@@ -23,7 +23,7 @@ geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
 class DiffusionModule(BaseLightningModule):
     """
-    this module is for learning the diffusion stuff
+    Learning and sampling flow matching on residuals.
     """
 
     def __init__(
@@ -171,18 +171,18 @@ class DiffusionModule(BaseLightningModule):
 
         cond_emb = month_emb + hour_emb + timestep_emb
 
+        # NOTE: 
+        # here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
         x = self.embedder.encode(batch["state"], input_state)
-
         x = self.backbone(x, cond_emb)
         out = self.embedder.decode(x)  # we get tdict
 
+        # compute velocity r-eps := (r-z)/s 
+        # to pass the right thing to the euler sampler
         if is_sampling and self.prediction_type == "sample":
-            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps
-            sigmas = sigmas[:, None, None, None, None]  # shape (bs,)
-
-            # to transform model_output=sample to output=noise - sample
+            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps  # t/T, e.g. 959.5 / 1000
+            sigmas = sigmas[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
             out = (noisy_next_state - out).apply(lambda x: x / sigmas)
-
         return out
 
     def training_step(self, batch, batch_nb):
@@ -306,26 +306,38 @@ class DiffusionModule(BaseLightningModule):
 
         with torch.no_grad():
             for t in tqdm(scheduler.timesteps, disable=disable_tqdm):
-                # 1. predict noise model_output
+                # NOTE: 
+                # t is in torch.linspace(1000, small_value, 25) 
+                # loop_batch.shape == noisy_state and are Torch dicts with:
+                    # level: Tensor(shape=torch.Size([1, 6, 13, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False),
+                    # surface: Tensor(shape=torch.Size([1, 4, 1, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False)},
+                # and noisy_state is being denoised progressively
+
+                # NOTE: pred is the velocity r-eps (u_theta^t(x_t))
                 pred = self.forward(
                     loop_batch,
                     noisy_state,
                     timesteps=torch.tensor([t]).to(self.device),
                     is_sampling=True,
-                )
+                )  # also a tensor_dict
 
                 # due to weird behavior of scheduler we need to use the following
                 step_index = getattr(scheduler, "_step_index", None)
+                # NOTE: step_index is None ... still weird to me
 
                 def scheduler_step(*args, **kwargs):
+                    # dt = sigma_next - sigma
+                    # prev_sample = sample + dt * model_output (velocity)
                     out = scheduler.step(*args, **kwargs)
                     if hasattr(scheduler, "_step_index"):
                         scheduler._step_index = step_index
                     return out.prev_sample
 
+                # apply euler step
                 noisy_state = tensordict_apply(
                     scheduler_step, pred, t, noisy_state, **scheduler_kwargs
                 )
+
                 # at the end
                 if step_index is not None:
                     scheduler._step_index = step_index + 1
@@ -508,3 +520,139 @@ class DiffusionModule(BaseLightningModule):
             "frequency": 1,
         }
         return [opt], [sched]
+    
+
+    def guided_sampling(
+        self,
+        batch,
+        seed=None,
+        num_steps=None,
+        disable_tqdm=False,
+        scale_input_noise=None,
+        **kwargs,
+    ):
+        """
+        kwargs args are fed to scheduler_step
+        """
+
+        scheduler = self.inference_scheduler
+        num_steps = num_steps or self.cfg.inference.num_steps
+        scheduler.set_timesteps(num_steps)
+
+        # get args to scheduler
+        scheduler_kwargs = dict(s_churn=self.cfg.inference.s_churn)
+        scheduler_kwargs.update(kwargs)
+
+        generator = torch.Generator(device=self.device)
+
+        if seed is not None:
+            generator.manual_seed(seed)
+
+        noisy_state = batch["state"].apply(
+            lambda x: torch.empty_like(x).normal_(generator=generator)
+        )
+
+        scale_input_noise = scale_input_noise or getattr(
+            self.cfg.inference, "scale_input_noise", None
+        )
+        if scale_input_noise is not None:
+            noisy_state = noisy_state * scale_input_noise
+
+        if self.learn_residual == "pred" and "pred_state" not in batch:
+            with torch.no_grad():
+                batch["pred_state"] = self.det_model(batch).detach()
+
+        loop_batch = {k: v for k, v in batch.items() if "next" not in k}  # ensures no data leakage
+
+        import pathlib
+        import datetime
+        date, time = str(datetime.datetime.now().replace(microsecond=0)).split(" ")
+        now = date + "_" + time
+        results_dir = pathlib.Path("experiments", f"{now}")
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        with torch.no_grad():
+            for i, t in enumerate(tqdm(scheduler.timesteps, disable=disable_tqdm)):
+                # NOTE: 
+                # t is in torch.linspace(1000, small_value, 25) 
+                # loop_batch.shape == noisy_state and are Torch dicts with:
+                    # level: Tensor(shape=torch.Size([1, 6, 13, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False),
+                    # surface: Tensor(shape=torch.Size([1, 4, 1, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False)},
+                # loop_batch is there for the conditioniing (X_{t-2}, X_{t-1})
+                # noisy_state is being denoised progressively
+
+                # predict noise model_output
+                # NOTE: pred is the inverse velocity vector (x_t - r^theta(x^cond, x_t, t)) / s
+                pred = self.forward(
+                    loop_batch,
+                    noisy_state,
+                    timesteps=torch.tensor([t]).to(self.device),
+                    is_sampling=True,
+                )  # also a tensor_dict
+
+                # due to weird behavior of scheduler we need to use the following
+                step_index = getattr(scheduler, "_step_index", None)
+                # NOTE: step_index is None ... still weird to me
+
+                def scheduler_step(*args, **kwargs):
+                    # dt = sigma_next - sigma
+                    # prev_sample = sample + dt * model_output (velocity)
+                    out = scheduler.step(*args, **kwargs)
+                    if hasattr(scheduler, "_step_index"):
+                        scheduler._step_index = step_index
+                    return out.prev_sample
+
+                # apply scheduler step to tensor dict
+                # retrieves noisy_state_new
+                noisy_state = tensordict_apply(
+                    scheduler_step, pred, t, noisy_state, **scheduler_kwargs  # noisy_state_prev
+                )
+
+                # rescale for plotting
+                if self.state_normalization:
+                    print("state_normalization applied")
+                    final_state = tensordict_apply(
+                        torch.mul, noisy_state, self.state_scaler.to(self.device)
+                    )
+
+                level = final_state["level"].squeeze()
+                surface = final_state["surface"].squeeze().unsqueeze(1)
+
+                sub_dir = results_dir / f"{i}"
+                sub_dir.mkdir(parents=True, exist_ok=True)
+                level_path = sub_dir / "level.pt"
+                surface_path = sub_dir /"surface.pt"
+
+                torch.save(level, level_path)
+                torch.save(surface, surface_path)
+
+                # at the end
+                if step_index is not None:
+                    scheduler._step_index = step_index + 1
+
+        sub_dir = results_dir / f"pred_state"
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        det_surface_path = sub_dir /"surface.pt"
+        det_level_path = sub_dir /"level.pt"
+        surface = batch["pred_state"]["surface"].squeeze().unsqueeze(1)
+        level = batch["pred_state"]["level"].squeeze()
+        torch.save(surface, det_surface_path)
+        torch.save(level, det_level_path)
+
+        final_state = noisy_state.detach()
+
+        if self.state_normalization:
+            print("state_normalization applied")
+            final_state = tensordict_apply(
+                torch.mul, final_state, self.state_scaler.to(self.device)
+            )
+
+        if self.learn_residual == "default":
+            final_state = batch["state"] + final_state
+
+        elif self.learn_residual == "pred":
+            final_state = batch["pred_state"] + final_state
+
+        print(f"learn_residual is {self.learn_residual}")
+
+        return final_state

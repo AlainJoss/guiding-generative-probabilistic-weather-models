@@ -42,10 +42,17 @@ Path(args.folder).mkdir(parents=True, exist_ok=True)
 
 clim_tgt = Path(args.folder).parent.joinpath("era5_240_clim.nc")
 if not clim_tgt.exists() and (args.clim or not args.years):
-    obs_xarr = xr.open_zarr(climatology_path)
-    obs_xarr.to_netcdf(clim_tgt)
+    obs_xarr = xr.open_zarr(
+        obs_path,
+        storage_options={"token": "anon"}  # or {"anon": True} depending on gcsfs version
+    )
+    obs_xarr = xr.open_zarr(
+        climatology_path,
+        storage_options={"token": "anon"}
+    )
     exit()
 
+# if year is defined and other conditions
 for year in args.years:
     for hour in args.hours:
         print(f"Downloading ERA5 for year {year} hour {hour}...")
@@ -53,7 +60,10 @@ for year in args.years:
         if Path(fname).exists() and os.stat(fname).st_size < 4580000000:
             os.remove(fname)  # file is corrupted
         if not Path(fname).exists():
-            obs_xarr = xr.open_zarr(obs_path)
+            obs_xarr = xr.open_zarr(
+                obs_path,
+                storage_options={"token": "anon"}  # or {"anon": True} depending on gcsfs version
+            )
 
             ds = obs_xarr.sel(time=obs_xarr.time.dt.year.isin([year]))
             ds2 = ds.sel(time=ds.time.dt.hour.isin([hour]))

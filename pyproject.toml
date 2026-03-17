@@ -41,6 +41,14 @@ dependencies = [
     "dask (>=2024.12.1,<2025.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
     "gcsfs (>=2025.5.1,<2026.0.0)",
+    "marimo>=0.20.4",
+    "wigglystuff>=0.2.37",
+    "scikit-learn>=1.8.0",
+    "altair>=6.0.0",
+    "vega-datasets>=0.9.0",
+    "cartopy>=0.25.0",
+    "geopandas>=1.1.3",
+    "geodatasets>=2026.1.0",
 ]
 
 
@@ -91,3 +99,10 @@ mkdocs-jupyter = "^0.25.1"
 geoarches-main = 'geoarches.main_hydra:main'
 geoarches-submit = 'geoarches.submit:main'
 geoarches-eval = 'geoarches.evaluation.eval_multistep:main'
+
+
+[tool.marimo.runtime]
+pythonpath = ["geoarches"]
+
+[tool.marimo.display]
+custom_css = ["menlo.css"]

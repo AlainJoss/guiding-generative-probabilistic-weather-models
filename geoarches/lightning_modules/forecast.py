@@ -351,6 +351,8 @@ class ForecastModule(BaseLightningModule):
 
 class ForecastModuleWithCond(ForecastModule):
     """
+    can be an ensemble of multiple deterministic models
+    does only the forward pass and averages
     module that can take additional information:
     - month and hour
     - previous state
@@ -372,8 +374,8 @@ class ForecastModuleWithCond(ForecastModule):
         # cond_dim should be given as arg to the backbone
         self.month_embedder = dit.TimestepEmbedder(cond_dim)
         self.hour_embedder = dit.TimestepEmbedder(cond_dim)
-        self.use_prev = use_prev
-        self.use_avg = use_avg
+        self.use_prev = use_prev  # NOTE: never used
+        self.use_avg = use_avg  # NOTE: never used
 
         self.avg_modules = None
         if avg_with_modules:
@@ -387,7 +389,6 @@ class ForecastModuleWithCond(ForecastModule):
     def forward(self, batch, use_avg=True):
         device = batch["state"].device
         # convert time into str
-
         times = pd.to_datetime(batch["timestamp"].cpu().numpy(), unit="s").tz_localize(None)
         month = torch.tensor(times.month).to(device)
         month_emb = self.month_embedder(month)
