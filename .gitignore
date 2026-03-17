@@ -170,6 +170,7 @@ cython_debug/
 
 # my additions
 data/
-experiments/
+experiments/2026*
+experiments/layouts
 modelstore/
 geoarches/stats/
