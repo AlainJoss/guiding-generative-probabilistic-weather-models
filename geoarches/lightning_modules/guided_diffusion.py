@@ -95,8 +95,7 @@ class GuidedFlow(BaseLightningModule):
             trajectory.append(x_hat)
 
             if n < N - 1:
-                # TODO: update correctly!
-                X_cond = [X_cond[1], x_hat]
+                X_cond = tensordict_cat([X_cond["state"], x_hat], dim=1)
 
         return trajectory
 
@@ -110,8 +109,9 @@ class GuidedFlow(BaseLightningModule):
     
     def sample(
         self,
-        batch,
-        guidance_term: torch.Tensor,  # NOTE: when the guidance term is a full state, we can set the mask to torch.ones()
+        X_cond,
+        mu,
+        X_guide: torch.Tensor,  # NOTE: when the guidance term is a full state, we can set the mask to torch.ones()
         mask: torch.Tensor,
         **kwargs,
     ):
@@ -127,7 +127,7 @@ class GuidedFlow(BaseLightningModule):
 
         # draw noise
         generator = torch.Generator(device=self.device)
-        z = batch["state"].apply(
+        z = X_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
         # reason explained in paper
@@ -135,28 +135,20 @@ class GuidedFlow(BaseLightningModule):
 
         # det prediction
         with torch.no_grad():
-            batch["pred_state"] = self.det_model(batch).detach()
-
+            X_cond["pred_state"] = self.det_model(X_cond).detach()
         # remove next_state (save compute)
-        loop_batch = {k: v for k, v in batch.items() if "next" not in k} 
+        loop_batch = {k: v for k, v in X_cond.items() if "next" not in k} 
+
         with torch.no_grad():
             # TODO: check wtf is happening with time going backwards
             for i, t in enumerate(tqdm(scheduler.timesteps)):
-                # NOTE: 
-                # t is in torch.linspace(1000, small_value, 25) 
-                # loop_batch.shape == noisy_state and are Torch dicts with:
-                    # level: Tensor(shape=torch.Size([1, 6, 13, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False),
-                    # surface: Tensor(shape=torch.Size([1, 4, 1, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False)},
-                # loop_batch is there for the conditioniing (X_{t-2}, X_{t-1})
-                # noisy_state is being denoised progressively
-
                 # predict noise model_output
                 # NOTE: pred is the inverse velocity vector (x_t - r^theta(x^cond, x_t, t)) / s
                 v = self.compute_velocity(
                     loop_batch,
                     z,
                     t=torch.tensor([t]).to(self.device),
-                    guidance_term=guidance_term
+                    X_guide=X_guide
                 )  # also a tensor_dict
 
                 # TODO: improve this bs
@@ -186,11 +178,11 @@ class GuidedFlow(BaseLightningModule):
             torch.mul, residual, self.state_scaler.to(self.device)
         )
         # X_hat = X_det + r
-        final_state = batch["pred_state"] + scaled_residual
+        final_state = X_cond["pred_state"] + scaled_residual
         return final_state
 
 
-    def compute_velocity(self, batch, noisy_next_state, t, guidance_term=None, mask=None):
+    def compute_velocity(self, batch, z, t, X_guide=None, mask=None):
         device = batch["state"].device
         eta = 0.1
         lambda_t = 0.1  # TODO: should input a time dependent lambda list to guided_sampling
@@ -199,10 +191,10 @@ class GuidedFlow(BaseLightningModule):
             # TODO: choose the tensor we actually guide from outside
             #       --> pass variable_type and variable
             # for now: example on surface
-            noisy_guided = noisy_next_state["surface"].detach().clone().requires_grad_(True)
+            noisy_guided = z["surface"].detach().clone().requires_grad_(True)
 
             # rebuild noisy state with the differentiable tensor inserted
-            guided_noisy_state = noisy_next_state.clone()
+            guided_noisy_state = z.clone()
             guided_noisy_state["surface"] = noisy_guided
 
             # tensor_dict with single state (fields only)
@@ -273,5 +265,5 @@ class GuidedFlow(BaseLightningModule):
         # to pass the right thing to the euler sampler
         sigmas = t / self.num_train_timesteps  # t/T, e.g. 959.5 / 1000
         sigmas = sigmas[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
-        out_tilde = (noisy_next_state - out_tilde).apply(lambda x: x / sigmas)
+        out_tilde = (z - out_tilde).apply(lambda x: x / sigmas)
         return out_tilde
