@@ -59,6 +59,12 @@ def _():
     )
 
 
+@app.cell
+def _():
+    # TODO: the start date is 18:00 the 31.12.2019!
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -174,6 +180,14 @@ def _(spline_widget):
 
 
 @app.cell
+def _():
+    import os
+    os.getcwd()
+    os.listdir("/Users/alain/Desktop/master-thesis/guiding-diffusion-based-weather-models")
+    return
+
+
+@app.cell
 def _(mo):
     from geoarches.lightning_modules import load_module
     from geoarches.dataloaders.era5 import Era5Forecast
@@ -280,7 +294,7 @@ def _(ds, start_ts_idx):
 
 
 @app.cell
-def _(ChartPuck, geodatasets, gpd, mo, mpatches, np):
+def _(ChartPuck, geodatasets, gpd, level, mo, mpatches, np, variable):
     def lonlat_to_ij(lon, lat, lon_c, lat_c):
         j = int(np.argmin(np.abs(lon_c - lon)))
         i = int(np.argmin(np.abs(lat_c - lat)))
@@ -325,7 +339,7 @@ def _(ChartPuck, geodatasets, gpd, mo, mpatches, np):
             ax.set_ylim(-90, 90)
             ax.set_xlabel("Longitude")
             ax.set_ylabel("Latitude")
-            ax.set_title("Drag pucks to define rectangle")
+            ax.set_title(f"{variable.value} @ level {level.value}")
 
             x0, x1 = widget.x
             y0, y1 = widget.y
@@ -480,9 +494,15 @@ def _(array_2d, array_2d_denormalized, drift, np, spatial_mask):
 
 
 @app.cell
+def _():
+    # TODO: need to compute guidance in residual space!
+    return
+
+
+@app.cell
 def _(guidance_terms_denormalized, init_avg_denormalized, np, plt, variable):
     trajectory = [init_avg_denormalized] + guidance_terms_denormalized
-    def plot_guidance_trajectory(trajectory):
+    def plot_trajectory(trajectory):
         x = np.arange(len(trajectory))
 
         fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
@@ -499,14 +519,13 @@ def _(guidance_terms_denormalized, init_avg_denormalized, np, plt, variable):
 
         return fig
 
-    fig = plot_guidance_trajectory(trajectory)
+    fig = plot_trajectory(trajectory)
     # mo.vstack([
     #     mo.md("Planned trajectory: "),
     #     fig
     # ])
     fig
-    fig
-    return
+    return (plot_trajectory,)
 
 
 @app.cell(hide_code=True)
@@ -551,10 +570,11 @@ def _(device, gen_model, start_state):
         sampled_state = gen_model.guided_sampling(
             batch, seed=SEED, num_steps=T, scale_input_noise=1.05
         ).cpu()
-    
+
         return sampled_state
 
-    sample_next_state(start_state)
+    sampled_state = sample_next_state(start_state)
+    sampled_state
     return (T,)
 
 
@@ -564,13 +584,17 @@ def _(
     T,
     level_idx,
     mcolors,
+    np,
     plt,
+    spatial_mask,
     start_state,
     torch,
     var_idx,
     variable,
     variable_type,
 ):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
     def get_last_experiment_id():
         paths = Path("experiments").glob("2026*")
         paths = sorted(paths)
@@ -581,34 +605,35 @@ def _(
         tensor = torch.load(path)
         return tensor.cpu()
 
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-
     def plot_sample(ground_truth, pred_state, tensor, title=""):
         ground_truth = ground_truth.cpu()
         pred_state = pred_state.cpu()
         tensor = tensor.cpu()
 
         combined = pred_state + tensor
-        error = ground_truth - combined
+
+
+        gen_error = combined - ground_truth
+        gen_rmse = torch.sqrt(torch.mean(gen_error**2))
+        print(f"Combined RMSE: {gen_rmse.item()}")
 
         det_error = pred_state - ground_truth
-        abs_error = torch.abs(det_error)
-        sum_error = torch.sum(abs_error)
-        print(f"total det error: {sum_error}")
+        det_rmse = torch.sqrt(torch.mean(det_error**2))
+        print(f"Det RMSE: {det_rmse.item()}")
 
+        diff_det_gen = pred_state - tensor
 
-        abs_error = torch.abs(error)
-        sum_error = torch.sum(abs_error)
-        print(f"total error: {sum_error}")
-
-        fig, axes = plt.subplots(1, 4, dpi=1000, figsize=(16, 4))
+        fig, axes = plt.subplots(1, 7, dpi=1000, figsize=(20, 4))
         fig.suptitle(title)
 
         fields = [
             ("tensor", tensor),
+            ("pred_state", pred_state),
             ("pred_state + tensor", combined),
             ("ground_truth", ground_truth),
-            ("error", error),
+            ("det_error", det_error),
+            ("gen_error", gen_error),
+            ("diff_det_gen", diff_det_gen)
         ]
 
         for ax, (name, field) in zip(axes, fields):
@@ -631,22 +656,174 @@ def _(
 
     def plot_state(ground_truth, pred_state, id, t, partition: str, var: str, var_idx: int, level: int):
         tensor = read_experiment_tensor(id, t, partition)
-        tensor = tensor[var_idx, level]
-        pred_state = pred_state[var_idx, level]
+        tensor_slice = tensor[var_idx, level]
+        pred_state_slice = pred_state[var_idx, level]
+
+        combined = pred_state_slice + tensor_slice
+        combined = np.asarray(combined)
+        actual_avg = np.sum(combined*spatial_mask) / np.sum(spatial_mask)
+        print("actual_avg", actual_avg)
 
         title = f"{t} - {partition} - {var} - {level}"
-    
-        plot_sample(ground_truth, pred_state, tensor, title)
+        plot_sample(ground_truth, pred_state_slice, tensor_slice, title)
+        return actual_avg
 
     id = get_last_experiment_id()
 
     gt_state = start_state["next_state"]
-    ground_truth = gt_state[variable_type.value][var_idx, level_idx]
-    pred_state = read_experiment_tensor(id, "pred_state", variable_type.value)
-    # print(pred_state.shape)
+    # ground_truth = ds.denormalize(gt_state)
+    ground_truth = gt_state
+    ground_truth = ground_truth[variable_type.value][var_idx, level_idx]
 
+    pred_state = read_experiment_tensor(id, "pred_state", variable_type.value)
+
+    avgs = []
     for t in range(T):
-        plot_state(ground_truth, pred_state, id, t, variable_type.value, variable.value, var_idx, level_idx)
+        actual_avg = plot_state(
+            ground_truth=ground_truth,
+            pred_state=pred_state,
+            id=id,
+            t=t,
+            partition=variable_type.value,
+            var=variable.value,
+            var_idx=var_idx,
+            level=level_idx,
+        )
+        avgs.append(actual_avg)
+    return (avgs,)
+
+
+@app.cell
+def _(avgs, plot_trajectory):
+    fig_avgs = plot_trajectory(avgs)
+    fig_avgs
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Guided roll-out
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ```bash
+
+    def updated_states(input_state, pred_state):
+        input_state["prev_state"] = input_state["state"]
+        input_state["state"] = pred_state
+        return input_state
+
+    def gen_guidance_state(input_state):
+        X_hat = det(input_state)
+        input_state = updated_states(input_state, pred_state)
+        X_hat = det(input_state)
+        X_tilde = SGD(X_hat, input_state)
+        return X_tilde
+
+    def SGD(X_hat):
+        for m in M:
+            X_input["prev_state"] = X_input["prev_state"] - eta * nabla_{X_input["prev_state"]}(X_hat)
+        # NOTE: we will generate using this state for guidance
+        return X_input["prev_state"]
+
+    X_input = start_state()
+    for n in N:
+        if n > 1
+            X_input = updated_states(X_input, X_bar)
+
+        X_tilde = gen_guidance_state(X_input)
+        # NOTE: we still use the unchanged X_input for generation but guide towards X_tilde
+        X_bar = gen_guide(X_input, X_tilde)
+        save_states(X_tilde, X_bar)
+    ```
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ```python
+
+    X_cond = [X_{n-1}, X_n]
+    SIGMA = ...  # hard_coded -> should extract it
+
+    ##### universal time
+
+    def rollout(
+        N, T,
+        X_cond,
+        guide: Callable,
+        X_guide_trajectory: list[torch.Tensor] | None = None,
+        mask=None,
+    ):
+        trajectory = []
+
+        for n in range(N):
+            X_guide = None if X_guide_trajectory is None else X_guide_trajectory[n]
+            x_hat = rollout_step(
+                T=T,
+                X_cond=X_cond,
+                guide=guide,
+                X_guide=X_guide,
+                mask=mask,
+            )
+            trajectory.append(x_hat)
+
+            if n < N - 1:
+                X_cond = [X_cond[1], x_hat]
+
+        return trajectory
+
+    # can maybe define more complicated schemes like the forward-backward one
+    def rollout_step(
+        T, X_cond,
+        guide, X_guide, mask
+    ):
+        mu = self.deterministic(X_cond)
+        z = sample(T, X_cond, mu, guide, X_guide, mask)
+        x_hat = mu + SIGMA * z
+        return x_hat
+
+    ##### generative time
+
+    def sample(T, X_cond, mu, guide, X_guide, mask):
+        z = noise()
+        for t in range(T):
+            # denoiser is composed of encoder-backbone-decoder
+            # I must do some torch pipeline object
+            model_out = denoiser(z, X_cond, t)
+            # TODO: need to decide how to pass the grad in case I need it
+            guided_out = guide(t, z, model_out, mu, X_cond, X_guide, mask)
+            z = scheduler_step(z, guided_out, t)
+        return z
+
+
+    def guide(t, z, model_out, mu, X_cond, X_guide, mask):
+        # Protocol
+        pass
+
+    # Not of concern for now
+
+    def no_guidance(...):
+        return model_out
+
+    def universal_guidance(...):
+        lambda_t = np.sin(t)  # or something similar
+        L(z)=(avgM​(μ+Σz)−Xguide​)2
+        pass
+
+    def flow_grad(...)
+        # compute all control vectors outside and somehow call them here
+        pass
+
+    ```
+    """)
     return
 
 

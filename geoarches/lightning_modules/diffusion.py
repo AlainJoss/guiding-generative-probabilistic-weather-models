@@ -154,7 +154,6 @@ class DiffusionModule(BaseLightningModule):
         if "det" in conditional_keys:
             assert "pred_state" in batch
             pred_state = batch["pred_state"]
-
         if "prev" in conditional_keys:
             prev_state = batch["prev_state"]
             input_state = tensordict_cat([prev_state, input_state], dim=1)
@@ -174,6 +173,7 @@ class DiffusionModule(BaseLightningModule):
         # NOTE: 
         # here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
         x = self.embedder.encode(batch["state"], input_state)
+        # print(type(self.backbone))
         x = self.backbone(x, cond_emb)
         out = self.embedder.decode(x)  # we get tdict
 
@@ -521,10 +521,127 @@ class DiffusionModule(BaseLightningModule):
         }
         return [opt], [sched]
     
+    def guided_forward(self, batch, noisy_next_state, timesteps, is_sampling=False, guidance_term=None, mask=None):
+        def average_over_mask(mask, state):
+            # NOTE: has to be changed either inside or outside because state is tensor_dict!
+            return torch.mean(mask * state)
+    
 
+        device = batch["state"].device
+        eta = 0.1
+        lambda_t = 0.1  # TODO: should input a time dependent lambda list to guided_sampling
+
+        with torch.enable_grad():
+            # TODO: choose the tensor we actually guide from outside
+            #       --> pass variable_type and variable
+            # for now: example on surface
+            noisy_guided = noisy_next_state["surface"].detach().clone().requires_grad_(True)
+
+
+            # rebuild noisy state with the differentiable tensor inserted
+            guided_noisy_state = noisy_next_state.clone()
+            guided_noisy_state["surface"] = noisy_guided
+
+            def random_sparse_mask_like(state, num_pixels=10):
+                mask = torch.zeros_like(state, dtype=torch.float32)
+                
+                flat_mask = mask.view(-1)
+                idx = torch.randperm(flat_mask.numel(), device=state.device)[:num_pixels]
+                flat_mask[idx] = 1.0
+                
+                return mask
+            
+            mask = random_sparse_mask_like(noisy_guided, num_pixels=10).to(
+                device=noisy_guided.device, dtype=noisy_guided.dtype
+            )
+
+            # NOTE: the inpute state is a tensor_dict with single state (fields only)
+            input_state = guided_noisy_state
+            conditional_keys = self.conditional.split("+")  # all the things we condition on
+
+            # TODO: should get rid of this and simply keep what we use
+            # whether we need to run the deterministic model
+            if "det" in conditional_keys:
+                assert "pred_state" in batch
+                pred_state = batch["pred_state"]
+
+            if "prev" in conditional_keys:
+                prev_state = batch["prev_state"]
+                input_state = tensordict_cat([prev_state, input_state], dim=1)
+
+            if "det" in conditional_keys:
+                input_state = tensordict_cat([pred_state, input_state], dim=1)
+            
+            # conditional by default
+            times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
+            month = torch.tensor(times.month).to(device)
+            month_emb = self.month_embedder(month)
+            hour = torch.tensor(times.hour).to(device)
+            hour_emb = self.hour_embedder(hour)
+            timestep_emb = self.timestep_embedder(timesteps)
+
+            cond_emb = month_emb + hour_emb + timestep_emb
+
+            # NOTE: here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
+            x = self.embedder.encode(batch["state"], input_state)
+            x = self.backbone(x, cond_emb)
+            out = self.embedder.decode(x)  # we get tdict
+
+            ##### here is where we compute the guidance
+            #     we use universal guidance for now
+
+            # compute aggregate term for loss
+            pred_guided_tensor = out["surface"]
+            gen_agg_term = torch.mean(mask * pred_guided_tensor)  # NOTE: mask has should probably be 121x240
+
+            # grad
+            print("guidance_term", guidance_term)
+            guidance_loss = torch.nn.functional.mse_loss(gen_agg_term, guidance_term)
+            # TODO: check that grad is disabled again after this
+            with torch.enable_grad():
+                grad = torch.autograd.grad(
+                    outputs=guidance_loss,
+                    inputs=noisy_guided,
+                    retain_graph=True,
+                    create_graph=False,
+                )[0]
+            # make one update to the noisy state
+            guided_noisy_state_hat = guided_noisy_state.clone()
+            guided_noisy_state_hat["surface"] = noisy_guided - eta * grad
+
+            # rebuild input_state
+            input_state_hat = guided_noisy_state_hat
+            if "prev" in conditional_keys:
+                input_state_hat = tensordict_cat([prev_state, input_state_hat], dim=1)
+            if "det" in conditional_keys:
+                input_state_hat = tensordict_cat([pred_state, input_state_hat], dim=1)
+
+            # second forward pass
+            x_hat = self.embedder.encode(batch["state"], input_state_hat)
+            x_hat = self.backbone(x_hat, cond_emb)
+            out_hat = self.embedder.decode(x_hat)
+
+            # guided combo
+            out_tilde = out.apply(lambda x: x.clone())
+            for key in out.keys():
+                out_tilde[key] = out[key] + lambda_t * (out_hat[key] - out[key])
+
+            #####
+
+        # compute velocity r-eps := (r-z)/s 
+        # to pass the right thing to the euler sampler
+        if is_sampling and self.prediction_type == "sample":
+            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps  # t/T, e.g. 959.5 / 1000
+            sigmas = sigmas[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
+            out_tilde = (noisy_next_state - out_tilde).apply(lambda x: x / sigmas)
+        return out_tilde
+    
     def guided_sampling(
         self,
         batch,
+        # NOTE: when the guidance term is a full state, we can set the mask to torch.ones()
+        guidance_term: torch.Tensor,
+        mask: torch.Tensor,
         seed=None,
         num_steps=None,
         disable_tqdm=False,
@@ -563,6 +680,7 @@ class DiffusionModule(BaseLightningModule):
                 batch["pred_state"] = self.det_model(batch).detach()
 
         loop_batch = {k: v for k, v in batch.items() if "next" not in k}  # ensures no data leakage
+        # print("loop_batch", loop_batch)
 
         import pathlib
         import datetime
@@ -583,11 +701,13 @@ class DiffusionModule(BaseLightningModule):
 
                 # predict noise model_output
                 # NOTE: pred is the inverse velocity vector (x_t - r^theta(x^cond, x_t, t)) / s
-                pred = self.forward(
+                
+                pred = self.guided_forward(
                     loop_batch,
                     noisy_state,
                     timesteps=torch.tensor([t]).to(self.device),
                     is_sampling=True,
+                    guidance_term=guidance_term
                 )  # also a tensor_dict
 
                 # due to weird behavior of scheduler we need to use the following
@@ -608,7 +728,7 @@ class DiffusionModule(BaseLightningModule):
                     scheduler_step, pred, t, noisy_state, **scheduler_kwargs  # noisy_state_prev
                 )
 
-                # rescale for plotting
+                # from normalized residual space z=r/sigma to r=sigma*z
                 if self.state_normalization:
                     print("state_normalization applied")
                     final_state = tensordict_apply(
