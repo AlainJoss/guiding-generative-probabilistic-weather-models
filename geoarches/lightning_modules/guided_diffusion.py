@@ -1,12 +1,7 @@
-
 import importlib
-from copy import deepcopy
-from datetime import datetime
-from pathlib import Path
-
 import pandas as pd
 import torch
-from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+
 from hydra.utils import instantiate
 from tensordict.tensordict import TensorDict
 from tqdm import tqdm
@@ -14,9 +9,8 @@ from tqdm import tqdm
 import geoarches.stats as geoarches_stats
 from geoarches.backbones.dit import TimestepEmbedder
 from geoarches.lightning_modules import BaseLightningModule
-from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
-
 from geoarches.lightning_modules.base_module import AvgModule, load_module
+from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
 geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
@@ -35,7 +29,7 @@ class GuidedFlow(BaseLightningModule):
         
         # some constants that were floating hardcoded around the codebase 
         # or are uselessly in the cfg (since they are fix anyway)
-        self.scale_input_noise = 1.05
+        self.scale_input_noise = 1.05  # NOTE: this is not sigma
         self.num_train_timesteps=1000
         self.cond_dim=256
         self.T = 25
@@ -49,15 +43,13 @@ class GuidedFlow(BaseLightningModule):
             self.det_model, _ = load_module(load_deterministic_model)
         else:
             self.det_model = AvgModule(load_deterministic_model)
+        print("self.device", self.device)
+        self.det_model = self.det_model.to(self.device)
 
+        # TODO: can I put this in a pipeline too?
         self.month_embedder = TimestepEmbedder(self.cond_dim)
         self.hour_embedder = TimestepEmbedder(self.cond_dim)
         self.timestep_embedder = TimestepEmbedder(self.cond_dim)
-
-        # might get rid of this to simplify or speed up
-        self.inference_scheduler = FlowMatchEulerDiscreteScheduler(
-            num_train_timesteps=self.num_train_timesteps
-        )
 
         # sigma scaling factor (shape like usual states)
         pangu_stats = torch.load(
@@ -72,198 +64,148 @@ class GuidedFlow(BaseLightningModule):
             )
         )
         scaler["level"][-1] *= 3  # we don't care too much about vertical velocity
-        self.state_scaler = scaler / pangu_scaler  # inverse because we divide by state_scaler
-
-    ##### methods #####
+        self.sigma = scaler / pangu_scaler  # inverse because we divide by state_scaler
 
     def rollout(
         self, 
         N, 
-        X_cond,
-        X_guide_trajectory: list[torch.Tensor] | None = None, # shape: 
+        x_cond,  # TODO: need a better name
+        x_guide_trajectory: list[torch.Tensor] | None = None, # shape: 
         mask: torch.Tensor | None = None,  # shape: 
     ):
-        trajectory = []
+        realized_trajectory = []
 
         for n in range(N):
-            X_guide = None if X_guide_trajectory is None else X_guide_trajectory[n]
+            x_guide = None if x_guide_trajectory is None else x_guide_trajectory[n]
             x_hat = self.rollout_step(
-                X_cond=X_cond,
-                X_guide=X_guide,
+                x_cond=x_cond,
+                y_t=x_guide,
                 mask=mask,
             )
-            trajectory.append(x_hat)
+            realized_trajectory.append(x_hat)
 
             if n < N - 1:
-                X_cond = tensordict_cat([X_cond["state"], x_hat], dim=1)
+                x_cond = tensordict_cat([x_cond["state"], x_hat], dim=1)
 
-        return trajectory
+        return realized_trajectory
 
     def rollout_step(self,
-        X_cond, X_guide, mask
-    ):
-        mu = self.det_model(X_cond)
-        z = self.sample(X_cond, mu, X_guide, mask)
-        x_hat = mu + self.state_scaler * z
+        x_cond, y_t, mask
+    ):  
+        # det prediction
+        with torch.no_grad():
+            x_cond["pred_state"] = self.det_model(x_cond).detach()
+            # TODO: should place this somewhere else
+            self.sigma = self.sigma.to(self.det_model.device)
+        
+        # TODO: might remove this (it's redundant for now)
+        mu = x_cond["pred_state"]
+        # remove next_state (save compute)
+        loop_batch = {k: v for k, v in x_cond.items() if "next" not in k} 
+        z = self.sample(loop_batch, mu, y_t, mask).detach()
+        # x_hat = x_det + r_hat (=sigma*z_T)
+        x_hat = mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat
     
-    def sample(
-        self,
-        X_cond,
-        mu,
-        X_guide: torch.Tensor,  # NOTE: when the guidance term is a full state, we can set the mask to torch.ones()
-        mask: torch.Tensor,
-        **kwargs,
-    ):
-        """
-        kwargs args are fed to scheduler_step
-        """
-        # set up scheduler
-        scheduler = self.inference_scheduler
-        scheduler.set_timesteps(self.T)
-        # TODO: probably need to check this part again now ...
-        scheduler_kwargs = dict(s_churn=self.cfg.inference.s_churn)
-        scheduler_kwargs.update(kwargs)
+    # TODO: do not use batch, separate object for clarity 
+    #       also the name is utter bs
+    def sample(self, batch, mu, y_t, mask):
+        
+        ##### init #####
 
         # draw noise
-        generator = torch.Generator(device=self.device)
-        z = X_cond["state"].apply(
+        generator = torch.Generator(device=batch["timestamp"].device)
+        z = batch["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
         # reason explained in paper
-        z = z * self.scale_input_noise
+        # TODO: changed name ones we get rid of the name "sigma" in other contexts!
+        z_t = z * self.scale_input_noise
 
-        # det prediction
-        with torch.no_grad():
-            X_cond["pred_state"] = self.det_model(X_cond).detach()
-        # remove next_state (save compute)
-        loop_batch = {k: v for k, v in X_cond.items() if "next" not in k} 
-
-        with torch.no_grad():
-            # TODO: check wtf is happening with time going backwards
-            for i, t in enumerate(tqdm(scheduler.timesteps)):
-                # predict noise model_output
-                # NOTE: pred is the inverse velocity vector (x_t - r^theta(x^cond, x_t, t)) / s
-                v = self.compute_velocity(
-                    loop_batch,
-                    z,
-                    t=torch.tensor([t]).to(self.device),
-                    X_guide=X_guide
-                )  # also a tensor_dict
-
-                # TODO: improve this bs
-                # due to weird behavior of scheduler we need to use the following
-                step_index = getattr(scheduler, "_step_index", None)
-                def scheduler_step(*args, **kwargs):
-                    # dt = sigma_next - sigma
-                    # prev_sample = sample + dt * model_output (velocity)
-                    out = scheduler.step(*args, **kwargs)
-                    if hasattr(scheduler, "_step_index"):
-                        scheduler._step_index = step_index
-                    return out.prev_sample
-
-                z = tensordict_apply(
-                    scheduler_step, v, t, z, **scheduler_kwargs  
-                )
-
-                # at the end
-                # TODO: need to remove this bs
-                if step_index is not None:
-                    scheduler._step_index = step_index + 1
-
-        # z_T
-        residual = z.detach()
-        # r = sigma * z_T
-        scaled_residual = tensordict_apply(
-            torch.mul, residual, self.state_scaler.to(self.device)
-        )
-        # X_hat = X_det + r
-        final_state = X_cond["pred_state"] + scaled_residual
-        return final_state
-
-
-    def compute_velocity(self, batch, z, t, X_guide=None, mask=None):
-        device = batch["state"].device
-        eta = 0.1
-        lambda_t = 0.1  # TODO: should input a time dependent lambda list to guided_sampling
-
-        with torch.enable_grad():
-            # TODO: choose the tensor we actually guide from outside
-            #       --> pass variable_type and variable
-            # for now: example on surface
-            noisy_guided = z["surface"].detach().clone().requires_grad_(True)
-
-            # rebuild noisy state with the differentiable tensor inserted
-            guided_noisy_state = z.clone()
-            guided_noisy_state["surface"] = noisy_guided
-
-            # tensor_dict with single state (fields only)
-            input_state = guided_noisy_state
+        lambdas = [0.1 * self.T]  # TODO: should input a time dependent lambda list to guided_sampling
+        w = 1
     
-            # concatenate inputs
-            assert "pred_state" in batch
-            pred_state = batch["pred_state"]
-            prev_state = batch["prev_state"]
-            input_state = tensordict_cat([prev_state, input_state], dim=1)
-            input_state = tensordict_cat([pred_state, input_state], dim=1)
-        
-            # conditional by default
-            times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-            month = torch.tensor(times.month).to(device)
-            month_emb = self.month_embedder(month)
-            hour = torch.tensor(times.hour).to(device)
-            hour_emb = self.hour_embedder(hour)
-            timestep_emb = self.timestep_embedder(t)
+        ##### sample #####
 
-            cond_emb = month_emb + hour_emb + timestep_emb
+        with torch.no_grad():
+            for t in tqdm(range(1, self.T + 1)):
+                # denoiser is composed of encoder-backbone-decoder
+                # I must do some torch pipeline object
+                time_embedding = self.embedd_time(batch, t)
+                input_state = self.get_velocity_input_state(z_t, batch)
+                u_t = self.velocity(batch, time_embedding, input_state, z_t, t)
+                # TODO: need to decide how to pass the grad in case I need it
+                grad_l = self.grad_loss(mask, mu, y_t, z_t)
+                u_t_guided = u_t -  lambdas[0] * w * grad_l
+                z_t = self.euler_step(z_t, u_t_guided)
 
-            # NOTE: here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
-            x = self.embedder.encode(batch["state"], input_state)
-            x = self.backbone(x, cond_emb)
-            out = self.embedder.decode(x)  # we get tdict
+        return z_t
 
-            ##### here is where we compute the guidance
-            #     we use universal guidance for now
+        ##### compute final output #####
+    
+    def embedd_time(self, batch, t):
+        times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
+        month = torch.tensor(times.month).to(batch["timestamp"].device)
+        month_emb = self.month_embedder(month)
+        hour = torch.tensor(times.hour).to(batch["timestamp"].device)
+        hour_emb = self.hour_embedder(hour)
+        timestep_emb = self.timestep_embedder(torch.tensor([t]).to(batch["timestamp"].device))
 
-            # compute aggregate term for loss
-            pred_guided_tensor = out["surface"]
-            gen_agg_term = torch.mean(mask * pred_guided_tensor)  # NOTE: mask has should probably be 121x240
+        time_embedding = month_emb + hour_emb + timestep_emb
+        return time_embedding
+    
+    def get_velocity_input_state(self, z, batch):
+        input_state = z  # only init of concat (we need z later as is)
+        assert "pred_state" in batch
+        pred_state = batch["pred_state"]
+        prev_state = batch["prev_state"]
+        input_state = tensordict_cat([prev_state, input_state], dim=1)
+        input_state = tensordict_cat([pred_state, input_state], dim=1)
+        return input_state
 
-            # grad
-            print("guidance_term", guidance_term)
-            guidance_loss = torch.nn.functional.mse_loss(gen_agg_term, guidance_term)
-            # TODO: check that grad is disabled again after this
-            with torch.enable_grad():
-                grad = torch.autograd.grad(
-                    outputs=guidance_loss,
-                    inputs=noisy_guided,
-                    retain_graph=True,
-                    create_graph=False,
-                )[0]
-            # make one update to the noisy state
-            guided_noisy_state_hat = guided_noisy_state.clone()
-            guided_noisy_state_hat["surface"] = noisy_guided - eta * grad
+    def velocity(self, batch, time_embedding, input_state, z, t):
 
-            # rebuild input_state
-            input_state_hat = guided_noisy_state_hat
-            input_state_hat = tensordict_cat([prev_state, input_state_hat], dim=1)
-            input_state_hat = tensordict_cat([pred_state, input_state_hat], dim=1)
+        ##### compute residual #####
 
-            # second forward pass
-            x_hat = self.embedder.encode(batch["state"], input_state_hat)
-            x_hat = self.backbone(x_hat, cond_emb)
-            out_hat = self.embedder.decode(x_hat)
+        # TODO: can I put this into a torch pipeline object?
+        #       may need to compute the grad through this object
+        # here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
+        x = self.embedder.encode(batch["state"], input_state)
+        x = self.backbone(x, time_embedding)
+        r_t = self.embedder.decode(x)  # we get tdict
 
-            # guided combo
-            out_tilde = out.apply(lambda x: x.clone())
-            for key in out.keys():
-                out_tilde[key] = out[key] + lambda_t * (out_hat[key] - out[key])
+        ##### compute velocity from residual
 
-            #####
+        # u_t = r_t - eps_t := (r_t - z_t) / s_t
+        # TODO: check that this works in the forwards case ...
+        s_t = t / self.T  # e.g. 959.5 / 1000
+        # TODO: check that broadcasts correctly
+        # s_t = s_t[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
+        s_t = torch.tensor(t / self.T, device=batch["state"].device, dtype=torch.float32)
+        u_t = (r_t - z).apply(lambda x: x / s_t)
+        return u_t
+    
+    def grad_loss(self, mask, mu, y_t, z_t):
+        # TODO: select tensor from inside tensor_dict to compute this ...
+        #       need to define guiding variable and partition somewhere too!
+        # TODO: can place it in helpers instead of class
+        # TODO: sigma needs probably same treatment as in the translation ...
+        # TODO: check that * does pointwise multiplication
+        print(mask.device, mu.device, z_t.device, self.sigma.device)
+        # loss_ = torch.square(
+        #     y_t - torch.sum(mask * (mu + self.sigma * z_t)) / torch.sum(mask)
+        # )
+        return torch.tensor(0.0)
 
-        # compute velocity r-eps := (r-z)/s 
-        # to pass the right thing to the euler sampler
-        sigmas = t / self.num_train_timesteps  # t/T, e.g. 959.5 / 1000
-        sigmas = sigmas[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
-        out_tilde = (z - out_tilde).apply(lambda x: x / sigmas)
-        return out_tilde
+        def grad(loss, z_t):
+            # TODO: can place it in helpers instead of clas
+            return torch.tensor(0.0)
+
+        grad_l = grad(loss_, z_t)
+        return grad_l 
+    
+    def euler_step(self, z_t, u_t):
+        h = 1 / self.T
+        # z_new = z_t + h * u_t
+        # the lambda corresponds to def f(z, u): return z + h * u, the rest are the arguments
+        return tensordict_apply(lambda z, u: z + h * u, z_t, u_t)
