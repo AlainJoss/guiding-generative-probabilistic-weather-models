@@ -23,7 +23,7 @@ geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
 class DiffusionModule(BaseLightningModule):
     """
-    Learning and sampling flow matching on residuals.
+    this module is for learning the diffusion stuff
     """
 
     def __init__(
@@ -154,6 +154,7 @@ class DiffusionModule(BaseLightningModule):
         if "det" in conditional_keys:
             assert "pred_state" in batch
             pred_state = batch["pred_state"]
+
         if "prev" in conditional_keys:
             prev_state = batch["prev_state"]
             input_state = tensordict_cat([prev_state, input_state], dim=1)
@@ -170,19 +171,19 @@ class DiffusionModule(BaseLightningModule):
 
         cond_emb = month_emb + hour_emb + timestep_emb
 
-        # NOTE: 
-        # here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
         x = self.embedder.encode(batch["state"], input_state)
-        # print(type(self.backbone))
+
         x = self.backbone(x, cond_emb)
         out = self.embedder.decode(x)  # we get tdict
 
-        # compute velocity r-eps := (r-z)/s 
-        # to pass the right thing to the euler sampler
         if is_sampling and self.prediction_type == "sample":
-            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps  # t/T, e.g. 959.5 / 1000
-            sigmas = sigmas[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
+            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps
+            sigmas = sigmas[:, None, None, None, None]  # shape (bs,)
+            print(timesteps, sigmas)
+
+            # to transform model_output=sample to output=noise - sample
             out = (noisy_next_state - out).apply(lambda x: x / sigmas)
+
         return out
 
     def training_step(self, batch, batch_nb):
@@ -306,38 +307,26 @@ class DiffusionModule(BaseLightningModule):
 
         with torch.no_grad():
             for t in tqdm(scheduler.timesteps, disable=disable_tqdm):
-                # NOTE: 
-                # t is in torch.linspace(1000, small_value, 25) 
-                # loop_batch.shape == noisy_state and are Torch dicts with:
-                    # level: Tensor(shape=torch.Size([1, 6, 13, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False),
-                    # surface: Tensor(shape=torch.Size([1, 4, 1, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False)},
-                # and noisy_state is being denoised progressively
-
-                # NOTE: pred is the velocity r-eps (u_theta^t(x_t))
+                # 1. predict noise model_output
                 pred = self.forward(
                     loop_batch,
                     noisy_state,
                     timesteps=torch.tensor([t]).to(self.device),
                     is_sampling=True,
-                )  # also a tensor_dict
+                )
 
                 # due to weird behavior of scheduler we need to use the following
                 step_index = getattr(scheduler, "_step_index", None)
-                # NOTE: step_index is None ... still weird to me
 
                 def scheduler_step(*args, **kwargs):
-                    # dt = sigma_next - sigma
-                    # prev_sample = sample + dt * model_output (velocity)
                     out = scheduler.step(*args, **kwargs)
                     if hasattr(scheduler, "_step_index"):
                         scheduler._step_index = step_index
                     return out.prev_sample
 
-                # apply euler step
                 noisy_state = tensordict_apply(
                     scheduler_step, pred, t, noisy_state, **scheduler_kwargs
                 )
-
                 # at the end
                 if step_index is not None:
                     scheduler._step_index = step_index + 1
@@ -520,259 +509,3 @@ class DiffusionModule(BaseLightningModule):
             "frequency": 1,
         }
         return [opt], [sched]
-    
-    def guided_forward(self, batch, noisy_next_state, timesteps, is_sampling=False, guidance_term=None, mask=None):
-        def average_over_mask(mask, state):
-            # NOTE: has to be changed either inside or outside because state is tensor_dict!
-            return torch.mean(mask * state)
-    
-
-        device = batch["state"].device
-        eta = 0.1
-        lambda_t = 0.1  # TODO: should input a time dependent lambda list to guided_sampling
-
-        with torch.enable_grad():
-            # TODO: choose the tensor we actually guide from outside
-            #       --> pass variable_type and variable
-            # for now: example on surface
-            noisy_guided = noisy_next_state["surface"].detach().clone().requires_grad_(True)
-
-
-            # rebuild noisy state with the differentiable tensor inserted
-            guided_noisy_state = noisy_next_state.clone()
-            guided_noisy_state["surface"] = noisy_guided
-
-            def random_sparse_mask_like(state, num_pixels=10):
-                mask = torch.zeros_like(state, dtype=torch.float32)
-                
-                flat_mask = mask.view(-1)
-                idx = torch.randperm(flat_mask.numel(), device=state.device)[:num_pixels]
-                flat_mask[idx] = 1.0
-                
-                return mask
-            
-            mask = random_sparse_mask_like(noisy_guided, num_pixels=10).to(
-                device=noisy_guided.device, dtype=noisy_guided.dtype
-            )
-
-            # NOTE: the inpute state is a tensor_dict with single state (fields only)
-            input_state = guided_noisy_state
-            conditional_keys = self.conditional.split("+")  # all the things we condition on
-
-            # TODO: should get rid of this and simply keep what we use
-            # whether we need to run the deterministic model
-            if "det" in conditional_keys:
-                assert "pred_state" in batch
-                pred_state = batch["pred_state"]
-
-            if "prev" in conditional_keys:
-                prev_state = batch["prev_state"]
-                input_state = tensordict_cat([prev_state, input_state], dim=1)
-
-            if "det" in conditional_keys:
-                input_state = tensordict_cat([pred_state, input_state], dim=1)
-            
-            # conditional by default
-            times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-            month = torch.tensor(times.month).to(device)
-            month_emb = self.month_embedder(month)
-            hour = torch.tensor(times.hour).to(device)
-            hour_emb = self.hour_embedder(hour)
-            timestep_emb = self.timestep_embedder(timesteps)
-
-            cond_emb = month_emb + hour_emb + timestep_emb
-
-            # NOTE: here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
-            x = self.embedder.encode(batch["state"], input_state)
-            x = self.backbone(x, cond_emb)
-            out = self.embedder.decode(x)  # we get tdict
-
-            ##### here is where we compute the guidance
-            #     we use universal guidance for now
-
-            # compute aggregate term for loss
-            pred_guided_tensor = out["surface"]
-            gen_agg_term = torch.mean(mask * pred_guided_tensor)  # NOTE: mask has should probably be 121x240
-
-            # grad
-            print("guidance_term", guidance_term)
-            guidance_loss = torch.nn.functional.mse_loss(gen_agg_term, guidance_term)
-            # TODO: check that grad is disabled again after this
-            with torch.enable_grad():
-                grad = torch.autograd.grad(
-                    outputs=guidance_loss,
-                    inputs=noisy_guided,
-                    retain_graph=True,
-                    create_graph=False,
-                )[0]
-            # make one update to the noisy state
-            guided_noisy_state_hat = guided_noisy_state.clone()
-            guided_noisy_state_hat["surface"] = noisy_guided - eta * grad
-
-            # rebuild input_state
-            input_state_hat = guided_noisy_state_hat
-            if "prev" in conditional_keys:
-                input_state_hat = tensordict_cat([prev_state, input_state_hat], dim=1)
-            if "det" in conditional_keys:
-                input_state_hat = tensordict_cat([pred_state, input_state_hat], dim=1)
-
-            # second forward pass
-            x_hat = self.embedder.encode(batch["state"], input_state_hat)
-            x_hat = self.backbone(x_hat, cond_emb)
-            out_hat = self.embedder.decode(x_hat)
-
-            # guided combo
-            out_tilde = out.apply(lambda x: x.clone())
-            for key in out.keys():
-                out_tilde[key] = out[key] + lambda_t * (out_hat[key] - out[key])
-
-            #####
-
-        # compute velocity r-eps := (r-z)/s 
-        # to pass the right thing to the euler sampler
-        if is_sampling and self.prediction_type == "sample":
-            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps  # t/T, e.g. 959.5 / 1000
-            sigmas = sigmas[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
-            out_tilde = (noisy_next_state - out_tilde).apply(lambda x: x / sigmas)
-        return out_tilde
-    
-    def guided_sampling(
-        self,
-        batch,
-        # NOTE: when the guidance term is a full state, we can set the mask to torch.ones()
-        guidance_term: torch.Tensor,
-        mask: torch.Tensor,
-        seed=None,
-        num_steps=None,
-        disable_tqdm=False,
-        scale_input_noise=None,
-        **kwargs,
-    ):
-        """
-        kwargs args are fed to scheduler_step
-        """
-
-        scheduler = self.inference_scheduler
-        num_steps = num_steps or self.cfg.inference.num_steps
-        scheduler.set_timesteps(num_steps)
-
-        # get args to scheduler
-        scheduler_kwargs = dict(s_churn=self.cfg.inference.s_churn)
-        scheduler_kwargs.update(kwargs)
-
-        generator = torch.Generator(device=self.device)
-
-        if seed is not None:
-            generator.manual_seed(seed)
-
-        noisy_state = batch["state"].apply(
-            lambda x: torch.empty_like(x).normal_(generator=generator)
-        )
-
-        scale_input_noise = scale_input_noise or getattr(
-            self.cfg.inference, "scale_input_noise", None
-        )
-        if scale_input_noise is not None:
-            noisy_state = noisy_state * scale_input_noise
-
-        if self.learn_residual == "pred" and "pred_state" not in batch:
-            with torch.no_grad():
-                batch["pred_state"] = self.det_model(batch).detach()
-
-        loop_batch = {k: v for k, v in batch.items() if "next" not in k}  # ensures no data leakage
-        # print("loop_batch", loop_batch)
-
-        import pathlib
-        import datetime
-        date, time = str(datetime.datetime.now().replace(microsecond=0)).split(" ")
-        now = date + "_" + time
-        results_dir = pathlib.Path("experiments", f"{now}")
-        results_dir.mkdir(parents=True, exist_ok=True)
-
-        with torch.no_grad():
-            for i, t in enumerate(tqdm(scheduler.timesteps, disable=disable_tqdm)):
-                # NOTE: 
-                # t is in torch.linspace(1000, small_value, 25) 
-                # loop_batch.shape == noisy_state and are Torch dicts with:
-                    # level: Tensor(shape=torch.Size([1, 6, 13, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False),
-                    # surface: Tensor(shape=torch.Size([1, 4, 1, 121, 240]), device=mps:0, dtype=torch.float32, is_shared=False)},
-                # loop_batch is there for the conditioniing (X_{t-2}, X_{t-1})
-                # noisy_state is being denoised progressively
-
-                # predict noise model_output
-                # NOTE: pred is the inverse velocity vector (x_t - r^theta(x^cond, x_t, t)) / s
-                
-                pred = self.guided_forward(
-                    loop_batch,
-                    noisy_state,
-                    timesteps=torch.tensor([t]).to(self.device),
-                    is_sampling=True,
-                    guidance_term=guidance_term
-                )  # also a tensor_dict
-
-                # due to weird behavior of scheduler we need to use the following
-                step_index = getattr(scheduler, "_step_index", None)
-                # NOTE: step_index is None ... still weird to me
-
-                def scheduler_step(*args, **kwargs):
-                    # dt = sigma_next - sigma
-                    # prev_sample = sample + dt * model_output (velocity)
-                    out = scheduler.step(*args, **kwargs)
-                    if hasattr(scheduler, "_step_index"):
-                        scheduler._step_index = step_index
-                    return out.prev_sample
-
-                # apply scheduler step to tensor dict
-                # retrieves noisy_state_new
-                noisy_state = tensordict_apply(
-                    scheduler_step, pred, t, noisy_state, **scheduler_kwargs  # noisy_state_prev
-                )
-
-                # from normalized residual space z=r/sigma to r=sigma*z
-                if self.state_normalization:
-                    print("state_normalization applied")
-                    final_state = tensordict_apply(
-                        torch.mul, noisy_state, self.state_scaler.to(self.device)
-                    )
-
-                level = final_state["level"].squeeze()
-                surface = final_state["surface"].squeeze().unsqueeze(1)
-
-                sub_dir = results_dir / f"{i}"
-                sub_dir.mkdir(parents=True, exist_ok=True)
-                level_path = sub_dir / "level.pt"
-                surface_path = sub_dir /"surface.pt"
-
-                torch.save(level, level_path)
-                torch.save(surface, surface_path)
-
-                # at the end
-                if step_index is not None:
-                    scheduler._step_index = step_index + 1
-
-        sub_dir = results_dir / f"pred_state"
-        sub_dir.mkdir(parents=True, exist_ok=True)
-        det_surface_path = sub_dir /"surface.pt"
-        det_level_path = sub_dir /"level.pt"
-        surface = batch["pred_state"]["surface"].squeeze().unsqueeze(1)
-        level = batch["pred_state"]["level"].squeeze()
-        torch.save(surface, det_surface_path)
-        torch.save(level, det_level_path)
-
-        final_state = noisy_state.detach()
-
-        if self.state_normalization:
-            print("state_normalization applied")
-            final_state = tensordict_apply(
-                torch.mul, final_state, self.state_scaler.to(self.device)
-            )
-
-        if self.learn_residual == "default":
-            final_state = batch["state"] + final_state
-
-        elif self.learn_residual == "pred":
-            final_state = batch["pred_state"] + final_state
-
-        print(f"learn_residual is {self.learn_residual}")
-
-        return final_state

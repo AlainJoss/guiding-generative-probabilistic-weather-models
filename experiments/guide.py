@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = "0.20.4"
-app = marimo.App(width="medium")
+__generated_with = "0.21.1"
+app = marimo.App(width="medium", css_file="")
 
 
 @app.cell(hide_code=True)
@@ -45,7 +45,6 @@ def _():
     return (
         ChartPuck,
         CubicSpline,
-        Path,
         datetime,
         geodatasets,
         gpd,
@@ -177,14 +176,6 @@ def _(mo):
 def _(spline_widget):
     drift = spline_widget.y
     return (drift,)
-
-
-@app.cell
-def _():
-    import os
-    os.getcwd()
-    os.listdir("/Users/alain/Desktop/master-thesis/guiding-diffusion-based-weather-models")
-    return
 
 
 @app.cell
@@ -444,8 +435,6 @@ def _(map_widget, np):
         & (lat_grid >= lat_bottom)
         & (lat_grid <= lat_top)
     ).astype(np.uint8)
-
-    # spatial_mask
     return (spatial_mask,)
 
 
@@ -490,7 +479,7 @@ def _(array_2d, array_2d_denormalized, drift, np, spatial_mask):
 
     # '{:f}'.format(init_avg_denormalized)
     # '{:f}'.format(init_avg)
-    return guidance_terms_denormalized, init_avg_denormalized
+    return guidance_terms, guidance_terms_denormalized, init_avg_denormalized
 
 
 @app.cell
@@ -559,138 +548,189 @@ def _():
 
 
 @app.cell
-def _(device, gen_model, start_state):
-    ##### sample
+def _(device):
+    def state_to_device(state):
+        return {k: v[None].to(device) for k, v in state.items()}
 
-    SEED = 0
-    T = 25
-
-    def sample_next_state(current_state):
-        batch = {k: v[None].to(device) for k, v in current_state.items()}
-        sampled_state = gen_model.guided_sampling(
-            batch, seed=SEED, num_steps=T, scale_input_noise=1.05
-        ).cpu()
-
-        return sampled_state
-
-    sampled_state = sample_next_state(start_state)
-    sampled_state
-    return (T,)
+    return (state_to_device,)
 
 
 @app.cell
 def _(
-    Path,
-    T,
-    level_idx,
-    mcolors,
-    np,
-    plt,
+    device,
+    gen_model,
+    guidance_terms,
+    mo,
     spatial_mask,
     start_state,
+    state_to_device,
     torch,
-    var_idx,
-    variable,
-    variable_type,
 ):
+    ##### sample
+
+    @mo.cache
+    def run_rollout(start_state, guidance_terms, spatial_mask):
+        batch = state_to_device(start_state)
+        guidance = torch.tensor(guidance_terms)
+        mask = torch.tensor(spatial_mask, device=device, dtype=torch.float32)
+        return gen_model.rollout_step(batch, guidance[0], mask).cpu()
+
+    sampled_state = run_rollout(start_state, guidance_terms, spatial_mask)
+    return (sampled_state,)
+
+
+@app.cell
+def _(mcolors, plt):
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-    def get_last_experiment_id():
-        paths = Path("experiments").glob("2026*")
-        paths = sorted(paths)
-        return paths[-1]
+    # TODO: normalize the colorbar across
 
-    def read_experiment_tensor(id, t, partition):
-        path = Path(id, str(t), f"{partition}.pt")
-        tensor = torch.load(path)
-        return tensor.cpu()
+    def plot_sample(sample, title=""):
+        sample = sample.cpu()
 
-    def plot_sample(ground_truth, pred_state, tensor, title=""):
-        ground_truth = ground_truth.cpu()
-        pred_state = pred_state.cpu()
-        tensor = tensor.cpu()
-
-        combined = pred_state + tensor
-
-
-        gen_error = combined - ground_truth
-        gen_rmse = torch.sqrt(torch.mean(gen_error**2))
-        print(f"Combined RMSE: {gen_rmse.item()}")
-
-        det_error = pred_state - ground_truth
-        det_rmse = torch.sqrt(torch.mean(det_error**2))
-        print(f"Det RMSE: {det_rmse.item()}")
-
-        diff_det_gen = pred_state - tensor
-
-        fig, axes = plt.subplots(1, 7, dpi=1000, figsize=(20, 4))
+        fig, ax = plt.subplots(1, 1, dpi=300, figsize=(8, 4))
         fig.suptitle(title)
 
-        fields = [
-            ("tensor", tensor),
-            ("pred_state", pred_state),
-            ("pred_state + tensor", combined),
-            ("ground_truth", ground_truth),
-            ("det_error", det_error),
-            ("gen_error", gen_error),
-            ("diff_det_gen", diff_det_gen)
-        ]
+        vmax = sample.abs().max().item()
+        if vmax == 0:
+            vmax = 1e-8
+        norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
 
-        for ax, (name, field) in zip(axes, fields):
-            vmax = field.abs().max().item()
-            if vmax == 0:
-                vmax = 1e-8
-            norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+        im = ax.imshow(sample, cmap="RdBu_r", norm=norm)
+        ax.set_title("tensor")
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-            im = ax.imshow(field, cmap="RdBu_r", norm=norm)
-            ax.set_title(name)
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes("right", size="5%", pad=0.05)
-            fig.colorbar(im, cax=cax)
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        fig.colorbar(im, cax=cax)
 
         plt.tight_layout()
         plt.show()
+    
 
-    def plot_state(ground_truth, pred_state, id, t, partition: str, var: str, var_idx: int, level: int):
-        tensor = read_experiment_tensor(id, t, partition)
-        tensor_slice = tensor[var_idx, level]
-        pred_state_slice = pred_state[var_idx, level]
+    def plot_state(sample, partition: str, var: str, var_idx: int, level: int):
+        sample = sample[var_idx, level]
+        title = f"{partition} - {var} - {level}"
+        plot_sample(sample, title)
 
-        combined = pred_state_slice + tensor_slice
-        combined = np.asarray(combined)
-        actual_avg = np.sum(combined*spatial_mask) / np.sum(spatial_mask)
-        print("actual_avg", actual_avg)
+    # print(pred_state.shape)
+    return (plot_state,)
 
-        title = f"{t} - {partition} - {var} - {level}"
-        plot_sample(ground_truth, pred_state_slice, tensor_slice, title)
-        return actual_avg
 
-    id = get_last_experiment_id()
+@app.cell
+def _(level_idx, plot_state, sampled_state, var_idx, variable, variable_type):
+    plot_state(sampled_state[variable_type.value][0], variable_type.value, variable.value, var_idx, level_idx)
+    return
 
-    gt_state = start_state["next_state"]
-    # ground_truth = ds.denormalize(gt_state)
-    ground_truth = gt_state
-    ground_truth = ground_truth[variable_type.value][var_idx, level_idx]
 
-    pred_state = read_experiment_tensor(id, "pred_state", variable_type.value)
+@app.cell
+def _(level_idx, plot_state, start_state, var_idx, variable, variable_type):
+    plot_state(start_state["next_state"][variable_type.value], variable_type.value, variable.value, var_idx, level_idx)
+    return
 
-    avgs = []
-    for t in range(T):
-        actual_avg = plot_state(
-            ground_truth=ground_truth,
-            pred_state=pred_state,
-            id=id,
-            t=t,
-            partition=variable_type.value,
-            var=variable.value,
-            var_idx=var_idx,
-            level=level_idx,
-        )
-        avgs.append(actual_avg)
-    return (avgs,)
+
+@app.cell
+def _():
+    # from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    # def get_last_experiment_id():
+    #     paths = Path("experiments").glob("2026*")
+    #     paths = sorted(paths)
+    #     return paths[-1]
+
+    # def read_experiment_tensor(id, t, partition):
+    #     path = Path(id, str(t), f"{partition}.pt")
+    #     tensor = torch.load(path)
+    #     return tensor.cpu()
+
+    # def plot_sample(ground_truth, pred_state, tensor, title=""):
+    #     ground_truth = ground_truth.cpu()
+    #     pred_state = pred_state.cpu()
+    #     tensor = tensor.cpu()
+
+    #     combined = pred_state + tensor
+
+
+    #     gen_error = combined - ground_truth
+    #     gen_rmse = torch.sqrt(torch.mean(gen_error**2))
+    #     print(f"Combined RMSE: {gen_rmse.item()}")
+
+    #     det_error = pred_state - ground_truth
+    #     det_rmse = torch.sqrt(torch.mean(det_error**2))
+    #     print(f"Det RMSE: {det_rmse.item()}")
+
+    #     diff_det_gen = pred_state - tensor
+
+    #     fig, axes = plt.subplots(1, 7, dpi=1000, figsize=(20, 4))
+    #     fig.suptitle(title)
+
+    #     fields = [
+    #         ("tensor", tensor),
+    #         ("pred_state", pred_state),
+    #         ("pred_state + tensor", combined),
+    #         ("ground_truth", ground_truth),
+    #         ("det_error", det_error),
+    #         ("gen_error", gen_error),
+    #         ("diff_det_gen", diff_det_gen)
+    #     ]
+
+    #     for ax, (name, field) in zip(axes, fields):
+    #         vmax = field.abs().max().item()
+    #         if vmax == 0:
+    #             vmax = 1e-8
+    #         norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+
+    #         im = ax.imshow(field, cmap="RdBu_r", norm=norm)
+    #         ax.set_title(name)
+    #         ax.set_xticks([])
+    #         ax.set_yticks([])
+
+    #         divider = make_axes_locatable(ax)
+    #         cax = divider.append_axes("right", size="5%", pad=0.05)
+    #         fig.colorbar(im, cax=cax)
+
+    #     plt.tight_layout()
+    #     plt.show()
+
+    # def plot_state(ground_truth, pred_state, id, t, partition: str, var: str, var_idx: int, level: int):
+    #     tensor = read_experiment_tensor(id, t, partition)
+    #     tensor_slice = tensor[var_idx, level]
+    #     pred_state_slice = pred_state[var_idx, level]
+
+    #     combined = pred_state_slice + tensor_slice
+    #     combined = np.asarray(combined)
+    #     actual_avg = np.sum(combined*spatial_mask) / np.sum(spatial_mask)
+    #     print("actual_avg", actual_avg)
+
+    #     title = f"{t} - {partition} - {var} - {level}"
+    #     plot_sample(ground_truth, pred_state_slice, tensor_slice, title)
+    #     return actual_avg
+
+    # id = get_last_experiment_id()
+
+    # gt_state = start_state["next_state"]
+    # # ground_truth = ds.denormalize(gt_state)
+    # ground_truth = gt_state
+    # ground_truth = ground_truth[variable_type.value][var_idx, level_idx]
+
+    # pred_state = read_experiment_tensor(id, "pred_state", variable_type.value)
+
+    # avgs = []
+    # for t in range(T):
+    #     actual_avg = plot_state(
+    #         ground_truth=ground_truth,
+    #         pred_state=pred_state,
+    #         id=id,
+    #         t=t,
+    #         partition=variable_type.value,
+    #         var=variable.value,
+    #         var_idx=var_idx,
+    #         level=level_idx,
+    #     )
+    #     avgs.append(actual_avg)
+    return
 
 
 @app.cell

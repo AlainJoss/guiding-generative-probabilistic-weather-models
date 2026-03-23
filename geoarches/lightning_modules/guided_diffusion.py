@@ -22,7 +22,29 @@ class GuidedFlow(BaseLightningModule):
     def __init__(
         self,
         cfg,
-        load_deterministic_model=None
+        name="diffusion",
+        cond_dim=32,
+        num_train_timesteps=1000,
+        scheduler="flow",  # only available option
+        prediction_type="sample",  # or velocity
+        beta_schedule="squaredcos_cap_v2",
+        beta_start=0.0001,
+        beta_end=0.012,
+        loss_weighting_strategy=None,
+        conditional="",  # things that the model is conditioned
+        load_deterministic_model=False,
+        loss_delta_normalization=False,
+        state_normalization=False,
+        pow=2,
+        lr=1e-4,
+        betas=(0.9, 0.98),
+        weight_decay=1e-5,
+        num_warmup_steps=1000,
+        num_training_steps=300000,
+        num_cycles=0.5,
+        learn_residual=False,
+        sd3_timestep_sampling=True,
+        **kwargs,
     ):
         super().__init__()
         self.__dict__.update(locals())
@@ -126,10 +148,14 @@ class GuidedFlow(BaseLightningModule):
         w = 1
     
         ##### sample #####
+        timesteps = torch.linspace(
+            self.num_train_timesteps, 1, self.T
+        )
+
+        print(timesteps)
 
         with torch.no_grad():
-            for t in tqdm(range(1, self.T + 1)):
-                # denoiser is composed of encoder-backbone-decoder
+            for t in tqdm(timesteps.tolist()):                # denoiser is composed of encoder-backbone-decoder
                 # I must do some torch pipeline object
                 time_embedding = self.embedd_time(batch, t)
                 input_state = self.get_velocity_input_state(z_t, batch)
@@ -138,7 +164,9 @@ class GuidedFlow(BaseLightningModule):
                 grad_l = self.grad_loss(mask, mu, y_t, z_t)
                 u_t_guided = u_t -  lambdas[0] * w * grad_l
                 z_t = self.euler_step(z_t, u_t_guided)
-
+                for (k,v), (k2,v2) in zip(u_t_guided.items(), u_t.items()):
+                    assert torch.allclose(v, v2)
+                print("assertion passed")
         return z_t
 
         ##### compute final output #####
