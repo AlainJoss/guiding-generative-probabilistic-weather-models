@@ -101,8 +101,8 @@ geoarches-submit = 'geoarches.submit:main'
 geoarches-eval = 'geoarches.evaluation.eval_multistep:main'
 
 
-[tool.marimo.runtime]
-pythonpath = ["geoarches"]
+# [tool.marimo.runtime]
+# pythonpath = [".."]
 
 [tool.marimo.display]
 custom_css = ["menlo.css"]

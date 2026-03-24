@@ -59,6 +59,8 @@ class DiffusionModule(BaseLightningModule):
         super().__init__()
         self.__dict__.update(locals())
 
+        print("initialized DiffusionModule")
+
         self.cfg = cfg
         self.backbone = instantiate(cfg.backbone)  # necessary to put it on device
         self.embedder = instantiate(cfg.embedder)
@@ -178,8 +180,11 @@ class DiffusionModule(BaseLightningModule):
 
         if is_sampling and self.prediction_type == "sample":
             sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps
+            # NOTE: this is completly redundant
             sigmas = sigmas[:, None, None, None, None]  # shape (bs,)
-            print(timesteps, sigmas)
+            # print(timesteps, sigmas)
+
+            print(f"sigma = {sigmas.item():.12f}")
 
             # to transform model_output=sample to output=noise - sample
             out = (noisy_next_state - out).apply(lambda x: x / sigmas)
@@ -262,14 +267,18 @@ class DiffusionModule(BaseLightningModule):
         weighted_error = (pred - gt).abs().pow(self.pow).mul(loss_coeffs)
         loss = sum(weighted_error.mean().values())
         return loss
+    
+    def rollout_step(self, start_state, guidance_terms_denormalized, spatial_mask):
+        # batch = {k: v[None].to(self.device) for k, v in start_state.items()}
+        return self.sample(start_state)
 
     def sample(
         self,
         batch,
-        seed=None,
-        num_steps=None,
+        seed=0,
+        num_steps=25,
         disable_tqdm=False,
-        scale_input_noise=None,
+        scale_input_noise=1.05,
         **kwargs,
     ):
         """

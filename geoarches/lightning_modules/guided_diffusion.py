@@ -23,7 +23,7 @@ class GuidedFlow(BaseLightningModule):
         self,
         cfg,
         name="diffusion",
-        cond_dim=32,
+        cond_dim=256,
         num_train_timesteps=1000,
         scheduler="flow",  # only available option
         prediction_type="sample",  # or velocity
@@ -48,6 +48,7 @@ class GuidedFlow(BaseLightningModule):
     ):
         super().__init__()
         self.__dict__.update(locals())
+        print("initialized GuidedFlow")
         
         # some constants that were floating hardcoded around the codebase 
         # or are uselessly in the cfg (since they are fix anyway)
@@ -65,8 +66,6 @@ class GuidedFlow(BaseLightningModule):
             self.det_model, _ = load_module(load_deterministic_model)
         else:
             self.det_model = AvgModule(load_deterministic_model)
-        print("self.device", self.device)
-        self.det_model = self.det_model.to(self.device)
 
         # TODO: can I put this in a pipeline too?
         self.month_embedder = TimestepEmbedder(self.cond_dim)
@@ -117,8 +116,9 @@ class GuidedFlow(BaseLightningModule):
         # det prediction
         with torch.no_grad():
             x_cond["pred_state"] = self.det_model(x_cond).detach()
-            # TODO: should place this somewhere else
-            self.sigma = self.sigma.to(self.det_model.device)
+            
+            # TODO: should place where-else once I have the correct rollout func
+            self.sigma = self.sigma.to(self.device)
         
         # TODO: might remove this (it's redundant for now)
         mu = x_cond["pred_state"]
@@ -136,7 +136,8 @@ class GuidedFlow(BaseLightningModule):
         ##### init #####
 
         # draw noise
-        generator = torch.Generator(device=batch["timestamp"].device)
+        generator = torch.Generator(device=self.device)
+        generator.manual_seed(0)
         z = batch["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
@@ -150,34 +151,46 @@ class GuidedFlow(BaseLightningModule):
         ##### sample #####
         timesteps = torch.linspace(
             self.num_train_timesteps, 1, self.T
-        )
-
-        print(timesteps)
+        ).to(self.device)
 
         with torch.no_grad():
-            for t in tqdm(timesteps.tolist()):                # denoiser is composed of encoder-backbone-decoder
+            # TODO: check this: probably missing 1 step
+            for i in tqdm(range(len(timesteps))):
+                t = timesteps[i]
+
+                s_t = t / self.num_train_timesteps   
+                if i < len(timesteps) - 1:
+                    t_next = timesteps[i + 1]
+                    s_next = t_next / self.num_train_timesteps
+                    dt = s_t - s_next
+                else:
+                    dt = s_t
+                # print(f"s_t = {s_t.item():.12f}")
+                # print(f"dt = {dt.item():.12f}")
+                
                 # I must do some torch pipeline object
                 time_embedding = self.embedd_time(batch, t)
                 input_state = self.get_velocity_input_state(z_t, batch)
-                u_t = self.velocity(batch, time_embedding, input_state, z_t, t)
+
+                u_t = self.velocity(batch, time_embedding, input_state, z_t, s_t)
+            
                 # TODO: need to decide how to pass the grad in case I need it
                 grad_l = self.grad_loss(mask, mu, y_t, z_t)
                 u_t_guided = u_t -  lambdas[0] * w * grad_l
-                z_t = self.euler_step(z_t, u_t_guided)
-                for (k,v), (k2,v2) in zip(u_t_guided.items(), u_t.items()):
-                    assert torch.allclose(v, v2)
-                print("assertion passed")
+
+                # TODO: not sure whether the tensor dict apply is doing it both for the lower and upper
+                z_t = self.euler_step(z_t, u_t_guided, dt)
         return z_t
 
         ##### compute final output #####
     
     def embedd_time(self, batch, t):
         times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-        month = torch.tensor(times.month).to(batch["timestamp"].device)
+        month = torch.tensor(times.month).to(self.device)
         month_emb = self.month_embedder(month)
-        hour = torch.tensor(times.hour).to(batch["timestamp"].device)
+        hour = torch.tensor(times.hour).to(self.device)
         hour_emb = self.hour_embedder(hour)
-        timestep_emb = self.timestep_embedder(torch.tensor([t]).to(batch["timestamp"].device))
+        timestep_emb = self.timestep_embedder(torch.tensor([t]).to(self.device))
 
         time_embedding = month_emb + hour_emb + timestep_emb
         return time_embedding
@@ -191,7 +204,7 @@ class GuidedFlow(BaseLightningModule):
         input_state = tensordict_cat([pred_state, input_state], dim=1)
         return input_state
 
-    def velocity(self, batch, time_embedding, input_state, z, t):
+    def velocity(self, batch, time_embedding, input_state, z, s_t):
 
         ##### compute residual #####
 
@@ -206,20 +219,16 @@ class GuidedFlow(BaseLightningModule):
 
         # u_t = r_t - eps_t := (r_t - z_t) / s_t
         # TODO: check that this works in the forwards case ...
-        s_t = t / self.T  # e.g. 959.5 / 1000
         # TODO: check that broadcasts correctly
         # s_t = s_t[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
-        s_t = torch.tensor(t / self.T, device=batch["state"].device, dtype=torch.float32)
         u_t = (r_t - z).apply(lambda x: x / s_t)
         return u_t
     
     def grad_loss(self, mask, mu, y_t, z_t):
         # TODO: select tensor from inside tensor_dict to compute this ...
         #       need to define guiding variable and partition somewhere too!
-        # TODO: can place it in helpers instead of class
         # TODO: sigma needs probably same treatment as in the translation ...
         # TODO: check that * does pointwise multiplication
-        print(mask.device, mu.device, z_t.device, self.sigma.device)
         # loss_ = torch.square(
         #     y_t - torch.sum(mask * (mu + self.sigma * z_t)) / torch.sum(mask)
         # )
@@ -231,9 +240,11 @@ class GuidedFlow(BaseLightningModule):
 
         grad_l = grad(loss_, z_t)
         return grad_l 
+
+    # def euler_step(self, z_t, u_t, dt):
+    #     return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)
     
-    def euler_step(self, z_t, u_t):
-        h = 1 / self.T
-        # z_new = z_t + h * u_t
+    def euler_step(self, z_t, u_t, dt):
+        # z_new = z_t + h * u_t, where h =dt
         # the lambda corresponds to def f(z, u): return z + h * u, the rest are the arguments
-        return tensordict_apply(lambda z, u: z + h * u, z_t, u_t)
+        return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)

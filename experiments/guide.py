@@ -7,6 +7,22 @@ app = marimo.App(width="medium", css_file="")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## todos
+    - refactor plots to use a dix min and max
+    - solve how to steer in denormalized and latent space
+    - refactor guided_flow model to take in partition, level_index, variable_index
+    - refactor this whole notebook to outsource functionality
+
+    ## ideas
+    - steer model towards grount truth in mask and measure divergence across states
+    - generate multiple (vars, levels, partitions) no-guidance N rollouts and save in experiment folder -> need a way to encode the experiment (log of experiments or yaml with keys).
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## setup
     """)
     return
@@ -38,16 +54,19 @@ def _():
 
     import matplotlib.patches as mpatches
     import cartopy.feature as cfeature
-
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
     from cartopy.crs import PlateCarree
     from matplotlib import colors
 
     return (
         ChartPuck,
         CubicSpline,
+        Path,
         datetime,
         geodatasets,
         gpd,
+        make_axes_locatable,
         mcolors,
         mo,
         mpatches,
@@ -56,6 +75,13 @@ def _():
         timedelta,
         torch,
     )
+
+
+@app.cell
+def _():
+    import matplotlib as mpl
+    mpl.rcParams["figure.dpi"] = 100
+    return
 
 
 @app.cell
@@ -84,9 +110,6 @@ def _(mo):
 def _(ChartPuck, CubicSpline, n_pucks_slider, np):
     # Internal state for interpolation method (not a marimo dependency)
     method_state = {"value": "CubicSpline"}
-
-    import matplotlib as mpl
-    mpl.rcParams["figure.dpi"] = 100
 
     MAX_PERC_DELTA = 200/100
 
@@ -167,6 +190,46 @@ def _(method_state, spline_puck):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## Model
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    from geoarches.lightning_modules import load_module
+    from geoarches.dataloaders.era5 import Era5Forecast
+
+    device = "mps"
+
+    ds = Era5Forecast(
+        path="data/era5_240/full",  # default path
+        domain="test", # domain to consider. domain = 'test' loads the 2020 period
+        load_prev=True,  # whether to load previous state
+        norm_scheme="pangu",  # default normalization scheme
+        lead_time_hours=6
+    )
+
+    module_target = "geoarches.lightning_modules.{}"
+    MODELS = ["diffusion.DiffusionModule", "guided_diffusion.GuidedFlow"]
+    model = mo.ui.dropdown(MODELS, value=MODELS[1], label="model: ")
+    model
+    return device, ds, load_module, model, module_target
+
+
+@app.cell
+def _(device, load_module, model, module_target):
+    gen_model, gen_config = load_module(
+        "archesweathergen",
+        module_target=module_target.format(model.value),
+    )
+    gen_model = gen_model.to(device)
+    return (gen_model,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## State
     """)
     return
@@ -180,35 +243,9 @@ def _(spline_widget):
 
 @app.cell
 def _(mo):
-    from geoarches.lightning_modules import load_module
-    from geoarches.dataloaders.era5 import Era5Forecast
-
-    device = "mps"
-    model, config = load_module("archesweather-m-seed0")
-
-    ds = Era5Forecast(
-        path="data/era5_240/full",  # default path
-        domain="test", # domain to consider. domain = 'test' loads the 2020 period
-        load_prev=True,  # whether to load previous state
-        norm_scheme="pangu",  # default normalization scheme
-        lead_time_hours=6
-    )
-
-    gen_model, gen_config = load_module("archesweathergen")
-
-    gen_model = gen_model.to(device)
-
-    MODELS = ["ArchesWeather"]
-    model = mo.ui.dropdown(MODELS, value=MODELS[0], label="model: ")
-    model
-    return device, ds, gen_model
-
-
-@app.cell
-def _(mo):
     VARIABLE_TYPES = ["surface", "level"]
     variable_type = mo.ui.dropdown(VARIABLE_TYPES, value=VARIABLE_TYPES[0], label="variable type: ")
-    variable_type
+    variable_type, mo.md("temperature is in kelvin, my god")
     return (variable_type,)
 
 
@@ -244,7 +281,7 @@ def _(mo, variable_type):
     }
 
     VARIABLES = VARIABLES_DICT[variable_type.value]
-    variable = mo.ui.dropdown(VARIABLES, value=VARIABLES[0], label="variable : ")
+    variable = mo.ui.dropdown(VARIABLES, value=VARIABLES[2], label="variable : ")
     variable
     return VARIABLES, variable
 
@@ -279,19 +316,48 @@ def _(LEVELS, TIMESTAMPS, VARIABLES, level, start_ts, variable):
 
 
 @app.cell
+def _(level_idx, var_idx):
+    var_idx, level_idx
+    return
+
+
+@app.cell
 def _(ds, start_ts_idx):
     start_state = ds[start_ts_idx]
     return (start_state,)
 
 
 @app.cell
-def _(ChartPuck, geodatasets, gpd, level, mo, mpatches, np, variable):
+def _(
+    ChartPuck,
+    geodatasets,
+    gpd,
+    level,
+    make_axes_locatable,
+    mcolors,
+    mo,
+    mpatches,
+    np,
+    variable,
+):
+
     def lonlat_to_ij(lon, lat, lon_c, lat_c):
         j = int(np.argmin(np.abs(lon_c - lon)))
         i = int(np.argmin(np.abs(lat_c - lat)))
         return i, j
 
-    def visualize_map_with_rectangle(array_2d, cmap="coolwarm", norm=None):
+
+    def visualize_map(
+        array_2d,
+        cmap="coolwarm",
+        vmin=None,
+        vmax=None,
+        center=None,
+        figsize=(10, 5),
+        with_rectangle=False,
+        rectangle_x=(20.0, 60.0),
+        rectangle_y=(50.0, 20.0),
+    ):
         ny, nx = array_2d.shape
         assert (ny, nx) == (121, 240), f"Expected (121, 240), got {(ny, nx)}"
 
@@ -312,10 +378,21 @@ def _(ChartPuck, geodatasets, gpd, level, mo, mpatches, np, variable):
 
         world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
-        def draw_map(ax, widget):
-            ax.clear()
+        if center is not None:
+            if vmin is None or vmax is None:
+                absmax = np.nanmax(np.abs(array_2d_plot))
+                if not np.isfinite(absmax) or absmax == 0:
+                    absmax = 1e-8
+                if vmin is None:
+                    vmin = -absmax
+                if vmax is None:
+                    vmax = absmax
+            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
+        else:
+            norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
 
-            ax.pcolormesh(
+        def draw_base(ax):
+            im = ax.pcolormesh(
                 lon_c_plot,
                 lat_c,
                 array_2d_plot,
@@ -331,6 +408,31 @@ def _(ChartPuck, geodatasets, gpd, level, mo, mpatches, np, variable):
             ax.set_xlabel("Longitude")
             ax.set_ylabel("Latitude")
             ax.set_title(f"{variable.value} @ level {level.value}")
+
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="4%", pad=0.08)
+            ax.figure.colorbar(im, cax=cax)
+
+            return im
+
+        if not with_rectangle:
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots(1, 1, dpi=300, figsize=figsize)
+            draw_base(ax)
+            plt.tight_layout()
+            plt.show()
+            return
+
+        def draw_map(ax, widget):
+            ax.clear()
+
+            # remove previous colorbar axes if redraw happens
+            fig = ax.figure
+            while len(fig.axes) > 1:
+                fig.delaxes(fig.axes[-1])
+
+            draw_base(ax)
 
             x0, x1 = widget.x
             y0, y1 = widget.y
@@ -368,19 +470,20 @@ def _(ChartPuck, geodatasets, gpd, level, mo, mpatches, np, variable):
                 markersize=5,
                 zorder=11,
             )
+
         rect_puck = ChartPuck.from_callback(
             draw_fn=draw_map,
-            x=[20.0, 60.0],
-            y=[50.0, 20.0],
+            x=list(rectangle_x),
+            y=list(rectangle_y),
             puck_color=["green", "red"],
-            figsize=(10, 5),
+            figsize=figsize,
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
         )
 
         return mo.ui.anywidget(rect_puck)
 
-    return (visualize_map_with_rectangle,)
+    return (visualize_map,)
 
 
 @app.cell
@@ -392,18 +495,12 @@ def _(mo):
 
 
 @app.cell
-def _(
-    ds,
-    level_idx,
-    start_state,
-    var_idx,
-    variable_type,
-    visualize_map_with_rectangle,
-):
+def _(ds, level_idx, start_state, var_idx, variable_type, visualize_map):
     array_2d_denormalized = ds.denormalize(start_state["state"])[variable_type.value][var_idx, level_idx]
     array_2d = start_state["state"][variable_type.value][var_idx, level_idx]
 
-    map_widget = visualize_map_with_rectangle(array_2d)
+    map_widget = visualize_map(array_2d, vmin=-3, vmax=3, with_rectangle=True)
+
     map_widget
     return array_2d, array_2d_denormalized, map_widget
 
@@ -465,21 +562,21 @@ def _(array_2d, array_2d_denormalized, drift, np, spatial_mask):
     # compute initial avg: init_avg = avg(mask*state)
     # compute guidance: guidance = drift_perc*init_avg
 
-    def init_avg(mask, state):
-        return np.mean(mask * state)
+    def avg_over_mask(mask, state):
+        avg = np.sum(mask * state) / np.sum(mask)
+        return avg
 
     def guidance_terms(drift, init_avg):
         return [init_avg + d * np.abs(init_avg) for d in drift]
 
-    init_avg_denormalized = init_avg(spatial_mask, np.asarray(array_2d_denormalized))
-    guidance_terms_denormalized = guidance_terms(drift, init_avg_denormalized)
+    avg_over_mask_denormalized  = avg_over_mask(spatial_mask, np.asarray(array_2d_denormalized))
+    guidance_terms_denormalized  = guidance_terms(drift, avg_over_mask_denormalized)
 
-    init_avg = init_avg(spatial_mask, np.asarray(array_2d))
-    guidance_terms = guidance_terms(drift, init_avg)
+    avg_over_mask_normalized = avg_over_mask(spatial_mask, np.asarray(array_2d))
+    guidance_terms_normalized = guidance_terms(drift, avg_over_mask_normalized)
 
-    # '{:f}'.format(init_avg_denormalized)
-    # '{:f}'.format(init_avg)
-    return guidance_terms, guidance_terms_denormalized, init_avg_denormalized
+    avg_over_mask_denormalized, guidance_terms_denormalized, avg_over_mask_normalized, guidance_terms_normalized
+    return avg_over_mask_denormalized, guidance_terms_denormalized
 
 
 @app.cell
@@ -489,8 +586,14 @@ def _():
 
 
 @app.cell
-def _(guidance_terms_denormalized, init_avg_denormalized, np, plt, variable):
-    trajectory = [init_avg_denormalized] + guidance_terms_denormalized
+def _(
+    avg_over_mask_denormalized,
+    guidance_terms_denormalized,
+    np,
+    plt,
+    variable,
+):
+    trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
     def plot_trajectory(trajectory):
         x = np.arange(len(trajectory))
 
@@ -514,7 +617,7 @@ def _(guidance_terms_denormalized, init_avg_denormalized, np, plt, variable):
     #     fig
     # ])
     fig
-    return (plot_trajectory,)
+    return
 
 
 @app.cell(hide_code=True)
@@ -556,187 +659,109 @@ def _(device):
 
 
 @app.cell
-def _(
-    device,
-    gen_model,
-    guidance_terms,
-    mo,
-    spatial_mask,
-    start_state,
-    state_to_device,
-    torch,
-):
+def _(mo):
     ##### sample
 
+    run_button = mo.ui.run_button(label="Run experiment")
+    run_button
+    return (run_button,)
+
+
+@app.cell
+def _(mo):
+    get_sampled_state, set_sampled_state = mo.state(None)
+    return get_sampled_state, set_sampled_state
+
+
+@app.cell
+def _(device, gen_model, mo, state_to_device, torch):
     @mo.cache
-    def run_rollout(start_state, guidance_terms, spatial_mask):
+    def run_rollout(start_state, guidance_terms_denormalized, spatial_mask):
         batch = state_to_device(start_state)
-        guidance = torch.tensor(guidance_terms)
+        guidance = torch.tensor(guidance_terms_denormalized)
         mask = torch.tensor(spatial_mask, device=device, dtype=torch.float32)
         return gen_model.rollout_step(batch, guidance[0], mask).cpu()
 
-    sampled_state = run_rollout(start_state, guidance_terms, spatial_mask)
-    return (sampled_state,)
+    return (run_rollout,)
 
 
 @app.cell
-def _(mcolors, plt):
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
+def _(
+    Path,
+    datetime,
+    guidance_terms_denormalized,
+    level_idx,
+    model,
+    run_button,
+    run_rollout,
+    sampled_state,
+    set_sampled_state,
+    spatial_mask,
+    start_state,
+    torch,
+    var_idx,
+    variable_type,
+):
+    def save_run(sampled_state):
+        date, time = str(datetime.now().replace(microsecond=0)).split(" ")
+        now = date + "_" + time
+        experiment_path = Path("experiments", f"{now}")
+        experiment_path.mkdir(parents=True, exist_ok=True)
+        experiment_path = experiment_path /f"{model.value}.pt"
+        torch.save(sampled_state[variable_type.value][0][var_idx, level_idx], experiment_path)
+        print("run saved")
 
-    # TODO: normalize the colorbar across
-
-    def plot_sample(sample, title=""):
-        sample = sample.cpu()
-
-        fig, ax = plt.subplots(1, 1, dpi=300, figsize=(8, 4))
-        fig.suptitle(title)
-
-        vmax = sample.abs().max().item()
-        if vmax == 0:
-            vmax = 1e-8
-        norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
-
-        im = ax.imshow(sample, cmap="RdBu_r", norm=norm)
-        ax.set_title("tensor")
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.05)
-        fig.colorbar(im, cax=cax)
-
-        plt.tight_layout()
-        plt.show()
-    
-
-    def plot_state(sample, partition: str, var: str, var_idx: int, level: int):
-        sample = sample[var_idx, level]
-        title = f"{partition} - {var} - {level}"
-        plot_sample(sample, title)
-
-    # print(pred_state.shape)
-    return (plot_state,)
-
-
-@app.cell
-def _(level_idx, plot_state, sampled_state, var_idx, variable, variable_type):
-    plot_state(sampled_state[variable_type.value][0], variable_type.value, variable.value, var_idx, level_idx)
-    return
-
-
-@app.cell
-def _(level_idx, plot_state, start_state, var_idx, variable, variable_type):
-    plot_state(start_state["next_state"][variable_type.value], variable_type.value, variable.value, var_idx, level_idx)
+    if run_button.value:
+        result = run_rollout(start_state, guidance_terms_denormalized, spatial_mask)
+        set_sampled_state(result)
+        save_run(sampled_state)
     return
 
 
 @app.cell
 def _():
-    # from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-    # def get_last_experiment_id():
-    #     paths = Path("experiments").glob("2026*")
-    #     paths = sorted(paths)
-    #     return paths[-1]
-
-    # def read_experiment_tensor(id, t, partition):
-    #     path = Path(id, str(t), f"{partition}.pt")
-    #     tensor = torch.load(path)
-    #     return tensor.cpu()
-
-    # def plot_sample(ground_truth, pred_state, tensor, title=""):
-    #     ground_truth = ground_truth.cpu()
-    #     pred_state = pred_state.cpu()
-    #     tensor = tensor.cpu()
-
-    #     combined = pred_state + tensor
+    vmin = -3
+    vmax = 3
+    return vmax, vmin
 
 
-    #     gen_error = combined - ground_truth
-    #     gen_rmse = torch.sqrt(torch.mean(gen_error**2))
-    #     print(f"Combined RMSE: {gen_rmse.item()}")
+@app.cell
+def _(get_sampled_state, mo):
 
-    #     det_error = pred_state - ground_truth
-    #     det_rmse = torch.sqrt(torch.mean(det_error**2))
-    #     print(f"Det RMSE: {det_rmse.item()}")
+    # plot_state(start_state["next_state"][variable_type.value], variable_type.value, variable.value, var_idx, level_idx)
 
-    #     diff_det_gen = pred_state - tensor
+    sampled_state = get_sampled_state()
 
-    #     fig, axes = plt.subplots(1, 7, dpi=1000, figsize=(20, 4))
-    #     fig.suptitle(title)
+    mo.stop(sampled_state is None, mo.md("Press **Run rollout** first."))
 
-    #     fields = [
-    #         ("tensor", tensor),
-    #         ("pred_state", pred_state),
-    #         ("pred_state + tensor", combined),
-    #         ("ground_truth", ground_truth),
-    #         ("det_error", det_error),
-    #         ("gen_error", gen_error),
-    #         ("diff_det_gen", diff_det_gen)
-    #     ]
+    # DO THINGS WITH sampled_state
 
-    #     for ax, (name, field) in zip(axes, fields):
-    #         vmax = field.abs().max().item()
-    #         if vmax == 0:
-    #             vmax = 1e-8
-    #         norm = mcolors.TwoSlopeNorm(vmin=-vmax, vcenter=0, vmax=vmax)
+    # visualize_map(sampled_state[variable_type.value][0][var_idx, level_idx], vmin=vmin, vmax=vmax)
+    # visualize_map(start_state["next_state"][variable_type.value][var_idx, level_idx], vmin=vmin, vmax=vmax)
+    return (sampled_state,)
 
-    #         im = ax.imshow(field, cmap="RdBu_r", norm=norm)
-    #         ax.set_title(name)
-    #         ax.set_xticks([])
-    #         ax.set_yticks([])
 
-    #         divider = make_axes_locatable(ax)
-    #         cax = divider.append_axes("right", size="5%", pad=0.05)
-    #         fig.colorbar(im, cax=cax)
-
-    #     plt.tight_layout()
-    #     plt.show()
-
-    # def plot_state(ground_truth, pred_state, id, t, partition: str, var: str, var_idx: int, level: int):
-    #     tensor = read_experiment_tensor(id, t, partition)
-    #     tensor_slice = tensor[var_idx, level]
-    #     pred_state_slice = pred_state[var_idx, level]
-
-    #     combined = pred_state_slice + tensor_slice
-    #     combined = np.asarray(combined)
-    #     actual_avg = np.sum(combined*spatial_mask) / np.sum(spatial_mask)
-    #     print("actual_avg", actual_avg)
-
-    #     title = f"{t} - {partition} - {var} - {level}"
-    #     plot_sample(ground_truth, pred_state_slice, tensor_slice, title)
-    #     return actual_avg
-
-    # id = get_last_experiment_id()
-
-    # gt_state = start_state["next_state"]
-    # # ground_truth = ds.denormalize(gt_state)
-    # ground_truth = gt_state
-    # ground_truth = ground_truth[variable_type.value][var_idx, level_idx]
-
-    # pred_state = read_experiment_tensor(id, "pred_state", variable_type.value)
-
-    # avgs = []
-    # for t in range(T):
-    #     actual_avg = plot_state(
-    #         ground_truth=ground_truth,
-    #         pred_state=pred_state,
-    #         id=id,
-    #         t=t,
-    #         partition=variable_type.value,
-    #         var=variable.value,
-    #         var_idx=var_idx,
-    #         level=level_idx,
-    #     )
-    #     avgs.append(actual_avg)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## compare
+    """)
     return
 
 
 @app.cell
-def _(avgs, plot_trajectory):
-    fig_avgs = plot_trajectory(avgs)
-    fig_avgs
+def _(torch):
+    path_ = "experiments/generated/{}.pt"
+    diffusion_tensor = torch.load(path_.format("diffusion.DiffusionModule"), weights_only=False)
+    flow_tensor = torch.load(path_.format("guided_diffusion.GuidedFlow"), weights_only=False)
+    torch.allclose(diffusion_tensor, flow_tensor, rtol=1e-6, atol=1e-7)
+    return diffusion_tensor, flow_tensor
+
+
+@app.cell
+def _(diffusion_tensor, flow_tensor, visualize_map, vmax, vmin):
+    visualize_map(diffusion_tensor, vmin=vmin, vmax=vmax)
+    visualize_map(flow_tensor, vmin=vmin, vmax=vmax)
     return
 
 
@@ -744,125 +769,6 @@ def _(avgs, plot_trajectory):
 def _(mo):
     mo.md(r"""
     ## Guided roll-out
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ```bash
-
-    def updated_states(input_state, pred_state):
-        input_state["prev_state"] = input_state["state"]
-        input_state["state"] = pred_state
-        return input_state
-
-    def gen_guidance_state(input_state):
-        X_hat = det(input_state)
-        input_state = updated_states(input_state, pred_state)
-        X_hat = det(input_state)
-        X_tilde = SGD(X_hat, input_state)
-        return X_tilde
-
-    def SGD(X_hat):
-        for m in M:
-            X_input["prev_state"] = X_input["prev_state"] - eta * nabla_{X_input["prev_state"]}(X_hat)
-        # NOTE: we will generate using this state for guidance
-        return X_input["prev_state"]
-
-    X_input = start_state()
-    for n in N:
-        if n > 1
-            X_input = updated_states(X_input, X_bar)
-
-        X_tilde = gen_guidance_state(X_input)
-        # NOTE: we still use the unchanged X_input for generation but guide towards X_tilde
-        X_bar = gen_guide(X_input, X_tilde)
-        save_states(X_tilde, X_bar)
-    ```
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ```python
-
-    X_cond = [X_{n-1}, X_n]
-    SIGMA = ...  # hard_coded -> should extract it
-
-    ##### universal time
-
-    def rollout(
-        N, T,
-        X_cond,
-        guide: Callable,
-        X_guide_trajectory: list[torch.Tensor] | None = None,
-        mask=None,
-    ):
-        trajectory = []
-
-        for n in range(N):
-            X_guide = None if X_guide_trajectory is None else X_guide_trajectory[n]
-            x_hat = rollout_step(
-                T=T,
-                X_cond=X_cond,
-                guide=guide,
-                X_guide=X_guide,
-                mask=mask,
-            )
-            trajectory.append(x_hat)
-
-            if n < N - 1:
-                X_cond = [X_cond[1], x_hat]
-
-        return trajectory
-
-    # can maybe define more complicated schemes like the forward-backward one
-    def rollout_step(
-        T, X_cond,
-        guide, X_guide, mask
-    ):
-        mu = self.deterministic(X_cond)
-        z = sample(T, X_cond, mu, guide, X_guide, mask)
-        x_hat = mu + SIGMA * z
-        return x_hat
-
-    ##### generative time
-
-    def sample(T, X_cond, mu, guide, X_guide, mask):
-        z = noise()
-        for t in range(T):
-            # denoiser is composed of encoder-backbone-decoder
-            # I must do some torch pipeline object
-            model_out = denoiser(z, X_cond, t)
-            # TODO: need to decide how to pass the grad in case I need it
-            guided_out = guide(t, z, model_out, mu, X_cond, X_guide, mask)
-            z = scheduler_step(z, guided_out, t)
-        return z
-
-
-    def guide(t, z, model_out, mu, X_cond, X_guide, mask):
-        # Protocol
-        pass
-
-    # Not of concern for now
-
-    def no_guidance(...):
-        return model_out
-
-    def universal_guidance(...):
-        lambda_t = np.sin(t)  # or something similar
-        L(z)=(avgM​(μ+Σz)−Xguide​)2
-        pass
-
-    def flow_grad(...)
-        # compute all control vectors outside and somehow call them here
-        pass
-
-    ```
     """)
     return
 

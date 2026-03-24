@@ -172,5 +172,6 @@ cython_debug/
 data/
 experiments/2026*
 experiments/layouts
+experiments/generated
 modelstore/
 geoarches/stats/
