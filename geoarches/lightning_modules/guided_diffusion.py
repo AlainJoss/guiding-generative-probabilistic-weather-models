@@ -115,7 +115,7 @@ class GuidedFlow(BaseLightningModule):
     ):  
         # det prediction
         with torch.no_grad():
-            x_cond["pred_state"] = self.det_model(x_cond).detach()
+            x_cond["pred_state"] = self.det_model(x_cond)
             
             # TODO: should place where-else once I have the correct rollout func
             self.sigma = self.sigma.to(self.device)
@@ -124,7 +124,7 @@ class GuidedFlow(BaseLightningModule):
         mu = x_cond["pred_state"]
         # remove next_state (save compute)
         loop_batch = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.sample(loop_batch, mu, y_t, mask).detach()
+        z = self.sample(loop_batch, mu, y_t, mask)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat
@@ -141,8 +141,6 @@ class GuidedFlow(BaseLightningModule):
         z = batch["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
-        # reason explained in paper
-        # TODO: changed name ones we get rid of the name "sigma" in other contexts!
         z_t = z * self.scale_input_noise
 
         lambdas = [0.1 * self.T]  # TODO: should input a time dependent lambda list to guided_sampling
@@ -153,33 +151,42 @@ class GuidedFlow(BaseLightningModule):
             self.num_train_timesteps, 1, self.T
         ).to(self.device)
 
-        with torch.no_grad():
-            # TODO: check this: probably missing 1 step
-            for i in tqdm(range(len(timesteps))):
-                t = timesteps[i]
+        # TODO: check grads here
+        for i in tqdm(range(len(timesteps))):
+            t = timesteps[i]
 
-                s_t = t / self.num_train_timesteps   
-                if i < len(timesteps) - 1:
-                    t_next = timesteps[i + 1]
-                    s_next = t_next / self.num_train_timesteps
-                    dt = s_t - s_next
-                else:
-                    dt = s_t
-                # print(f"s_t = {s_t.item():.12f}")
-                # print(f"dt = {dt.item():.12f}")
-                
-                # I must do some torch pipeline object
-                time_embedding = self.embedd_time(batch, t)
-                input_state = self.get_velocity_input_state(z_t, batch)
+            s_t = t / self.num_train_timesteps   
+            if i < len(timesteps) - 1:
+                t_next = timesteps[i + 1]
+                s_next = t_next / self.num_train_timesteps
+                dt = s_t - s_next
+            else:
+                dt = s_t
 
+            # reset graph at each step and make z_t differentiable
+            z_t = z_t.apply(lambda x: x.detach().clone().requires_grad_(True))
+            
+            # TODO: some torch pipeline object
+            time_embedding = self.embedd_time(batch, t)
+            input_state = self.get_velocity_input_state(z_t, batch)
+
+            # vector field 
+            with torch.no_grad():
                 u_t = self.velocity(batch, time_embedding, input_state, z_t, s_t)
             
-                # TODO: need to decide how to pass the grad in case I need it
+            # TODO: need to play around with this part
+            with torch.enable_grad():
                 grad_l = self.grad_loss(mask, mu, y_t, z_t)
-                u_t_guided = u_t -  lambdas[0] * w * grad_l
 
-                # TODO: not sure whether the tensor dict apply is doing it both for the lower and upper
+            u_t_guided = tensordict_apply(
+                lambda u, g: u - (lambdas[0] * w) * g,
+                u_t,
+                grad_l,
+            )
+
+            with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t_guided, dt)
+        
         return z_t
 
         ##### compute final output #####
@@ -216,35 +223,39 @@ class GuidedFlow(BaseLightningModule):
         r_t = self.embedder.decode(x)  # we get tdict
 
         ##### compute velocity from residual
-
-        # u_t = r_t - eps_t := (r_t - z_t) / s_t
-        # TODO: check that this works in the forwards case ...
-        # TODO: check that broadcasts correctly
-        # s_t = s_t[:, None, None, None, None]  # shape (batch_size,1,1,1,1), to divide elementwise
+        #     u_t = r_t - eps_t := (r_t - z_t) / s_t
         u_t = (r_t - z).apply(lambda x: x / s_t)
         return u_t
     
     def grad_loss(self, mask, mu, y_t, z_t):
-        # TODO: select tensor from inside tensor_dict to compute this ...
-        #       need to define guiding variable and partition somewhere too!
-        # TODO: sigma needs probably same treatment as in the translation ...
-        # TODO: check that * does pointwise multiplication
-        # loss_ = torch.square(
-        #     y_t - torch.sum(mask * (mu + self.sigma * z_t)) / torch.sum(mask)
-        # )
-        return torch.tensor(0.0)
+        sigma_z = tensordict_apply(torch.mul, z_t, self.sigma)
+        x_hat = tensordict_apply(torch.add, mu, sigma_z)
+        x_hat_masked = tensordict_apply(torch.mul, mask, x_hat)
 
-        def grad(loss, z_t):
-            # TODO: can place it in helpers instead of clas
-            return torch.tensor(0.0)
+        mask_term = (
+            sum(v.sum() for v in x_hat_masked.values())
+            / sum(v.sum() for v in mask.values())
+        )
 
-        grad_l = grad(loss_, z_t)
-        return grad_l 
+        loss_ = torch.square(y_t - mask_term)
 
-    # def euler_step(self, z_t, u_t, dt):
-    #     return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)
+        keys = list(z_t.keys())
+        tensors = [z_t[k] for k in keys]
+
+        grads = torch.autograd.grad(
+            loss_,
+            tensors,
+            retain_graph=False,
+            create_graph=False,
+        )
+
+        grad_l = z_t.__class__(
+            {k: g for k, g in zip(keys, grads)},
+            batch_size=z_t.batch_size,
+            device=z_t.device,
+        )
+        return grad_l
     
     def euler_step(self, z_t, u_t, dt):
-        # z_new = z_t + h * u_t, where h =dt
-        # the lambda corresponds to def f(z, u): return z + h * u, the rest are the arguments
+        # z_new = z_t + h * u_t, where h = dt
         return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)

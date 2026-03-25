@@ -1,0 +1,5 @@
+:root {
+  --marimo-text-font: Menlo, Monaco, Consolas, monospace;
+  --marimo-heading-font: Menlo, Monaco, Consolas, monospace;
+  /* DO NOT set --marimo-monospace-font */
+}

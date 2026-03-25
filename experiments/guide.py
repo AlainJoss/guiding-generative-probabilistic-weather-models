@@ -8,14 +8,18 @@ app = marimo.App(width="medium", css_file="")
 def _(mo):
     mo.md(r"""
     ## todos
+    - normalize the colormaps around zero
     - refactor plots to use a dix min and max
     - solve how to steer in denormalized and latent space
     - refactor guided_flow model to take in partition, level_index, variable_index
     - refactor this whole notebook to outsource functionality
+    - the start date is 18:00 the 31.12.2019!
+    - convert temperature to degrees celsius
 
     ## ideas
     - steer model towards grount truth in mask and measure divergence across states
     - generate multiple (vars, levels, partitions) no-guidance N rollouts and save in experiment folder -> need a way to encode the experiment (log of experiments or yaml with keys).
+    - as baseline compute some basic facts about ArchesWeatherGen. For instance, how well it does (compared to its deterministic brother)? How does performance degrade as N of rollout increases?
     """)
     return
 
@@ -23,7 +27,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## setup
+    ## Imports
     """)
     return
 
@@ -31,87 +35,63 @@ def _(mo):
 @app.cell
 def _():
     from pathlib import Path 
+    from datetime import datetime, timedelta
+
     import marimo as mo
     import numpy as np
-    import matplotlib.pyplot as plt
-    from sklearn.cluster import KMeans
-    from sklearn.datasets import load_digits
-    from sklearn.decomposition import PCA
-    from wigglystuff import ChartPuck
-    from datetime import datetime, timedelta
     import geopandas as gpd
     import geodatasets
     import torch
-    import matplotlib.colors as mcolors
 
-    from scipy.interpolate import (
-        CubicSpline,
-        PchipInterpolator,
-        Akima1DInterpolator,
-        interp1d,
-        BarycentricInterpolator,
-    )
+    from wigglystuff import ChartPuck
+    from scipy.interpolate import CubicSpline
 
+    import matplotlib.pyplot as plt
     import matplotlib.patches as mpatches
-    import cartopy.feature as cfeature
+    import matplotlib.colors as mcolors
     from mpl_toolkits.axes_grid1 import make_axes_locatable
     from mpl_toolkits.axes_grid1 import make_axes_locatable
-    from cartopy.crs import PlateCarree
     from matplotlib import colors
 
+    import cartopy.feature as cfeature
+    from cartopy.crs import PlateCarree
+
+    method_state = {"value": "CubicSpline"}
+    return ChartPuck, CubicSpline, method_state, mo, np, torch
+
+
+@app.cell
+def _():
+    from src.utils import get_last_experiment_id, get_mask_from_widget
+    from src.interaction import visualize_map
+    from src.funcs import avg_over_mask, get_guidance_trajectory
+    from src.utils import state_to_device
+
+    from geoarches.lightning_modules import load_module
+    from geoarches.dataloaders.era5 import Era5Forecast
+
     return (
-        ChartPuck,
-        CubicSpline,
-        Path,
-        datetime,
-        geodatasets,
-        gpd,
-        make_axes_locatable,
-        mcolors,
-        mo,
-        mpatches,
-        np,
-        plt,
-        timedelta,
-        torch,
+        Era5Forecast,
+        avg_over_mask,
+        get_guidance_trajectory,
+        get_mask_from_widget,
+        load_module,
+        state_to_device,
+        visualize_map,
     )
 
 
-@app.cell
-def _():
-    import matplotlib as mpl
-    mpl.rcParams["figure.dpi"] = 100
-    return
-
-
-@app.cell
-def _():
-    # TODO: the start date is 18:00 the 31.12.2019!
-    return
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Guidance experiments
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## funcs
+    ## Spline Puckchart
     """)
     return
 
 
 @app.cell
-def _(ChartPuck, CubicSpline, n_pucks_slider, np):
-    # Internal state for interpolation method (not a marimo dependency)
-    method_state = {"value": "CubicSpline"}
-
-    MAX_PERC_DELTA = 200/100
+def _(ChartPuck, CubicSpline, MAX_PERC_DELTA, N_slider, method_state, np):
+    ##### splinechart
 
     def draw_spline_chart(ax, x_pucks, y_pucks, method):
         # Add fixed left anchor at (0, 0)
@@ -129,15 +109,15 @@ def _(ChartPuck, CubicSpline, n_pucks_slider, np):
                 x_sorted[i] = x_sorted[i - 1] + 1e-6
 
         # Dense x values over the full axis 0 ... N-1
-        x_dense = np.linspace(0, n_pucks_slider.value, 200)
+        x_dense = np.linspace(0, N_slider.value, 200)
 
         spline = CubicSpline(x_sorted, y_sorted)
         y_dense = spline(x_dense)
 
         ax.plot(x_dense, y_dense, "b-", linewidth=2)
-        ax.set_xlim(0, n_pucks_slider.value)
+        ax.set_xlim(0, N_slider.value)
         ax.set_ylim(-MAX_PERC_DELTA, MAX_PERC_DELTA)
-        ax.set_xticks(np.arange(0, n_pucks_slider.value, 1))
+        ax.set_xticks(np.arange(0, N_slider.value, 1))
         ax.set_xlabel("N")
         ax.set_ylabel("Percentage change")
         ax.set_title("Trajectory")
@@ -149,7 +129,7 @@ def _(ChartPuck, CubicSpline, n_pucks_slider, np):
 
     def draw_spline(ax, widget):
         # N total points INCLUDING the fixed anchor => N draggable pucks
-        fixed_x = np.linspace(1, n_pucks_slider.value, len(widget.y)).tolist()
+        fixed_x = np.linspace(1, N_slider.value, len(widget.y)).tolist()
 
         try:
             widget.x = fixed_x
@@ -159,7 +139,7 @@ def _(ChartPuck, CubicSpline, n_pucks_slider, np):
         draw_spline_chart(ax, fixed_x, list(widget.y), method_state["value"])
 
     # Slider value N = total number of points INCLUDING the anchor
-    _n = n_pucks_slider.value
+    _n = N_slider.value
 
     # Draggable pucks are at x = 1, 2, ..., N
     _init_x = np.linspace(1, _n, _n).tolist()
@@ -175,7 +155,7 @@ def _(ChartPuck, CubicSpline, n_pucks_slider, np):
         puck_color="#9c27b0",
         drag_y_bounds=(-MAX_PERC_DELTA, MAX_PERC_DELTA),
     )
-    return method_state, spline_puck
+    return (spline_puck,)
 
 
 @app.cell
@@ -190,18 +170,22 @@ def _(method_state, spline_puck):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Model
+    # Guidance experiments
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Load
+    Data and model.
     """)
     return
 
 
 @app.cell
-def _(mo):
-    from geoarches.lightning_modules import load_module
-    from geoarches.dataloaders.era5 import Era5Forecast
-
-    device = "mps"
-
+def _(Era5Forecast):
     ds = Era5Forecast(
         path="data/era5_240/full",  # default path
         domain="test", # domain to consider. domain = 'test' loads the 2020 period
@@ -209,19 +193,15 @@ def _(mo):
         norm_scheme="pangu",  # default normalization scheme
         lead_time_hours=6
     )
-
-    module_target = "geoarches.lightning_modules.{}"
-    MODELS = ["diffusion.DiffusionModule", "guided_diffusion.GuidedFlow"]
-    model = mo.ui.dropdown(MODELS, value=MODELS[1], label="model: ")
-    model
-    return device, ds, load_module, model, module_target
+    return (ds,)
 
 
 @app.cell
-def _(device, load_module, model, module_target):
+def _(device, load_module):
+    module_target = "geoarches.lightning_modules.{}"  # appendix
     gen_model, gen_config = load_module(
         "archesweathergen",
-        module_target=module_target.format(model.value),
+        module_target=module_target.format("guided_diffusion.GuidedFlow"),
     )
     gen_model = gen_model.to(device)
     return (gen_model,)
@@ -230,39 +210,36 @@ def _(device, load_module, model, module_target):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## State
+    ## Constants
     """)
     return
 
 
 @app.cell
-def _(spline_widget):
-    drift = spline_widget.y
-    return (drift,)
+def _(ds):
+    # remove first and last, since we have two tensordicts less (because of prev and next)
+    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
+    return (TIMESTAMPS,)
 
 
 @app.cell
-def _(mo):
-    VARIABLE_TYPES = ["surface", "level"]
-    variable_type = mo.ui.dropdown(VARIABLE_TYPES, value=VARIABLE_TYPES[0], label="variable type: ")
-    variable_type, mo.md("temperature is in kelvin, my god")
-    return (variable_type,)
+def _():
+    PARTITIONS = ["surface", "level"]
+    return (PARTITIONS,)
 
 
 @app.cell
-def _(mo, variable_type):
+def _(partition):
     LEVELS_DICT = {
         "surface": [i+1 for i in range(1)],
         "level": [i+1 for i in range(13)]
     }
-    LEVELS = LEVELS_DICT[variable_type.value]
-    level = mo.ui.dropdown(LEVELS, value=LEVELS[0], label="level: ")
-    level
-    return LEVELS, level
+    LEVELS = LEVELS_DICT[partition]
+    return (LEVELS,)
 
 
 @app.cell
-def _(mo, variable_type):
+def _(partition):
     VARIABLES_DICT = {
         "surface": [
             "10m_u_component_of_wind",
@@ -279,497 +256,256 @@ def _(mo, variable_type):
             "vertical_velocity"
         ]
     }
-
-    VARIABLES = VARIABLES_DICT[variable_type.value]
-    variable = mo.ui.dropdown(VARIABLES, value=VARIABLES[2], label="variable : ")
-    variable
-    return VARIABLES, variable
-
-
-@app.cell
-def _(datetime, mo, timedelta):
-    def dates_2020_6h():
-        start = datetime(2020, 1, 1, 0)
-        end = datetime(2021, 1, 1, 0)
-
-        dates = []
-        current = start
-        while current < end:
-            dates.append(f"{current:%Y-%m-%d} - {current.hour}h")
-            current += timedelta(hours=6)
-
-        # removes first and last
-        return dates[1:-1]
-
-    TIMESTAMPS = dates_2020_6h()
-    start_ts = mo.ui.dropdown(TIMESTAMPS, value=TIMESTAMPS[0], label="start state : ")
-    start_ts
-    return TIMESTAMPS, start_ts
-
-
-@app.cell
-def _(LEVELS, TIMESTAMPS, VARIABLES, level, start_ts, variable):
-    start_ts_idx = TIMESTAMPS.index(start_ts.value)
-    var_idx = VARIABLES.index(variable.value)
-    level_idx = LEVELS.index(level.value) - 1
-    return level_idx, start_ts_idx, var_idx
-
-
-@app.cell
-def _(level_idx, var_idx):
-    var_idx, level_idx
-    return
-
-
-@app.cell
-def _(ds, start_ts_idx):
-    start_state = ds[start_ts_idx]
-    return (start_state,)
-
-
-@app.cell
-def _(
-    ChartPuck,
-    geodatasets,
-    gpd,
-    level,
-    make_axes_locatable,
-    mcolors,
-    mo,
-    mpatches,
-    np,
-    variable,
-):
-
-    def lonlat_to_ij(lon, lat, lon_c, lat_c):
-        j = int(np.argmin(np.abs(lon_c - lon)))
-        i = int(np.argmin(np.abs(lat_c - lat)))
-        return i, j
-
-
-    def visualize_map(
-        array_2d,
-        cmap="coolwarm",
-        vmin=None,
-        vmax=None,
-        center=None,
-        figsize=(10, 5),
-        with_rectangle=False,
-        rectangle_x=(20.0, 60.0),
-        rectangle_y=(50.0, 20.0),
-    ):
-        ny, nx = array_2d.shape
-        assert (ny, nx) == (121, 240), f"Expected (121, 240), got {(ny, nx)}"
-
-        # undo the 180° roll applied in convert_to_tensordict
-        array_2d_unrolled = np.roll(array_2d, -nx // 2, axis=1)
-
-        # original ERA5 grid in [0, 360]
-        lon_e = np.linspace(0.0, 360.0, nx + 1, endpoint=True)
-        lat_e = np.linspace(90.0, -90.0, ny + 1, endpoint=True)
-        lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-        lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
-
-        # convert longitudes to [-180, 180]
-        lon_c_plot = ((lon_c + 180) % 360) - 180
-        sort_idx = np.argsort(lon_c_plot)
-        lon_c_plot = lon_c_plot[sort_idx]
-        array_2d_plot = array_2d_unrolled[:, sort_idx]
-
-        world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
-
-        if center is not None:
-            if vmin is None or vmax is None:
-                absmax = np.nanmax(np.abs(array_2d_plot))
-                if not np.isfinite(absmax) or absmax == 0:
-                    absmax = 1e-8
-                if vmin is None:
-                    vmin = -absmax
-                if vmax is None:
-                    vmax = absmax
-            norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
-        else:
-            norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-
-        def draw_base(ax):
-            im = ax.pcolormesh(
-                lon_c_plot,
-                lat_c,
-                array_2d_plot,
-                cmap=cmap,
-                norm=norm,
-                shading="nearest",
-            )
-
-            world.boundary.plot(ax=ax, color="black", linewidth=0.4, zorder=5)
-
-            ax.set_xlim(-180, 180)
-            ax.set_ylim(-90, 90)
-            ax.set_xlabel("Longitude")
-            ax.set_ylabel("Latitude")
-            ax.set_title(f"{variable.value} @ level {level.value}")
-
-            divider = make_axes_locatable(ax)
-            cax = divider.append_axes("right", size="4%", pad=0.08)
-            ax.figure.colorbar(im, cax=cax)
-
-            return im
-
-        if not with_rectangle:
-            import matplotlib.pyplot as plt
-
-            fig, ax = plt.subplots(1, 1, dpi=300, figsize=figsize)
-            draw_base(ax)
-            plt.tight_layout()
-            plt.show()
-            return
-
-        def draw_map(ax, widget):
-            ax.clear()
-
-            # remove previous colorbar axes if redraw happens
-            fig = ax.figure
-            while len(fig.axes) > 1:
-                fig.delaxes(fig.axes[-1])
-
-            draw_base(ax)
-
-            x0, x1 = widget.x
-            y0, y1 = widget.y
-
-            lon_left = min(x0, x1)
-            lon_right = max(x0, x1)
-            lat_bottom = min(y0, y1)
-            lat_top = max(y0, y1)
-
-            try:
-                widget.x = [lon_left, lon_right]
-                widget.y = [lat_top, lat_bottom]
-            except Exception:
-                pass
-
-            ul_i, ul_j = lonlat_to_ij(lon_left, lat_top, lon_c_plot, lat_c)
-            lr_i, lr_j = lonlat_to_ij(lon_right, lat_bottom, lon_c_plot, lat_c)
-
-            rect = mpatches.Rectangle(
-                (lon_left, lat_bottom),
-                lon_right - lon_left,
-                lat_top - lat_bottom,
-                fill=False,
-                edgecolor="red",
-                linewidth=1.5,
-                zorder=10,
-            )
-            ax.add_patch(rect)
-
-            ax.plot(
-                [lon_left, lon_right],
-                [lat_top, lat_bottom],
-                "o",
-                color="red",
-                markersize=5,
-                zorder=11,
-            )
-
-        rect_puck = ChartPuck.from_callback(
-            draw_fn=draw_map,
-            x=list(rectangle_x),
-            y=list(rectangle_y),
-            puck_color=["green", "red"],
-            figsize=figsize,
-            x_bounds=(-180.0, 180.0),
-            y_bounds=(-90.0, 90.0),
-        )
-
-        return mo.ui.anywidget(rect_puck)
-
-    return (visualize_map,)
-
-
-@app.cell
-def _(mo):
-    mo.md("""
-    Spatial mask:
-    """)
-    return
-
-
-@app.cell
-def _(ds, level_idx, start_state, var_idx, variable_type, visualize_map):
-    array_2d_denormalized = ds.denormalize(start_state["state"])[variable_type.value][var_idx, level_idx]
-    array_2d = start_state["state"][variable_type.value][var_idx, level_idx]
-
-    map_widget = visualize_map(array_2d, vmin=-3, vmax=3, with_rectangle=True)
-
-    map_widget
-    return array_2d, array_2d_denormalized, map_widget
+    VARIABLES = VARIABLES_DICT[partition]
+    return (VARIABLES,)
 
 
 @app.cell
 def _():
-    # TODO: denormalize and renormalize!
-    return
+    device = "mps"
 
+    MAX_PERC_DELTA = 100/100
 
-@app.cell
-def _(map_widget, np):
-    x0, x1 = map_widget.value["x"]
-    y0, y1 = map_widget.value["y"]
-
-    lon_left, lon_right = sorted([x0, x1])
-    lat_bottom, lat_top = sorted([y0, y1])
-
-    lon_e = np.linspace(0.0, 360.0, 240 + 1, endpoint=True)
-    lat_e = np.linspace(90.0, -90.0,  121 + 1, endpoint=True)
-    lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-    lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
-
-    lon_grid, lat_grid = np.meshgrid(lon_c, lat_c)
-
-    spatial_mask = (
-        (lon_grid >= lon_left)
-        & (lon_grid <= lon_right)
-        & (lat_grid >= lat_bottom)
-        & (lat_grid <= lat_top)
-    ).astype(np.uint8)
-    return (spatial_mask,)
+    VMIN = None
+    VMAX = None
+    return MAX_PERC_DELTA, device
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Trajectory
+    ## Config
     """)
     return
 
 
 @app.cell
+def _(TIMESTAMPS, mo):
+    timestamp_dropdown = mo.ui.dropdown(TIMESTAMPS, value=TIMESTAMPS[0], label="start state : ")
+    return (timestamp_dropdown,)
+
+
+@app.cell
+def _(PARTITIONS, mo):
+    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=PARTITIONS[0], label="variable type: ")
+    return (partition_dropdown,)
+
+
+@app.cell
+def _(LEVELS, mo):
+    level_dropdown = mo.ui.dropdown(LEVELS, value=LEVELS[0], label="level: ")
+    return (level_dropdown,)
+
+
+@app.cell
+def _(VARIABLES, mo):
+    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLES[2], label="variable : ")
+    return (var_dropdown,)
+
+
+@app.cell
 def _(mo):
-    n_pucks_slider = mo.ui.slider(3, 20, value=6, label="N: ")
-    n_pucks_slider
-    return (n_pucks_slider,)
+    N_slider = mo.ui.slider(3, 20, value=6, label="N: ")
+    return (N_slider,)
 
 
 @app.cell
 def _(mo, spline_puck):
-    spline_widget = mo.ui.anywidget(spline_puck)
-    spline_widget
+    spline_widget = mo.ui.anywidget(spline_puck)  # cannot be put with n_pucks_slider
     return (spline_widget,)
 
 
 @app.cell
-def _(array_2d, array_2d_denormalized, drift, np, spatial_mask):
-    # compute initial avg: init_avg = avg(mask*state)
-    # compute guidance: guidance = drift_perc*init_avg
-
-    def avg_over_mask(mask, state):
-        avg = np.sum(mask * state) / np.sum(mask)
-        return avg
-
-    def guidance_terms(drift, init_avg):
-        return [init_avg + d * np.abs(init_avg) for d in drift]
-
-    avg_over_mask_denormalized  = avg_over_mask(spatial_mask, np.asarray(array_2d_denormalized))
-    guidance_terms_denormalized  = guidance_terms(drift, avg_over_mask_denormalized)
-
-    avg_over_mask_normalized = avg_over_mask(spatial_mask, np.asarray(array_2d))
-    guidance_terms_normalized = guidance_terms(drift, avg_over_mask_normalized)
-
-    avg_over_mask_denormalized, guidance_terms_denormalized, avg_over_mask_normalized, guidance_terms_normalized
-    return avg_over_mask_denormalized, guidance_terms_denormalized
+def _(array_2d, visualize_map):
+    map_widget = visualize_map(
+        array_2d,
+        title="Select mask region",
+        interactive=True,
+        undo_roll=True
+    )
+    return (map_widget,)
 
 
 @app.cell
-def _():
-    # TODO: need to compute guidance in residual space!
+def _(
+    N_slider,
+    level_dropdown,
+    map_widget,
+    mo,
+    partition_dropdown,
+    spline_widget,
+    timestamp_dropdown,
+    var_dropdown,
+):
+    mo.vstack([
+        timestamp_dropdown,
+        var_dropdown,
+        partition_dropdown,
+        level_dropdown,
+        N_slider,
+        spline_widget,
+        map_widget
+    ])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Derived quantities
+    - dropdown variables and associated ids
+    - ids
+    - mask
+    - trajectory
+    """)
+    return
+
+
+@app.cell
+def _(timestamp_dropdown):
+    timestamp = timestamp_dropdown.value
+    return
+
+
+@app.cell
+def _(level_dropdown):
+    level = level_dropdown.value
+    return
+
+
+@app.cell
+def _(partition_dropdown):
+    partition = partition_dropdown.value
+    return (partition,)
+
+
+@app.cell
+def _(var_dropdown):
+    var = var_dropdown.value
+    return
+
+
+@app.cell
+def _(N_slider):
+    N = N_slider.value
     return
 
 
 @app.cell
 def _(
-    avg_over_mask_denormalized,
-    guidance_terms_denormalized,
-    np,
-    plt,
-    variable,
+    LEVELS,
+    TIMESTAMPS,
+    VARIABLES,
+    ds,
+    level_dropdown,
+    timestamp_dropdown,
+    var_dropdown,
 ):
-    trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
-    def plot_trajectory(trajectory):
-        x = np.arange(len(trajectory))
-
-        fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
-        ax.plot(x, trajectory, "b-", linewidth=2)
-        ax.plot(x, trajectory, "o", color="#9c27b0", markersize=5)
-
-        ax.set_xlim(0, len(trajectory) - 1)
-        ax.set_xticks(np.arange(len(trajectory)))
-        ax.set_xlabel("N")
-        ax.set_ylabel(f"{variable.value}")
-        ax.set_title("Trajectory")
-        ax.grid(True, alpha=0.3)
-        ax.axhline(0, color="gray", linewidth=0.5)
-
-        return fig
-
-    fig = plot_trajectory(trajectory)
-    # mo.vstack([
-    #     mo.md("Planned trajectory: "),
-    #     fig
-    # ])
-    fig
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Guidance
-    """)
-    return
+    start_ts_idx = TIMESTAMPS.index(timestamp_dropdown.value)
+    var_idx = VARIABLES.index(var_dropdown.value)
+    level_idx = LEVELS.index(level_dropdown.value) - 1
+    start_state = ds[start_ts_idx]
+    return level_idx, start_state, var_idx
 
 
 @app.cell
-def _(mo):
-    GUIDANCE_METHODS = ["CFG"]
-    guidance_method = mo.ui.dropdown(GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="Guidance method: ")
-    guidance_method
-    return
+def _(get_mask_from_widget, map_widget):
+    mask = get_mask_from_widget(map_widget)
+    return (mask,)
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Generate
-    """)
-    return
+@app.cell
+def _(ds, level_idx, partition_dropdown, start_state, var_idx):
+    array_2d_denormalized = ds.denormalize(start_state["state"])[partition_dropdown.value][var_idx, level_idx]
+    array_2d = start_state["state"][partition_dropdown.value][var_idx, level_idx]
+    return array_2d, array_2d_denormalized
 
 
 @app.cell
 def _():
-    # can retrieve ground truth state on ds using timestamp
+    # TODO: continue here
     return
 
 
 @app.cell
-def _(device):
-    def state_to_device(state):
-        return {k: v[None].to(device) for k, v in state.items()}
+def _(
+    array_2d,
+    array_2d_denormalized,
+    avg_over_mask,
+    get_guidance_trajectory,
+    mask,
+    np,
+    spline_widget,
+):
+    avg_over_mask_denormalized  = avg_over_mask(mask, np.asarray(array_2d_denormalized))
+    guidance_terms_denormalized  = get_guidance_trajectory(spline_widget.y, avg_over_mask_denormalized)
 
-    return (state_to_device,)
+    trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
+
+    avg_over_mask_normalized = avg_over_mask(mask, np.asarray(array_2d))
+    guidance_terms_normalized = get_guidance_trajectory(spline_widget.y, avg_over_mask_normalized)
+
+    avg_over_mask_denormalized, guidance_terms_denormalized, avg_over_mask_normalized, guidance_terms_normalized
+    return guidance_terms_denormalized, trajectory
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
-    ##### sample
-
-    run_button = mo.ui.run_button(label="Run experiment")
-    run_button
-    return (run_button,)
-
-
-@app.cell
-def _(mo):
-    get_sampled_state, set_sampled_state = mo.state(None)
-    return get_sampled_state, set_sampled_state
+    mo.md(r"""
+    ## Run experiments
+    """)
+    return
 
 
 @app.cell
-def _(device, gen_model, mo, state_to_device, torch):
-    @mo.cache
-    def run_rollout(start_state, guidance_terms_denormalized, spatial_mask):
+def _(device, gen_model, state_to_device, torch):
+    def run_rollout(start_state, guidance_terms_denormalized, mask):
         batch = state_to_device(start_state)
         guidance = torch.tensor(guidance_terms_denormalized)
-        mask = torch.tensor(spatial_mask, device=device, dtype=torch.float32)
+        mask = torch.tensor(mask, device=device, dtype=torch.float32)
         return gen_model.rollout_step(batch, guidance[0], mask).cpu()
 
     return (run_rollout,)
 
 
 @app.cell
+def _(mo):
+    run_button = mo.ui.run_button(label="Run experiment")
+    run_button
+    return (run_button,)
+
+
+@app.cell
 def _(
-    Path,
-    datetime,
     guidance_terms_denormalized,
-    level_idx,
-    model,
+    mask,
     run_button,
     run_rollout,
     sampled_state,
+    save_run,
     set_sampled_state,
-    spatial_mask,
     start_state,
-    torch,
-    var_idx,
-    variable_type,
 ):
-    def save_run(sampled_state):
-        date, time = str(datetime.now().replace(microsecond=0)).split(" ")
-        now = date + "_" + time
-        experiment_path = Path("experiments", f"{now}")
-        experiment_path.mkdir(parents=True, exist_ok=True)
-        experiment_path = experiment_path /f"{model.value}.pt"
-        torch.save(sampled_state[variable_type.value][0][var_idx, level_idx], experiment_path)
-        print("run saved")
-
     if run_button.value:
-        result = run_rollout(start_state, guidance_terms_denormalized, spatial_mask)
+        result = run_rollout(start_state, guidance_terms_denormalized, mask)
         set_sampled_state(result)
         save_run(sampled_state)
     return
 
 
-@app.cell
-def _():
-    vmin = -3
-    vmax = 3
-    return vmax, vmin
-
-
-@app.cell
-def _(get_sampled_state, mo):
-
-    # plot_state(start_state["next_state"][variable_type.value], variable_type.value, variable.value, var_idx, level_idx)
-
-    sampled_state = get_sampled_state()
-
-    mo.stop(sampled_state is None, mo.md("Press **Run rollout** first."))
-
-    # DO THINGS WITH sampled_state
-
-    # visualize_map(sampled_state[variable_type.value][0][var_idx, level_idx], vmin=vmin, vmax=vmax)
-    # visualize_map(start_state["next_state"][variable_type.value][var_idx, level_idx], vmin=vmin, vmax=vmax)
-    return (sampled_state,)
-
-
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## compare
+    ## Analysis
     """)
     return
 
 
 @app.cell
-def _(torch):
-    path_ = "experiments/generated/{}.pt"
-    diffusion_tensor = torch.load(path_.format("diffusion.DiffusionModule"), weights_only=False)
-    flow_tensor = torch.load(path_.format("guided_diffusion.GuidedFlow"), weights_only=False)
-    torch.allclose(diffusion_tensor, flow_tensor, rtol=1e-6, atol=1e-7)
-    return diffusion_tensor, flow_tensor
-
-
-@app.cell
-def _(diffusion_tensor, flow_tensor, visualize_map, vmax, vmin):
-    visualize_map(diffusion_tensor, vmin=vmin, vmax=vmax)
-    visualize_map(flow_tensor, vmin=vmin, vmax=vmax)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Guided roll-out
-    """)
+def _(trajectory, var_dropdown):
+    from src.interaction import plot_trajectory
+    fig = plot_trajectory(trajectory, var_dropdown.value)
+    fig
     return
 
 
