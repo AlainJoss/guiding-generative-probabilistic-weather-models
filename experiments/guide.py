@@ -62,7 +62,7 @@ def _():
 
 @app.cell
 def _():
-    from src.utils import get_last_experiment_id, get_mask_from_widget
+    from src.utils import get_last_experiment_dir, get_mask_corners_from_widget, get_mask_from_corners
     from src.interaction import visualize_map
     from src.funcs import avg_over_mask, get_guidance_trajectory
     from src.utils import state_to_device
@@ -74,7 +74,8 @@ def _():
         Era5Forecast,
         avg_over_mask,
         get_guidance_trajectory,
-        get_mask_from_widget,
+        get_mask_corners_from_widget,
+        get_mask_from_corners,
         load_module,
         state_to_device,
         visualize_map,
@@ -287,7 +288,7 @@ def _(TIMESTAMPS, mo):
 
 @app.cell
 def _(PARTITIONS, mo):
-    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=PARTITIONS[0], label="variable type: ")
+    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=PARTITIONS[0], label="partition: ")
     return (partition_dropdown,)
 
 
@@ -316,12 +317,15 @@ def _(mo, spline_puck):
 
 
 @app.cell
-def _(array_2d, visualize_map):
+def _(denormalized_slice, visualize_map):
     map_widget = visualize_map(
-        array_2d,
+        denormalized_slice,
         title="Select mask region",
         interactive=True,
-        undo_roll=True
+        undo_roll=True,
+        vmin=denormalized_slice.min(),
+        vmax=denormalized_slice.max(),
+        center= denormalized_slice.mean()
     )
     return (map_widget,)
 
@@ -364,13 +368,13 @@ def _(mo):
 @app.cell
 def _(timestamp_dropdown):
     timestamp = timestamp_dropdown.value
-    return
+    return (timestamp,)
 
 
 @app.cell
 def _(level_dropdown):
     level = level_dropdown.value
-    return
+    return (level,)
 
 
 @app.cell
@@ -382,71 +386,80 @@ def _(partition_dropdown):
 @app.cell
 def _(var_dropdown):
     var = var_dropdown.value
-    return
+    return (var,)
 
 
 @app.cell
 def _(N_slider):
     N = N_slider.value
+    return (N,)
+
+
+@app.cell
+def _(LEVELS, TIMESTAMPS, VARIABLES, ds, level, timestamp, var):
+    timestamp_idx = TIMESTAMPS.index(timestamp)
+    var_idx = VARIABLES.index(var)
+    level_idx = LEVELS.index(level) - 1
+    x_start = ds[timestamp_idx]
+    return level_idx, timestamp_idx, var_idx, x_start
+
+
+@app.cell
+def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
+    mask_corners = get_mask_corners_from_widget(map_widget)
+    mask = get_mask_from_corners(*mask_corners)
+    return mask, mask_corners
+
+
+@app.cell
+def _(gen_model, level_idx, partition, var_idx, x_start):
+    denormalized_slice = gen_model.denormalize(x_start["state"])[partition][var_idx, level_idx]
+    return (denormalized_slice,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    The denormalized prediction at time $t$ is defined as follows:
+
+    \begin{align*}
+    \hat{x}^\text{denorm} &= \mu^\text{denorm} + (\hat{x}^\text{norm}) \odot \sigma^\text{denorm} \\
+    &= \mu^\text{denorm} + (\hat{\mu}^\text{det} + \sigma^\text{residual} \odot z_t) \odot \sigma^\text{denorm}
+    \end{align*}
+
+    Importantly, we have to perform two denormalizations. One in the residual space, and one in the data space. The second one is standard machine learning preprocessing, whilst the first one comes from the way the target of the generative model is built, which is as follows:
+
+    \begin{align*}
+    r^\text{gt} &=  \frac{x^\text{gt} - \hat{x}^\text{det}}{\sigma^\text{residual}}
+    \end{align*}
+
+    Note, $\sigma^\text{residual}$ is computed as standard deviation of the residuals $\sigma^\text{residual}_{n \in [N]}(x^\text{gt}_n - \hat{x}_n^\text{det})$ over the dataset.
+
+    We are interested in defining the guidance in denormalized space.
+    The loss is then defined as follows:
+
+    \begin{align*}
+    \mathcal{L}^\text{denorm}(y_t, \hat{x}^\text{denorm}) &=  \frac{1}{2} \left\lVert y_t - \frac{\sum_i \hat{x}^\text{denorm}_i \odot m_i}{\sum_i m_i} \right\lVert^2_2
+    \end{align*}
+    """)
     return
 
 
 @app.cell
 def _(
-    LEVELS,
-    TIMESTAMPS,
-    VARIABLES,
-    ds,
-    level_dropdown,
-    timestamp_dropdown,
-    var_dropdown,
-):
-    start_ts_idx = TIMESTAMPS.index(timestamp_dropdown.value)
-    var_idx = VARIABLES.index(var_dropdown.value)
-    level_idx = LEVELS.index(level_dropdown.value) - 1
-    start_state = ds[start_ts_idx]
-    return level_idx, start_state, var_idx
-
-
-@app.cell
-def _(get_mask_from_widget, map_widget):
-    mask = get_mask_from_widget(map_widget)
-    return (mask,)
-
-
-@app.cell
-def _(ds, level_idx, partition_dropdown, start_state, var_idx):
-    array_2d_denormalized = ds.denormalize(start_state["state"])[partition_dropdown.value][var_idx, level_idx]
-    array_2d = start_state["state"][partition_dropdown.value][var_idx, level_idx]
-    return array_2d, array_2d_denormalized
-
-
-@app.cell
-def _():
-    # TODO: continue here
-    return
-
-
-@app.cell
-def _(
-    array_2d,
-    array_2d_denormalized,
     avg_over_mask,
+    denormalized_slice,
     get_guidance_trajectory,
     mask,
-    np,
     spline_widget,
 ):
-    avg_over_mask_denormalized  = avg_over_mask(mask, np.asarray(array_2d_denormalized))
+    avg_over_mask_denormalized  = avg_over_mask(denormalized_slice, mask)
     guidance_terms_denormalized  = get_guidance_trajectory(spline_widget.y, avg_over_mask_denormalized)
 
-    trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
+    guidance_trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
 
-    avg_over_mask_normalized = avg_over_mask(mask, np.asarray(array_2d))
-    guidance_terms_normalized = get_guidance_trajectory(spline_widget.y, avg_over_mask_normalized)
-
-    avg_over_mask_denormalized, guidance_terms_denormalized, avg_over_mask_normalized, guidance_terms_normalized
-    return guidance_terms_denormalized, trajectory
+    # avg_over_mask_denormalized, guidance_terms_denormalized
+    return guidance_terms_denormalized, guidance_trajectory
 
 
 @app.cell(hide_code=True)
@@ -459,13 +472,42 @@ def _(mo):
 
 @app.cell
 def _(device, gen_model, state_to_device, torch):
-    def run_rollout(start_state, guidance_terms_denormalized, mask):
-        batch = state_to_device(start_state)
-        guidance = torch.tensor(guidance_terms_denormalized)
-        mask = torch.tensor(mask, device=device, dtype=torch.float32)
-        return gen_model.rollout_step(batch, guidance[0], mask).cpu()
+    from src.rollout_step import rollout_step
 
-    return (run_rollout,)
+    def run(
+        ds,
+        x_start,
+        guidance_terms_denormalized,
+        mask_corners,
+        N,
+        timestamp,
+        timestamp_idx,
+        partition,
+        level,
+        level_idx,
+        var,
+        var_idx,
+    ):
+        batch = state_to_device(x_start, device)
+        y_t = torch.as_tensor(guidance_terms_denormalized, device=gen_model.device)[0]
+
+        return rollout_step(
+            ds=ds,
+            x_start=batch,
+            gen_model=gen_model,
+            mask_corners=mask_corners,
+            y_t=y_t,
+            N=N,
+            timestamp=timestamp,
+            timestamp_idx=timestamp_idx,
+            partition=partition,
+            level=level,
+            level_idx=level_idx,
+            var=var,
+            var_idx=var_idx,
+        )
+
+    return (run,)
 
 
 @app.cell
@@ -477,19 +519,36 @@ def _(mo):
 
 @app.cell
 def _(
+    N,
+    ds,
     guidance_terms_denormalized,
-    mask,
+    level,
+    level_idx,
+    mask_corners,
+    partition,
+    run,
     run_button,
-    run_rollout,
-    sampled_state,
-    save_run,
-    set_sampled_state,
-    start_state,
+    timestamp,
+    timestamp_idx,
+    var,
+    var_idx,
+    x_start,
 ):
     if run_button.value:
-        result = run_rollout(start_state, guidance_terms_denormalized, mask)
-        set_sampled_state(result)
-        save_run(sampled_state)
+        run(
+            ds,
+            x_start,
+            guidance_terms_denormalized,
+            mask_corners,
+            N,
+            timestamp,
+            timestamp_idx,
+            partition,
+            level,
+            level_idx,
+            var,
+            var_idx,
+        )
     return
 
 
@@ -502,9 +561,9 @@ def _(mo):
 
 
 @app.cell
-def _(trajectory, var_dropdown):
+def _(guidance_trajectory, var):
     from src.interaction import plot_trajectory
-    fig = plot_trajectory(trajectory, var_dropdown.value)
+    fig = plot_trajectory(guidance_trajectory, var)
     fig
     return
 

@@ -86,6 +86,27 @@ class GuidedFlow(BaseLightningModule):
         )
         scaler["level"][-1] *= 3  # we don't care too much about vertical velocity
         self.sigma = scaler / pangu_scaler  # inverse because we divide by state_scaler
+        # taken from era5.py
+        self.data_mean = TensorDict(
+            surface=pangu_stats["surface_mean"],
+            level=pangu_stats["level_mean"],
+        )
+        self.data_std = TensorDict(
+            surface=pangu_stats["surface_std"],
+            level=pangu_stats["level_std"],
+        )
+
+    def denormalize(self, batch):
+        # TODO: have to change this to work with "no-key" state 
+        means = self.data_mean
+        stds = self.data_std
+        # TODO: not sure why the presence of surface should enable this 
+        if "surface" in batch:
+            # we can denormalize directly
+            return batch * stds + means
+
+        out = {k: (v * stds + means if "state" in k else v) for k, v in batch.items()}
+        return out
 
     def rollout(
         self, 
@@ -119,14 +140,16 @@ class GuidedFlow(BaseLightningModule):
             
             # TODO: should place where-else once I have the correct rollout func
             self.sigma = self.sigma.to(self.device)
+            self.data_mean = self.data_mean.to(self.device)
+            self.data_std = self.data_std.to(self.device)
         
         # TODO: might remove this (it's redundant for now)
-        mu = x_cond["pred_state"]
+        self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
         loop_batch = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.sample(loop_batch, mu, y_t, mask)
+        z = self.sample(loop_batch, self.mu, y_t, mask)
         # x_hat = x_det + r_hat (=sigma*z_T)
-        x_hat = mu + tensordict_apply(torch.mul, z, self.sigma)
+        x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat
     
     # TODO: do not use batch, separate object for clarity 
@@ -143,7 +166,7 @@ class GuidedFlow(BaseLightningModule):
         )
         z_t = z * self.scale_input_noise
 
-        lambdas = [0.1 * self.T]  # TODO: should input a time dependent lambda list to guided_sampling
+        lambdas = [0.9 * self.T]  # TODO: should input a time dependent lambda list to guided_sampling
         w = 1
     
         ##### sample #####
@@ -165,24 +188,30 @@ class GuidedFlow(BaseLightningModule):
 
             # reset graph at each step and make z_t differentiable
             z_t = z_t.apply(lambda x: x.detach().clone().requires_grad_(True))
+            # print("z_t: \n", z_t)
             
             # TODO: some torch pipeline object
             time_embedding = self.embedd_time(batch, t)
+            # print("time_embedding: \n", time_embedding)            
             input_state = self.get_velocity_input_state(z_t, batch)
+            # print("input_state: \n", input_state)
 
             # vector field 
             with torch.no_grad():
                 u_t = self.velocity(batch, time_embedding, input_state, z_t, s_t)
-            
+                # print("u_t: \n", u_t)
             # TODO: need to play around with this part
             with torch.enable_grad():
                 grad_l = self.grad_loss(mask, mu, y_t, z_t)
+                # print("grad_l: \n", grad_l)
 
             u_t_guided = tensordict_apply(
                 lambda u, g: u - (lambdas[0] * w) * g,
                 u_t,
                 grad_l,
             )
+            # print("u_t_guided: \n", u_t_guided)
+
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t_guided, dt)
@@ -229,8 +258,9 @@ class GuidedFlow(BaseLightningModule):
     
     def grad_loss(self, mask, mu, y_t, z_t):
         sigma_z = tensordict_apply(torch.mul, z_t, self.sigma)
-        x_hat = tensordict_apply(torch.add, mu, sigma_z)
-        x_hat_masked = tensordict_apply(torch.mul, mask, x_hat)
+        x_hat_norm = tensordict_apply(torch.add, mu, sigma_z) + self.mu
+        x_hat = self.denormalize(x_hat_norm)
+        x_hat_masked = tensordict_apply(torch.mul, mask, x_hat) 
 
         mask_term = (
             sum(v.sum() for v in x_hat_masked.values())

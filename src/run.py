@@ -1,23 +1,17 @@
+import json
+
 import torch
 
 from src.utils import (
     save_state, 
     state_to_device,
 )
+from src.funcs import get_mask_tensordict
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
 # TODO: create run func and call from marimo after setup!
-
-##### to move
-
-from tensordict.tensordict import TensorDict
-from geoarches.utils.tensordict_utils import tensordict_apply
-def get_mask_tensordict(example_tdict: TensorDict, partition: str, var_idx: int, level_idx: int, spatial_mask: torch.Tensor):
-    mask = tensordict_apply(lambda x: torch.zeros_like(x), example_tdict)
-    mask[partition][var_idx, level_idx] = spatial_mask
-    return mask
 
 ##### load #####
 
@@ -40,10 +34,6 @@ gen_model, gen_config = load_module(
 )
 gen_model = gen_model.to(device)
 
-##### run config #####
-
-
-
 ##### set up #####
 
 # select X_start
@@ -56,9 +46,10 @@ level_idx = 0  # int
 spatial_mask = torch.zeros((121, 240), device=device, dtype=torch.float32)
 spatial_mask[100, 100] = 1
 
+# note: something is not unrolled here ...
 mask = get_mask_tensordict(X_start["state"][0], partition, var_idx, level_idx, spatial_mask)
 
-y_t = torch.tensor(1, device=device, dtype=torch.float32)
+y_t = torch.tensor(200, device=device, dtype=torch.float32)
 
 ##### run #####
 
@@ -67,14 +58,29 @@ sampled_state = gen_model.rollout_step(
     y_t=y_t, 
     mask=mask
 ).cpu()
-
-# sampled_state = X_start["state"].cpu()
-# print(sampled_state)
+# TODO: this has later to be moved to rollout(N)
+sampled_state = gen_model.denormalize(sampled_state)
 
 ##### save #####
 
-
+# TODO: get from ui
 timestamp = X_start["timestamp"].cpu()
 sampled_state = ds.convert_to_xarray(sampled_state, timestamp)
 
 save_state(sampled_state)
+
+timestamp = "2020-01-02T00:00:00" # this is actually annoying since there is only one
+start_ts_idx = ...  # enables to retrieve ground truth from timestamp to timestamp+N
+partition = "surface"  # str
+var = "2m_temperature"
+var_idx = 2  # int
+level = ...
+level_idx = 0  # int  # NOTE: some variables do not have level coordinate
+mask = ...
+N = ...
+
+
+def save_config(config):
+    path = ""
+    with open(path, "w"):
+        json.dump(config)

@@ -27,17 +27,33 @@ def _():
     import xarray as xr
     import numpy as np
 
-    from src.utils import get_last_experiment_id, get_mask_from_widget
+    from src.utils import (
+        read_config,
+        read_state,
+        get_last_experiment_dir, 
+        get_mask_from_corners
+    )
     from src.interaction import visualize_map
 
-    return get_last_experiment_id, mo, np, visualize_map, xr
+    return (
+        get_last_experiment_dir,
+        get_mask_from_corners,
+        mo,
+        np,
+        read_config,
+        read_state,
+        visualize_map,
+    )
 
 
 @app.cell
-def _(get_last_experiment_id, xr):
-    path = get_last_experiment_id() / "state.nc"
-    state = xr.open_dataset(path, engine="netcdf4")
-    return (state,)
+def _(get_last_experiment_dir, get_mask_from_corners, read_config, read_state):
+    result_dir = get_last_experiment_dir() 
+    state = read_state(result_dir)
+    cfg = read_config(result_dir)
+    mask = get_mask_from_corners(*cfg["mask_corners"])
+    cfg
+    return cfg, mask, state
 
 
 @app.cell(hide_code=True)
@@ -77,12 +93,9 @@ def _():
 
 @app.cell
 def _():
-    timestamp = "2020-01-02T00:00:00" # this is actually annoying since there is only one
-    partition = "surface"  # str
-    var = "2m_temperature"
-    var_idx = 2  # int
-    level_idx = 0  # int  # NOTE: some variables do not have level coordinate
-    return timestamp, var
+
+
+    return
 
 
 @app.cell
@@ -92,14 +105,8 @@ def _():
 
 
 @app.cell
-def _():
-    # todo: enable variable selection from the interface
-    return
-
-
-@app.cell
-def _(state, timestamp, var):
-    slice = state[var].sel(time=timestamp)
+def _(cfg, state):
+    slice = state[cfg["var"]].sel(time=cfg["timestamp"])
     return (slice,)
 
 
@@ -112,19 +119,15 @@ def _(mo):
 
 
 @app.cell
-def _(np):
-    mask = np.zeros((121, 240), dtype=np.float32)
-    mask[100, 100] = 1
-    return (mask,)
-
-
-@app.cell
-def _(mask, slice, visualize_map):
+def _(mask, np, slice, visualize_map):
     static_map = visualize_map(
         slice,
-        mask_2d=mask,
+        mask_2d=np.asarray(mask),
         title="Experiment with saved mask",
         undo_roll=False,
+        vmin=slice.min(),
+        vmax=slice.max(),
+        center= slice.mean()
     )
     return (static_map,)
 
