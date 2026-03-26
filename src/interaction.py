@@ -1,4 +1,4 @@
-
+import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -10,6 +10,30 @@ import geopandas as gpd
 import geodatasets
 from wigglystuff import ChartPuck
 
+
+def get_mask_corners_from_widget(map_widget):
+    x0, x1 = map_widget.value["x"]
+    y0, y1 = map_widget.value["y"]
+
+    lon_left, lon_right = sorted([x0, x1])
+    lat_bottom, lat_top = sorted([y0, y1])
+
+    return lon_left, lon_right, lat_bottom, lat_top
+
+def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
+    lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
+    lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
+
+    lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
+    lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
+
+    lon_grid, lat_grid = np.meshgrid(lon_c, lat_c)
+
+    lon_mask = (lon_grid >= lon_left) & (lon_grid <= lon_right)
+    lat_mask = (lat_grid >= lat_bottom) & (lat_grid <= lat_top)
+
+    mask = (lon_mask & lat_mask).astype(np.float32)
+    return torch.as_tensor(mask)
 
 
 def plot_trajectory(trajectory: list[np.float64], var: str):
@@ -30,96 +54,23 @@ def plot_trajectory(trajectory: list[np.float64], var: str):
 # ------------------------------------------------------------
 # ERA5 grid preparation
 # ------------------------------------------------------------
-
 def prepare_era5_plot_grid(array_2d: np.ndarray, undo_roll: bool = False):
-    """
-    Prepare ERA5 121x240 field for plotting on lon in [-180, 180].
-
-    Parameters
-    ----------
-    array_2d : np.ndarray
-        Shape (121, 240)
-    undo_roll : bool
-        Set True only if the incoming array is still in the rolled format.
-
-    Returns
-    -------
-    dict with:
-        array_plot : reordered array
-        lon_c_plot : longitude centers in [-180, 180]
-        lat_c      : latitude centers
-        lon_e_plot : longitude edges in [-180, 180]
-        lat_e_plot : latitude edges
-        sort_idx   : sorting index used to move from ERA5 [0,360] to plot [-180,180]
-    """
     ny, nx = array_2d.shape
     assert (ny, nx) == (121, 240), f"Expected (121, 240), got {(ny, nx)}"
 
-    if undo_roll:
-        array_unrolled = np.roll(array_2d, -nx // 2, axis=1)
-    else:
-        array_unrolled = array_2d
-
-    lon_e = np.linspace(0.0, 360.0, nx + 1, endpoint=True)
+    lon_e = np.linspace(-180.0, 180.0, nx + 1, endpoint=True)
     lat_e = np.linspace(90.0, -90.0, ny + 1, endpoint=True)
 
     lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
     lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
 
-    lon_c_plot = ((lon_c + 180.0) % 360.0) - 180.0
-    sort_idx = np.argsort(lon_c_plot)
-
-    lon_c_plot = lon_c_plot[sort_idx]
-    array_plot = array_unrolled[:, sort_idx]
-
-    dlon = lon_c_plot[1] - lon_c_plot[0]
-    lon_e_plot = np.concatenate([
-        [lon_c_plot[0] - 0.5 * dlon],
-        0.5 * (lon_c_plot[:-1] + lon_c_plot[1:]),
-        [lon_c_plot[-1] + 0.5 * dlon],
-    ])
-
-    dlat = lat_c[0] - lat_c[1]
-    lat_e_plot = np.concatenate([
-        [lat_c[0] + 0.5 * dlat],
-        0.5 * (lat_c[:-1] + lat_c[1:]),
-        [lat_c[-1] - 0.5 * dlat],
-    ])
-
     return {
-        "array_plot": array_plot,
-        "lon_c_plot": lon_c_plot,
+        "array_plot": array_2d,
+        "lon_c_plot": lon_c,
         "lat_c": lat_c,
-        "lon_e_plot": lon_e_plot,
-        "lat_e_plot": lat_e_plot,
-        "sort_idx": sort_idx,
+        "lon_e_plot": lon_e,
+        "lat_e_plot": lat_e,
     }
-
-
-def reorder_mask_for_plot(mask_2d: np.ndarray, sort_idx: np.ndarray, undo_roll: bool = False):
-    """
-    Reorder a mask from ERA5 storage coordinates [0,360] to plot coordinates [-180,180].
-
-    Parameters
-    ----------
-    mask_2d : np.ndarray
-        Shape (121, 240), built on ERA5 lon centers in [0, 360]
-    sort_idx : np.ndarray
-        Longitude sorting index from prepare_era5_plot_grid
-    undo_roll : bool
-        If the mask was produced on rolled data coordinates, set True.
-        Usually False for masks built from get_mask().
-    """
-    ny, nx = mask_2d.shape
-    assert (ny, nx) == (121, 240), f"Expected mask shape (121, 240), got {(ny, nx)}"
-
-    if undo_roll:
-        mask_unrolled = np.roll(mask_2d, -nx // 2, axis=1)
-    else:
-        mask_unrolled = mask_2d
-
-    mask_plot = mask_unrolled[:, sort_idx]
-    return mask_plot
 
 
 def make_norm(array_2d_plot, vmin=None, vmax=None, center=None):
@@ -260,7 +211,6 @@ def draw_base_map(
 
     return im
 
-
 def plot_map_static(
     array_2d,
     *,
@@ -273,24 +223,12 @@ def plot_map_static(
     dpi=100,
     title=None,
     mask_edgecolor="red",
-    mask_linewidth=1.5,
+    mask_linewidth=0.5,
     mask_with_points=False,
-    undo_roll=False,
     show=True,
+    show_mask=False
 ):
-    """
-    Non-interactive experiment plot.
-    
-    Parameters
-    ----------
-    array_2d : np.ndarray
-        Field to plot, shape (121, 240)
-    mask_2d : np.ndarray or None
-        Mask in ERA5 storage coordinates, shape (121, 240)
-    undo_roll : bool
-        Applies to array_2d only. Usually False.
-    """
-    grid = prepare_era5_plot_grid(array_2d, undo_roll=undo_roll)
+    grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
     world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
@@ -309,20 +247,16 @@ def plot_map_static(
     )
 
     if mask_2d is not None:
-        mask_plot = reorder_mask_for_plot(
-            mask_2d,
-            sort_idx=grid["sort_idx"],
-            undo_roll=False,
-        )
-        draw_mask_outline(
-            ax,
-            mask_plot=mask_plot,
-            lon_e_plot=grid["lon_e_plot"],
-            lat_e_plot=grid["lat_e_plot"],
-            edgecolor=mask_edgecolor,
-            linewidth=mask_linewidth,
-            with_points=mask_with_points,
-        )
+        if show_mask:
+            draw_mask_outline(
+                ax,
+                mask_plot=np.asarray(mask_2d),
+                lon_e_plot=grid["lon_e_plot"],
+                lat_e_plot=grid["lat_e_plot"],
+                edgecolor=mask_edgecolor,
+                linewidth=mask_linewidth,
+                with_points=mask_with_points,
+            )
 
     plt.tight_layout()
 
@@ -335,7 +269,6 @@ def plot_map_static(
 # ------------------------------------------------------------
 # interactive layer only
 # ------------------------------------------------------------
-
 def make_interactive_map(
     array_2d,
     *,
@@ -346,13 +279,8 @@ def make_interactive_map(
     title=None,
     rectangle_x=(-10.0, 2.0),
     rectangle_y=(45.0, 35.0),
-    undo_roll=False,
 ):
-    """
-    Interactive wrapper around the same visual helpers.
-    Requires `mo` and `ChartPuck` to exist in the notebook/app environment.
-    """
-    grid = prepare_era5_plot_grid(array_2d, undo_roll=undo_roll)
+    grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
     world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
@@ -392,15 +320,6 @@ def make_interactive_map(
         )
         ax.add_patch(rect)
 
-        ax.plot(
-            [lon_left, lon_right],
-            [lat_top, lat_bottom],
-            "o",
-            color="red",
-            markersize=5,
-            zorder=11,
-        )
-
     return mo.ui.anywidget(
         ChartPuck.from_callback(
             draw_fn=draw_map,
@@ -413,11 +332,9 @@ def make_interactive_map(
         )
     )
 
-
 # ------------------------------------------------------------
 # wrapper
 # ------------------------------------------------------------
-
 def visualize_map(
     array_2d,
     cmap="coolwarm",
@@ -428,9 +345,9 @@ def visualize_map(
     interactive=False,
     title=None,
     dpi=200,
-    undo_roll=False,
     mask_2d=None,
     show=False,
+    show_mask=False
 ):
     if interactive:
         return make_interactive_map(
@@ -440,7 +357,6 @@ def visualize_map(
             vmax=vmax,
             center=center,
             title=title,
-            undo_roll=undo_roll,
         )
 
     return plot_map_static(
@@ -453,6 +369,6 @@ def visualize_map(
         figsize=figsize,
         dpi=dpi,
         title=title,
-        undo_roll=undo_roll,
         show=show,
+        show_mask=show_mask
     )

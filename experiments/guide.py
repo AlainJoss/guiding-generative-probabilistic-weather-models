@@ -15,6 +15,9 @@ def _(mo):
     - refactor this whole notebook to outsource functionality
     - the start date is 18:00 the 31.12.2019!
     - convert temperature to degrees celsius
+    - capture progress bar in marimo app-mode
+    - ready for N-step rollout?
+    - compare to ground-truth and also capture and compute no-guidance generation
 
     ## ideas
     - steer model towards grount truth in mask and measure divergence across states
@@ -62,8 +65,8 @@ def _():
 
 @app.cell
 def _():
-    from src.utils import get_last_experiment_dir, get_mask_corners_from_widget, get_mask_from_corners
-    from src.interaction import visualize_map
+    from src.utils import get_last_experiment_dir
+    from src.interaction import visualize_map, get_mask_corners_from_widget, get_mask_from_corners, plot_trajectory
     from src.funcs import avg_over_mask, get_guidance_trajectory
     from src.utils import state_to_device
 
@@ -77,6 +80,7 @@ def _():
         get_mask_corners_from_widget,
         get_mask_from_corners,
         load_module,
+        plot_trajectory,
         state_to_device,
         visualize_map,
     )
@@ -211,54 +215,16 @@ def _(device, load_module):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Constants
+    ## Config
     """)
     return
 
 
 @app.cell
-def _(ds):
-    # remove first and last, since we have two tensordicts less (because of prev and next)
-    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
-    return (TIMESTAMPS,)
-
-
-@app.cell
 def _():
-    PARTITIONS = ["surface", "level"]
-    return (PARTITIONS,)
+    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
-
-@app.cell
-def _(partition):
-    LEVELS_DICT = {
-        "surface": [i+1 for i in range(1)],
-        "level": [i+1 for i in range(13)]
-    }
-    LEVELS = LEVELS_DICT[partition]
-    return (LEVELS,)
-
-
-@app.cell
-def _(partition):
-    VARIABLES_DICT = {
-        "surface": [
-            "10m_u_component_of_wind",
-            "10m_v_component_of_wind",
-            "2m_temperature",
-            "mean_sea_level_pressure"
-        ],
-        "level": [
-            "geopotential",
-            "u_component_of_wind",
-            "v_component_of_wind",
-            "temperature",
-            "specific_humidity",
-            "vertical_velocity"
-        ]
-    }
-    VARIABLES = VARIABLES_DICT[partition]
-    return (VARIABLES,)
+    return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
 
 
 @app.cell
@@ -272,18 +238,12 @@ def _():
     return MAX_PERC_DELTA, device
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Config
-    """)
-    return
-
-
 @app.cell
-def _(TIMESTAMPS, mo):
+def _(ds, mo):
+    # remove first and last, since we have two tensordicts less (because of prev and next)
+    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
     timestamp_dropdown = mo.ui.dropdown(TIMESTAMPS, value=TIMESTAMPS[0], label="start state : ")
-    return (timestamp_dropdown,)
+    return TIMESTAMPS, timestamp_dropdown
 
 
 @app.cell
@@ -293,15 +253,17 @@ def _(PARTITIONS, mo):
 
 
 @app.cell
-def _(LEVELS, mo):
+def _(LEVELS_DICT, mo, partition):
+    LEVELS = LEVELS_DICT[partition]
     level_dropdown = mo.ui.dropdown(LEVELS, value=LEVELS[0], label="level: ")
-    return (level_dropdown,)
+    return LEVELS, level_dropdown
 
 
 @app.cell
-def _(VARIABLES, mo):
+def _(VARIABLES_DICT, mo, partition):
+    VARIABLES = VARIABLES_DICT[partition]
     var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLES[2], label="variable : ")
-    return (var_dropdown,)
+    return VARIABLES, var_dropdown
 
 
 @app.cell
@@ -317,15 +279,20 @@ def _(mo, spline_puck):
 
 
 @app.cell
-def _(denormalized_slice, visualize_map):
+def _(guidance_trajectory, plot_trajectory, var):
+    planned_trajectory = plot_trajectory(guidance_trajectory, var)
+    return (planned_trajectory,)
+
+
+@app.cell
+def _(slice, visualize_map):
     map_widget = visualize_map(
-        denormalized_slice,
+        slice,
         title="Select mask region",
         interactive=True,
-        undo_roll=True,
-        vmin=denormalized_slice.min(),
-        vmax=denormalized_slice.max(),
-        center= denormalized_slice.mean()
+        vmin=slice.min(),
+        vmax=slice.max(),
+        center= slice.mean()
     )
     return (map_widget,)
 
@@ -413,47 +380,14 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
 
 @app.cell
 def _(gen_model, level_idx, partition, var_idx, x_start):
-    denormalized_slice = gen_model.denormalize(x_start["state"])[partition][var_idx, level_idx]
-    return (denormalized_slice,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    The denormalized prediction at time $t$ is defined as follows:
-
-    \begin{align*}
-    \hat{x}^\text{denorm} &= \mu^\text{denorm} + (\hat{x}^\text{norm}) \odot \sigma^\text{denorm} \\
-    &= \mu^\text{denorm} + (\hat{\mu}^\text{det} + \sigma^\text{residual} \odot z_t) \odot \sigma^\text{denorm}
-    \end{align*}
-
-    Importantly, we have to perform two denormalizations. One in the residual space, and one in the data space. The second one is standard machine learning preprocessing, whilst the first one comes from the way the target of the generative model is built, which is as follows:
-
-    \begin{align*}
-    r^\text{gt} &=  \frac{x^\text{gt} - \hat{x}^\text{det}}{\sigma^\text{residual}}
-    \end{align*}
-
-    Note, $\sigma^\text{residual}$ is computed as standard deviation of the residuals $\sigma^\text{residual}_{n \in [N]}(x^\text{gt}_n - \hat{x}_n^\text{det})$ over the dataset.
-
-    We are interested in defining the guidance in denormalized space.
-    The loss is then defined as follows:
-
-    \begin{align*}
-    \mathcal{L}^\text{denorm}(y_t, \hat{x}^\text{denorm}) &=  \frac{1}{2} \left\lVert y_t - \frac{\sum_i \hat{x}^\text{denorm}_i \odot m_i}{\sum_i m_i} \right\lVert^2_2
-    \end{align*}
-    """)
-    return
+    # don't really like the batch dim ... [0]
+    slice = gen_model.denormalize(x_start["state"])[partition][var_idx, level_idx]
+    return (slice,)
 
 
 @app.cell
-def _(
-    avg_over_mask,
-    denormalized_slice,
-    get_guidance_trajectory,
-    mask,
-    spline_widget,
-):
-    avg_over_mask_denormalized  = avg_over_mask(denormalized_slice, mask)
+def _(avg_over_mask, get_guidance_trajectory, mask, slice, spline_widget):
+    avg_over_mask_denormalized  = avg_over_mask(slice, mask)
     guidance_terms_denormalized  = get_guidance_trajectory(spline_widget.y, avg_over_mask_denormalized)
 
     guidance_trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
@@ -465,7 +399,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Run experiments
+    ## Run
     """)
     return
 
@@ -488,12 +422,12 @@ def _(device, gen_model, state_to_device, torch):
         var,
         var_idx,
     ):
-        batch = state_to_device(x_start, device)
-        y_t = torch.as_tensor(guidance_terms_denormalized, device=gen_model.device)[0]
+        x_start = state_to_device(x_start, device)
+        y_t = torch.as_tensor(guidance_terms_denormalized, device=device)[0]
 
         return rollout_step(
             ds=ds,
-            x_start=batch,
+            x_start=x_start,
             gen_model=gen_model,
             mask_corners=mask_corners,
             y_t=y_t,
@@ -552,19 +486,23 @@ def _(
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Analysis
-    """)
+@app.cell
+def _(planned_trajectory):
+    planned_trajectory
     return
 
 
 @app.cell
-def _(guidance_trajectory, var):
-    from src.interaction import plot_trajectory
-    fig = plot_trajectory(guidance_trajectory, var)
-    fig
+def _(mask, np, slice, visualize_map):
+    static_map = visualize_map(
+        slice,
+        mask_2d=np.asarray(mask),
+        title="Experiment with saved mask",
+        vmin=slice.min(),
+        vmax=slice.max(),
+        center= slice.mean()
+    )
+    static_map
     return
 
 

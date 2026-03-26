@@ -53,39 +53,3 @@ def save_state(result_dir: Path, array: xr.DataArray):
 def read_state(result_dir):
     path = result_dir / "state.nc"
     return xr.open_dataset(path, engine="netcdf4")
-
-
-def get_mask_corners_from_widget(map_widget):
-    x0, x1 = map_widget.value["x"]
-    y0, y1 = map_widget.value["y"]
-
-    lat_bottom, lat_top = sorted([y0, y1])
-
-    # keep widget longitudes in plot coordinates [-180, 180]
-    lon_left_plot = x0
-    lon_right_plot = x1
-
-    # convert each endpoint separately to ERA5 storage coords [0, 360]
-    lon_left = lon_left_plot % 360.0
-    lon_right = lon_right_plot % 360.0
-
-    return lon_left, lon_right, lat_bottom, lat_top
-
-def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
-    lon_e = np.linspace(0.0, 360.0, 240 + 1, endpoint=True)
-    lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
-    lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-    lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
-
-    lon_grid, lat_grid = np.meshgrid(lon_c, lat_c)
-
-    # handle seam-crossing selections, e.g. [350, 20]
-    if lon_left <= lon_right:
-        lon_mask = (lon_grid >= lon_left) & (lon_grid <= lon_right)
-    else:
-        lon_mask = (lon_grid >= lon_left) | (lon_grid <= lon_right)
-
-    lat_mask = (lat_grid >= lat_bottom) & (lat_grid <= lat_top)
-
-    mask = (lon_mask & lat_mask).astype(np.uint8)
-    return torch.as_tensor(mask)

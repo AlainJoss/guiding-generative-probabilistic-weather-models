@@ -155,21 +155,13 @@ class Era5Dataset(XarrayDataset):
         tdict = tdict.apply(lambda x: x.roll(halflon, -1))
 
         return tdict
-
+    
     def convert_to_xarray(self, tdict, timestamp, levels=None):
-        """
-        we dont take prediction timedelta into account here
-        timestamp is necessary to convert to xarray
-        compressed means we only store 3 levels (500, 700, 850)
-        """
         tdict = tdict.cpu()
-        halflon = tdict["surface"].shape[-1] // 2
+
         # rebatch if not batched
         if tdict["surface"].shape == torch.Size([]):
             tdict = tdict[None]
-
-        # roll does not work with named dimensions, use cat
-        tdict = tdict.apply(lambda x: x.roll(-halflon, -1))
 
         # squeeze
         surface = tdict["surface"].squeeze(-3)
@@ -189,11 +181,12 @@ class Era5Dataset(XarrayDataset):
             ),
             coords=dict(
                 time=times,
-                latitude=np.arange(90, -90 - 1e-6, -180 / 120),  # decreasing lats
+                latitude=np.arange(90, -90 - 1e-6, -180 / 120),
                 longitude=np.arange(0, 360, 360 / 240),
                 level=pressure_levels,
             ),
         )
+
         if levels is not None:
             xr_dataset = xr_dataset.sel(level=levels)
 

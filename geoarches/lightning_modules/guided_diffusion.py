@@ -98,8 +98,8 @@ class GuidedFlow(BaseLightningModule):
 
     def denormalize(self, batch):
         # TODO: have to change this to work with "no-key" state 
-        means = self.data_mean
-        stds = self.data_std
+        means = self.data_mean #.to(self.device)
+        stds = self.data_std #.to(self.device)
         # TODO: not sure why the presence of surface should enable this 
         if "surface" in batch:
             # we can denormalize directly

@@ -11,7 +11,7 @@ from src.utils import (
     save_config
 )
 from src.funcs import get_mask_tensordict
-from src.utils import get_mask_from_corners
+from src.interaction import get_mask_from_corners
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
