@@ -173,5 +173,6 @@ data/
 experiments/2026*
 experiments/layouts
 experiments/generated
+experiments/random.ipynb
 modelstore/
 geoarches/stats/
