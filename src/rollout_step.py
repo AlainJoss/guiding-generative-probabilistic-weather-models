@@ -1,9 +1,4 @@
-import json
-
-from pathlib import Path 
-from datetime import datetime
-
-import torch
+from tensordict.tensordict import TensorDict
 
 from src.utils import (
     save_state, 
@@ -13,17 +8,17 @@ from src.utils import (
 from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
 
-from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
+from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 
 # TODO: create run func and call from marimo after setup!
 
 ##### load #####
 
 def rollout_step(
-        ds, x_start, 
-        gen_model, 
-        mask_corners, y_t, N,
+        ds: Era5Forecast, x_start: dict[TensorDict], 
+        gen_model: GuidedFlow, 
+        mask_corners, y_t, lambda_, N,
         timestamp, timestamp_idx, 
         partition, level, level_idx, var, var_idx
     ):
@@ -36,22 +31,31 @@ def rollout_step(
     mask = get_mask_tensordict(x_start["state"][0], partition, var_idx, level_idx, mask)
 
     ##### run #####
-    sampled_state = gen_model.rollout_step(
+    guided_state = gen_model.rollout_step(
         x_cond=x_start, 
-        y_t=y_t, 
-        mask=mask
+        mask=mask,
+        y_n=y_t,
+        lambda_=lambda_
     )
-    # sampled_state = x_start["state"]
+    unguided_state = gen_model.rollout_step(
+        x_cond=x_start, 
+        mask=None,
+        y_n=None,
+        lambda_=None
+    )
+    # guided_state = x_start["state"]
+    # unguided_state = x_start["state"]
     # TODO: this has later to be moved to rollout(N)
-    sampled_state = gen_model.denormalize(sampled_state)
-    sampled_state = sampled_state.cpu()
+    guided_state = ds.denormalize(guided_state).cpu()
+    unguided_state = ds.denormalize(unguided_state).cpu()
 
     ##### save #####
-
     result_dir = ensure_result_dir()
 
-    sampled_state = ds.convert_to_xarray(sampled_state, x_start["timestamp"].cpu())
-    save_state(result_dir, sampled_state)
+    guided_state = ds.convert_to_xarray(guided_state, x_start["timestamp"].cpu())
+    unguided_state = ds.convert_to_xarray(unguided_state, x_start["timestamp"].cpu())
+    save_state(result_dir, guided_state, "guided")
+    save_state(result_dir, unguided_state, "unguided")
 
     config = {
         "N": N,

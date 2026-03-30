@@ -20,6 +20,7 @@ def get_mask_corners_from_widget(map_widget):
 
     return lon_left, lon_right, lat_bottom, lat_top
 
+
 def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
     lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
@@ -36,7 +37,11 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     return torch.as_tensor(mask)
 
 
-def plot_trajectory(trajectory: list[np.float64], var: str):
+def plot_trajectory(
+    trajectory: list[np.float64],
+    var: str,
+    y_max: float | None = None,
+):
     x = np.arange(len(trajectory))
     fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
     ax.plot(x, trajectory, "b-", linewidth=2)
@@ -48,6 +53,11 @@ def plot_trajectory(trajectory: list[np.float64], var: str):
     ax.set_title("Trajectory")
     ax.grid(True, alpha=0.3)
     ax.axhline(0, color="gray", linewidth=0.5)
+
+    if y_max is not None:
+        ymin, _ = ax.get_ylim()
+        ax.set_ylim(ymin, y_max)
+
     return fig
 
 
@@ -91,24 +101,7 @@ def make_norm(array_2d_plot, vmin=None, vmax=None, center=None):
 # ------------------------------------------------------------
 # mask helpers
 # ------------------------------------------------------------
-
 def mask_bbox_from_active_cells(mask_plot: np.ndarray, lon_e_plot: np.ndarray, lat_e_plot: np.ndarray):
-    """
-    Infer the outer rectangle from active mask cells in plot coordinates.
-
-    Parameters
-    ----------
-    mask_plot : np.ndarray
-        Shape (121, 240), already reordered to plot longitude order
-    lon_e_plot : np.ndarray
-        Longitude edges in plot coordinates
-    lat_e_plot : np.ndarray
-        Latitude edges
-
-    Returns
-    -------
-    (lon_left, lon_right, lat_bottom, lat_top) or None if mask is empty
-    """
     active = mask_plot > 0
     if not np.any(active):
         return None
@@ -166,21 +159,125 @@ def draw_mask_outline(
     return rect
 
 
-# ------------------------------------------------------------
-# visual-only plotting
-# ------------------------------------------------------------
+def get_mask_center(mask_2d):
+    lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
+    lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
 
-def draw_base_map(
+    bbox = mask_bbox_from_active_cells(np.asarray(mask_2d), lon_e, lat_e)
+    if bbox is None:
+        return 0.0, 0.0
+
+    lon_left, lon_right, lat_bottom, lat_top = bbox
+    return 0.5 * (lon_left + lon_right), 0.5 * (lat_bottom + lat_top)
+
+
+# ------------------------------------------------------------
+# zoom helper
+# ------------------------------------------------------------
+def apply_zoom(
+    ax,
+    *,
+    zoom: int,
+    center_lon: float = 0.0,
+    center_lat: float = 0.0,
+):
+    """
+    zoom=1  -> full map
+    zoom>1  -> zoom into (center_lon, center_lat) by shrinking the visible window
+    """
+    zoom = max(1, int(zoom))
+
+    full_lon_span = 360.0
+    full_lat_span = 180.0
+
+    lon_span = full_lon_span / zoom
+    lat_span = full_lat_span / zoom
+
+    lon_min = center_lon - lon_span / 2
+    lon_max = center_lon + lon_span / 2
+    lat_min = center_lat - lat_span / 2
+    lat_max = center_lat + lat_span / 2
+
+    lon_min = max(-180.0, lon_min)
+    lon_max = min(180.0, lon_max)
+    lat_min = max(-90.0, lat_min)
+    lat_max = min(90.0, lat_max)
+
+    if lon_max - lon_min < lon_span:
+        if lon_min <= -180.0:
+            lon_max = min(180.0, lon_min + lon_span)
+        elif lon_max >= 180.0:
+            lon_min = max(-180.0, lon_max - lon_span)
+
+    if lat_max - lat_min < lat_span:
+        if lat_min <= -90.0:
+            lat_max = min(90.0, lat_min + lat_span)
+        elif lat_max >= 90.0:
+            lat_min = max(-90.0, lat_max - lat_span)
+
+    ax.set_xlim(lon_min, lon_max)
+    ax.set_ylim(lat_min, lat_max)
+
+def annotate_cell_values(
     ax,
     *,
     array_2d_plot,
-    lon_e_plot,
-    lat_e_plot,
+    lon_c_plot,
+    lat_c,
+    fmt=".2f",
+    fontsize=6,
+    color="black",
+    threshold=None,
+):
+    """
+    Annotate plotted cell centers with their numeric values.
+
+    Parameters
+    ----------
+    threshold:
+        If not None, only annotate cells with abs(value) >= threshold.
+    """
+    ii, jj = np.where(np.isfinite(array_2d_plot))
+
+    for i, j in zip(ii, jj):
+        value = array_2d_plot[i, j]
+
+        if threshold is not None and abs(value) < threshold:
+            continue
+
+        ax.text(
+            lon_c_plot[j],
+            lat_c[i],
+            format(value, fmt),
+            ha="center",
+            va="center",
+            fontsize=fontsize,
+            color=color,
+            zorder=20,
+            clip_on=True,
+        )
+
+# ------------------------------------------------------------
+# visual-only plotting
+# ------------------------------------------------------------
+def draw_base_map(
+    ax,
+    *,
+    array_2d_plot=None,
+    lon_e_plot=None,
+    lat_e_plot=None,
+    lon_c_plot=None,
+    lat_c=None,
     cmap="coolwarm",
     norm=None,
     title=None,
     add_colorbar=True,
     world=None,
+    show_values=False,
+    value_fmt=".2f",
+    value_fontsize=6,
+    value_color="black",
+    value_threshold=None,
 ):
     im = ax.pcolormesh(
         lon_e_plot,
@@ -195,9 +292,17 @@ def draw_base_map(
         world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
     world.boundary.plot(ax=ax, color="black", linewidth=0.4, zorder=5)
-
-    ax.set_xlim(-180, 180)
-    ax.set_ylim(-90, 90)
+    if show_values:
+        annotate_cell_values(
+            ax,
+            array_2d_plot=array_2d_plot,
+            lon_c_plot=lon_c_plot,
+            lat_c=lat_c,
+            fmt=value_fmt,
+            fontsize=value_fontsize,
+            color=value_color,
+            threshold=value_threshold,
+        )
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")
 
@@ -211,6 +316,7 @@ def draw_base_map(
 
     return im
 
+
 def plot_map_static(
     array_2d,
     *,
@@ -223,10 +329,18 @@ def plot_map_static(
     dpi=100,
     title=None,
     mask_edgecolor="red",
-    mask_linewidth=0.5,
+    mask_linewidth=1.0,
     mask_with_points=False,
     show=True,
-    show_mask=False
+    show_mask=False,
+    zoom=1,
+    zoom_center_lon=0.0,
+    zoom_center_lat=0.0,
+    show_values=False,
+    value_fmt=".2f",
+    value_fontsize=6,
+    value_color="black",
+    value_threshold=None,
 ):
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
@@ -239,24 +353,37 @@ def plot_map_static(
         array_2d_plot=grid["array_plot"],
         lon_e_plot=grid["lon_e_plot"],
         lat_e_plot=grid["lat_e_plot"],
+        lon_c_plot=grid["lon_c_plot"],
+        lat_c=grid["lat_c"],
         cmap=cmap,
         norm=norm,
         title=title,
         add_colorbar=True,
         world=world,
+        show_values=show_values,
+        value_fmt=value_fmt,
+        value_fontsize=value_fontsize,
+        value_color=value_color,
+        value_threshold=value_threshold,
     )
 
-    if mask_2d is not None:
-        if show_mask:
-            draw_mask_outline(
-                ax,
-                mask_plot=np.asarray(mask_2d),
-                lon_e_plot=grid["lon_e_plot"],
-                lat_e_plot=grid["lat_e_plot"],
-                edgecolor=mask_edgecolor,
-                linewidth=mask_linewidth,
-                with_points=mask_with_points,
-            )
+    if mask_2d is not None and show_mask:
+        draw_mask_outline(
+            ax,
+            mask_plot=np.asarray(mask_2d),
+            lon_e_plot=grid["lon_e_plot"],
+            lat_e_plot=grid["lat_e_plot"],
+            edgecolor=mask_edgecolor,
+            linewidth=mask_linewidth,
+            with_points=mask_with_points,
+        )
+
+    apply_zoom(
+        ax,
+        zoom=zoom,
+        center_lon=zoom_center_lon,
+        center_lat=zoom_center_lat,
+    )
 
     plt.tight_layout()
 
@@ -332,6 +459,7 @@ def make_interactive_map(
         )
     )
 
+
 # ------------------------------------------------------------
 # wrapper
 # ------------------------------------------------------------
@@ -347,7 +475,15 @@ def visualize_map(
     dpi=200,
     mask_2d=None,
     show=False,
-    show_mask=False
+    show_mask=False,
+    zoom=1,
+    zoom_center_lon=0.0,
+    zoom_center_lat=0.0,
+    show_values=False,
+    value_fmt=".2f",
+    value_fontsize=6,
+    value_color="black",
+    value_threshold=None,
 ):
     if interactive:
         return make_interactive_map(
@@ -370,5 +506,13 @@ def visualize_map(
         dpi=dpi,
         title=title,
         show=show,
-        show_mask=show_mask
+        show_mask=show_mask,
+        zoom=zoom,
+        zoom_center_lon=zoom_center_lon,
+        zoom_center_lat=zoom_center_lat,
+        show_values=show_values,
+        value_fmt=value_fmt,
+        value_fontsize=value_fontsize,
+        value_color=value_color,
+        value_threshold=value_threshold,
     )

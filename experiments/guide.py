@@ -30,7 +30,15 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Imports
+    # Guidance experiments
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Load
     """)
     return
 
@@ -60,7 +68,14 @@ def _():
     from cartopy.crs import PlateCarree
 
     method_state = {"value": "CubicSpline"}
-    return ChartPuck, CubicSpline, method_state, mo, np, torch
+    return mo, torch
+
+
+@app.cell
+def _():
+    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+
+    return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
 
 
 @app.cell
@@ -70,123 +85,23 @@ def _():
     from src.funcs import avg_over_mask, get_guidance_trajectory
     from src.utils import state_to_device
 
-    from geoarches.lightning_modules import load_module
-    from geoarches.dataloaders.era5 import Era5Forecast
-
     return (
-        Era5Forecast,
         avg_over_mask,
         get_guidance_trajectory,
         get_mask_corners_from_widget,
         get_mask_from_corners,
-        load_module,
         plot_trajectory,
         state_to_device,
         visualize_map,
     )
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Spline Puckchart
-    """)
-    return
-
-
 @app.cell
-def _(ChartPuck, CubicSpline, MAX_PERC_DELTA, N_slider, method_state, np):
-    ##### splinechart
+def _():
+    from geoarches.lightning_modules import load_module
+    from geoarches.dataloaders.era5 import Era5Forecast
 
-    def draw_spline_chart(ax, x_pucks, y_pucks, method):
-        # Add fixed left anchor at (0, 0)
-        x_all = np.concatenate([[0], x_pucks])
-        y_all = np.concatenate([[0], y_pucks])
-
-        # Sort points by x for proper spline fitting
-        sorted_indices = np.argsort(x_all)
-        x_sorted = x_all[sorted_indices]
-        y_sorted = y_all[sorted_indices]
-
-        # Ensure strictly increasing x by adding small perturbations to duplicates
-        for i in range(1, len(x_sorted)):
-            if x_sorted[i] <= x_sorted[i - 1]:
-                x_sorted[i] = x_sorted[i - 1] + 1e-6
-
-        # Dense x values over the full axis 0 ... N-1
-        x_dense = np.linspace(0, N_slider.value, 200)
-
-        spline = CubicSpline(x_sorted, y_sorted)
-        y_dense = spline(x_dense)
-
-        ax.plot(x_dense, y_dense, "b-", linewidth=2)
-        ax.set_xlim(0, N_slider.value)
-        ax.set_ylim(-MAX_PERC_DELTA, MAX_PERC_DELTA)
-        ax.set_xticks(np.arange(0, N_slider.value, 1))
-        ax.set_xlabel("N")
-        ax.set_ylabel("Percentage change")
-        ax.set_title("Trajectory")
-        ax.grid(True, alpha=0.3)
-        ax.axhline(0, color="gray", linewidth=0.5)
-
-        # Fixed anchor
-        ax.plot([0], [0], "ko", markersize=8, zorder=5)
-
-    def draw_spline(ax, widget):
-        # N total points INCLUDING the fixed anchor => N draggable pucks
-        fixed_x = np.linspace(1, N_slider.value, len(widget.y)).tolist()
-
-        try:
-            widget.x = fixed_x
-        except Exception:
-            pass
-
-        draw_spline_chart(ax, fixed_x, list(widget.y), method_state["value"])
-
-    # Slider value N = total number of points INCLUDING the anchor
-    _n = N_slider.value
-
-    # Draggable pucks are at x = 1, 2, ..., N
-    _init_x = np.linspace(1, _n, _n).tolist()
-    _init_y = (0.15 * np.sin(np.pi * np.array(_init_x) / (_n))).tolist()
-
-    spline_puck = ChartPuck.from_callback(
-        draw_fn=draw_spline,
-        x_bounds=(1, _n),
-        y_bounds=(-MAX_PERC_DELTA, MAX_PERC_DELTA),
-        figsize=(6, 4),
-        x=_init_x,
-        y=_init_y,
-        puck_color="#9c27b0",
-        drag_y_bounds=(-MAX_PERC_DELTA, MAX_PERC_DELTA),
-    )
-    return (spline_puck,)
-
-
-@app.cell
-def _(method_state, spline_puck):
-    def on_method_change(new_val):
-        method_state["value"] = new_val
-        spline_puck.redraw()
-
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Guidance experiments
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Load
-    Data and model.
-    """)
-    return
+    return Era5Forecast, load_module
 
 
 @app.cell
@@ -215,16 +130,33 @@ def _(device, load_module):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Config
+    ## Setup
+    - funcs
+    - constants
+    - sliders and dropdowns
+    - ids
     """)
     return
 
 
-@app.cell
-def _():
-    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+@app.function
+def sinusoidal_schedule(T: int, flatness: float, peak: float):
+    import math
+    import torch
 
-    return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
+    if T <= 0:
+        return []
+
+    if T == 1:
+        return [torch.tensor(0.0, dtype=torch.float32)]
+
+    return [
+        torch.tensor(
+            peak * (math.sin(math.pi * t / (T - 1)) ** flatness),
+            dtype=torch.float32,
+        )
+        for t in range(T)
+    ]
 
 
 @app.cell
@@ -235,7 +167,7 @@ def _():
 
     VMIN = None
     VMAX = None
-    return MAX_PERC_DELTA, device
+    return (device,)
 
 
 @app.cell
@@ -247,9 +179,21 @@ def _(ds, mo):
 
 
 @app.cell
+def _(timestamp_dropdown):
+    timestamp = timestamp_dropdown.value
+    return (timestamp,)
+
+
+@app.cell
 def _(PARTITIONS, mo):
     partition_dropdown = mo.ui.dropdown(PARTITIONS, value=PARTITIONS[0], label="partition: ")
     return (partition_dropdown,)
+
+
+@app.cell
+def _(partition_dropdown):
+    partition = partition_dropdown.value
+    return (partition,)
 
 
 @app.cell
@@ -260,10 +204,22 @@ def _(LEVELS_DICT, mo, partition):
 
 
 @app.cell
+def _(level_dropdown):
+    level = level_dropdown.value
+    return (level,)
+
+
+@app.cell
 def _(VARIABLES_DICT, mo, partition):
     VARIABLES = VARIABLES_DICT[partition]
     var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLES[2], label="variable : ")
     return VARIABLES, var_dropdown
+
+
+@app.cell
+def _(var_dropdown):
+    var = var_dropdown.value
+    return (var,)
 
 
 @app.cell
@@ -273,15 +229,28 @@ def _(mo):
 
 
 @app.cell
-def _(mo, spline_puck):
-    spline_widget = mo.ui.anywidget(spline_puck)  # cannot be put with n_pucks_slider
-    return (spline_widget,)
+def _(N_slider):
+    N = N_slider.value
+    return (N,)
 
 
 @app.cell
-def _(guidance_trajectory, plot_trajectory, var):
-    planned_trajectory = plot_trajectory(guidance_trajectory, var)
-    return (planned_trajectory,)
+def _(mo):
+    lambda_shape_slider = mo.ui.slider(1.0, 10.0, step=0.1, value=1.0, label="lambda schedule shape")
+    y_shape_slider = mo.ui.slider(1.0, 10.0, step=0.1, value=1.0, label="y schedule shape")
+    return lambda_shape_slider, y_shape_slider
+
+
+@app.cell
+def _(mo):
+    alpha_slider = mo.ui.slider(0.1, 5, value=1.0, label="alpha: ", step=0.1)
+    return (alpha_slider,)
+
+
+@app.cell
+def _(alpha_slider):
+    alpha = alpha_slider.value
+    return (alpha,)
 
 
 @app.cell
@@ -298,68 +267,51 @@ def _(slice, visualize_map):
 
 
 @app.cell
-def _(
-    N_slider,
-    level_dropdown,
-    map_widget,
-    mo,
-    partition_dropdown,
-    spline_widget,
-    timestamp_dropdown,
-    var_dropdown,
-):
-    mo.vstack([
-        timestamp_dropdown,
-        var_dropdown,
-        partition_dropdown,
-        level_dropdown,
-        N_slider,
-        spline_widget,
-        map_widget
-    ])
-    return
-
-
-@app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""
-    ## Derived quantities
-    - dropdown variables and associated ids
-    - ids
-    - mask
-    - trajectory
-    """)
-    return
+    w_slider = mo.ui.slider(0.1, 5, value=1.0, label="w: ", step=0.1)
+    return (w_slider,)
 
 
 @app.cell
-def _(timestamp_dropdown):
-    timestamp = timestamp_dropdown.value
-    return (timestamp,)
+def _(w_slider):
+    w = w_slider.value
+    return (w,)
 
 
 @app.cell
-def _(level_dropdown):
-    level = level_dropdown.value
-    return (level,)
+def _(lambda_shape_slider):
+    lambda_shape = lambda_shape_slider.value
+    return (lambda_shape,)
 
 
 @app.cell
-def _(partition_dropdown):
-    partition = partition_dropdown.value
-    return (partition,)
+def _(lambda_shape, w):
+    lambda_trajectory = sinusoidal_schedule(25, lambda_shape, w) 
+    return (lambda_trajectory,)
 
 
 @app.cell
-def _(var_dropdown):
-    var = var_dropdown.value
-    return (var,)
+def _(lambda_trajectory, plot_trajectory):
+    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "lambda", 5)
+    return (lambda_trajectory_plot,)
 
 
 @app.cell
-def _(N_slider):
-    N = N_slider.value
-    return (N,)
+def _(y_shape_slider):
+    y_shape = y_shape_slider.value
+    return (y_shape,)
+
+
+@app.cell
+def _(N, alpha, y_shape):
+    y_trajectory = sinusoidal_schedule(N, y_shape, alpha) 
+    return (y_trajectory,)
+
+
+@app.cell
+def _(plot_trajectory, y_trajectory):
+    y_trajectory_plot = plot_trajectory(y_trajectory, "y", 5)
+    return (y_trajectory_plot,)
 
 
 @app.cell
@@ -379,21 +331,69 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
 
 
 @app.cell
-def _(gen_model, level_idx, partition, var_idx, x_start):
+def _(ds, level_idx, partition, var_idx, x_start):
     # don't really like the batch dim ... [0]
-    slice = gen_model.denormalize(x_start["state"])[partition][var_idx, level_idx]
+    slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
     return (slice,)
 
 
 @app.cell
-def _(avg_over_mask, get_guidance_trajectory, mask, slice, spline_widget):
+def _(avg_over_mask, get_guidance_trajectory, mask, slice, y_trajectory):
     avg_over_mask_denormalized  = avg_over_mask(slice, mask)
-    guidance_terms_denormalized  = get_guidance_trajectory(spline_widget.y, avg_over_mask_denormalized)
+    guidance_terms_denormalized  = get_guidance_trajectory(y_trajectory, avg_over_mask_denormalized)
 
     guidance_trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
+    return (guidance_terms_denormalized,)
 
-    # avg_over_mask_denormalized, guidance_terms_denormalized
-    return guidance_terms_denormalized, guidance_trajectory
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Config
+    """)
+    return
+
+
+@app.cell
+def _(
+    N,
+    N_slider,
+    alpha,
+    alpha_slider,
+    lambda_shape_slider,
+    lambda_trajectory_plot,
+    level_dropdown,
+    map_widget,
+    mo,
+    partition_dropdown,
+    timestamp_dropdown,
+    var_dropdown,
+    w,
+    w_slider,
+    y_shape_slider,
+    y_trajectory_plot,
+):
+    mo.vstack([
+        timestamp_dropdown,
+        var_dropdown,
+        partition_dropdown,
+        level_dropdown,
+            mo.hstack([N_slider, mo.md(f"{N} (number of rollouts)")], justify="start"),
+        mo.hstack([
+            mo.vstack([
+            lambda_shape_slider,
+            mo.hstack([w_slider, mo.md(f"{w} (guidance schedule scaling factor)")], justify="start"),
+            lambda_trajectory_plot,
+        ]),
+            mo.vstack([
+                y_shape_slider,
+                mo.hstack([alpha_slider, mo.md(f"{alpha} (guidance schedule scaling factor)")], justify="start"),
+                y_trajectory_plot,
+            ])
+        ]),
+        map_widget
+    ])
+    return
 
 
 @app.cell(hide_code=True)
@@ -412,6 +412,7 @@ def _(device, gen_model, state_to_device, torch):
         ds,
         x_start,
         guidance_terms_denormalized,
+        lambda_,
         mask_corners,
         N,
         timestamp,
@@ -431,6 +432,7 @@ def _(device, gen_model, state_to_device, torch):
             gen_model=gen_model,
             mask_corners=mask_corners,
             y_t=y_t,
+            lambda_=lambda_,
             N=N,
             timestamp=timestamp,
             timestamp_idx=timestamp_idx,
@@ -438,7 +440,7 @@ def _(device, gen_model, state_to_device, torch):
             level=level,
             level_idx=level_idx,
             var=var,
-            var_idx=var_idx,
+            var_idx=var_idx
         )
 
     return (run,)
@@ -452,27 +454,48 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    get_status, set_status = mo.state("IDLE")
+    return get_status, set_status
+
+
+@app.cell
+def _(get_status, mo, run_button, set_status):
+    set_status("IDLE")
+    if run_button.value:
+        set_status("RUNNING")
+        SET = True
+    status = get_status()
+    mo.md(f"Experiment status: **{status}**")
+    return (status,)
+
+
+@app.cell
 def _(
     N,
     ds,
     guidance_terms_denormalized,
+    lambda_trajectory,
     level,
     level_idx,
     mask_corners,
     partition,
     run,
     run_button,
+    set_status,
+    status,
     timestamp,
     timestamp_idx,
     var,
     var_idx,
     x_start,
 ):
-    if run_button.value:
+    if run_button.value and status == "RUNNING":
         run(
             ds,
             x_start,
             guidance_terms_denormalized,
+            lambda_trajectory,
             mask_corners,
             N,
             timestamp,
@@ -483,26 +506,7 @@ def _(
             var,
             var_idx,
         )
-    return
-
-
-@app.cell
-def _(planned_trajectory):
-    planned_trajectory
-    return
-
-
-@app.cell
-def _(mask, np, slice, visualize_map):
-    static_map = visualize_map(
-        slice,
-        mask_2d=np.asarray(mask),
-        title="Experiment with saved mask",
-        vmin=slice.min(),
-        vmax=slice.max(),
-        center= slice.mean()
-    )
-    static_map
+        set_status("IDLE")
     return
 
 

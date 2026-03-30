@@ -12,3 +12,7 @@
     timestamp_tensor_to_iso_t(t)
     '2020-12-31T12:00:00'
     ```
+- removed dask chunking from conversion to xarrays in era5 dataloader: 
+```
+# xr_dataset = xr_dataset.chunk(time=1)
+```

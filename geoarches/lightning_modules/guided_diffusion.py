@@ -4,7 +4,9 @@ import torch
 
 from hydra.utils import instantiate
 from tensordict.tensordict import TensorDict
-from tqdm import tqdm
+import logging
+from pathlib import Path
+from tqdm.auto import tqdm
 
 import geoarches.stats as geoarches_stats
 from geoarches.backbones.dit import TimestepEmbedder
@@ -14,6 +16,17 @@ from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
 geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
+log_dir = Path("logs")
+log_dir.mkdir(exist_ok=True)
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+if not logger.handlers:
+    file_handler = logging.FileHandler(log_dir / "experiment.log")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
 
 class GuidedFlow(BaseLightningModule):
     """
@@ -112,17 +125,19 @@ class GuidedFlow(BaseLightningModule):
         self, 
         N, 
         x_cond,  # TODO: need a better name
-        x_guide_trajectory: list[torch.Tensor] | None = None, # shape: 
+        y: list[torch.Tensor] | None = None, # shape: 
         mask: torch.Tensor | None = None,  # shape: 
+        lambda_: list[torch.Tensor] | None = None,
     ):
         realized_trajectory = []
 
         for n in range(N):
-            x_guide = None if x_guide_trajectory is None else x_guide_trajectory[n]
+            y_n = None if y is None else y[n]
             x_hat = self.rollout_step(
                 x_cond=x_cond,
-                y_t=x_guide,
+                y_n=y_n,
                 mask=mask,
+                lambda_=lambda_
             )
             realized_trajectory.append(x_hat)
 
@@ -132,7 +147,10 @@ class GuidedFlow(BaseLightningModule):
         return realized_trajectory
 
     def rollout_step(self,
-        x_cond, y_t, mask
+        x_cond,  # TODO: need a better name
+        y_n: list[torch.Tensor] | None = None, # shape: 
+        mask: torch.Tensor | None = None,  # shape: 
+        lambda_: list[torch.Tensor] | None = None,
     ):  
         # det prediction
         with torch.no_grad():
@@ -146,37 +164,37 @@ class GuidedFlow(BaseLightningModule):
         # TODO: might remove this (it's redundant for now)
         self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
-        loop_batch = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.sample(loop_batch, self.mu, y_t, mask)
+        x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
+        z = self.sample(x_cond, self.mu, y_n, mask, lambda_)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat
     
     # TODO: do not use batch, separate object for clarity 
     #       also the name is utter bs
-    def sample(self, batch, mu, y_t, mask):
-        
+    def sample(self,
+        x_cond, 
+        mu,
+        y_n: list[torch.Tensor] | None = None, # shape: 
+        mask: torch.Tensor | None = None,  # shape: 
+        lambda_: list[torch.Tensor] | None = None,
+    ):
         ##### init #####
-
         # draw noise
         generator = torch.Generator(device=self.device)
         generator.manual_seed(0)
-        z = batch["state"].apply(
+        z = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
         z_t = z * self.scale_input_noise
-
-        lambdas = [0.9 * self.T]  # TODO: should input a time dependent lambda list to guided_sampling
-        w = 1
     
         ##### sample #####
         timesteps = torch.linspace(
             self.num_train_timesteps, 1, self.T
         ).to(self.device)
-
-        # TODO: check grads here
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
+            logger.info(f"{i+1}")
 
             s_t = t / self.num_train_timesteps   
             if i < len(timesteps) - 1:
@@ -188,33 +206,26 @@ class GuidedFlow(BaseLightningModule):
 
             # reset graph at each step and make z_t differentiable
             z_t = z_t.apply(lambda x: x.detach().clone().requires_grad_(True))
-            # print("z_t: \n", z_t)
             
-            # TODO: some torch pipeline object
-            time_embedding = self.embedd_time(batch, t)
-            # print("time_embedding: \n", time_embedding)            
-            input_state = self.get_velocity_input_state(z_t, batch)
-            # print("input_state: \n", input_state)
+            time_embedding = self.embedd_time(x_cond, t)      
+            input_state = self.get_velocity_input_state(z_t, x_cond)
 
             # vector field 
             with torch.no_grad():
-                u_t = self.velocity(batch, time_embedding, input_state, z_t, s_t)
-                # print("u_t: \n", u_t)
-            # TODO: need to play around with this part
-            with torch.enable_grad():
-                grad_l = self.grad_loss(mask, mu, y_t, z_t)
-                # print("grad_l: \n", grad_l)
+                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
 
-            u_t_guided = tensordict_apply(
-                lambda u, g: u - (lambdas[0] * w) * g,
-                u_t,
-                grad_l,
-            )
-            # print("u_t_guided: \n", u_t_guided)
+            if mask is not None:
+                with torch.enable_grad():
+                    grad_l = self.grad_loss(mask, mu, y_n, z_t)
 
+                u_t = tensordict_apply(
+                    lambda u, g: u - (lambda_[i]) * g,
+                    u_t,
+                    grad_l,
+                )
 
             with torch.no_grad():
-                z_t = self.euler_step(z_t, u_t_guided, dt)
+                z_t = self.euler_step(z_t, u_t, dt)
         
         return z_t
 
