@@ -121,30 +121,31 @@ class GuidedFlow(BaseLightningModule):
         out = {k: (v * stds + means if "state" in k else v) for k, v in batch.items()}
         return out
 
-    def rollout(
-        self, 
-        N, 
-        x_cond,  # TODO: need a better name
-        y: list[torch.Tensor] | None = None, # shape: 
-        mask: torch.Tensor | None = None,  # shape: 
-        lambda_: list[torch.Tensor] | None = None,
-    ):
-        realized_trajectory = []
+    # NOTE: may be useful later on
+    # def rollout(
+    #     self, 
+    #     N, 
+    #     x_cond,  # TODO: need a better name
+    #     y: list[torch.Tensor] | None = None, # shape: 
+    #     mask: torch.Tensor | None = None,  # shape: 
+    #     lambda_: list[torch.Tensor] | None = None,
+    # ):
+    #     realized_trajectory = []
 
-        for n in range(N):
-            y_n = None if y is None else y[n]
-            x_hat = self.rollout_step(
-                x_cond=x_cond,
-                y_n=y_n,
-                mask=mask,
-                lambda_=lambda_
-            )
-            realized_trajectory.append(x_hat)
+    #     for n in range(N):
+    #         y_n = None if y is None else y[n]
+    #         x_hat = self.rollout_step(
+    #             x_cond=x_cond,
+    #             y_n=y_n,
+    #             mask=mask,
+    #             lambda_=lambda_
+    #         )
+    #         realized_trajectory.append(x_hat)
 
-            if n < N - 1:
-                x_cond = tensordict_cat([x_cond["state"], x_hat], dim=1)
+    #         if n < N - 1:
+    #             x_cond = tensordict_cat([x_cond["state"], x_hat], dim=1)
 
-        return realized_trajectory
+    #     return realized_trajectory
 
     def rollout_step(self,
         x_cond,  # TODO: need a better name

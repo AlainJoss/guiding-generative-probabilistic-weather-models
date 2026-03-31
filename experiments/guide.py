@@ -7,6 +7,14 @@ app = marimo.App(width="medium", css_file="")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    # Boiler plate
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## todos
     - normalize the colormaps around zero
     - refactor plots to use a dix min and max
@@ -23,14 +31,6 @@ def _(mo):
     - steer model towards grount truth in mask and measure divergence across states
     - generate multiple (vars, levels, partitions) no-guidance N rollouts and save in experiment folder -> need a way to encode the experiment (log of experiments or yaml with keys).
     - as baseline compute some basic facts about ArchesWeatherGen. For instance, how well it does (compared to its deterministic brother)? How does performance degrade as N of rollout increases?
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Guidance experiments
     """)
     return
 
@@ -139,24 +139,30 @@ def _(mo):
     return
 
 
-@app.function
-def sinusoidal_schedule(T: int, flatness: float, peak: float):
+@app.cell
+def _(torch):
     import math
-    import torch
 
-    if T <= 0:
-        return []
+    def N_schedule(T: int, flatness: float, peak: float, alpha: float = 0.0):
+        if T <= 0:
+            return []
 
-    if T == 1:
-        return [torch.tensor(0.0, dtype=torch.float32)]
+        return [
+            torch.tensor(
+                alpha + peak * (math.sin(0.5 * math.pi * (t + 1) / T) ** flatness),
+                dtype=torch.float32,
+            )
+            for t in range(T)
+        ]
 
-    return [
-        torch.tensor(
-            peak * (math.sin(math.pi * t / (T - 1)) ** flatness),
-            dtype=torch.float32,
-        )
-        for t in range(T)
-    ]
+    def T_schedule(T: int, flatness: float, peak: float): 
+        if T == 1: 
+            return [torch.tensor(0.0, dtype=torch.float32)] 
+        return [
+            torch.tensor( peak * (math.sin(math.pi * t / (T - 1)) ** flatness), dtype=torch.float32, ) for t in range(T)
+               ] 
+
+    return N_schedule, T_schedule
 
 
 @app.cell
@@ -199,20 +205,24 @@ def _(partition_dropdown):
 @app.cell
 def _(LEVELS_DICT, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_dropdown = mo.ui.dropdown(LEVELS, value=LEVELS[0], label="level: ")
-    return LEVELS, level_dropdown
+    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level: ")
+    return LEVELS, level_slider
 
 
 @app.cell
-def _(level_dropdown):
-    level = level_dropdown.value
+def _(level_slider):
+    level = level_slider.value
     return (level,)
 
 
 @app.cell
 def _(VARIABLES_DICT, mo, partition):
     VARIABLES = VARIABLES_DICT[partition]
-    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLES[2], label="variable : ")
+    if partition == "surface":
+        VARIABLES_VALUE = VARIABLES[2]
+    else:
+        VARIABLES_VALUE = VARIABLES[3]
+    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLES_VALUE, label="variable : ")
     return VARIABLES, var_dropdown
 
 
@@ -224,7 +234,7 @@ def _(var_dropdown):
 
 @app.cell
 def _(mo):
-    N_slider = mo.ui.slider(3, 20, value=6, label="N: ")
+    N_slider = mo.ui.slider(1, 20, value=1, label="N: ")
     return (N_slider,)
 
 
@@ -232,25 +242,6 @@ def _(mo):
 def _(N_slider):
     N = N_slider.value
     return (N,)
-
-
-@app.cell
-def _(mo):
-    lambda_shape_slider = mo.ui.slider(1.0, 10.0, step=0.1, value=1.0, label="lambda schedule shape")
-    y_shape_slider = mo.ui.slider(1.0, 10.0, step=0.1, value=1.0, label="y schedule shape")
-    return lambda_shape_slider, y_shape_slider
-
-
-@app.cell
-def _(mo):
-    alpha_slider = mo.ui.slider(0.1, 5, value=1.0, label="alpha: ", step=0.1)
-    return (alpha_slider,)
-
-
-@app.cell
-def _(alpha_slider):
-    alpha = alpha_slider.value
-    return (alpha,)
 
 
 @app.cell
@@ -279,21 +270,40 @@ def _(w_slider):
 
 
 @app.cell
+def _(mo):
+    lambda_shape_slider = mo.ui.slider(1.0, 10.0, step=0.1, value=1.0, label="shape: ")
+    y_shape_slider = mo.ui.slider(1.0, 10.0, step=0.1, value=1.0, label="shape: ")
+    return lambda_shape_slider, y_shape_slider
+
+
+@app.cell
 def _(lambda_shape_slider):
     lambda_shape = lambda_shape_slider.value
     return (lambda_shape,)
 
 
 @app.cell
-def _(lambda_shape, w):
-    lambda_trajectory = sinusoidal_schedule(25, lambda_shape, w) 
+def _(T_schedule, lambda_shape, w):
+    lambda_trajectory = T_schedule(25, lambda_shape, w) 
     return (lambda_trajectory,)
 
 
 @app.cell
 def _(lambda_trajectory, plot_trajectory):
-    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "lambda", 5)
+    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "lambda", ymax=5)
     return (lambda_trajectory_plot,)
+
+
+@app.cell
+def _(mo):
+    alpha_slider = mo.ui.slider(-5, 5, value=1, label="alpha: ", step=0.1)
+    return (alpha_slider,)
+
+
+@app.cell
+def _(alpha_slider):
+    alpha = alpha_slider.value
+    return (alpha,)
 
 
 @app.cell
@@ -303,15 +313,10 @@ def _(y_shape_slider):
 
 
 @app.cell
-def _(N, alpha, y_shape):
-    y_trajectory = sinusoidal_schedule(N, y_shape, alpha) 
+def _(N, N_schedule, alpha, torch, y_shape):
+    y_trajectory = N_schedule(N, y_shape, alpha) 
+    y_trajectory = [torch.tensor(0.0, dtype=torch.float32)] + y_trajectory
     return (y_trajectory,)
-
-
-@app.cell
-def _(plot_trajectory, y_trajectory):
-    y_trajectory_plot = plot_trajectory(y_trajectory, "y", 5)
-    return (y_trajectory_plot,)
 
 
 @app.cell
@@ -342,8 +347,29 @@ def _(avg_over_mask, get_guidance_trajectory, mask, slice, y_trajectory):
     avg_over_mask_denormalized  = avg_over_mask(slice, mask)
     guidance_terms_denormalized  = get_guidance_trajectory(y_trajectory, avg_over_mask_denormalized)
 
-    guidance_trajectory = [avg_over_mask_denormalized] + guidance_terms_denormalized
-    return (guidance_terms_denormalized,)
+    guidance_trajectory = guidance_terms_denormalized
+    return guidance_terms_denormalized, guidance_trajectory
+
+
+@app.cell
+def _(guidance_trajectory, var, y_trajectory):
+    from src.interaction import plot_dual_trajectory
+    y_trajectory_plot = plot_dual_trajectory(
+        y_trajectory=y_trajectory,
+        guidance_trajectory=guidance_trajectory,
+        var=var,
+        ymin_left=-1,
+        ymax_left=1
+    )
+    return (y_trajectory_plot,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Guidance experiments
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -358,38 +384,38 @@ def _(mo):
 def _(
     N,
     N_slider,
-    alpha,
     alpha_slider,
     lambda_shape_slider,
     lambda_trajectory_plot,
-    level_dropdown,
+    level_slider,
     map_widget,
     mo,
     partition_dropdown,
     timestamp_dropdown,
     var_dropdown,
-    w,
     w_slider,
     y_shape_slider,
     y_trajectory_plot,
 ):
     mo.vstack([
-        timestamp_dropdown,
-        var_dropdown,
-        partition_dropdown,
-        level_dropdown,
-            mo.hstack([N_slider, mo.md(f"{N} (number of rollouts)")], justify="start"),
+        mo.hstack([
+            timestamp_dropdown,
+            partition_dropdown,
+            var_dropdown,
+            level_slider,
+        ], justify="start"),
+        mo.hstack([N_slider, mo.md(f"{N}")], justify="start"),
         mo.hstack([
             mo.vstack([
-            lambda_shape_slider,
-            mo.hstack([w_slider, mo.md(f"{w} (guidance schedule scaling factor)")], justify="start"),
-            lambda_trajectory_plot,
-        ]),
-            mo.vstack([
                 y_shape_slider,
-                mo.hstack([alpha_slider, mo.md(f"{alpha} (guidance schedule scaling factor)")], justify="start"),
+                alpha_slider,
                 y_trajectory_plot,
-            ])
+            ]),
+            mo.vstack([
+                lambda_shape_slider,
+                w_slider,
+                lambda_trajectory_plot,
+            ]),
         ]),
         map_widget
     ])
@@ -405,10 +431,17 @@ def _(mo):
 
 
 @app.cell
-def _(device, gen_model, state_to_device, torch):
+def _():
+    from src.utils import save_config, ensure_result_dir
     from src.rollout_step import rollout_step
 
+    return ensure_result_dir, rollout_step, save_config
+
+
+@app.cell
+def _(device, gen_model, rollout_step, state_to_device, torch):
     def run(
+        result_dir, 
         ds,
         x_start,
         guidance_terms_denormalized,
@@ -424,26 +457,44 @@ def _(device, gen_model, state_to_device, torch):
         var_idx,
     ):
         x_start = state_to_device(x_start, device)
-        y_t = torch.as_tensor(guidance_terms_denormalized, device=device)[0]
+        y = torch.as_tensor(guidance_terms_denormalized, device=device)
 
         return rollout_step(
+            result_dir=result_dir,
             ds=ds,
             x_start=x_start,
             gen_model=gen_model,
             mask_corners=mask_corners,
-            y_t=y_t,
+            y=y,
             lambda_=lambda_,
             N=N,
-            timestamp=timestamp,
-            timestamp_idx=timestamp_idx,
             partition=partition,
-            level=level,
             level_idx=level_idx,
-            var=var,
             var_idx=var_idx
         )
 
     return (run,)
+
+
+@app.cell
+def _(mo):
+    get_status, set_status = mo.state("IDLE")
+    return get_status, set_status
+
+
+@app.cell
+def _(run_button, set_status):
+    set_status("IDLE")
+    if run_button.value:
+        set_status("RUNNING")
+    return
+
+
+@app.cell
+def _(get_status, mo):
+    status = get_status()
+    mo.md(f"Experiment status: **{status}**")
+    return (status,)
 
 
 @app.cell
@@ -454,26 +505,10 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    get_status, set_status = mo.state("IDLE")
-    return get_status, set_status
-
-
-@app.cell
-def _(get_status, mo, run_button, set_status):
-    set_status("IDLE")
-    if run_button.value:
-        set_status("RUNNING")
-        SET = True
-    status = get_status()
-    mo.md(f"Experiment status: **{status}**")
-    return (status,)
-
-
-@app.cell
 def _(
     N,
     ds,
+    ensure_result_dir,
     guidance_terms_denormalized,
     lambda_trajectory,
     level,
@@ -482,6 +517,7 @@ def _(
     partition,
     run,
     run_button,
+    save_config,
     set_status,
     status,
     timestamp,
@@ -489,24 +525,84 @@ def _(
     var,
     var_idx,
     x_start,
+    y_trajectory,
 ):
+    import time
+    time.sleep(3)
     if run_button.value and status == "RUNNING":
-        run(
-            ds,
-            x_start,
-            guidance_terms_denormalized,
-            lambda_trajectory,
-            mask_corners,
-            N,
-            timestamp,
-            timestamp_idx,
-            partition,
-            level,
-            level_idx,
-            var,
-            var_idx,
-        )
-        set_status("IDLE")
+        try:
+        
+            result_dir = ensure_result_dir()
+
+            time.sleep(3)
+        
+            run(
+                result_dir,
+                ds,
+                x_start,
+                guidance_terms_denormalized,
+                lambda_trajectory,
+                mask_corners,
+                N,
+                timestamp,
+                timestamp_idx,
+                partition,
+                level,
+                level_idx,
+                var,
+                var_idx,
+            )
+    
+            config = {
+                "N": N,
+                "mask_corners": mask_corners,
+                "timestamp": str(timestamp),
+                "timestamp_idx": int(timestamp_idx),
+                "partition": partition,
+                "level": None if level is None else str(level),
+                "level_idx": None if level_idx is None else int(level_idx),
+                "var": var,
+                "var_idx": int(var_idx),
+                "y": [g_t.item() for g_t in guidance_terms_denormalized],
+                "y_perc": [y_t.item() for y_t in y_trajectory],
+                "lambda_": [l_t.item() for l_t in lambda_trajectory]
+            }
+    
+            save_config(result_dir, config)
+
+            set_status("IDLE")
+        except:
+            set_status("IDLE")
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
     return
 
 

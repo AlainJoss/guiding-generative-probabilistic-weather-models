@@ -36,27 +36,87 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     mask = (lon_mask & lat_mask).astype(np.float32)
     return torch.as_tensor(mask)
 
+def plot_dual_trajectory(
+    y_trajectory: list[float],
+    guidance_trajectory: list[float],
+    var: str,
+    ymin_left: float | None = None,
+    ymax_left: float | None = None,
+):
+    y = np.asarray(y_trajectory, dtype=float)
+    g = np.asarray(guidance_trajectory, dtype=float)
+
+    if len(y) != len(g):
+        raise ValueError("y_trajectory and guidance_trajectory must have the same length")
+
+    x = np.arange(len(y))
+
+    fig, ax1 = plt.subplots(figsize=(6, 4), dpi=100)
+
+    ax1.plot(x, y, "b-", linewidth=2)
+    ax1.plot(x, y, "o", color="#9c27b0", markersize=5)
+
+    ax1.set_xlim((-0.5, 0.5) if len(y) == 1 else (0, len(y) - 1))
+    ax1.set_xticks(np.arange(len(y)))
+    ax1.set_xlabel("N")
+    ax1.set_ylabel("Percentage change")
+    ax1.set_title("Trajectory")
+    ax1.grid(True, alpha=0.3)
+    ax1.axhline(0, color="gray", linewidth=0.5)
+
+    cur_ymin, cur_ymax = ax1.get_ylim()
+    left_min = ymin_left if ymin_left is not None else cur_ymin
+    left_max = ymax_left if ymax_left is not None else cur_ymax
+    if left_min == left_max:
+        left_min -= 1
+        left_max += 1
+    ax1.set_ylim(left_min, left_max)
+
+    ax2 = ax1.twinx()
+    ax2.plot(x, g, "-", linewidth=2)
+    ax2.plot(x, g, "s", markersize=4)
+    ax2.set_ylabel(var)
+
+    y0, y1 = np.nanmin(y), np.nanmax(y)
+    g0, g1 = np.nanmin(g), np.nanmax(g)
+
+    if y0 == y1:
+        y0 -= 1
+        y1 += 1
+    if g0 == g1:
+        g0 -= 1
+        g1 += 1
+
+    def map_left_to_right(v):
+        return g0 + (v - y0) * (g1 - g0) / (y1 - y0)
+
+    ax2.set_ylim(map_left_to_right(left_min), map_left_to_right(left_max))
+
+    return fig
+
 
 def plot_trajectory(
     trajectory: list[np.float64],
     var: str,
-    y_max: float | None = None,
+    ymin: float | None = None,
+    ymax: float | None = None,
 ):
     x = np.arange(len(trajectory))
-    fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
+    fig, ax = plt.subplots(figsize=(6, 4), dpi=200)
     ax.plot(x, trajectory, "b-", linewidth=2)
     ax.plot(x, trajectory, "o", color="#9c27b0", markersize=5)
     ax.set_xlim(0, len(trajectory) - 1)
     ax.set_xticks(np.arange(len(trajectory)))
-    ax.set_xlabel("N")
+    ax.set_xlabel("steps")
     ax.set_ylabel(f"{var}")
     ax.set_title("Trajectory")
     ax.grid(True, alpha=0.3)
     ax.axhline(0, color="gray", linewidth=0.5)
 
-    if y_max is not None:
-        ymin, _ = ax.get_ylim()
-        ax.set_ylim(ymin, y_max)
+    current_ymin, current_ymax = ax.get_ylim()
+    final_ymin = ymin if ymin is not None else current_ymin
+    final_ymax = ymax if ymax is not None else current_ymax
+    ax.set_ylim(final_ymin, final_ymax)
 
     return fig
 
@@ -228,26 +288,35 @@ def annotate_cell_values(
     fontsize=6,
     color="black",
     threshold=None,
+    lon_min=None,
+    lon_max=None,
+    lat_min=None,
+    lat_max=None,
 ):
-    """
-    Annotate plotted cell centers with their numeric values.
-
-    Parameters
-    ----------
-    threshold:
-        If not None, only annotate cells with abs(value) >= threshold.
-    """
     ii, jj = np.where(np.isfinite(array_2d_plot))
 
+    print(array_2d_plot.max())
+
     for i, j in zip(ii, jj):
+        lon = lon_c_plot[j]
+        lat = lat_c[i]
         value = array_2d_plot[i, j]
 
         if threshold is not None and abs(value) < threshold:
             continue
 
+        if lon_min is not None and lon < lon_min:
+            continue
+        if lon_max is not None and lon > lon_max:
+            continue
+        if lat_min is not None and lat < lat_min:
+            continue
+        if lat_max is not None and lat > lat_max:
+            continue
+            
         ax.text(
-            lon_c_plot[j],
-            lat_c[i],
+            lon,
+            lat,
             format(value, fmt),
             ha="center",
             va="center",
@@ -278,6 +347,10 @@ def draw_base_map(
     value_fontsize=6,
     value_color="black",
     value_threshold=None,
+    value_lon_min=None,
+    value_lon_max=None,
+    value_lat_min=None,
+    value_lat_max=None,
 ):
     im = ax.pcolormesh(
         lon_e_plot,
@@ -293,7 +366,7 @@ def draw_base_map(
 
     world.boundary.plot(ax=ax, color="black", linewidth=0.4, zorder=5)
     if show_values:
-        annotate_cell_values(
+       annotate_cell_values(
             ax,
             array_2d_plot=array_2d_plot,
             lon_c_plot=lon_c_plot,
@@ -302,6 +375,10 @@ def draw_base_map(
             fontsize=value_fontsize,
             color=value_color,
             threshold=value_threshold,
+            lon_min=value_lon_min,
+            lon_max=value_lon_max,
+            lat_min=value_lat_min,
+            lat_max=value_lat_max,
         )
     ax.set_xlabel("Longitude")
     ax.set_ylabel("Latitude")
@@ -341,12 +418,29 @@ def plot_map_static(
     value_fontsize=6,
     value_color="black",
     value_threshold=None,
+    value_lon_min=None,
+    value_lon_max=None,
+    value_lat_min=None,
+    value_lat_max=None,
 ):
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
     world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
     fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
+
+    zoom_ = max(1, int(zoom))
+
+    full_lon_span = 360.0
+    full_lat_span = 180.0
+
+    lon_span = full_lon_span / zoom_
+    lat_span = full_lat_span / zoom_
+
+    lon_min = max(-180.0, zoom_center_lon - lon_span / 2)
+    lon_max = min(180.0, zoom_center_lon + lon_span / 2)
+    lat_min = max(-90.0, zoom_center_lat - lat_span / 2)
+    lat_max = min(90.0, zoom_center_lat + lat_span / 2)
 
     draw_base_map(
         ax,
