@@ -1,0 +1,337 @@
+\documentclass[a4paper,12pt]{article}
+
+\input{preamble}
+\title{
+    \vspace*{3cm}
+    {\LARGE\bfseries
+    Guiding\\[0.2em]
+    Generative Probabilistic Weather Models\\[0.2em]
+    to Simulate\\[0.2em]
+    Realistic Extreme Weather Events
+    }\\[1.2cm]
+    {\large Master Thesis - Notes}
+}
+
+\author{
+\begin{tabular}{@{}l l@{}}
+\multicolumn{2}{@{}l}{\textbf{Author}}\\[0.3em]
+Alain Joss & \texttt{alain.joss@uzh.ch}\\[0.9em]
+\multicolumn{2}{@{}l}{\textbf{Supervision}}\\[0.3em]
+Maxim Samarin & \texttt{maxim.samarin@sdsc.ethz.ch}\\
+Shirin Goshtasbpour & \texttt{shirin.goshtasbpour@sdsc.ethz.ch}\\
+Prof.\ Dr.\ Guillaume Obozinski & \texttt{guillaume.obozinski@sdsc.ethz.ch}\\
+\end{tabular}
+}
+% \date{
+%     \vspace*{4.2cm}
+%     % left-aligned heading
+%     \makebox[\textwidth][l]{\large\textbf{Supervision Agreement}}\\[0.6cm]
+%     % right-aligned blocks with equal left edge (so the 2nd line never starts further left)
+%     \begin{tabular*}{\textwidth}{@{}r@{\extracolsep{\fill}}l@{}}
+%     Place, date: \quad & \rule{7.5cm}{0.4pt}\\[0.5cm]
+%     Signature (Prof.\ Dr.\ Guillaume Obozinski): \quad & \rule{7.5cm}{0.4pt}
+%     \end{tabular*}
+% }
+
+\date{
+  \vfill
+  \today
+}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\clearpage
+\setcounter{page}{1}
+
+\section{ArchesWeather}
+Here a few clarifying notes on the specifics of ArchesWeather and its implementation details in code.
+
+\subsection{Empirical bservations}
+\begin{itemize}
+    \item The diffusion model on top of the deterministic one makes the predictions worse in terms of RMSE.
+    \item The predictions seem to be largely a copy paste of the past.
+\end{itemize}
+
+\subsection{The theory}
+Instead of regressing the learned flow model against the velocity vector $r-\epsilon$, they learn to predict $r$ directly, and retrieve the direction $u_{t}^{\theta}(r_t)$ for the next update as follows:
+\begin{align*}
+    z_{t} &= (1-s)r_{t} + s\epsilon \\
+    \text{let}\quad r_{t}^\theta:= r_{t}^\theta((1-s)r_{t} + s\epsilon) &= r_{t}^\theta(z_{t}) \\
+    \text{s.t.} \quad \epsilon_{t}^\theta &= \frac{z_{t} - (1-s)r_{t}^\theta}{s} \\
+    \text{then} \quad  u_{t}^\theta =  r_{t}^\theta - \epsilon_{t}^\theta &= \frac {s}{s}r_{t}^\theta - \frac{z_{t} - (1-s)r_{t}^\theta}{s} \\
+    &= \frac{r_{t}^\theta-z_{t}}{s} 
+\end{align*}
+where, during the generation process, $z_{t}=r_{t-\delta}^\theta$ is the noisy state at the previous time step (or pure noise at initialization of sampling, to confirm plug in $s=0$ and $s=1$), and $s=\frac{t}{T}$ (progressing from 0 to 1, although in their implementation they do the opposite, and go from 1 to 0).
+We have thus retrieved the velocity vector $u_{t}^{\theta}(z_t)$, which we can feed to our Euler sampler.
+The Euler sampler then does the usual update
+$$
+z_{t+\delta} = z_t + h u_{t}^\theta(z_t)
+$$
+
+\subsection{The implementation}
+For some reason, although the sampler performs really simple updates, they defer the update steps to the \texttt{diffusers.FlowMatchEulerDiscreteScheduler} class, which overcomplicates thing unnecessarily.
+
+Since the scheduler makes use of $h:=s_t-s_{t+1} < 0$, they compute the negative velocity $-u_t^\theta=\frac{r_{t}^\theta-z_{t}}{s}$.
+
+The scheduler updates as outlined in algorithm \ref{algo-euler}.
+\begin{algorithm}
+\caption{Update}
+\begin{algorithmic}[1]
+\Require current sample $z_t$, model output $-u_t$, noise level $s_t$, effective noise level $\hat{s}_t$, next scheduler value $s_{t+1}$
+\State $\tilde{z} \gets z_t - u_t \cdot s_t$
+\Comment{compute denoised sample}
+\State $d \gets \dfrac{z_t - \tilde{z}}{\hat{s}_t}$
+\Comment{convert denoised prediction into ODE derivative}
+\State $\Delta t \gets s_{t+1} - \hat{s}_t$
+\Comment{step size}
+\State $z_{t+1} \gets z_t + d \cdot \Delta t$
+\Comment{Euler update}
+\State \Return $x_{t+1}$
+\end{algorithmic}
+\label{algo-euler}
+\end{algorithm}
+
+Since with our parameters $\hat{s}_t=s_t$, $\Delta t=-u_t$ and $d=s_t-s_{t+1}$, making the update equivalent to the simple Euler sampler defined above. 
+
+\section{Guidance}
+
+\subsection{Loss}
+At time $t$, given a scalar value $y_t$ (in normalized space) denoting the guidance term, we define the squared l2 distance from the denoised state $z_t$ as follows:
+\begin{align*} 
+    \mathcal{L}(y_t, z_t) = \frac{1}{2} \left\lVert y_t - \frac{\sum_i m_i \, (x_t^i + \sigma^i z_t^i)}{\sum_i m_i}   \right\lVert ^2
+\end{align*}
+Note that we the define guidance $y_t$ in the denormalized space.
+
+We are then interested in the gradient $\nabla_{z_t}\mathcal{L}(y_t, z_t)$, which we can compute in closed form:
+\begin{align*} 
+    \text{let} \quad \hat{m}(z_t) &:= \frac{\sum_i m_i \, (x_t^i + \sigma^i z_t^i)}{\sum_i m_i} \\
+    \text{then} \quad \nabla_{z_t}\mathcal{L}(y_t, z_t) &= \nabla_{z_t}\frac{1}{2} \left\lVert y_t - \hat{m}(z_t) \right\lVert ^2 \\
+    &= \nabla_{z_t}\frac{1}{2} \left(\hat{m}(z_t)^2 - 2 \,y_t \, \hat{m}(z_t) \right) \\
+    &= \hat{m}(z_t) \nabla_{z_t} \hat{m}(z_t) - y_t \nabla_{z_t} \hat{m}(z_t) 
+\end{align*}
+From this we extract the partial derivatives and stack them to put together the final gradient vector:
+\begin{align*}
+     \frac{\partial \, \hat{m}(z_t)}{z_t^j} &= \frac{m^i\sigma^i}{\sum_i m_i} \\
+    \text{then} \quad \frac{\partial \,  \mathcal{L}(y_t, z_t)}{z_t^j} &= \hat{m}(z_t) \frac{m^i\sigma^i}{\sum_i m_i} - y_t \frac{m^i\sigma^i}{\sum_i m_i}
+\end{align*}
+For practical reasons we use automatic differentiation, but this might be worthwhile for future usage.
+
+\subsection{Computing the loss in denormalized space}
+Unfortunately, we cannot define $y_t$ in normalized space directly and have a direct translation to denormalized space. We need instead to define $y_t$ in denormalized space, and denormalize $\hat{r}_t$ instead.
+
+The denormalized prediction at time $t$ is defined as follows:
+\begin{align*}
+\hat{x}^\text{denorm} &= \mu^\text{denorm} + (\hat{x}^\text{norm}) \odot \sigma^\text{denorm} \\
+&= \mu^\text{denorm} + (\hat{\mu}^\text{det} + \sigma^\text{residual} \odot z_t) \odot \sigma^\text{denorm}
+\end{align*}
+
+Importantly, we have to perform two denormalizations. One in the residual space, and one in the data space. The second one is standard machine learning preprocessing, whilst the first one comes from the way the target of the generative model is built, which is as follows:
+\begin{align*}
+r^\text{gt} &=  \frac{x^\text{gt} - \hat{x}^\text{det}}{\sigma^\text{residual}}
+\end{align*}
+Note, $\sigma^\text{residual}$ is computed as standard deviation of the residuals $\sigma^\text{residual}_{n \in [N]}(x^\text{gt}_n - \hat{x}_n^\text{det})$ over the dataset.
+
+The loss then takes following form:
+\begin{align*}
+\mathcal{L}^\text{denorm}(y_t, \hat{x}^\text{denorm}) &=  \frac{1}{2} \left\lVert y_t - \frac{\sum_i \hat{x}^\text{denorm}_i \odot m_i}{\sum_i m_i} \right\lVert^2_2
+\end{align*}
+
+\subsection{Classifier guidance}
+The conditional vector field can be defined in terms of the conditional score as follows:
+\begin{align*}
+     u_t(z|y) &=  u_t(z) + a_t \nabla_{z} \log p_t(y|z) 
+\end{align*}
+Where $\alpha_t$ comes is one of the two noise scheduling terms (fixed before training). 
+
+We can parametrize the conditional probability $p_t(y|z)$ as we wish (show why from paper), and decide on following form: 
+\begin{align*}
+    u_t(z|y) &=  u_t(z) + a_t \nabla_{z} \log p_t(y|z) \\ &= u_t(z) + a_t \nabla_{z} \log e^{-\mathcal{L}(y, z^\theta(z_t))} \\
+    &= u_t(z) - a_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t))
+\end{align*}
+In the spirit of classifier guidance we substitute $\alpha_t$ with a general guidance strength term $\lambda_t:= w\cdot \alpha_t$:
+\begin{align*}
+    \tilde{u}_t(z|y) = u_t(z) - \lambda_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) 
+\end{align*}
+Note that with $w\neq 1$ we abandon the vector field $u(x|y)$ in favor of $\tilde{u}_t(z|y)$, losing the original probabilistic interpretation (still in the spirit of classifier guidance).
+$\lambda_t$ is then a paramater we tune for our specific purposes. The tuning implies that we need a metric of fitness, that defines how good the guided samples "look".
+
+Note, in our case we are not interested in the classifier free guidance counterpart, since we will not train a conditional network $u_t(z|y)$. However, we might, for the sake of curiosity, experiment with a convex blend of the velocity and gradient vectors, in the spirit of classifier free guidance:
+\begin{align*}
+    \bar{u}_t(z|y) &:= (1-w)u_t(z) - (1-w)\lambda_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) \\
+    \text{or maybe even} \quad \bar{u}_t(z|y) &:= (1-w_t)u_t(z) - (1-w_t) \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) 
+\end{align*}
+
+\subsection{FlowGrad}
+
+An alternative approach to ablate a schedule to find a fitting $\lambda_t$, is to define following optimization problem:
+
+...
+
+\section{Producing weather trajectories}
+
+Whilst we have derived a potential method for producing weather trajectories in diffusion space we still haven't defined what $r^\text{guide}$ looks like.
+
+\subsection{Guidance times}
+Since the goal is to generate a weather trajectory, which is defined by a roll-out of multiple prediction steps, we have to distinguish between guidance at universal time and guidance at diffusion time.
+
+\subsubsection{Guidance @ universal time}
+
+Depending on the type of model used we can have different types of guidance: 
+\begin{itemize}
+    \item Deterministic: backwards guidance
+    \item Generative: forward guidance
+    \item Deterministic + residual generative: rolling forward/backward guidance
+\end{itemize}
+
+\subsubsection{Guidance @ generation time}
+At generation time we have a single $r^\text{guide}$ that define the direction of generation. A guidance strength schedule defines how strong we want to guide the generation towards the wanted result over $T$ steps.
+
+The guidance method used depends in the first place on the type of model we are dealing with:
+\begin{itemize}
+    \item Score: $\nabla_{x_t} \log p_t(x_t|c)$
+        \begin{itemize}
+            \item Loss guidance
+            \item Universal guidance
+        \end{itemize}
+    \item Flow matching: $u_t(x_t|c)$
+        \begin{itemize}
+            \item FlowGrad
+            \item CFG-like 
+            \item Source-Guided Flow Matching
+            \item Monte Carlo guidance
+        \end{itemize}
+\end{itemize}
+
+Importantly, for score based models use 
+
+\subsection{Trajectory hyperparameters}
+The design of $r^\text{guide}$ depends on our approach to specify the weather trajectory.
+To simplify matters we can start by listing relevant hyperparameters. 
+
+\subsection{Backward guidance}
+
+
+
+\subsection{Forward guidance}
+
+\subsection{Rolling forward/backward guidance}
+Must pay attention to the fact that the input states are actually 2! In the gradient descent we should only change the current state!
+
+\begin{tikzpicture}[
+    >=Stealth,
+    every node/.style={font=\small},
+    x=2.2cm, y=1.6cm
+]
+
+% top row
+\node (Xt)      at (0,0) {$X_t$};
+\node (det1)    at (1,0) {det};
+\node (Xtp1hat) at (2,0) {$\hat{X}_{t+1}$};
+\node (det2)    at (3,0) {det};
+\node (Xtp2hat) at (4,0) {$\hat{X}_{t+2}$};
+
+\draw[->] (Xt) -- (det1);
+\draw[->] (det1) -- (Xtp1hat);
+\draw[->] (Xtp1hat) -- (det2);
+\draw[->] (det2) -- (Xtp2hat);
+
+% lower middle row
+\node (Xtp1tilde) at (2,-1) {$\tilde{X}_{t+1}$};
+\node (back)      at (3,-1) {SGD};
+\draw[->] (back) -- (Xtp1tilde);
+
+% guide below right
+\node (Loss)      at (4,-1) {$\mathcal{L}$};
+\node (guide)  at (4,-2) {$X_{\mathrm{guide}}$};
+
+\draw[->] (Xtp2hat) -- (Loss);
+\draw[->] (guide) -- (Loss);
+\draw[->] (Loss) -- (back);
+
+% left side gen branch
+\node (gen)    at (0,-1) {gen};
+\node (Xtp1bar) at (2,-2) {$\bar{X}_{t+1}$};
+
+\draw[->] (Xtp1tilde) -- (gen);
+\draw[->] (gen.south) -- ++(0,-0.45) -| (Xtp1bar);
+% small downward arrow under Xt
+\draw[->] (Xt.south) -- ++(0,-0.45);
+
+\end{tikzpicture}
+
+
+
+\section{Old notes on universal guidance}
+
+\subsection{UG (1)}
+
+We now translate universal guidance in the language of flow modeling such that we can apply it correctly and maybe even develop an ad-hoc solution that works directly in vector-field land ($u_t^\theta$) instead of noise land ($\epsilon_t^\theta$).
+
+Universal guidance works as follows.
+Given the "forward noising":
+\begin{align*}
+    z_t &= \sqrt{\alpha_t} z_o + \sqrt{1-\alpha_t}\epsilon \\
+    \epsilon_\theta(z_t, t) \approx \epsilon &= \frac{z_t - \sqrt{\alpha_t}z_o}{\sqrt{1-\alpha_t}}
+    \\
+    \hat{z}_o &= \frac{z_t - \sqrt{1-\alpha_t}\epsilon_\theta(z_t, t)}{\sqrt{\alpha_t}} 
+\end{align*}
+and classifier guidance:
+$$
+\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - \sqrt{1-\alpha_t}\nabla_{z_t}\log p(c|z_t)
+$$
+they rewrite guidance with a loss-based term:
+$$
+\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - \sqrt{1-\alpha_t}\nabla_{z_t}\mathcal{L}(c, f^\theta(z_t, t))
+$$
+This aims to extend classifier guidance, departing from its exact mathematical derivation ($\nabla_x \log p(x|y) = \nabla_x \log p(x) + \nabla_x \log p(y|x)$).
+Replacing $\nabla_x \log p(y|x)$ with a generic loss term enables to guide sampling with some generic fitness function. Whether this produces meaningful results now completely depends on our qualitative analysis. This is however also valid for theoretically derived methods in the first place. 
+
+The first observation UG makes is that we might want to replace the weighting term $\sqrt{1-\alpha_t}$ with some other weighting term $s_t$, resulting in:
+$$
+\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - s_t\nabla_{z_t}\mathcal{L}(c, f^\theta(z_t, t))
+$$
+In addition, we might want to check fitness against the predicted denoised sample instead of the noisy sample. This is also motivated by the fact that a classifier wouldn't know what to do very well with a noisy image.
+Hence:
+$$
+\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - s_t\nabla_{z_t}\mathcal{L}(c, f^\theta(\hat{z}_o, t))
+$$
+
+In our use case however, $f$ is not a classifier. Our loss function aims to measure how well the denoised state at time $t$ aligns with the guidance term $y_n$. So in our case $f:=\text{Id}$. In addition, our network parametrizes the velocity $u_t$. However, when we express the conditional velocity in terms of the score we obtain a very similar equivalence:
+\begin{align*}
+    u_t(x|y) &=  u_t(x) + a_t \nabla \log p_t(y|x)
+\end{align*}
+
+In the same fashion we might want to replace the conditional score with the following:
+\begin{align*}
+    u_t(z|y) &=  u_t(z) + a_t \nabla_{z} \log p_t(y|z) \\ &= u_t(z) + a_t \nabla_{z} \log e^{-\mathcal{L}(y, z^\theta(z_t))} \\
+    &= u_t(z) - a_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) \\
+    & \rightarrow u_t(z) - \lambda_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) \quad \text{with } \lambda_t := wa_t 
+\end{align*}
+
+Remember that when $w\neq1$, the guidance looses its probabilistic interpretation. Anyways, the method is an heuristic in the first place: representing the data distribution using a multimodal Gaussian is a means to an end. We are more interested in what works rather than what can be theoretically derived from first principles. Much of the focus should thus go into how to evaluate the results of the diffusion, rather than its theoretical soundness. This means we will have to define a fitness criteria to tune different schedules for $\lambda_t$.
+
+\subsection{UG (2)}
+Before analyzing their second adjustment to the guidance function, we have to answer following question: what is the loss and its components in our case?
+In our case we're interested in following loss
+$$
+\mathcal{L}(c=(\mathbb{M},r_{\text{guide}}), r^\theta(r_t))=\| \text{avg}(\mathbb{M} \odot (r^{\text{guide}} - r^\theta(r_t)))\|^2_2
+$$
+Note that in our case $f:=\text{Id}(\cdot)$ (identity function). In fact we want to compute the loss with respect to the predicted clean sample, without passing it into any additional function.
+Here $\mathbb{M}$ denotes a mask of interest and $r^{\text{guide}}$ contains the corresponding values of interest. For instance $r^{\text{guide}}$ might just be a percentage increase in temperature at a specific location.
+
+In our case, the second adjustment of the guidance function results in following
+\begin{align*}
+    \Delta_{z_o} &= \arg\min_\Delta \mathcal{L}(r^{\text{guide}}, z^\theta + \Delta) \\
+    \Delta_{z_o} &= z^\theta - r^{\text{guide}} \\
+    \Tilde{z} &= z^\theta - \Delta_{z_o} = r^{\text{guide}}
+\end{align*}
+Because the optimized term can be computed in closed form (due to the $f:=\text{Id}(\cdot)$), the update $\Tilde{z}$ collapses to $r_{\text{guide}}$.
+This is of course not what we want, since $r_{\text{guide}}$ is not physically meaningful, and the procedure itself is just a hack to make guidance more reliable than the first version.
+
+
+% \bibliographystyle{plain}
+% \bibliography{refs}
+
+\end{document}

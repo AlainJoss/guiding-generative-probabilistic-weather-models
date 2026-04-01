@@ -174,3 +174,9 @@ experiments/random.ipynb
 experiments/generated
 modelstore/
 geoarches/stats/
+
+journal/latex-notes/*
+!journal/latex-notes/main.pdf
+!journal/latex-notes/main.tex
+!journal/latex-notes/preamble.pdf
+!journal/latex-notes/refs.bib
