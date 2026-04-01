@@ -10,13 +10,42 @@ from pathlib import Path
 from datetime import datetime
 import torch
 
-def ensure_result_dir():
-    def get_timestamp():
-        date, time = str(datetime.now().replace(microsecond=0)).split(" ")
-        timestamp = date + "_" + time
-        return timestamp
+from geoarches.lightning_modules import load_module
+from geoarches.dataloaders.era5 import Era5Forecast
+
+def get_dataset():
+    return Era5Forecast(
+        path="data/era5_240/full",  # default path
+        domain="test", # domain to consider. domain = 'test' loads the 2020 period
+        load_prev=True,  # whether to load previous state
+        norm_scheme="pangu",  # default normalization scheme
+        lead_time_hours=6
+    )
+
+def get_model(device):
+    gen_model, _ = load_module(  # _ := gen_config
+        "archesweathergen",
+        module_target="geoarches.lightning_modules.guided_diffusion.GuidedFlow",
+    )
+    return gen_model.to(device)
+
+def get_timestamp():
+    date, time = str(datetime.now().replace(microsecond=0)).split(" ")
+    timestamp = date + "_" + time
+    return timestamp
+
+def ensure_ensemble_rollouts_dir(N: int):
     timestamp = get_timestamp()
-    result_dir = Path("data", "results", f"{timestamp}")
+    result_dir = Path("data", f"ensemble_rollouts", f"{timestamp}")
+    result_dir.mkdir(parents=True, exist_ok=True)
+    for n in range(1, N+1):
+        path = Path(result_dir, f"{n}")
+        path.mkdir(parents=True, exist_ok=True)
+    return result_dir
+
+def ensure_results_dir():
+    timestamp = get_timestamp()
+    result_dir = Path("data", f"results", f"{timestamp}")
     result_dir.mkdir(parents=True, exist_ok=True)
     path = Path(result_dir, "guided")
     path.mkdir(parents=True, exist_ok=True)
@@ -33,9 +62,6 @@ def read_config(result_dir):
     path = Path(result_dir) / "config.json"
     with open(path, "r") as f:
         config = json.load(f)
-
-    # config["timestamp"] = datetime.fromisoformat(config["timestamp"])
-    config["y"] = torch.tensor(config["y"])
     return config
 
 def get_last_experiment_dir():
@@ -66,3 +92,10 @@ def read_state(result_dir, state_type, step: int):
     """
     path = result_dir / f"{state_type}" / f"{step}.nc"
     return xr.open_dataset(path, engine="netcdf4")
+
+
+def get_slice(state, partition, level, var, timestamp):
+    if partition == "surface":
+        return state[var].sel(time=timestamp, method='nearest')
+    else: 
+        return state[var].sel(time=timestamp, level=level, method='nearest')

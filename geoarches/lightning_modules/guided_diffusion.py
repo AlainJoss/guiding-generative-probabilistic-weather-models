@@ -183,7 +183,7 @@ class GuidedFlow(BaseLightningModule):
         ##### init #####
         # draw noise
         generator = torch.Generator(device=self.device)
-        generator.manual_seed(0)
+        # generator.manual_seed(0)
         z = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
@@ -215,7 +215,7 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
 
-            if mask is not None:
+            if y_n is not None:
                 with torch.enable_grad():
                     grad_l = self.grad_loss(mask, mu, y_n, z_t)
 

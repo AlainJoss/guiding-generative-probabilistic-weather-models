@@ -38,13 +38,15 @@ def _():
     from src.utils import (
         read_config,
         read_state,
-        get_last_experiment_dir
+        get_last_experiment_dir,
+        get_slice
     )
     from src.interaction import visualize_map, get_mask_from_corners, get_mask_center
 
     return (
         get_mask_center,
         get_mask_from_corners,
+        get_slice,
         read_config,
         read_state,
         visualize_map,
@@ -57,14 +59,6 @@ def _(mo):
     ## Funcs
     """)
     return
-
-
-@app.function
-def get_slice(state, partition, level, var, timestamp):
-    if partition == "surface":
-        return state[var].sel(time=timestamp, method='nearest')
-    else: 
-        return state[var].sel(time=timestamp, level=level, method='nearest')
 
 
 @app.cell
@@ -264,12 +258,6 @@ def _(show_values_checkbox):
 
 
 @app.cell
-def _(guided_unguided):
-    guided_unguided.max().item()
-    return
-
-
-@app.cell
 def _(guided_unguided, mo):
     center_ = 0.0
     max_ = max(guided_unguided.max().item(), abs(guided_unguided.min().item()))
@@ -334,7 +322,6 @@ def _(cfg, ds, n, unix_tensor_to_iso):
     lead_time_seconds = x_start["lead_time_hours"] * 3600
     timestamp = x_start["timestamp"] - lead_time_seconds
     timestamp = unix_tensor_to_iso(timestamp)
-    timestamp
     return current, next, timestamp, x_start
 
 
@@ -347,7 +334,17 @@ def _(pd):
 
 
 @app.cell
-def _(current, guided, level, next, partition, timestamp, unguided, var):
+def _(
+    current,
+    get_slice,
+    guided,
+    level,
+    next,
+    partition,
+    timestamp,
+    unguided,
+    var,
+):
     guided_slice = get_slice(guided, partition, level, var, timestamp)
     unguided_slice = get_slice(unguided, partition, level, var, timestamp)
     current_slice = get_slice(current, partition, level, var, timestamp)
@@ -390,7 +387,7 @@ def _(mo):
 def _(Path, mo, refresh_button):
     if refresh_button.value:
         pass
-    experiments = Path("data", "results").glob("2026*")
+    experiments = Path("data", "guided_rollouts").glob("2026*")
     experiments = sorted(experiments)[::-1]
     pick_dropdown = mo.ui.dropdown(label="Pick experiment", value=experiments[0], options=experiments)
     return (pick_dropdown,)
@@ -664,6 +661,7 @@ def _(
     avg_over_mask,
     cfg,
     ds,
+    get_slice,
     mask,
     read_state,
     result_dir,
@@ -679,7 +677,7 @@ def _(
         lead_time_seconds_ = x_start_["lead_time_hours"] * 3600
         timestamp_ = x_start["timestamp"]
         timestamp_ = unix_tensor_to_iso(timestamp_)
-    
+
         state = ds.convert_to_xarray(x_start["next_state"].unsqueeze(0), x_start["timestamp"].unsqueeze(0))
         state = get_slice(state, cfg["partition"], cfg["level"], cfg["var"], timestamp_)
         state = state.to_numpy()

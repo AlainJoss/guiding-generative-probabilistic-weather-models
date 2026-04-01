@@ -68,7 +68,7 @@ def _():
     from cartopy.crs import PlateCarree
 
     method_state = {"value": "CubicSpline"}
-    return mo, torch
+    return Path, mo, np, torch
 
 
 @app.cell
@@ -97,34 +97,11 @@ def _():
 
 
 @app.cell
-def _():
-    from geoarches.lightning_modules import load_module
-    from geoarches.dataloaders.era5 import Era5Forecast
-
-    return Era5Forecast, load_module
-
-
-@app.cell
-def _(Era5Forecast):
-    ds = Era5Forecast(
-        path="data/era5_240/full",  # default path
-        domain="test", # domain to consider. domain = 'test' loads the 2020 period
-        load_prev=True,  # whether to load previous state
-        norm_scheme="pangu",  # default normalization scheme
-        lead_time_hours=6
-    )
+def _(device):
+    from src.utils import get_dataset, get_model
+    ds = get_dataset()
+    model = get_model(device)
     return (ds,)
-
-
-@app.cell
-def _(device, load_module):
-    module_target = "geoarches.lightning_modules.{}"  # appendix
-    gen_model, gen_config = load_module(
-        "archesweathergen",
-        module_target=module_target.format("guided_diffusion.GuidedFlow"),
-    )
-    gen_model = gen_model.to(device)
-    return (gen_model,)
 
 
 @app.cell(hide_code=True)
@@ -425,17 +402,108 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Run
+    ## The rollout experiment stuff
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    refresh_button = mo.ui.button(label="refresh")
+    return (refresh_button,)
+
+
+@app.cell
+def _(Path, mo, refresh_button):
+    if refresh_button.value:
+        pass
+    experiments = Path("data", "ensemble_rollouts").glob("2026*")
+    experiments = sorted(experiments)[::-1]
+    pick_dropdown = mo.ui.dropdown(label="Pick experiment", value=experiments[0], options=experiments)
+    return (pick_dropdown,)
+
+
+@app.cell
+def _(pick_dropdown):
+    from src.utils import read_config
+    experiment_dir = pick_dropdown.value
+    cfg = read_config(experiment_dir)
+    return cfg, experiment_dir
+
+
+@app.cell
+def _(cfg, mo, pick_dropdown, refresh_button):
+    mo.vstack([
+        mo.hstack([
+            pick_dropdown, refresh_button,
+        ], justify="start"),
+        mo.vstack([
+            mo.md("#### ----- Experiment params -----"),
+            mo.md("<br>".join(f"{k}: {v}" for k, v in cfg.items()))
+        ]),
+    ])
+    return
+
+
+@app.cell
+def _(cfg):
+    M = cfg["M"]
+    return (M,)
+
+
+@app.cell
+def _():
+    from src.utils import read_state, get_slice
+
+    return get_slice, read_state
+
+
+@app.cell
+def _(
+    M,
+    avg_over_mask,
+    cfg,
+    experiment_dir,
+    get_slice,
+    level,
+    mask,
+    np,
+    partition,
+    read_state,
+    timestamp,
+    torch,
+    var,
+):
+    avgs_avgs = []
+    for n in range(1, cfg["N"]+1):
+        states = [read_state(experiment_dir, str(n), str(m)) for m in range(M)]
+        slices = [get_slice(state, partition, level, var, timestamp) for state in states]
+        slices = [torch.tensor(np.asarray(slice)) for slice in slices]
+        avgs = [avg_over_mask(slice, mask) for slice in slices]
+        avgs_avgs.append(avgs)
+    return (avgs_avgs,)
+
+
+@app.cell
+def _(avgs_avgs):
+    avgs_avgs
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Run guided rollout
     """)
     return
 
 
 @app.cell
 def _():
-    from src.utils import save_config, ensure_result_dir
-    from src.rollout_step import rollout_step
+    from src.utils import save_config, ensure_results_dir
+    from src.rollout import rollout
 
-    return ensure_result_dir, rollout_step, save_config
+    return (save_config,)
 
 
 @app.cell
@@ -527,32 +595,28 @@ def _(
     x_start,
     y_trajectory,
 ):
-    import time
-    time.sleep(3)
     if run_button.value and status == "RUNNING":
         try:
-        
             result_dir = ensure_result_dir()
 
-            time.sleep(3)
-        
-            run(
-                result_dir,
-                ds,
-                x_start,
-                guidance_terms_denormalized,
-                lambda_trajectory,
-                mask_corners,
-                N,
-                timestamp,
-                timestamp_idx,
-                partition,
-                level,
-                level_idx,
-                var,
-                var_idx,
-            )
-    
+            for mc in [mask_corners, None]:
+                run(
+                    result_dir,
+                    ds,
+                    x_start,
+                    guidance_terms_denormalized,
+                    lambda_trajectory,
+                    mc,
+                    N,
+                    timestamp,
+                    timestamp_idx,
+                    partition,
+                    level,
+                    level_idx,
+                    var,
+                    var_idx,
+                )
+
             config = {
                 "N": N,
                 "mask_corners": mask_corners,
@@ -567,42 +631,12 @@ def _(
                 "y_perc": [y_t.item() for y_t in y_trajectory],
                 "lambda_": [l_t.item() for l_t in lambda_trajectory]
             }
-    
+
             save_config(result_dir, config)
 
             set_status("IDLE")
         except:
             set_status("IDLE")
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
     return
 
 
