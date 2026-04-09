@@ -15,21 +15,27 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ## pipeline
+    - generate ensemble rollout as base trajectory
+    - define mask (or evolving masks) and define guidance (y) trajectory (extremified version of ensemble rollout trajectory over mask)
+    - set other params
+    - run experiment
+    - analyze in analyze.py
+
     ## todos
-    - normalize the colormaps around zero
-    - refactor plots to use a dix min and max
-    - solve how to steer in denormalized and latent space
-    - refactor guided_flow model to take in partition, level_index, variable_index
-    - refactor this whole notebook to outsource functionality
-    - the start date is 18:00 the 31.12.2019!
+    - capture total relative change per variable in mask and overall.
+    - correct the loss function in latex doc and explain why y not possible in denormalized space.
     - convert temperature to degrees celsius
-    - capture progress bar in marimo app-mode
-    - ready for N-step rollout?
-    - compare to ground-truth and also capture and compute no-guidance generation
+    - define masks with physical priors
+    - define masks dynamically in N
+    - experiment with multiple variables (and masks correspondingly)
+    - increase T and decrease lambda
+    - define fitness of
+
+    ## questions
+    - is the spatially interplay of variables respected when guiding samples?
 
     ## ideas
-    - steer model towards grount truth in mask and measure divergence across states
-    - generate multiple (vars, levels, partitions) no-guidance N rollouts and save in experiment folder -> need a way to encode the experiment (log of experiments or yaml with keys).
     - as baseline compute some basic facts about ArchesWeatherGen. For instance, how well it does (compared to its deterministic brother)? How does performance degrade as N of rollout increases?
     """)
     return
@@ -101,7 +107,7 @@ def _(device):
     from src.utils import get_dataset, get_model
     ds = get_dataset()
     model = get_model(device)
-    return (ds,)
+    return ds, model
 
 
 @app.cell(hide_code=True)
@@ -500,18 +506,20 @@ def _(mo):
 
 @app.cell
 def _():
-    from src.utils import save_config, ensure_results_dir
+    from src.utils import save_config, ensure_guided_rollouts_dir
     from src.rollout import rollout
 
-    return (save_config,)
+    return ensure_guided_rollouts_dir, rollout, save_config
 
 
 @app.cell
-def _(device, gen_model, rollout_step, state_to_device, torch):
+def _(device, rollout, state_to_device, torch):
     def run(
+        experiment_type,
         result_dir, 
         ds,
         x_start,
+        model,
         guidance_terms_denormalized,
         lambda_,
         mask_corners,
@@ -527,11 +535,12 @@ def _(device, gen_model, rollout_step, state_to_device, torch):
         x_start = state_to_device(x_start, device)
         y = torch.as_tensor(guidance_terms_denormalized, device=device)
 
-        return rollout_step(
+        return rollout(
+            experiment_type=experiment_type,
             result_dir=result_dir,
             ds=ds,
             x_start=x_start,
-            gen_model=gen_model,
+            gen_model=model,
             mask_corners=mask_corners,
             y=y,
             lambda_=lambda_,
@@ -576,17 +585,17 @@ def _(mo):
 def _(
     N,
     ds,
-    ensure_result_dir,
+    ensure_guided_rollouts_dir,
     guidance_terms_denormalized,
     lambda_trajectory,
     level,
     level_idx,
     mask_corners,
+    model,
     partition,
     run,
     run_button,
     save_config,
-    set_status,
     status,
     timestamp,
     timestamp_idx,
@@ -596,47 +605,51 @@ def _(
     y_trajectory,
 ):
     if run_button.value and status == "RUNNING":
-        try:
-            result_dir = ensure_result_dir()
+        # try:
 
-            for mc in [mask_corners, None]:
-                run(
-                    result_dir,
-                    ds,
-                    x_start,
-                    guidance_terms_denormalized,
-                    lambda_trajectory,
-                    mc,
-                    N,
-                    timestamp,
-                    timestamp_idx,
-                    partition,
-                    level,
-                    level_idx,
-                    var,
-                    var_idx,
-                )
+        result_dir = ensure_guided_rollouts_dir()
+        experiment_types = ["guided", "unguided"]
+    
+        for et in experiment_types:
+            run(
+                et,
+                result_dir,
+                ds,
+                x_start,
+                model,
+                guidance_terms_denormalized,
+                lambda_trajectory,
+                mask_corners,
+                N,
+                timestamp,
+                timestamp_idx,
+                partition,
+                level,
+                level_idx,
+                var,
+                var_idx,
+            )
 
-            config = {
-                "N": N,
-                "mask_corners": mask_corners,
-                "timestamp": str(timestamp),
-                "timestamp_idx": int(timestamp_idx),
-                "partition": partition,
-                "level": None if level is None else str(level),
-                "level_idx": None if level_idx is None else int(level_idx),
-                "var": var,
-                "var_idx": int(var_idx),
-                "y": [g_t.item() for g_t in guidance_terms_denormalized],
-                "y_perc": [y_t.item() for y_t in y_trajectory],
-                "lambda_": [l_t.item() for l_t in lambda_trajectory]
-            }
+        config = {
+            "N": N,
+            "mask_corners": mask_corners,
+            "timestamp": str(timestamp),
+            "timestamp_idx": int(timestamp_idx),
+            "partition": partition,
+            "level": None if level is None else str(level),
+            "level_idx": None if level_idx is None else int(level_idx),
+            "var": var,
+            "var_idx": int(var_idx),
+            "y": [g_t.item() for g_t in guidance_terms_denormalized],
+            "y_perc": [y_t.item() for y_t in y_trajectory],
+            "lambda_": [l_t.item() for l_t in lambda_trajectory]
+        }
 
-            save_config(result_dir, config)
+        save_config(result_dir, config)
 
-            set_status("IDLE")
-        except:
-            set_status("IDLE")
+        #     set_status("IDLE")
+        # except:
+        #     set_status("IDLE")
     return
 
 

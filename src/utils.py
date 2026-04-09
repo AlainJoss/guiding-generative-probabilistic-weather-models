@@ -13,6 +13,17 @@ import torch
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
+def save_to_json(dict_: dict, result_dir: Path, name:str):
+    path = result_dir / f"{name}.json"
+    with open(path, "w") as f:
+        json.dump(dict_, f, indent=2)
+
+def read_json(result_dir, name:str):
+    path = Path(result_dir) / f"{name}.json"
+    with open(path, "r") as f:
+        dict_ = json.load(f)
+    return dict_
+
 def get_dataset():
     return Era5Forecast(
         path="data/era5_240/full",  # default path
@@ -43,9 +54,9 @@ def ensure_ensemble_rollouts_dir(N: int):
         path.mkdir(parents=True, exist_ok=True)
     return result_dir
 
-def ensure_results_dir():
+def ensure_guided_rollouts_dir():
     timestamp = get_timestamp()
-    result_dir = Path("data", f"results", f"{timestamp}")
+    result_dir = Path("data", f"guided_rollouts", f"{timestamp}")
     result_dir.mkdir(parents=True, exist_ok=True)
     path = Path(result_dir, "guided")
     path.mkdir(parents=True, exist_ok=True)

@@ -166,10 +166,10 @@ class GuidedFlow(BaseLightningModule):
         self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.sample(x_cond, self.mu, y_n, mask, lambda_)
+        z, mask_term = self.sample(x_cond, self.mu, y_n, mask, lambda_)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
-        return x_hat
+        return x_hat, mask_term
     
     # TODO: do not use batch, separate object for clarity 
     #       also the name is utter bs
@@ -215,9 +215,10 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
 
+            mask_term = 0.0
             if y_n is not None:
                 with torch.enable_grad():
-                    grad_l = self.grad_loss(mask, mu, y_n, z_t)
+                    grad_l, mask_term = self.grad_loss(mask, mu, y_n, z_t)
 
                 u_t = tensordict_apply(
                     lambda u, g: u - (lambda_[i]) * g,
@@ -228,7 +229,7 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
         
-        return z_t
+        return z_t, mask_term
 
         ##### compute final output #####
     
@@ -296,7 +297,7 @@ class GuidedFlow(BaseLightningModule):
             batch_size=z_t.batch_size,
             device=z_t.device,
         )
-        return grad_l
+        return grad_l, mask_term
     
     def euler_step(self, z_t, u_t, dt):
         # z_new = z_t + h * u_t, where h = dt

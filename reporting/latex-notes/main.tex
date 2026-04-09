@@ -48,7 +48,7 @@ Prof.\ Dr.\ Guillaume Obozinski & \texttt{guillaume.obozinski@sdsc.ethz.ch}\\
 \section{ArchesWeather}
 Here a few clarifying notes on the specifics of ArchesWeather and its implementation details in code.
 
-\subsection{Empirical bservations}
+\subsection{Empirical observations}
 \begin{itemize}
     \item The diffusion model on top of the deterministic one makes the predictions worse in terms of RMSE.
     \item The predictions seem to be largely a copy paste of the past.
@@ -58,12 +58,14 @@ Here a few clarifying notes on the specifics of ArchesWeather and its implementa
 Instead of regressing the learned flow model against the velocity vector $r-\epsilon$, they learn to predict $r$ directly, and retrieve the direction $u_{t}^{\theta}(r_t)$ for the next update as follows:
 \begin{align*}
     z_{t} &= (1-s)r_{t} + s\epsilon \\
-    \text{let}\quad r_{t}^\theta:= r_{t}^\theta((1-s)r_{t} + s\epsilon) &= r_{t}^\theta(z_{t}) \\
+    \text{let}\quad r_{t}^\theta &:= \hat{z}_{t+1} = r_{t}^\theta(z_{t}) = r_{t}^\theta((1-s)r_{t} + s\epsilon) \\
     \text{s.t.} \quad \epsilon_{t}^\theta &= \frac{z_{t} - (1-s)r_{t}^\theta}{s} \\
-    \text{then} \quad  u_{t}^\theta =  r_{t}^\theta - \epsilon_{t}^\theta &= \frac {s}{s}r_{t}^\theta - \frac{z_{t} - (1-s)r_{t}^\theta}{s} \\
-    &= \frac{r_{t}^\theta-z_{t}}{s} 
+    \text{then} \quad  u_{t}^\theta &=  r_{t}^\theta - \epsilon_{t}^\theta \\
+    &= \frac {s}{s}r_{t}^\theta - \frac{z_{t} - (1-s)r_{t}^\theta}{s}\\
+    &= \frac{r_{t}^\theta-z_{t}}{s} = \frac{\hat{z}_{t+1} - z_t}{s}
 \end{align*}
-where, during the generation process, $z_{t}=r_{t-\delta}^\theta$ is the noisy state at the previous time step (or pure noise at initialization of sampling, to confirm plug in $s=0$ and $s=1$), and $s=\frac{t}{T}$ (progressing from 0 to 1, although in their implementation they do the opposite, and go from 1 to 0).
+Note that our network directly predicts the denoised residual $r_{t}^\theta = \hat{z}_{t+1}$, but to make the euler update we have to first go back to the noisy space.
+In addition, $s=\frac{t}{T}$, progressing from 0 to 1 (in theory), while in their implementation it goes from 1 to 0.
 We have thus retrieved the velocity vector $u_{t}^{\theta}(z_t)$, which we can feed to our Euler sampler.
 The Euler sampler then does the usual update
 $$
@@ -98,33 +100,33 @@ Since with our parameters $\hat{s}_t=s_t$, $\Delta t=-u_t$ and $d=s_t-s_{t+1}$, 
 \section{Guidance}
 
 \subsection{Loss}
-At time $t$, given a scalar value $y_t$ (in normalized space) denoting the guidance term, we define the squared l2 distance from the denoised state $z_t$ as follows:
+At time $t$, given a scalar value $y_n$ (in normalized space) denoting the guidance term, we define the squared l2 distance from the denoised state $z_t$ as follows:
 \begin{align*} 
-    \mathcal{L}(y_t, z_t) = \frac{1}{2} \left\lVert y_t - \frac{\sum_i m_i \, (x_t^i + \sigma^i z_t^i)}{\sum_i m_i}   \right\lVert ^2
+    \mathcal{L}(y_n) = \frac{1}{2} \left\lVert y_n - \frac{\sum_i m_i \, (x_t^i + \sigma^i r^\theta_t(z_t)^i)}{\sum_i m_i}   \right\lVert ^2
 \end{align*}
-Note that we the define guidance $y_t$ in the denormalized space.
+Note that we the define guidance $y_n$ in the denormalized space.
 
-We are then interested in the gradient $\nabla_{z_t}\mathcal{L}(y_t, z_t)$, which we can compute in closed form:
+We are then interested in the gradient $\nabla_{z_t}\mathcal{L}(y_n, r^\theta_t(z_t))$, which we can compute in closed form:
 \begin{align*} 
-    \text{let} \quad \hat{m}(z_t) &:= \frac{\sum_i m_i \, (x_t^i + \sigma^i z_t^i)}{\sum_i m_i} \\
-    \text{then} \quad \nabla_{z_t}\mathcal{L}(y_t, z_t) &= \nabla_{z_t}\frac{1}{2} \left\lVert y_t - \hat{m}(z_t) \right\lVert ^2 \\
-    &= \nabla_{z_t}\frac{1}{2} \left(\hat{m}(z_t)^2 - 2 \,y_t \, \hat{m}(z_t) \right) \\
-    &= \hat{m}(z_t) \nabla_{z_t} \hat{m}(z_t) - y_t \nabla_{z_t} \hat{m}(z_t) 
+    \text{let} \quad \text{m}(z_t) &:= \frac{\sum_i m_i \, (x_t^i + \sigma^i r^\theta_t(z_t)^i)}{\sum_i m_i} \\
+    \text{then} \quad \nabla_{z_t}\mathcal{L}(y_n, r^\theta_t(z_t)) &= \nabla_{z_t}\frac{1}{2} \left\lVert y_n - \text{m}(z_t) \right\lVert ^2 \\
+    &= \nabla_{z_t}\frac{1}{2} \left(\text{m}(z_t)^2 - 2 \,y_n \, \text{m}(z_t) \right) \\
+    &= \text{m}(z_t) \nabla_{z_t} \text{m}(z_t) - y_n \nabla_{z_t} \text{m}(z_t)
 \end{align*}
 From this we extract the partial derivatives and stack them to put together the final gradient vector:
 \begin{align*}
-     \frac{\partial \, \hat{m}(z_t)}{z_t^j} &= \frac{m^i\sigma^i}{\sum_i m_i} \\
-    \text{then} \quad \frac{\partial \,  \mathcal{L}(y_t, z_t)}{z_t^j} &= \hat{m}(z_t) \frac{m^i\sigma^i}{\sum_i m_i} - y_t \frac{m^i\sigma^i}{\sum_i m_i}
+     \frac{\partial \, \text{m}(z_t)}{\partial z_t^j} &= \frac{m^j\sigma^j}{\sum_i m_i} \\
+    \text{then} \quad \frac{\partial \,  \mathcal{L}(y_n, r^\theta_t(z_t))}{\partial z_t^j} &= \text{m}(z_t) \frac{m^j\sigma^j}{\sum_i m_i} - y_n \frac{m^j\sigma^j}{\sum_i m_i}
 \end{align*}
-For practical reasons we use automatic differentiation, but this might be worthwhile for future usage.
+For practical reasons we use automatic differentiation, but this might be worthwhile noting for future usage.
 
 \subsection{Computing the loss in denormalized space}
-Unfortunately, we cannot define $y_t$ in normalized space directly and have a direct translation to denormalized space. We need instead to define $y_t$ in denormalized space, and denormalize $\hat{r}_t$ instead.
+Unfortunately, we cannot define $y_n$ in normalized space directly and have a direct translation to denormalized space. We need instead to define $y_n$ in denormalized space, and denormalize $\hat{r}_t$ instead.
 
 The denormalized prediction at time $t$ is defined as follows:
 \begin{align*}
 \hat{x}^\text{denorm} &= \mu^\text{denorm} + (\hat{x}^\text{norm}) \odot \sigma^\text{denorm} \\
-&= \mu^\text{denorm} + (\hat{\mu}^\text{det} + \sigma^\text{residual} \odot z_t) \odot \sigma^\text{denorm}
+&= \mu^\text{denorm} + (\hat{\mu}^\text{det} + \sigma^\text{residual} \odot r^\theta_t(z_t)) \odot \sigma^\text{denorm}
 \end{align*}
 
 Importantly, we have to perform two denormalizations. One in the residual space, and one in the data space. The second one is standard machine learning preprocessing, whilst the first one comes from the way the target of the generative model is built, which is as follows:
@@ -135,32 +137,32 @@ Note, $\sigma^\text{residual}$ is computed as standard deviation of the residual
 
 The loss then takes following form:
 \begin{align*}
-\mathcal{L}^\text{denorm}(y_t, \hat{x}^\text{denorm}) &=  \frac{1}{2} \left\lVert y_t - \frac{\sum_i \hat{x}^\text{denorm}_i \odot m_i}{\sum_i m_i} \right\lVert^2_2
+\mathcal{L}^\text{denorm}(y_n, \hat{x}^\text{denorm}) &=  \frac{1}{2} \left\lVert y_n - \frac{\sum_i \hat{x}^\text{denorm}_i \odot m_i}{\sum_i m_i} \right\lVert^2_2
 \end{align*}
 
 \subsection{Classifier guidance}
 The conditional vector field can be defined in terms of the conditional score as follows:
 \begin{align*}
-     u_t(z|y) &=  u_t(z) + a_t \nabla_{z} \log p_t(y|z) 
+     u_t(z_t|y) &=  u_t(z_t) + a_t \nabla_{z_t} \log p_t(y|z_t) 
 \end{align*}
 Where $\alpha_t$ comes is one of the two noise scheduling terms (fixed before training). 
 
 We can parametrize the conditional probability $p_t(y|z)$ as we wish (show why from paper), and decide on following form: 
 \begin{align*}
-    u_t(z|y) &=  u_t(z) + a_t \nabla_{z} \log p_t(y|z) \\ &= u_t(z) + a_t \nabla_{z} \log e^{-\mathcal{L}(y, z^\theta(z_t))} \\
-    &= u_t(z) - a_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t))
+    u_t(z_t|y) &=  u_t(z_t) + a_t \nabla_{z_t} \log p_t(y|z_t) \\ &= u_t(z_t) + a_t \nabla_{z_t} \log e^{-\mathcal{L}(y, r^\theta_t(z_t))} \\
+    &= u_t(z_t) - a_t \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t))
 \end{align*}
 In the spirit of classifier guidance we substitute $\alpha_t$ with a general guidance strength term $\lambda_t:= w\cdot \alpha_t$:
 \begin{align*}
-    \tilde{u}_t(z|y) = u_t(z) - \lambda_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) 
+    \tilde{u}_t(z_t|y) = u_t(z_t) - \lambda_t \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t)) 
 \end{align*}
-Note that with $w\neq 1$ we abandon the vector field $u(x|y)$ in favor of $\tilde{u}_t(z|y)$, losing the original probabilistic interpretation (still in the spirit of classifier guidance).
+Note that with $w\neq 1$ we abandon the vector field $u(z_t|y)$ in favor of $\tilde{u}_t(z_t|y)$, losing the original probabilistic interpretation (still in the spirit of classifier guidance).
 $\lambda_t$ is then a paramater we tune for our specific purposes. The tuning implies that we need a metric of fitness, that defines how good the guided samples "look".
 
 Note, in our case we are not interested in the classifier free guidance counterpart, since we will not train a conditional network $u_t(z|y)$. However, we might, for the sake of curiosity, experiment with a convex blend of the velocity and gradient vectors, in the spirit of classifier free guidance:
 \begin{align*}
-    \bar{u}_t(z|y) &:= (1-w)u_t(z) - (1-w)\lambda_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) \\
-    \text{or maybe even} \quad \bar{u}_t(z|y) &:= (1-w_t)u_t(z) - (1-w_t) \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) 
+    \bar{u}_t(z_t|y) &:= (1-w)u_t(z_t) - (1-w)\lambda_t \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t)) \\
+    \text{or maybe even} \quad \bar{u}_t(z_t|y) &:= (1-w_t)u_t(z_t) - (1-w_t) \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t)) 
 \end{align*}
 
 \subsection{FlowGrad}

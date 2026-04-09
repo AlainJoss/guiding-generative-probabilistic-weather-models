@@ -2,8 +2,8 @@ from tensordict.tensordict import TensorDict
 
 from src.utils import (
     save_state, 
-    ensure_results_dir,
-    save_config
+    save_to_json,
+    save_config,
 )
 from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
@@ -47,8 +47,9 @@ def rollout(
 
     ### iter
 
+    mask_terms = []
     for n in range(1, N+1):
-        state = gen_model.rollout_step(
+        state, mask_term = gen_model.rollout_step(
             x_cond=x_cond, 
             mask=mask,
             y_n=y[n] if experiment_type=="guided" else None,
@@ -58,19 +59,23 @@ def rollout(
         ### save states
 
         # for testing 
+        # mask_term = 0.0
         # state = x_start["state"]
 
         # --- save denormalized xarray outputs ---
+
+        mask_term = float(mask_term)
+        mask_terms.append(mask_term)
+
         state_denorm = ds.denormalize(state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds.cpu()
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
 
-        if not isinstance(experiment_type, int):
-            save_state(result_dir, state_xr, f"{n}", step=experiment_type)
-        else:
+        if isinstance(experiment_type, int):
             # step=m (model id)
             save_state(result_dir, state_xr, f"{n}", step=experiment_type)
-
+        else:
+            save_state(result_dir, state_xr, experiment_type, n)
 
 
         # build next conditioning batch 
@@ -82,3 +87,6 @@ def rollout(
                 "timestamp": next_timestamp,
                 "lead_time_hours": x_start["lead_time_hours"],
             }
+    
+    dict_ = {"mask_terms": mask_terms}
+    save_to_json(dict_, result_dir, "mask_terms")
