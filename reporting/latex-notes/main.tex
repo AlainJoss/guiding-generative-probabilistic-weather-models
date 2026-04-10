@@ -97,83 +97,261 @@ The scheduler updates as outlined in algorithm \ref{algo-euler}.
 
 Since with our parameters $\hat{s}_t=s_t$, $\Delta t=-u_t$ and $d=s_t-s_{t+1}$, making the update equivalent to the simple Euler sampler defined above. 
 
-\section{Guidance}
+
+\clearpage
+\section{Guidance @ flow time}
+
+\subsection{The guidance term}
+
+For a weather-time step $n$, we define the guidance target $y_n$ as a scalar representing the average value of a specific variable over a selected 2D region.
+Importantly, we define $y_n$ in denormalized space, that is, in the original data space.
+
+\subsection{Mask}
+
+The selected region together with the variable of interest defines a binary mask $\mathcal{M}$.
+Importantly, the mask has the same shape as a weather state: it is zero everywhere except on the entries corresponding to the chosen variable and spatial region.
+
+\subsection{The mask term}
+
+At flow time $t$, given the mask $\mathcal{M}$ and the current clean prediction $\hat{x}_t$, we define the mask term $m(z_t)$ as the average of the predicted values over the mask:
+\begin{align*} 
+    m(z_t) &= \frac{\sum_i \mathcal{M}_i \, \hat{x}_t^i}{\sum_i \mathcal{M}_i}.
+\end{align*}
+
+To compute $\hat{x}_t$, we need to undo the normalizations used in the model.
+
+First, we map the predicted residual in flow space, $r_t^\theta(z_t)$, back to normalized data space:
+\begin{align*} 
+    \hat{x}^{\text{norm}}_t &= \hat{x}^{\text{det}} + \sigma^{\text{res}} \odot r_t^\theta(z_t),
+\end{align*}
+where $\hat{x}^{\text{det}}$ is the prediction of the deterministic model, and $\sigma^{\text{res}}$ is the residual scaling constant used during training, with the same shape as $r_t^\theta$.
+
+We then map this normalized prediction back to the original data space using the inverse $z$-normalization:
+\begin{align*} 
+    \hat{x}^{\text{denorm}}_t &= \bar{x}^{\text{data}} + \sigma^{\text{data}} \odot \hat{x}^{\text{norm}}_t,
+\end{align*}
+where $\bar{x}^{\text{data}}$ and $\sigma^{\text{data}}$ are the mean and standard deviation of the training data.
+
+Putting everything together, we obtain
+\begin{align*} 
+    m(z_t) &= \frac{\sum_i \mathcal{M}_i \, [\hat{x}^{\text{denorm}}_t]^i}{\sum_i \mathcal{M}_i} \\
+    &= \frac{\sum_i \mathcal{M}_i \, [\bar{x}^{\text{data}} + \sigma^{\text{data}} \hat{x}^{\text{norm}}_t]^i}{\sum_i \mathcal{M}_i} \\
+    &= \frac{\sum_i \mathcal{M}_i \, [\bar{x}^{\text{data}} + \sigma^{\text{data}}(\hat{x}^{\text{det}} + \sigma^{\text{res}} r_t^\theta(z_t))]^i}{\sum_i \mathcal{M}_i}.
+\end{align*}
+
+The reason for going back to denormalized data space is that the guidance target $y_n$ is naturally defined there.
+In contrast, defining the corresponding target directly in normalized space is not straightforward, because the normalization depends on variable-wise training statistics and on the residual parameterization.
 
 \subsection{Loss}
-At time $t$, given a scalar value $y_n$ (in normalized space) denoting the guidance term, we define the squared l2 distance from the denoised state $z_t$ as follows:
+
+Now that we have both the mask term $m(z_t)$ and the guidance target $y_n$, we define the loss of interest as the squared $\ell_2$ distance:
 \begin{align*} 
-    \mathcal{L}(y_n) = \frac{1}{2} \left\lVert y_n - \frac{\sum_i m_i \, (x_t^i + \sigma^i r^\theta_t(z_t)^i)}{\sum_i m_i}   \right\lVert ^2
-\end{align*}
-Note that we the define guidance $y_n$ in the denormalized space.
-
-We are then interested in the gradient $\nabla_{z_t}\mathcal{L}(y_n, r^\theta_t(z_t))$, which we can compute in closed form:
-\begin{align*} 
-    \text{let} \quad \text{m}(z_t) &:= \frac{\sum_i m_i \, (x_t^i + \sigma^i r^\theta_t(z_t)^i)}{\sum_i m_i} \\
-    \text{then} \quad \nabla_{z_t}\mathcal{L}(y_n, r^\theta_t(z_t)) &= \nabla_{z_t}\frac{1}{2} \left\lVert y_n - \text{m}(z_t) \right\lVert ^2 \\
-    &= \nabla_{z_t}\frac{1}{2} \left(\text{m}(z_t)^2 - 2 \,y_n \, \text{m}(z_t) \right) \\
-    &= \text{m}(z_t) \nabla_{z_t} \text{m}(z_t) - y_n \nabla_{z_t} \text{m}(z_t)
-\end{align*}
-From this we extract the partial derivatives and stack them to put together the final gradient vector:
-\begin{align*}
-     \frac{\partial \, \text{m}(z_t)}{\partial z_t^j} &= \frac{m^j\sigma^j}{\sum_i m_i} \\
-    \text{then} \quad \frac{\partial \,  \mathcal{L}(y_n, r^\theta_t(z_t))}{\partial z_t^j} &= \text{m}(z_t) \frac{m^j\sigma^j}{\sum_i m_i} - y_n \frac{m^j\sigma^j}{\sum_i m_i}
-\end{align*}
-For practical reasons we use automatic differentiation, but this might be worthwhile noting for future usage.
-
-\subsection{Computing the loss in denormalized space}
-Unfortunately, we cannot define $y_n$ in normalized space directly and have a direct translation to denormalized space. We need instead to define $y_n$ in denormalized space, and denormalize $\hat{r}_t$ instead.
-
-The denormalized prediction at time $t$ is defined as follows:
-\begin{align*}
-\hat{x}^\text{denorm} &= \mu^\text{denorm} + (\hat{x}^\text{norm}) \odot \sigma^\text{denorm} \\
-&= \mu^\text{denorm} + (\hat{\mu}^\text{det} + \sigma^\text{residual} \odot r^\theta_t(z_t)) \odot \sigma^\text{denorm}
+    \mathcal{L}(y_n, z_t) &= \frac{1}{2} \left\lVert y_n - m(z_t) \right\rVert^2 \\
+    &= \frac{1}{2} \left\lVert
+    y_n -
+    \frac{\sum_i \mathcal{M}_i \, [\bar{x}^{\text{data}} + \sigma^{\text{data}}(\hat{x}^{\text{det}} + \sigma^{\text{res}} r_t^\theta(z_t))]^i}{\sum_i \mathcal{M}_i}
+    \right\rVert^2.
 \end{align*}
 
-Importantly, we have to perform two denormalizations. One in the residual space, and one in the data space. The second one is standard machine learning preprocessing, whilst the first one comes from the way the target of the generative model is built, which is as follows:
-\begin{align*}
-r^\text{gt} &=  \frac{x^\text{gt} - \hat{x}^\text{det}}{\sigma^\text{residual}}
-\end{align*}
-Note, $\sigma^\text{residual}$ is computed as standard deviation of the residuals $\sigma^\text{residual}_{n \in [N]}(x^\text{gt}_n - \hat{x}_n^\text{det})$ over the dataset.
+We are then interested in the gradient $\nabla_{z_t}\mathcal{L}$, which we compute using automatic differentiation.
 
-The loss then takes following form:
-\begin{align*}
-\mathcal{L}^\text{denorm}(y_n, \hat{x}^\text{denorm}) &=  \frac{1}{2} \left\lVert y_n - \frac{\sum_i \hat{x}^\text{denorm}_i \odot m_i}{\sum_i m_i} \right\lVert^2_2
-\end{align*}
-
+\clearpage
+\section{Guidance methods}
 \subsection{Classifier guidance}
-The conditional vector field can be defined in terms of the conditional score as follows:
-\begin{align*}
-     u_t(z_t|y) &=  u_t(z_t) + a_t \nabla_{z_t} \log p_t(y|z_t) 
-\end{align*}
-Where $\alpha_t$ comes is one of the two noise scheduling terms (fixed before training). 
 
-We can parametrize the conditional probability $p_t(y|z)$ as we wish (show why from paper), and decide on following form: 
+The conditional vector field can be written in terms of the conditional score as
 \begin{align*}
-    u_t(z_t|y) &=  u_t(z_t) + a_t \nabla_{z_t} \log p_t(y|z_t) \\ &= u_t(z_t) + a_t \nabla_{z_t} \log e^{-\mathcal{L}(y, r^\theta_t(z_t))} \\
-    &= u_t(z_t) - a_t \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t))
+     u_t(z_t \mid y) = u_t(z_t) + \alpha_t \nabla_{z_t} \log p_t(y \mid z_t),
 \end{align*}
-In the spirit of classifier guidance we substitute $\alpha_t$ with a general guidance strength term $\lambda_t:= w\cdot \alpha_t$:
-\begin{align*}
-    \tilde{u}_t(z_t|y) = u_t(z_t) - \lambda_t \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t)) 
-\end{align*}
-Note that with $w\neq 1$ we abandon the vector field $u(z_t|y)$ in favor of $\tilde{u}_t(z_t|y)$, losing the original probabilistic interpretation (still in the spirit of classifier guidance).
-$\lambda_t$ is then a paramater we tune for our specific purposes. The tuning implies that we need a metric of fitness, that defines how good the guided samples "look".
+where $\alpha_t$ is a time-dependent scaling term determined by the noise schedule.
 
-Note, in our case we are not interested in the classifier free guidance counterpart, since we will not train a conditional network $u_t(z|y)$. However, we might, for the sake of curiosity, experiment with a convex blend of the velocity and gradient vectors, in the spirit of classifier free guidance:
+We are free to choose a convenient form for $p_t(y \mid z_t)$, and we define it through the loss:
 \begin{align*}
-    \bar{u}_t(z_t|y) &:= (1-w)u_t(z_t) - (1-w)\lambda_t \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t)) \\
-    \text{or maybe even} \quad \bar{u}_t(z_t|y) &:= (1-w_t)u_t(z_t) - (1-w_t) \nabla_{z_t}\mathcal{L}(y, r^\theta_t(z_t)) 
+    p_t(y \mid z_t) \propto e^{-\mathcal{L}(y, z_t)}.
 \end{align*}
+This gives
+\begin{align*}
+    u_t(z_t \mid y)
+    &= u_t(z_t) + \alpha_t \nabla_{z_t} \log p_t(y \mid z_t) \\
+    &= u_t(z_t) + \alpha_t \nabla_{z_t} \log e^{-\mathcal{L}(y, z_t)} \\
+    &= u_t(z_t) - \alpha_t \nabla_{z_t} \mathcal{L}(y, z_t).
+\end{align*}
+
+In the spirit of classifier guidance, we replace $\alpha_t$ by a more general guidance-strength term
+\begin{align*}
+    \lambda_t := w \cdot \alpha_t,
+\end{align*}
+which leads to the guided vector field
+\begin{align*}
+    \tilde{u}_t(z_t \mid y) = u_t(z_t) - \lambda_t \nabla_{z_t}\mathcal{L}(y, z_t).
+\end{align*}
+
+Note that for $w \neq 1$, we no longer recover the original conditional vector field $u_t(z_t \mid y)$ exactly, but instead use the modified field $\tilde{u}_t(z_t \mid y)$.
+As in standard classifier guidance, this tuning improves controllability at the cost of the original probabilistic interpretation.
+
+The schedule $\lambda_t$ is therefore a parameter to tune for our purposes.
+This tuning requires a notion of fitness, that is, a metric describing how good the guided samples look.
+
+In our setting, we are not interested in the classifier-free guidance counterpart, since we do not train a conditional network $u_t(z_t \mid y)$.
+Still, for completeness, one could experiment with convex combinations of the base velocity and the guidance term, in the spirit of classifier-free guidance:
+\begin{align*}
+    \bar{u}_t(z_t \mid y)
+    &:= (1-w)u_t(z_t) - w \lambda_t \nabla_{z_t}\mathcal{L}(y, z_t),
+\end{align*}
+or even with a time-dependent weight,
+\begin{align*}
+    \bar{u}_t(z_t \mid y)
+    &:= (1-w_t)u_t(z_t) - w_t \nabla_{z_t}\mathcal{L}(y, z_t).
+\end{align*}
+These variants are heuristic and do not follow directly from a probabilistic derivation.
+
+
+
+\subsection{Monte Carlo classifier guidance}
+
+Following the Monte Carlo refinement of loss-guided diffusion, we replace the single-point guidance term by a local sampling-based estimate around $z_t$.
+We introduce a surrogate Gaussian distribution centered at the current point:
+\begin{align*}
+q_t(\tilde{z}_t \mid z_t) := \mathcal{N}(z_t, r_t^2 I),
+\end{align*}
+and draw i.i.d. samples
+\begin{align*}
+\tilde{z}_t^{\,j} \sim q_t(\cdot \mid z_t), \qquad j=1,\dots,G.
+\end{align*}
+
+In practice, we use the reparameterization
+\begin{align*}
+\tilde{z}_t^{\,j} = z_t + r_t \varepsilon_j,
+\qquad
+\varepsilon_j \sim \mathcal{N}(0,I),
+\end{align*}
+so that each sampled point remains a differentiable function of $z_t$.
+
+Instead of averaging the loss gradients directly, we define the Monte Carlo guidance term as
+\begin{align*}
+g_t^{\mathrm{MC}}(z_t, y)
+:=
+\nabla_{z_t}
+\log \left(
+\frac{1}{G}\sum_{j=1}^G
+\exp\bigl(-\mathcal{L}(y,\tilde{z}_t^{\,j})\bigr)
+\right).
+\end{align*}
+
+Differentiating this expression shows that the update is a weighted combination of local loss gradients:
+\begin{align*}
+g_t^{\mathrm{MC}}(z_t, y)
+=
+-\sum_{j=1}^G
+w_j
+\nabla_{\tilde{z}_t^{\,j}}
+\mathcal{L}(y,\tilde{z}_t^{\,j}),
+\end{align*}
+where
+\begin{align*}
+w_j
+:=
+\frac{\exp\bigl(-\mathcal{L}(y,\tilde{z}_t^{\,j})\bigr)}
+{\sum_{k=1}^G \exp\bigl(-\mathcal{L}(y,\tilde{z}_t^{\,k})\bigr)}.
+\end{align*}
+
+Hence, samples with smaller loss receive larger weight, while samples with larger loss are downweighted.
+This is the key difference from plain gradient averaging.
+
+The guided vector field then becomes
+\begin{align*}
+\tilde{u}_t(z_t \mid y)
+=
+u_t(z_t) + \lambda_t \, g_t^{\mathrm{MC}}(z_t, y).
+\end{align*}
+
+Compared with standard classifier guidance, this replaces the single local guidance direction by a locally averaged, loss-weighted one.
+Standard pointwise guidance is recovered in the limiting case of a single sample together with vanishing perturbation radius.
+
+\subsection{Gradient-averaged local guidance}
+
+As a simpler alternative, we can average the loss gradients evaluated at perturbed points around $z_t$.
+Using the same proposal distribution
+\begin{align*}
+q_t(\tilde{z}_t \mid z_t) := \mathcal{N}(z_t, r_t^2 I),
+\end{align*}
+we draw i.i.d. samples
+\begin{align*}
+\tilde{z}_t^{\,j} = z_t + r_t \varepsilon_j,
+\qquad
+\varepsilon_j \sim \mathcal{N}(0,I),
+\qquad j=1,\dots,G.
+\end{align*}
+
+We then compute the average gradient
+\begin{align*}
+\bar{g}_t(z_t,y)
+:=
+\frac{1}{G}\sum_{j=1}^G
+\nabla_{\tilde{z}_t^{\,j}} \mathcal{L}(y,\tilde{z}_t^{\,j}),
+\end{align*}
+and use it to define the heuristic guided vector field
+\begin{align*}
+\tilde{u}_t(z_t \mid y)
+=
+u_t(z_t) - \lambda_t \bar{g}_t(z_t,y).
+\end{align*}
+
+Unlike the Monte Carlo guidance term above, this update is not derived from the loss-guided diffusion formulation.
+Instead, it should be viewed as a practical smoothing heuristic: all sampled gradients contribute equally, regardless of their loss value.
 
 \subsection{FlowGrad}
 
-An alternative approach to ablate a schedule to find a fitting $\lambda_t$, is to define following optimization problem:
+An alternative to hand-designing a schedule for $\lambda_t$ is to define an optimization problem that determines suitable guidance strengths automatically:
 
-...
+\ldots
 
-\section{Producing weather trajectories}
+\clearpage
+\section{Guidance @ weather time}
+In the previous section we took the guidance term $y_n$ at time $n$ as a given.
+We now want to answer the question of how to specify a trajectory $\{y_n\}_{n=1}^N$.
 
-Whilst we have derived a potential method for producing weather trajectories in diffusion space we still haven't defined what $r^\text{guide}$ looks like.
+\subsection{M-Rollout trajectory}
+One feature we were interested in is that the sampled weather states are phisically realistic although extreme.
+
+A simple heuristic to define a guidance trajectory is to rollout $M$ unguided models for $N$ steps, and capture the distribution of $m(\hat{x}_n^m)$ over time, and define an extremified trajectory over a trajectory that can be visualized as in \ref{distributions_over_time}.
+
+\label{distributions_over_time}
+\includegraphics{../figures/distributions_over_time.png}
+
+This way the velocity of the flow would be more likely aligned with the gradient of the loss, compared to if we didn't considered the natural evolution of weather according to our models.
+
+\subsection{Arbitrary trajectories}
+We could theoretically define arbitrary trajectories.
+What is immediately visible is that the realized guidance will probably be much lower, because the model will kind of overwrite the gradient direction.
+
+\subsection{Experimental setting}
+\subsection{Summary of hyperparameters}
+In the following we summarize all hyperparameters for generating a guided trajectory:
+\begin{itemize}[noitemsep]
+    \item $x_0$: start state
+    \item $N$: length of the trajectory in weather time
+    \item $M$: number of ensemble members for the guidance base distribution
+    \item $\lambda_t$: guidance strength schedule
+    \item $G$: number of montecarlo drawings
+    \item $\mathcal{M}$: mask (variable at level and region of interest) 
+    \item $\mathcal{K}$: mask kernel defining the weigths for the averaging over the region
+    \item $\rho_n$: trajectory shape (relative to M rollout)
+\end{itemize}
+From this table, the hyperparameter that most importantly has to be ablated for tuning and understanding is $\lambda_t$. 
+In fact, it's really not straight forward to predict its influence on the guided states and the realized guidance.
+
+\subsection{Evaluation}
+The evaluation of the experiments straight forawrdly includes the realized guidance as key metric.
+In addition, we want to track the development of other variables. This can include the sum of relative change over the whole variable-level slice and the distributions of values.
+
+A plausible method of evaluation is to guide sampling towards the ground truth and evaluate whether it improves the accuracy of other variables (not the guided one).
+This might gives an idea whether the produced states are simply some adversarial noise, or the gradient direction is qualitatively good.
+
+\clearpage
+\section{Old notes - Generating weather trajectories}
+
+This section is devoted towards defining different heuristics to specificy guidance trajectory over $N$ step rollouts.
 
 \subsection{Guidance times}
 Since the goal is to generate a weather trajectory, which is defined by a roll-out of multiple prediction steps, we have to distinguish between guidance at universal time and guidance at diffusion time.
@@ -264,57 +442,10 @@ Must pay attention to the fact that the input states are actually 2! In the grad
 \end{tikzpicture}
 
 
-
+\clearpage
 \section{Old notes on universal guidance}
 
-\subsection{UG (1)}
-
-We now translate universal guidance in the language of flow modeling such that we can apply it correctly and maybe even develop an ad-hoc solution that works directly in vector-field land ($u_t^\theta$) instead of noise land ($\epsilon_t^\theta$).
-
-Universal guidance works as follows.
-Given the "forward noising":
-\begin{align*}
-    z_t &= \sqrt{\alpha_t} z_o + \sqrt{1-\alpha_t}\epsilon \\
-    \epsilon_\theta(z_t, t) \approx \epsilon &= \frac{z_t - \sqrt{\alpha_t}z_o}{\sqrt{1-\alpha_t}}
-    \\
-    \hat{z}_o &= \frac{z_t - \sqrt{1-\alpha_t}\epsilon_\theta(z_t, t)}{\sqrt{\alpha_t}} 
-\end{align*}
-and classifier guidance:
-$$
-\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - \sqrt{1-\alpha_t}\nabla_{z_t}\log p(c|z_t)
-$$
-they rewrite guidance with a loss-based term:
-$$
-\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - \sqrt{1-\alpha_t}\nabla_{z_t}\mathcal{L}(c, f^\theta(z_t, t))
-$$
-This aims to extend classifier guidance, departing from its exact mathematical derivation ($\nabla_x \log p(x|y) = \nabla_x \log p(x) + \nabla_x \log p(y|x)$).
-Replacing $\nabla_x \log p(y|x)$ with a generic loss term enables to guide sampling with some generic fitness function. Whether this produces meaningful results now completely depends on our qualitative analysis. This is however also valid for theoretically derived methods in the first place. 
-
-The first observation UG makes is that we might want to replace the weighting term $\sqrt{1-\alpha_t}$ with some other weighting term $s_t$, resulting in:
-$$
-\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - s_t\nabla_{z_t}\mathcal{L}(c, f^\theta(z_t, t))
-$$
-In addition, we might want to check fitness against the predicted denoised sample instead of the noisy sample. This is also motivated by the fact that a classifier wouldn't know what to do very well with a noisy image.
-Hence:
-$$
-\hat{\epsilon}_\theta(z_t, t) = \epsilon_\theta(z_t, t) - s_t\nabla_{z_t}\mathcal{L}(c, f^\theta(\hat{z}_o, t))
-$$
-
-In our use case however, $f$ is not a classifier. Our loss function aims to measure how well the denoised state at time $t$ aligns with the guidance term $y_n$. So in our case $f:=\text{Id}$. In addition, our network parametrizes the velocity $u_t$. However, when we express the conditional velocity in terms of the score we obtain a very similar equivalence:
-\begin{align*}
-    u_t(x|y) &=  u_t(x) + a_t \nabla \log p_t(y|x)
-\end{align*}
-
-In the same fashion we might want to replace the conditional score with the following:
-\begin{align*}
-    u_t(z|y) &=  u_t(z) + a_t \nabla_{z} \log p_t(y|z) \\ &= u_t(z) + a_t \nabla_{z} \log e^{-\mathcal{L}(y, z^\theta(z_t))} \\
-    &= u_t(z) - a_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) \\
-    & \rightarrow u_t(z) - \lambda_t \nabla_{z}\mathcal{L}(y, z^\theta(z_t)) \quad \text{with } \lambda_t := wa_t 
-\end{align*}
-
-Remember that when $w\neq1$, the guidance looses its probabilistic interpretation. Anyways, the method is an heuristic in the first place: representing the data distribution using a multimodal Gaussian is a means to an end. We are more interested in what works rather than what can be theoretically derived from first principles. Much of the focus should thus go into how to evaluate the results of the diffusion, rather than its theoretical soundness. This means we will have to define a fitness criteria to tune different schedules for $\lambda_t$.
-
-\subsection{UG (2)}
+\subsection{UG step 2}
 Before analyzing their second adjustment to the guidance function, we have to answer following question: what is the loss and its components in our case?
 In our case we're interested in following loss
 $$

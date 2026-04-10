@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.0"
+__generated_with = "0.21.1"
 app = marimo.App(width="full")
 
 
@@ -36,7 +36,7 @@ def _():
 @app.cell
 def _():
     from src.utils import (
-        read_json,
+        read_config,
         read_state,
         get_last_experiment_dir,
         get_slice
@@ -47,6 +47,7 @@ def _():
         get_mask_center,
         get_mask_from_corners,
         get_slice,
+        read_config,
         read_state,
         visualize_map,
     )

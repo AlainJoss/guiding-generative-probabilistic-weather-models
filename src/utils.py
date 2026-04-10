@@ -45,44 +45,29 @@ def get_timestamp():
     timestamp = date + "_" + time
     return timestamp
 
-def ensure_ensemble_rollouts_dir(N: int):
+def ensure_rollout_dir(rollout_dir: Path, N):
     timestamp = get_timestamp()
-    result_dir = Path("data", f"ensemble_rollouts", f"{timestamp}")
+    result_dir = Path("rollouts", rollout_dir, f"{timestamp}")
     result_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, N+1):
         path = Path(result_dir, f"{n}")
         path.mkdir(parents=True, exist_ok=True)
     return result_dir
 
-def ensure_guided_rollouts_dir():
-    timestamp = get_timestamp()
-    result_dir = Path("data", f"guided_rollouts", f"{timestamp}")
-    result_dir.mkdir(parents=True, exist_ok=True)
-    path = Path(result_dir, "guided")
-    path.mkdir(parents=True, exist_ok=True)
-    path = Path(result_dir, "unguided")
-    path.mkdir(parents=True, exist_ok=True)
-    return result_dir
-
-def save_config(result_dir, config):
-    path = result_dir / "config.json"
-    with open(path, "w") as f:
-        json.dump(config, f, indent=2)
-
-def read_config(result_dir):
-    path = Path(result_dir) / "config.json"
-    with open(path, "r") as f:
-        config = json.load(f)
-    return config
-
 def get_last_experiment_dir():
-    paths = Path("data", "results").glob("2026*")
+    paths = Path("rollouts", "guided").glob("2026*")
     paths = sorted(paths)
     print(paths[-1])
     return paths[-1]
 
-def get_experiment_dir():
-    paths = Path("data", "results").glob("2026*")
+def get_rollout_dir(subdir: str):
+    """
+    subdir should be either 
+    - ensemble
+    - guided
+    - gt-weather
+    """
+    paths = Path("results", subdir).glob("2026*")
     paths = sorted(paths)
     print(paths[-1])
     return paths[-1]
@@ -90,11 +75,11 @@ def get_experiment_dir():
 def state_to_device(state, device):
     return {k: v[None].to(device) for k, v in state.items()}
 
-def save_state(result_dir: Path, array, state_type: str, step: int):
+def save_state(result_dir: Path, array, n_step: str, m_step: int):
     """
     file: either "guided" or "unguided" in the current version.
     """
-    path = result_dir / f"{state_type}" / f"{step}.nc"
+    path = result_dir / f"{n_step}" / f"{m_step}.nc"
     array.to_netcdf(path)
 
 def read_state(result_dir, state_type, step: int):

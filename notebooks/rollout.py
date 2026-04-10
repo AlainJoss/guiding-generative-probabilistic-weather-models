@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 
@@ -22,7 +22,24 @@ def _():
     import marimo as mo
     from pathlib import Path
 
-    return Path, mo
+    return (mo,)
+
+
+@app.cell
+def _():
+    from src.utils import (
+        get_dataset, get_model,
+        ensure_ensemble_rollouts_dir, save_config, state_to_device
+    )
+    from src.rollout import rollout
+
+    return (
+        ensure_ensemble_rollouts_dir,
+        get_dataset,
+        get_model,
+        save_config,
+        state_to_device,
+    )
 
 
 @app.cell
@@ -32,11 +49,10 @@ def _():
 
 
 @app.cell
-def _(device):
-    from src.utils import get_dataset, get_model 
+def _(device, get_dataset, get_model):
     ds = get_dataset()
     model = get_model(device)
-    return ds, model
+    return (ds,)
 
 
 @app.cell
@@ -50,25 +66,15 @@ def _(ds, mo):
 @app.cell
 def _(mo):
     M_slider = mo.ui.slider(1, 10, value=5, label="M: ")
-    return (M_slider,)
-
-
-@app.cell
-def _(M_slider):
-    M = M_slider.value
-    return (M,)
-
-
-@app.cell
-def _(mo):
     N_slider = mo.ui.slider(1, 20, value=2, label="N: ")
-    return (N_slider,)
+    return M_slider, N_slider
 
 
 @app.cell
-def _(N_slider):
+def _(M_slider, N_slider):
+    M = M_slider.value
     N = N_slider.value
-    return (N,)
+    return M, N
 
 
 @app.cell(hide_code=True)
@@ -98,8 +104,7 @@ def _(mo):
 
 
 @app.cell
-def _(TIMESTAMPS, device, ds, timestamp_dropdown):
-    from src.utils import state_to_device
+def _(TIMESTAMPS, device, ds, state_to_device, timestamp_dropdown):
     timestamp = timestamp_dropdown.value
     timestamp_idx = TIMESTAMPS.index(timestamp)
     x_start = ds[timestamp_idx]
@@ -107,21 +112,14 @@ def _(TIMESTAMPS, device, ds, timestamp_dropdown):
     return timestamp, timestamp_idx, x_start
 
 
-@app.cell
-def _():
-    from src.utils import ensure_ensemble_rollouts_dir, save_config
-
-    return ensure_ensemble_rollouts_dir, save_config
-
-
-@app.cell
-def _(Path, ds, model):
-    from src.rollout import rollout
+app._unparsable_cell(
+    r"""
     def ensemble_rollout(result_dir: Path, M: int, N: int, x_start):
         for m in range(M):
             print(f"m: {m+1}/{M}")
             rollout(
-                m,
+                guidance_flag=False,
+                ensemble_flag=True,
                 result_dir,
                 ds, 
                 x_start,
@@ -132,10 +130,12 @@ def _(Path, ds, model):
                 N,
                 None, # partition
                 None, # level_idx
-                None # var_idx
+                None, # var_idx
+                ensemble_step=m
             )
-
-    return (ensemble_rollout,)
+    """,
+    name="_"
+)
 
 
 @app.cell
@@ -184,14 +184,14 @@ def _(
         try:
             result_dir = ensure_ensemble_rollouts_dir(N)
             ensemble_rollout(result_dir, M, N, x_start)
-    
+
             config = {
                 "M": M,
                 "N": N,
                 "timestamp": str(timestamp),
                 "timestamp_idx": int(timestamp_idx),
             }
-    
+
             save_config(result_dir, config)
             set_status("IDLE")
         except:

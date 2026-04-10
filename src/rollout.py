@@ -1,9 +1,10 @@
+from pathlib import Path
+
 from tensordict.tensordict import TensorDict
 
 from src.utils import (
     save_state, 
     save_to_json,
-    save_config,
 )
 from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
@@ -17,12 +18,15 @@ from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 ##### load #####
 
 def rollout(
-        experiment_type,
-        result_dir, 
+        sampling_flag: bool,
+        guidance_flag: bool,  # either guiding or not the sampling
+        ensemble_flag: bool,  # if M forecasts are being produced it's relevant for the saving logic
+        rollout_dir: Path, 
         ds: Era5Forecast, x_start: dict[TensorDict], 
         gen_model: GuidedFlow, 
         mask_corners, y, lambda_, N,
-        partition, level_idx, var_idx
+        partition, level_idx, var_idx, timestamp_idx,
+        ensemble_step: int | None = None,
     ):
     """
     Switch "guidance" ON/OFF using the mask: None=OFF, torch.Tensor=ON.
@@ -31,30 +35,32 @@ def rollout(
 
     device = gen_model.device
 
-    if experiment_type=="guided":
+    if guidance_flag:
         y = y.to(device)
         mask = get_mask_from_corners(*mask_corners)
         mask = mask.to(device)
         mask = get_mask_tensordict(x_start["state"][0], partition, var_idx, level_idx, mask)
-    elif experiment_type=="unguided" or isinstance(experiment_type, int):
-        mask=None
     else:
-        raise ValueError(f"no such experiment type: {experiment_type}")
+        mask=None
 
     x_cond = x_start
-
     lead_time_seconds = x_start["lead_time_hours"] * 3600
 
     ### iter
 
-    mask_terms = []
+    mask_terms = []  # realized guidance
     for n in range(1, N+1):
-        state, mask_term = gen_model.rollout_step(
-            x_cond=x_cond, 
-            mask=mask,
-            y_n=y[n] if experiment_type=="guided" else None,
-            lambda_=lambda_
-        )
+        if sampling_flag:
+            state, mask_term = gen_model.rollout_step(
+                x_cond=x_cond, 
+                mask=mask,
+                y_n=y[n] if guidance_flag else None,
+                lambda_=lambda_
+            )
+        else:
+            timestamp_idx+=1
+            state = ds[timestamp_idx]["next_state"].unsqueeze(0)
+            mask_term = 0
 
         ### save states
 
@@ -62,24 +68,20 @@ def rollout(
         # mask_term = 0.0
         # state = x_start["state"]
 
-        # --- save denormalized xarray outputs ---
-
-        mask_term = float(mask_term)
+        mask_term = float(mask_term)  # cast from torch
         mask_terms.append(mask_term)
 
         state_denorm = ds.denormalize(state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds.cpu()
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
 
-        if isinstance(experiment_type, int):
+        if ensemble_flag:
             # step=m (model id)
-            save_state(result_dir, state_xr, f"{n}", step=experiment_type)
+            save_state(rollout_dir, state_xr, n_step=n, m_step=ensemble_step)
         else:
-            save_state(result_dir, state_xr, experiment_type, n)
-
-
+            save_state(rollout_dir, state_xr, n_step=n, m_step=1)
         # build next conditioning batch 
-        if n < N:
+        if n < N and sampling_flag:
             next_timestamp = x_cond["timestamp"] + lead_time_seconds
             x_cond = {
                 "prev_state": x_cond["state"],
@@ -89,4 +91,4 @@ def rollout(
             }
     
     dict_ = {"mask_terms": mask_terms}
-    save_to_json(dict_, result_dir, "mask_terms")
+    save_to_json(dict_, rollout_dir, "mask_terms")

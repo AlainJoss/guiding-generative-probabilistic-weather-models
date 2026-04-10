@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.23.0"
 app = marimo.App(width="full")
 
 
@@ -248,7 +248,9 @@ def _(mo):
 
 @app.cell
 def _(all_close, mo):
-    mo.md(f"tensor values all close? {all_close}")
+    mo.md(f"""
+    tensor values all close? {all_close}
+    """)
     return
 
 
