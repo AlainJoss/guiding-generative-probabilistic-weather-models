@@ -4,9 +4,9 @@ from tensordict.tensordict import TensorDict
 
 from src.utils import (
     save_state, 
-    save_to_json,
+    save_to_json
 )
-from src.funcs import get_mask_tensordict
+from src.funcs import get_mask_tensordict, get_guidance
 from src.interaction import get_mask_from_corners
 
 from geoarches.dataloaders.era5 import Era5Forecast
@@ -18,15 +18,13 @@ from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 ##### load #####
 
 def rollout(
-        sampling_flag: bool,
         guidance_flag: bool,  # either guiding or not the sampling
-        ensemble_flag: bool,  # if M forecasts are being produced it's relevant for the saving logic
         rollout_dir: Path, 
         ds: Era5Forecast, x_start: dict[TensorDict], 
         gen_model: GuidedFlow, 
-        mask_corners, y, lambda_, N,
-        partition, level_idx, var_idx, timestamp_idx,
-        ensemble_step: int | None = None,
+        mask_corners, init_mask_term,
+        y, lambda_, N,
+        partition, level_idx, var_idx,
     ):
     """
     Switch "guidance" ON/OFF using the mask: None=OFF, torch.Tensor=ON.
@@ -44,23 +42,24 @@ def rollout(
         mask=None
 
     x_cond = x_start
-    lead_time_seconds = x_start["lead_time_hours"] * 3600
+    lead_time_seconds = 6 * 3600
 
     ### iter
 
     mask_terms = []  # realized guidance
+    mask_term = init_mask_term
     for n in range(1, N+1):
-        if sampling_flag:
-            state, mask_term = gen_model.rollout_step(
-                x_cond=x_cond, 
-                mask=mask,
-                y_n=y[n] if guidance_flag else None,
-                lambda_=lambda_
-            )
+        if guidance_flag:
+            # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
+            y_n = get_guidance(y[n], mask_term)
         else:
-            timestamp_idx+=1
-            state = ds[timestamp_idx]["next_state"].unsqueeze(0)
-            mask_term = 0
+            y_n = None
+        state, mask_term = gen_model.rollout_step(
+            x_cond=x_cond, 
+            mask=mask,
+            y_n=y_n,
+            lambda_=lambda_
+        )
 
         ### save states
 
@@ -72,16 +71,13 @@ def rollout(
         mask_terms.append(mask_term)
 
         state_denorm = ds.denormalize(state).cpu()
-        current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds.cpu()
+        current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
 
-        if ensemble_flag:
-            # step=m (model id)
-            save_state(rollout_dir, state_xr, n_step=n, m_step=ensemble_step)
-        else:
-            save_state(rollout_dir, state_xr, n_step=n, m_step=1)
+        save_state(rollout_dir, state_xr, n=n)
+
         # build next conditioning batch 
-        if n < N and sampling_flag:
+        if n < N:
             next_timestamp = x_cond["timestamp"] + lead_time_seconds
             x_cond = {
                 "prev_state": x_cond["state"],

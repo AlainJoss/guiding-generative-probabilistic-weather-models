@@ -1,28 +1,42 @@
 import json
+import random
+import string
+
 from pathlib import Path 
 from datetime import datetime
 
-import torch
 import xarray as xr
-
-import json
-from pathlib import Path
-from datetime import datetime
 import torch
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
-def save_to_json(dict_: dict, result_dir: Path, name:str):
-    path = result_dir / f"{name}.json"
+
+def save_to_json(dict_: dict, rollout_dir: Path, name:str):
+    path = rollout_dir / f"{name}.json"
     with open(path, "w") as f:
         json.dump(dict_, f, indent=2)
 
-def read_json(result_dir, name:str):
-    path = Path(result_dir) / f"{name}.json"
+def read_json(rollout_dir, name:str):
+    path = Path(rollout_dir) / f"{name}.json"
     with open(path, "r") as f:
         dict_ = json.load(f)
     return dict_
+
+def get_xr_ds():
+    timesteps = ["6", "12", "18", "0"]
+    datasets = [
+        xr.open_dataset(f"data/era5_240/full/era5_240_2020_{ts}h.nc", engine="netcdf4")
+        for ts in timesteps
+    ]
+    return xr.concat(
+        datasets,
+        dim="time",
+        data_vars="minimal",
+        coords="minimal",
+        compat="override",
+        join="exact",
+    ).sortby("time")
 
 def get_dataset():
     return Era5Forecast(
@@ -60,38 +74,30 @@ def get_last_experiment_dir():
     print(paths[-1])
     return paths[-1]
 
-def get_rollout_dir(subdir: str):
-    """
-    subdir should be either 
-    - ensemble
-    - guided
-    - gt-weather
-    """
-    paths = Path("results", subdir).glob("2026*")
-    paths = sorted(paths)
-    print(paths[-1])
-    return paths[-1]
-
 def state_to_device(state, device):
     return {k: v[None].to(device) for k, v in state.items()}
 
-def save_state(result_dir: Path, array, n_step: str, m_step: int):
-    """
-    file: either "guided" or "unguided" in the current version.
-    """
-    path = result_dir / f"{n_step}" / f"{m_step}.nc"
+def save_state(rollout_dir: Path, array, n: str):
+    def get_random_id(length=8):
+        return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+    path = rollout_dir / f"{n}" / f"{get_random_id()}.nc"
     array.to_netcdf(path)
 
-def read_state(result_dir, state_type, step: int):
-    """
-    file: either "guided" or "unguided" in the current version.
-    """
-    path = result_dir / f"{state_type}" / f"{step}.nc"
+def read_state(path: Path):
     return xr.open_dataset(path, engine="netcdf4")
 
+def read_states(rollout_dir: Path, n: int):
+    paths = [path for path in rollout_dir.glob(f"{n}/*")]
+    return [read_state(path) for path in paths]
 
 def get_slice(state, partition, level, var, timestamp):
     if partition == "surface":
         return state[var].sel(time=timestamp, method='nearest')
     else: 
         return state[var].sel(time=timestamp, level=level, method='nearest')
+    
+def xr_to_torch(slice_: xr.DataArray):
+    return torch.tensor(slice_.to_numpy())
+
+def tensordict_to_xr(tensordict):
+    return 

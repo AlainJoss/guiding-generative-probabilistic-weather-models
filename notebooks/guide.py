@@ -58,7 +58,7 @@ def _(mo):
 
 @app.cell
 def _():
-    import math
+
     from pathlib import Path 
     from datetime import datetime, timedelta
 
@@ -82,7 +82,21 @@ def _():
     from cartopy.crs import PlateCarree
 
     method_state = {"value": "CubicSpline"}
-    return Path, math, mo, np, torch
+    return Path, mo, torch
+
+
+@app.cell
+def _():
+    from src.visualization import visualize_mask_terms_over_N
+
+    return (visualize_mask_terms_over_N,)
+
+
+@app.cell
+def _():
+    from src.utils import read_states, xr_to_torch
+
+    return read_states, xr_to_torch
 
 
 @app.cell
@@ -99,15 +113,16 @@ def _():
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
     from src.funcs import avg_over_mask, get_guidance_trajectory
-    from src.utils import (
-        get_dataset, get_model, save_config, state_to_device,
-        ensure_guided_rollouts_dir, read_state, get_slice, read_config
-    )
     from src.rollout import rollout
+    from src.utils import (
+        ensure_rollout_dir,
+        get_dataset, get_model, state_to_device,
+        read_state, get_slice, save_to_json, read_json
+    )
 
     return (
         avg_over_mask,
-        ensure_guided_rollouts_dir,
+        ensure_rollout_dir,
         get_dataset,
         get_guidance_trajectory,
         get_mask_corners_from_widget,
@@ -116,10 +131,9 @@ def _():
         get_slice,
         plot_dual_trajectory,
         plot_trajectory,
-        read_config,
-        read_state,
+        read_json,
         rollout,
-        save_config,
+        save_to_json,
         state_to_device,
         visualize_map,
     )
@@ -145,25 +159,8 @@ def _(mo):
 
 
 @app.cell
-def _(math, torch):
-    def N_schedule(T: int, flatness: float, peak: float, alpha: float = 0.0):
-        if T <= 0:
-            return []
-
-        return [
-            torch.tensor(
-                alpha + peak * (math.sin(0.5 * math.pi * (t + 1) / T) ** flatness),
-                dtype=torch.float32,
-            )
-            for t in range(T)
-        ]
-
-    def T_schedule(T: int, flatness: float, peak: float): 
-        if T == 1: 
-            return [torch.tensor(0.0, dtype=torch.float32)] 
-        return [
-            torch.tensor( peak * (math.sin(math.pi * t / (T - 1)) ** flatness), dtype=torch.float32, ) for t in range(T)
-               ] 
+def _():
+    from src.funcs import N_schedule, T_schedule
 
     return N_schedule, T_schedule
 
@@ -180,22 +177,8 @@ def _():
 
 
 @app.cell
-def _(ds, mo):
-    # remove first and last, since we have two tensordicts less (because of prev and next)
-    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
-    timestamp_dropdown = mo.ui.dropdown(TIMESTAMPS, value=TIMESTAMPS[0], label="start state : ")
-    return TIMESTAMPS, timestamp_dropdown
-
-
-@app.cell
-def _(timestamp_dropdown):
-    timestamp = timestamp_dropdown.value
-    return (timestamp,)
-
-
-@app.cell
-def _(PARTITIONS, mo):
-    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=PARTITIONS[0], label="partition: ")
+def _(PARTITIONS, cfg, mo):
+    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=cfg["partition"], label="partition: ")
     return (partition_dropdown,)
 
 
@@ -206,9 +189,9 @@ def _(partition_dropdown):
 
 
 @app.cell
-def _(LEVELS_DICT, mo, partition):
+def _(LEVELS_DICT, cfg, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level: ")
+    level_slider = mo.ui.slider(steps=LEVELS, value=cfg["level"], label="level: ")
     return LEVELS, level_slider
 
 
@@ -219,13 +202,10 @@ def _(level_slider):
 
 
 @app.cell
-def _(VARIABLES_DICT, mo, partition):
+def _(VARIABLES_DICT, cfg, mo, partition):
     VARIABLES = VARIABLES_DICT[partition]
-    if partition == "surface":
-        VARIABLES_VALUE = VARIABLES[2]
-    else:
-        VARIABLES_VALUE = VARIABLES[3]
-    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLES_VALUE, label="variable : ")
+    VARIABLE_DEFAULT = cfg["var"] if partition == cfg["partition"] else VARIABLES[0]
+    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="variable : ")
     return VARIABLES, var_dropdown
 
 
@@ -275,19 +255,19 @@ def _(lambda_shape_slider):
 
 @app.cell
 def _(T_schedule, lambda_shape, w):
-    lambda_trajectory = T_schedule(25, lambda_shape, w) 
-    return (lambda_trajectory,)
+    lambda_ = T_schedule(25, lambda_shape, w) 
+    return (lambda_,)
 
 
 @app.cell
-def _(lambda_trajectory, plot_trajectory):
-    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "lambda", ymax=5)
+def _(lambda_, plot_trajectory):
+    lambda_trajectory_plot = plot_trajectory(lambda_, "lambda", ymax=5, ymin=0)
     return (lambda_trajectory_plot,)
 
 
 @app.cell
 def _(mo):
-    alpha_slider = mo.ui.slider(-5, 5, value=1, label="alpha: ", step=0.1)
+    alpha_slider = mo.ui.slider(-1, 1, value=0.5, label="alpha: ", step=0.01)
     return (alpha_slider,)
 
 
@@ -304,10 +284,30 @@ def _(y_shape_slider):
 
 
 @app.cell
-def _(N, N_schedule, alpha, torch, y_shape):
-    y_trajectory = N_schedule(N, y_shape, alpha) 
-    y_trajectory = [torch.tensor(0.0, dtype=torch.float32)] + y_trajectory
+def _(N, N_schedule, alpha, y_shape):
+    y_trajectory = N_schedule(N, y_shape, alpha)
     return (y_trajectory,)
+
+
+@app.cell
+def _(ds):
+    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
+    return (TIMESTAMPS,)
+
+
+@app.cell
+def _(cfg):
+    timestamp = cfg["timestamp"]
+    M = cfg["M"]
+    N = cfg["N"]
+    return M, N, timestamp
+
+
+@app.cell
+def _(N, TIMESTAMPS, timestamp_idx):
+    timestamps = TIMESTAMPS[timestamp_idx:timestamp_idx+N+1] 
+    timestamps
+    return (timestamps,)
 
 
 @app.cell
@@ -334,111 +334,22 @@ def _(ds, level_idx, partition, var_idx, x_start):
 
 
 @app.cell
-def _(avg_over_mask, get_guidance_trajectory, mask, slice, y_trajectory):
-    avg_over_mask_denormalized  = avg_over_mask(slice, mask)
-    guidance_terms_denormalized  = get_guidance_trajectory(y_trajectory, avg_over_mask_denormalized)
-
-    guidance_trajectory = guidance_terms_denormalized
-    return guidance_terms_denormalized, guidance_trajectory
+def _(get_guidance_trajectory, mean_rollout, y_trajectory):
+    planned_guidance = get_guidance_trajectory(y_trajectory, mean_rollout)
+    return (planned_guidance,)
 
 
 @app.cell
-def _(guidance_trajectory, plot_dual_trajectory, var, y_trajectory):
+def _(planned_guidance, plot_dual_trajectory, timestamps, var, y_trajectory):
     y_trajectory_plot = plot_dual_trajectory(
+        timestamps=timestamps,
         y_trajectory=y_trajectory,
-        guidance_trajectory=guidance_trajectory,
+        guidance_trajectory=planned_guidance,
         var=var,
         ymin_left=-1,
         ymax_left=1
     )
     return (y_trajectory_plot,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Guidance experiments
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Config
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    EXPERIMENT_BASES = ["M-rollout", "gt-weather"]
-    experiment_type_dropdown = mo.ui.dropdown(EXPERIMENT_BASES, value=EXPERIMENT_BASES[1], label="experiment base: ")
-    return (experiment_type_dropdown,)
-
-
-@app.cell
-def _(experiment_type_dropdown):
-    experiment_base = experiment_type_dropdown.value
-    return (experiment_base,)
-
-
-@app.cell
-def _(
-    alpha_slider,
-    experiment_base,
-    experiment_type_dropdown,
-    lambda_shape_slider,
-    lambda_trajectory_plot,
-    level_slider,
-    map_widget,
-    mo,
-    partition_dropdown,
-    rollout_experiment_form,
-    timestamp_dropdown,
-    var_dropdown,
-    w_slider,
-    y_shape_slider,
-    y_trajectory_plot,
-):
-    if experiment_base == "M-rollout":
-        form = mo.vstack([
-            experiment_type_dropdown,
-            rollout_experiment_form
-        ])
-    
-        # enable to select experiment (pick last one by default)
-        # pick config stored with rollout and extract values for N ...
-    else:
-        form = mo.vstack([
-            experiment_type_dropdown,
-            mo.hstack([
-                timestamp_dropdown,
-                partition_dropdown,
-                var_dropdown,
-                level_slider,
-            ], justify="start"),
-            mo.hstack([
-                mo.vstack([
-                    y_shape_slider,
-                    alpha_slider,
-                    y_trajectory_plot,
-                ]),
-                mo.vstack([
-                    lambda_shape_slider,
-                    w_slider,
-                    lambda_trajectory_plot,
-                ]),
-            ]),
-            map_widget
-        ])
-    return (form,)
-
-
-@app.cell
-def _(form):
-    form
-    return
 
 
 @app.cell(hide_code=True)
@@ -459,69 +370,213 @@ def _(mo):
 def _(Path, mo, refresh_button):
     if refresh_button.value:
         pass
-    experiments = Path("data", "ensemble_rollouts").glob("2026*")
-    experiments = sorted(experiments)[::-1]
-    pick_dropdown = mo.ui.dropdown(label="Pick experiment", value=experiments[0], options=experiments)
-    return (pick_dropdown,)
+
+    def has_config_json(path: Path) -> bool:
+        return (path / "config.json").exists()
+
+
+    unguided_rollouts = Path("rollouts", "unguided").glob("2026*")
+    unguided_rollouts = sorted(
+        [p for p in unguided_rollouts if has_config_json(p)],
+        reverse=True,
+    )
+    pick_unguided_rollout_dropdown = mo.ui.dropdown(label="Pick unguided rollout", value=unguided_rollouts[0], options=unguided_rollouts)
+    return (pick_unguided_rollout_dropdown,)
 
 
 @app.cell
-def _(pick_dropdown, read_config):
-    experiment_dir = pick_dropdown.value
-    cfg = read_config(experiment_dir)
-    return cfg, experiment_dir
+def _(pick_unguided_rollout_dropdown, read_json):
+    unguided_rollout_dir = pick_unguided_rollout_dropdown.value
+    cfg = read_json(unguided_rollout_dir, "config")
+    return cfg, unguided_rollout_dir
 
 
 @app.cell
-def _(cfg, mo, pick_dropdown, refresh_button):
-    rollout_experiment_form = mo.vstack([
+def _(cfg, mo, pick_unguided_rollout_dropdown):
+    experiment_dropdown = mo.vstack([
         mo.hstack([
-            pick_dropdown, refresh_button,
+            pick_unguided_rollout_dropdown,
         ], justify="start"),
         mo.vstack([
-            mo.md("#### ----- Experiment params -----"),
             mo.md("<br>".join(f"{k}: {v}" for k, v in cfg.items()))
         ]),
     ])
-    return (rollout_experiment_form,)
+    return (experiment_dropdown,)
 
 
-@app.cell
-def _(cfg):
-    M = cfg["M"]
-    N = cfg["N"]
-    return M, N
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Ensemble rollout
+    """)
+    return
 
 
 @app.cell
 def _(
     M,
+    TIMESTAMPS,
     avg_over_mask,
     cfg,
-    experiment_dir,
+    ds,
     get_slice,
     level,
+    level_idx,
     mask,
-    np,
     partition,
-    read_state,
-    timestamp,
-    torch,
+    read_states,
+    slice,
+    timestamp_idx,
+    unguided_rollout_dir,
     var,
+    var_idx,
+    xr_to_torch,
 ):
-    avgs_avgs = []
+    ground_truth = []
+    ensemble_rollout = []
+    ensemble_rollout.append([avg_over_mask(slice, mask)]*M)
+    ground_truth.append(avg_over_mask(slice, mask))
+
     for n in range(1, cfg["N"]+1):
-        states = [read_state(experiment_dir, str(n), str(m)) for m in range(M)]
-        slices = [get_slice(state, partition, level, var, timestamp) for state in states]
-        slices = [torch.tensor(np.asarray(slice)) for slice in slices]
-        avgs = [avg_over_mask(slice, mask) for slice in slices]
-        avgs_avgs.append(avgs)
-    return (avgs_avgs,)
+        timestamp_n = TIMESTAMPS[timestamp_idx+n]
+        state_n = ds[timestamp_idx+n]["state"]
+        slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
+        ground_truth.append(avg_over_mask(slice_n, mask))
+        states = read_states(unguided_rollout_dir, n) 
+        slices = [get_slice(state, partition, level, var, timestamp_n) for state in states]
+        slices = [xr_to_torch(slice_) for slice_ in slices]
+        avgs = [avg_over_mask(slice_, mask) for slice_ in slices]
+
+        ensemble_rollout.append(avgs)
+    return ensemble_rollout, ground_truth
 
 
 @app.cell
-def _(avgs_avgs):
-    avgs_avgs
+def _():
+    from src.funcs import compute_mean_rollout
+
+    return (compute_mean_rollout,)
+
+
+@app.cell
+def _(compute_mean_rollout, ensemble_rollout):
+    mean_rollout = compute_mean_rollout(ensemble_rollout)
+    return (mean_rollout,)
+
+
+@app.cell
+def _(
+    ensemble_rollout,
+    ground_truth,
+    mean_rollout,
+    planned_guidance,
+    timestamps,
+    var,
+    visualize_mask_terms_over_N,
+):
+    rollout_dist_plot = visualize_mask_terms_over_N(
+        var, timestamps, ensemble_rollout, mean_rollout, ground_truth, planned_guidance
+    )
+    return (rollout_dist_plot,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Guidance experiments
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Config
+    """)
+    return
+
+
+@app.cell
+def _(refresh_button):
+    refresh_button
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Mask config
+    """)
+    return
+
+
+@app.cell
+def _(
+    experiment_dropdown,
+    level_slider,
+    map_widget,
+    mo,
+    partition_dropdown,
+    var_dropdown,
+):
+    mo.vstack([
+        experiment_dropdown,
+        mo.hstack([
+            partition_dropdown,
+            var_dropdown,
+            level_slider,
+        ], justify="start"),
+        mo.vstack([
+            map_widget
+        ])
+    ])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Guidance config
+    """)
+    return
+
+
+@app.cell
+def _(
+    ensemble_rollout,
+    ground_truth,
+    mean_rollout,
+    planned_guidance,
+    y_trajectory,
+):
+    y_trajectory, planned_guidance, ground_truth, ensemble_rollout, mean_rollout
+    return
+
+
+@app.cell
+def _(
+    alpha_slider,
+    lambda_shape_slider,
+    lambda_trajectory_plot,
+    mo,
+    rollout_dist_plot,
+    w_slider,
+    y_shape_slider,
+    y_trajectory_plot,
+):
+    mo.hstack([
+        mo.vstack([
+            lambda_shape_slider,
+            w_slider,
+            lambda_trajectory_plot,
+        ]),
+        mo.vstack([
+            y_shape_slider,
+            alpha_slider,
+            y_trajectory_plot,
+        ]),
+        rollout_dist_plot
+    ])
     return
 
 
@@ -566,22 +621,26 @@ def _(
     N,
     device,
     ds,
-    ensure_guided_rollouts_dir,
-    guidance_terms_denormalized,
+    ensemble_rollout,
+    ensure_rollout_dir,
+    ground_truth,
     lambda_,
-    lambda_trajectory,
     level,
     level_idx,
     mask_corners,
+    mean_rollout,
     model,
     partition,
+    planned_guidance,
+    result_dir,
     rollout,
     run_button,
-    save_config,
+    save_to_json,
     state_to_device,
     status,
     timestamp,
     timestamp_idx,
+    timestamps,
     torch,
     var,
     var_idx,
@@ -590,23 +649,22 @@ def _(
 ):
     if run_button.value and status == "RUNNING":
         # try:
-
-        result_dir = ensure_guided_rollouts_dir()
-
+        rollout_dir = ensure_rollout_dir("guided", N)
+    
         rollout(
             guidance_flag=True,
-            ensemble_flag=False,
-            result_dir=result_dir,
+            rollout_dir=rollout_dir,
             ds=ds,
             x_start=state_to_device(x_start, device),
             gen_model=model,
             mask_corners=mask_corners,
-            y=torch.as_tensor(guidance_terms_denormalized, device=device),  # needs to happen only here
+            init_mask_term=torch.as_tensor(mean_rollout[0]),
+            y=torch.as_tensor(y_trajectory),  # needs to happen only here
             lambda_=lambda_,
             N=N,
             partition=partition,
             level_idx=level_idx,
-            var_idx=var_idx
+            var_idx=var_idx,
         )
 
         config = {
@@ -619,16 +677,32 @@ def _(
             "level_idx": None if level_idx is None else int(level_idx),
             "var": var,
             "var_idx": int(var_idx),
-            "y": [g_t.item() for g_t in guidance_terms_denormalized],
-            "y_perc": [y_t.item() for y_t in y_trajectory],
-            "lambda_": [l_t.item() for l_t in lambda_trajectory]
+            "timestamps": timestamps,
+            "planned_guidance": planned_guidance,
+            "ground_truth": ground_truth,
+            "ensemble_rollout": ensemble_rollout,
+            "mean_rollout": mean_rollout,
+            "y_perc": y_trajectory,
+            "lambda_": lambda_
         }
 
-        save_config(result_dir, config)
+
+        save_to_json(config, result_dir, "config")
 
         #     set_status("IDLE")
-        # except:
+        # except Exception as e:
+        #     print(f"Error: {type(e).__name__}: {e}")
+        #     raise
+
+        # finally:
         #     set_status("IDLE")
+    return
+
+
+@app.cell
+def _(mean_rollout, planned_guidance):
+    planned_guidance[0]
+    mean_rollout[0]
     return
 
 

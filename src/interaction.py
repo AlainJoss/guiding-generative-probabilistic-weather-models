@@ -36,9 +36,14 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     mask = (lon_mask & lat_mask).astype(np.float32)
     return torch.as_tensor(mask)
 
+import numpy as np
+import matplotlib.pyplot as plt
+
+
 def plot_dual_trajectory(
+    timestamps: list[str],
     y_trajectory: list[float],
-    guidance_trajectory: list[float],
+    guidance_trajectory: dict[str, float],
     var: str,
     ymin_left: float | None = None,
     ymax_left: float | None = None,
@@ -46,10 +51,7 @@ def plot_dual_trajectory(
     y = np.asarray(y_trajectory, dtype=float)
     g = np.asarray(guidance_trajectory, dtype=float)
 
-    if len(y) != len(g):
-        raise ValueError("y_trajectory and guidance_trajectory must have the same length")
-
-    x = np.arange(len(y))
+    x = np.arange(len(timestamps))
 
     fig, ax1 = plt.subplots(figsize=(6, 4), dpi=100)
 
@@ -57,8 +59,17 @@ def plot_dual_trajectory(
     ax1.plot(x, y, "o", color="#9c27b0", markersize=5)
 
     ax1.set_xlim((-0.5, 0.5) if len(y) == 1 else (0, len(y) - 1))
-    ax1.set_xticks(np.arange(len(y)))
-    ax1.set_xlabel("N")
+
+    xtick_positions = {0, len(timestamps) - 1}
+    xtick_positions.update(
+        i for i, ts in enumerate(timestamps) if str(ts).endswith("00:00:00")
+    )
+    xtick_positions = sorted(xtick_positions)
+    xtick_labels = [timestamps[i] for i in xtick_positions]
+
+    ax1.set_xticks(xtick_positions)
+    ax1.set_xticklabels(xtick_labels, rotation=45, ha="right")
+    ax1.set_xlabel("Timestamp")
     ax1.set_ylabel("Percentage change")
     ax1.set_title("Trajectory")
     ax1.grid(True, alpha=0.3)
@@ -92,6 +103,7 @@ def plot_dual_trajectory(
 
     ax2.set_ylim(map_left_to_right(left_min), map_left_to_right(left_max))
 
+    fig.tight_layout()
     return fig
 
 
