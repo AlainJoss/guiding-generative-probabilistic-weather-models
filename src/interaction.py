@@ -36,10 +36,6 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     mask = (lon_mask & lat_mask).astype(np.float32)
     return torch.as_tensor(mask)
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-
 def plot_dual_trajectory(
     timestamps: list[str],
     y_trajectory: list[float],
@@ -112,6 +108,7 @@ def plot_trajectory(
     var: str,
     ymin: float | None = None,
     ymax: float | None = None,
+    title: str | None = "Trajectory"
 ):
     x = np.arange(len(trajectory))
     fig, ax = plt.subplots(figsize=(6, 4), dpi=200)
@@ -119,9 +116,9 @@ def plot_trajectory(
     ax.plot(x, trajectory, "o", color="#9c27b0", markersize=5)
     ax.set_xlim(0, len(trajectory) - 1)
     ax.set_xticks(np.arange(len(trajectory)))
-    ax.set_xlabel("steps")
+    ax.set_xlabel("step")
     ax.set_ylabel(f"{var}")
-    ax.set_title("Trajectory")
+    ax.set_title(title)
     ax.grid(True, alpha=0.3)
     ax.axhline(0, color="gray", linewidth=0.5)
 

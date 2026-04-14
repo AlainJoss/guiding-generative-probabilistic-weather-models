@@ -173,7 +173,8 @@ def _(M_slider, N_slider, TIMESTAMPS, timestamp_dropdown):
     M = M_slider.value
     N = N_slider.value * 4
     timestamp_idx = TIMESTAMPS.index(timestamp)
-    return M, N, timestamp, timestamp_idx
+    timestamps = TIMESTAMPS[timestamp_idx:timestamp_idx+N+1] 
+    return M, N, timestamp, timestamp_idx, timestamps
 
 
 @app.cell
@@ -206,7 +207,6 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
 @app.cell
 def _(
     N,
-    TIMESTAMPS,
     avg_over_mask,
     ds,
     level_idx,
@@ -215,18 +215,18 @@ def _(
     timestamp_idx,
     var_idx,
 ):
-    ground_truth_mask_terms = {}
+    ground_truth = []
     for n in range(N+1):
         state_n = ds[timestamp_idx+n]["state"]
         slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
-        avgs = avg_over_mask(slice_n, mask)
-        ground_truth_mask_terms[f"{TIMESTAMPS[timestamp_idx+n]}"] = avgs
-    return (ground_truth_mask_terms,)
+        avg = avg_over_mask(slice_n, mask)
+        ground_truth.append(avg)
+    return (ground_truth,)
 
 
 @app.cell
-def _(ground_truth_mask_terms, var, visualize_mask_terms_over_N):
-    rollout_dist_plot = visualize_mask_terms_over_N(var, ground_truth=ground_truth_mask_terms)
+def _(ground_truth, timestamps, var, visualize_mask_terms_over_N):
+    rollout_dist_plot = visualize_mask_terms_over_N(var, timestamps, ground_truth=ground_truth)
     return (rollout_dist_plot,)
 
 
@@ -285,6 +285,7 @@ def _(Path, ds, model, rollout):
                 ds=ds, 
                 x_start=x_start,
                 gen_model=model,
+                init_mask_term=None,
                 mask_corners=None, # mask_corners
                 y=None, # y
                 lambda_=None, # lambda_
@@ -345,31 +346,32 @@ def _(
     x_start,
 ):
     if run_button.value and status == "RUNNING":
-        try:
-            rollout_dir = ensure_rollout_dir("unguided", N)
-            ensemble_rollout(rollout_dir, M, N, state_to_device(x_start, device))
-    
-            config = {
-                "M": M,
-                "N": N,
-                "timestamp": str(timestamp),
-                "level": level,
-                "partition": partition,
-                "var": var,
-                "mask_corners": mask_corners
-            } 
-    
-            save_to_json(config, rollout_dir, "config")
-            set_status("IDLE")
+        # try:
+        rollout_dir = ensure_rollout_dir("unguided", N)
+        ensemble_rollout(rollout_dir, M, N, state_to_device(x_start, device))
 
-        except Exception as e:
-            rollout_dir.unlink()
-            print(f"Error: {type(e).__name__}: {e}")
-            raise
-    
+        config = {
+            "rollout_dir": str(rollout_dir),
+            "M": M,
+            "N": N,
+            "timestamp": str(timestamp),
+            "level": level,
+            "partition": partition,
+            "var": var,
+            "mask_corners": mask_corners
+        } 
 
-        finally:
-            set_status("IDLE")
+        save_to_json(config, rollout_dir, "config")
+        set_status("IDLE")
+
+        # except Exception as e:
+        #     rollout_dir.unlink()
+        #     print(f"Error: {type(e).__name__}: {e}")
+        #     raise
+
+
+        # finally:
+        #     set_status("IDLE")
     return
 
 

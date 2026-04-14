@@ -58,16 +58,17 @@ Here a few clarifying notes on the specifics of ArchesWeather and its implementa
 Instead of regressing the learned flow model against the velocity vector $r-\epsilon$, they learn to predict $r$ directly, and retrieve the direction $u_{t}^{\theta}(r_t)$ for the next update as follows:
 \begin{align*}
     z_{t} &= (1-s)r_{t} + s\epsilon \\
-    \text{let}\quad r_{t}^\theta &:= \hat{z}_{t+1} = r_{t}^\theta(z_{t}) = r_{t}^\theta((1-s)r_{t} + s\epsilon) \\
+    \text{let}\quad r_{t}^\theta &:= r_{t}^\theta(z_{t}) = r_{t}^\theta((1-s)r_{t} + s\epsilon) \\
     \text{s.t.} \quad \epsilon_{t}^\theta &= \frac{z_{t} - (1-s)r_{t}^\theta}{s} \\
     \text{then} \quad  u_{t}^\theta &=  r_{t}^\theta - \epsilon_{t}^\theta \\
     &= \frac {s}{s}r_{t}^\theta - \frac{z_{t} - (1-s)r_{t}^\theta}{s}\\
-    &= \frac{r_{t}^\theta-z_{t}}{s} = \frac{\hat{z}_{t+1} - z_t}{s}
+    &= \frac{r_{t}^\theta-z_{t}}{s} 
 \end{align*}
-Note that our network directly predicts the denoised residual $r_{t}^\theta = \hat{z}_{t+1}$, but to make the euler update we have to first go back to the noisy space.
-In addition, $s=\frac{t}{T}$, progressing from 0 to 1 (in theory), while in their implementation it goes from 1 to 0.
-We have thus retrieved the velocity vector $u_{t}^{\theta}(z_t)$, which we can feed to our Euler sampler.
-The Euler sampler then does the usual update
+Note that our network directly predicts the denoised residual $r_{t}^\theta$, which is a clean prediction of the state at time $t$, different from $z_{t+1}$, which is only gradually being denoised.
+To make the Euler update we go back to the noisy space by computing the velocity vector $u_t^\theta$, which is the scaled difference between the last noisy state and the current one. 
+This could be viewed as a gradual "cleansing" step.
+The scaling term $s=\frac{t}{T}$, progressing from 1 to 0, and enables to do "more" update at the beginning of the sampling procedure, and gradually less.
+Given the velocity vector $u_{t}^{\theta}(z_t)$, we then do the Euler update as follows:
 $$
 z_{t+\delta} = z_t + h u_{t}^\theta(z_t)
 $$
@@ -125,6 +126,7 @@ First, we map the predicted residual in flow space, $r_t^\theta(z_t)$, back to n
     \hat{x}^{\text{norm}}_t &= \hat{x}^{\text{det}} + \sigma^{\text{res}} \odot r_t^\theta(z_t),
 \end{align*}
 where $\hat{x}^{\text{det}}$ is the prediction of the deterministic model, and $\sigma^{\text{res}}$ is the residual scaling constant used during training, with the same shape as $r_t^\theta$.
+Note that we are correctly using the clean prediction of the residual $r_t^\theta$, as opposed to the noisy state $z_{t+1}$. 
 
 We then map this normalized prediction back to the original data space using the inverse $z$-normalization:
 \begin{align*} 

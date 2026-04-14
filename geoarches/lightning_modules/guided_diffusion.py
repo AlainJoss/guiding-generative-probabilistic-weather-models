@@ -190,6 +190,7 @@ class GuidedFlow(BaseLightningModule):
         z_t = z * self.scale_input_noise
     
         ##### sample #####
+        mask_terms = []
         timesteps = torch.linspace(
             self.num_train_timesteps, 1, self.T
         ).to(self.device)
@@ -225,11 +226,12 @@ class GuidedFlow(BaseLightningModule):
                     u_t,
                     grad_l,
                 )
+            mask_terms.append(mask_term)
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
         
-        return z_t, mask_term
+        return z_t, mask_terms
 
         ##### compute final output #####
     

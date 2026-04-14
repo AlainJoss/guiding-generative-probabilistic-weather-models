@@ -25,7 +25,7 @@ def _():
     from pathlib import Path
     import marimo as mo
     import torch
-    # import xarray as xr
+    import xarray as xr
     import numpy as np
     import matplotlib.pyplot as plt
     import pandas as pd
@@ -38,15 +38,22 @@ def _():
     from src.utils import (
         read_json,
         read_state,
+        read_states,
         get_last_experiment_dir,
         get_slice
     )
     from src.interaction import visualize_map, get_mask_from_corners, get_mask_center
+    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.funcs import avg_over_mask
 
     return (
+        LEVELS_DICT,
+        PARTITIONS,
+        VARIABLES_DICT,
         get_mask_center,
         get_mask_from_corners,
         get_slice,
+        read_json,
         read_state,
         visualize_map,
     )
@@ -128,19 +135,20 @@ def _(np, plt):
     return (plot_zoom_histogram,)
 
 
+@app.cell
+def _(pd):
+    def unix_tensor_to_iso(ts):
+        return pd.to_datetime(int(ts.item()), unit="s").strftime("%Y-%m-%dT%H:%M:%S")
+
+    return (unix_tensor_to_iso,)
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     ## Config
     """)
     return
-
-
-@app.cell
-def _():
-    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-
-    return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
 
 
 @app.cell
@@ -278,8 +286,8 @@ def _(value_threshold_slider):
 
 
 @app.cell
-def _(cfg, mo):
-    n_slider = mo.ui.slider(steps=range(1, cfg["N"]+1), value=1, label="n: ")
+def _(guided_cfg, mo):
+    n_slider = mo.ui.slider(steps=range(1, guided_cfg["N"]+1), value=1, label="n: ")
     return (n_slider,)
 
 
@@ -287,6 +295,24 @@ def _(cfg, mo):
 def _(n_slider):
     n = n_slider.value
     return (n,)
+
+
+@app.cell
+def _(mo, unguided_cfg):
+    m_slider = mo.ui.slider(
+        start=1,
+        stop=unguided_cfg["M"],
+        step=1,
+        value=1,
+        label="m: ",
+    )
+    return (m_slider,)
+
+
+@app.cell
+def _(m_slider):
+    m = m_slider.value
+    return (m,)
 
 
 @app.cell(hide_code=True)
@@ -312,8 +338,8 @@ def _():
 
 
 @app.cell
-def _(cfg, ds, n, unix_tensor_to_iso):
-    x_start = ds[cfg["timestamp_idx"]+n]
+def _(ds, guided_cfg, n, unix_tensor_to_iso):
+    x_start = ds[guided_cfg["timestamp_idx"]+n]
     x_start = ds.denormalize(x_start)
     current = ds.convert_to_xarray(x_start["state"].unsqueeze(0), x_start["timestamp"].unsqueeze(0))
     next = ds.convert_to_xarray(x_start["next_state"].unsqueeze(0), x_start["timestamp"].unsqueeze(0))
@@ -321,31 +347,23 @@ def _(cfg, ds, n, unix_tensor_to_iso):
     lead_time_seconds = x_start["lead_time_hours"] * 3600
     timestamp = x_start["timestamp"] - lead_time_seconds
     timestamp = unix_tensor_to_iso(timestamp)
-    return current, next, timestamp, x_start
-
-
-@app.cell
-def _(pd):
-    def unix_tensor_to_iso(ts):
-        return pd.to_datetime(int(ts.item()), unit="s").strftime("%Y-%m-%dT%H:%M:%S")
-
-    return (unix_tensor_to_iso,)
+    return current, next, timestamp
 
 
 @app.cell
 def _(
     current,
     get_slice,
-    guided,
+    guided_state,
     level,
     next,
     partition,
     timestamp,
-    unguided,
+    unguided_state,
     var,
 ):
-    guided_slice = get_slice(guided, partition, level, var, timestamp)
-    unguided_slice = get_slice(unguided, partition, level, var, timestamp)
+    guided_slice = get_slice(guided_state, partition, level, var, timestamp)
+    unguided_slice = get_slice(unguided_state, partition, level, var, timestamp)
     current_slice = get_slice(current, partition, level, var, timestamp)
     next_slice = get_slice(next, partition, level, var, timestamp)
     return current_slice, guided_slice, next_slice, unguided_slice
@@ -379,6 +397,7 @@ def _(mo):
 @app.cell
 def _(mo):
     refresh_button = mo.ui.button(label="refresh")
+    # refresh_button
     return (refresh_button,)
 
 
@@ -386,47 +405,198 @@ def _(mo):
 def _(Path, mo, refresh_button):
     if refresh_button.value:
         pass
-    experiments = Path("data", "guided_rollouts").glob("2026*")
-    experiments = sorted(experiments)[::-1]
-    pick_dropdown = mo.ui.dropdown(label="Pick experiment", value=experiments[0], options=experiments)
-    return (pick_dropdown,)
+
+    def has_config_json(path: Path) -> bool:
+        return (path / "config.json").exists()
+
+
+    guided_rollouts = Path("rollouts", "guided").glob("2026*")
+    guided_rollouts = sorted(
+        [p for p in guided_rollouts if has_config_json(p)],
+        reverse=True,
+    )
+    pick_guided_rollout_dropdown = mo.ui.dropdown(label="Pick guided rollout", value=guided_rollouts[0], options=guided_rollouts)
+    # pick_guided_rollout_dropdown
+    return (pick_guided_rollout_dropdown,)
 
 
 @app.cell
-def _(read_config, result_dir):
-    cfg = read_config(result_dir)
-    return (cfg,)
+def _(pick_guided_rollout_dropdown):
+    guided_rollout_dir = pick_guided_rollout_dropdown.value
+    return (guided_rollout_dir,)
 
 
 @app.cell
-def _(pick_dropdown):
-    result_dir = pick_dropdown.value
-    return (result_dir,)
+def _(Path, guided_rollout_dir, read_json):
+    guided_cfg = read_json(guided_rollout_dir, "config")
+    unguided_rollout_dir = Path(guided_cfg["unguided_rollout_dir"])
+    unguided_cfg = read_json(unguided_rollout_dir, "config")
+    return guided_cfg, unguided_cfg, unguided_rollout_dir
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Realized guidance
+    """)
+    return
 
 
 @app.cell
-def _(n, read_state, result_dir):
-    guided = read_state(result_dir, "guided", n)
-    unguided = read_state(result_dir, "unguided", n)
-    return guided, unguided
+def _(get_guidance, plt):
+    def realized_guidance_branches(
+        realized_terms: list[float],
+        y_perc: list[float],
+    ) -> list[float]:
+        if len(realized_terms) != len(y_perc):
+            raise ValueError("realized_terms and y_perc must have the same length")
+
+        branches = [realized_terms[0]]
+        for n in range(1, len(realized_terms)):
+            branches.append(get_guidance(y_perc[n], realized_terms[n - 1]))
+        return branches
+
+
+    def plot_guidance_branching(
+        timestamps: list[str],
+        realized_terms: list[float],
+        y_perc: list[float],
+        planned_guidance: list[float] | None = None,
+        ground_truth: list[float] | None = None,
+        mean_rollout: list[float] | None = None,
+        ensemble_rollout: list[list[float]] | None = None,
+    ):
+        N = len(timestamps)
+        if N != len(realized_terms) or len(realized_terms) != len(y_perc):
+            raise ValueError("timestamps, realized_terms, and y_perc must have the same length")
+        x = list(range(N))
+        branch_targets = realized_guidance_branches(realized_terms, y_perc)
+
+        fig, ax = plt.subplots(figsize=(9, 4.5))
+
+        # realized trajectory
+        ax.plot(x, realized_terms, marker="o", linewidth=2, label="Realized guidance")
+
+        # branching segments:
+        # from realized[n-1] to target computed for step n
+        for n in range(1, len(x)):
+            ax.plot(
+                [x[n - 1], x[n]],
+                [realized_terms[n - 1], branch_targets[n]],
+                linestyle="--",
+                marker="o",
+                alpha=0.9,
+                label="Online planned guidance" if n == 1 else None,
+            )
+        
+        if ensemble_rollout is not None:
+            M = len(ensemble_rollout[0])
+
+            for i in range(M):
+                y = [ensemble_rollout[n][i] for n in range(N)]
+                ax.plot(x, y, marker="o", alpha=0.8)
+
+            lower = [min(row) for row in ensemble_rollout]
+            upper = [max(row) for row in ensemble_rollout]
+            ax.fill_between(x, lower, upper, alpha=0.2)
+
+        if planned_guidance is not None:
+            ax.plot(x, planned_guidance, marker="o", linewidth=2, label="Offline planned guidance")
+
+        if ground_truth is not None:
+            ax.plot(x, ground_truth, marker="o", linewidth=2, label="Ground truth")
+        
+        if mean_rollout is not None:
+            ax.plot(x, mean_rollout, marker="o", linewidth=2, label="Mean rollout")
+
+        tick_idx = [i for i, ts in enumerate(timestamps) if ts.endswith("00:00:00")]
+        if 0 not in tick_idx:
+            tick_idx = [0] + tick_idx
+        if len(timestamps) - 1 not in tick_idx:
+            tick_idx.append(len(timestamps) - 1)
+
+        ax.set_xticks(tick_idx)
+        ax.set_xticklabels([timestamps[i] for i in tick_idx], rotation=45, ha="right")
+        ax.set_xlabel("Timestamp")
+        ax.set_ylabel("Mask term")
+        ax.set_title("Realized guidance analysis")
+        ax.grid(alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        return fig
+
+    return (plot_guidance_branching,)
 
 
 @app.cell
-def _(cfg, get_mask_from_corners):
-    mask = get_mask_from_corners(*cfg["mask_corners"])
+def _():
+    from src.funcs import get_guidance
+
+    return (get_guidance,)
+
+
+@app.cell
+def _(guided_cfg, guided_rollout_dir, read_json):
+    timestamps = guided_cfg["timestamps"]
+    y_perc = guided_cfg["y_perc"]
+    planned_guidance = guided_cfg["planned_guidance"]
+    ground_truth_ = guided_cfg["ground_truth"]
+
+    # this should come from rollout_dir/mask_terms.json
+    realized_terms = read_json(guided_rollout_dir, "mask_terms")["final_mask_terms"]
+    return ground_truth_, planned_guidance, realized_terms, timestamps, y_perc
+
+
+@app.cell
+def _(
+    ground_truth_,
+    guided_cfg,
+    planned_guidance,
+    plot_guidance_branching,
+    realized_terms,
+    timestamps,
+    y_perc,
+):
+    # NOTE: 
+    # - first branch of online and offline planned should coincide
+    realized_guidance_plot = plot_guidance_branching(
+        timestamps=timestamps,
+        realized_terms=realized_terms,
+        y_perc=y_perc,
+        planned_guidance=planned_guidance,
+        ground_truth=ground_truth_,
+        mean_rollout=guided_cfg["mean_rollout"],
+        ensemble_rollout=guided_cfg["ensemble_rollout"]
+    )
+    return (realized_guidance_plot,)
+
+
+@app.cell
+def _(guided_rollout_dir, m, read_state, unguided_rollout_dir):
+    paths = [path for path in guided_rollout_dir.glob(f"{1}/*")]
+    guided_state = read_state(paths[0])
+    paths = [path for path in unguided_rollout_dir.glob(f"{1}/*")]
+    unguided_state = read_state(paths[m-1])
+    return guided_state, unguided_state
+
+
+@app.cell
+def _(get_mask_from_corners, guided_cfg):
+    mask = get_mask_from_corners(*guided_cfg["mask_corners"])
     return (mask,)
 
 
 @app.cell
-def _(cfg, mo, pick_dropdown, refresh_button):
+def _(guided_cfg, mo, pick_guided_rollout_dropdown, refresh_button):
     mo.vstack([
         mo.hstack([
-            pick_dropdown, refresh_button,
+            pick_guided_rollout_dropdown, refresh_button,
         ], justify="start"),
-        mo.vstack([
-            mo.md("#### ----- Experiment params -----"),
-            mo.md("<br>".join(f"{k}: {v}" for k, v in cfg.items()))
-        ]),
+        mo.accordion(
+            {
+                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in guided_cfg.items())),
+            }
+        )
     ])
     return
 
@@ -525,7 +695,7 @@ def _(
             zoom_center_lon=zoom_centers[0],
             zoom_center_lat=zoom_centers[1],
         )
-        print(guided_unguided.max())
+        # print(guided_unguided.max())
         guided_unguided_map = visualize_map(
             guided_unguided,
             mask_2d=np.asarray(mask),
@@ -598,6 +768,7 @@ def _(
     guided_unguided_map,
     level,
     level_slider,
+    m_slider,
     mo,
     n_slider,
     next_current_map,
@@ -616,7 +787,7 @@ def _(
     if analysis_type == "absolute":
         to_show = mo.vstack([
             analysis_type_dropdown,
-            n_slider, 
+            mo.hstack([n_slider, m_slider], justify="start"), 
             mo.hstack(
                 [partition_dropdown, var_dropdown, mo.hstack([level_slider, mo.md(f"{level}")], justify="start")],
                 justify="start",
@@ -629,7 +800,7 @@ def _(
     else:
         to_show = mo.vstack([
             analysis_type_dropdown,
-            n_slider,
+            mo.hstack([n_slider, m_slider], justify="start"), 
             mo.hstack([partition_dropdown, var_dropdown, mo.hstack([level_slider, mo.md(f"{level}")], justify="start")], justify="start"),
             mo.hstack([show_mask_switch, show_values_checkbox, value_threshold_slider], justify="start"),
             zoom_slider,
@@ -643,109 +814,70 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## N-trajectory
+    ## Static analysis
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Realized guidance during sampling
+    """)
+    return
+
+
+@app.cell
+def _(guided_rollout_dir, read_json):
+    mask_terms = read_json(guided_rollout_dir, "mask_terms")
+    final_mask_terms = mask_terms["final_mask_terms"]
+    all_mask_terms = mask_terms["all_mask_terms"]
+    # all_mask_terms
+    return (all_mask_terms,)
+
+
+@app.cell
+def _():
+    from src.interaction import plot_trajectory
+
+    return (plot_trajectory,)
+
+
+@app.cell
+def _(all_mask_terms, plot_trajectory):
+    plots=[]
+    for mask_list in  all_mask_terms:
+        plots.append(plot_trajectory(mask_list, "mask term", ymax=None, ymin=None, title="Realized guidance @ diffusion time"))
+    plots
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Realized guidance analysis
+    """)
+    return
+
+
+@app.cell
+def _(realized_guidance_plot):
+    realized_guidance_plot
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Variable change analysis
     """)
     return
 
 
 @app.cell
 def _():
-    from src.funcs import avg_over_mask
-
-    return (avg_over_mask,)
-
-
-@app.cell
-def _(
-    avg_over_mask,
-    cfg,
-    ds,
-    get_slice,
-    mask,
-    read_state,
-    result_dir,
-    unix_tensor_to_iso,
-    x_start,
-):
-    realized_y_guided = [] 
-    realized_y_unguided = [] 
-    ground_truth = []
-
-    for n_ in range(1, cfg["N"]+1):
-        x_start_ = ds[cfg["timestamp_idx"]]
-        lead_time_seconds_ = x_start_["lead_time_hours"] * 3600
-        timestamp_ = x_start["timestamp"]
-        timestamp_ = unix_tensor_to_iso(timestamp_)
-
-        state = ds.convert_to_xarray(x_start["next_state"].unsqueeze(0), x_start["timestamp"].unsqueeze(0))
-        state = get_slice(state, cfg["partition"], cfg["level"], cfg["var"], timestamp_)
-        state = state.to_numpy()
-        avg_ = avg_over_mask(state, mask)
-        ground_truth.append(avg_)
-
-        state = read_state(result_dir, "guided", n_)
-        state = get_slice(state, cfg["partition"], cfg["level"], cfg["var"], timestamp_)
-        state = state.to_numpy()
-        avg_ = avg_over_mask(state, mask)
-        realized_y_guided.append(avg_)
-
-        state = read_state(result_dir, "unguided", n_)
-        state = get_slice(state, cfg["partition"], cfg["level"], cfg["var"], timestamp_)
-        state = state.to_numpy()
-        avg_ = avg_over_mask(state, mask)
-        realized_y_unguided.append(avg_)
-
-    ground_truth = [cfg["y"][0]] + ground_truth
-    realized_y_guided = [cfg["y"][0]] + realized_y_guided
-    realized_y_unguided = [cfg["y"][0]] + realized_y_unguided
-    return ground_truth, realized_y_guided, realized_y_unguided
-
-
-@app.cell
-def _(np, plt):
-    def plot_realized_trajectories(planned, guided, unguided, ground_truth, var: str):
-        x = np.arange(len(guided))
-
-        fig, ax = plt.subplots(figsize=(7, 4), dpi=150)
-        ax.plot(x, planned, "-o", linewidth=2, markersize=5, label="planned")
-        ax.plot(x, guided, "-o", linewidth=2, markersize=5, label="guided")
-        ax.plot(x, unguided, "-o", linewidth=2, markersize=5, label="unguided")
-        ax.plot(x, ground_truth, "-o", linewidth=2, markersize=5, label="ground truth")
-
-        ax.set_xlim(0, len(x) - 1 if len(x) > 1 else 1)
-        ax.set_xticks(x)
-        ax.set_xlabel("N")
-        ax.set_ylabel(var)
-        ax.set_title("Realized trajectories")
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-
-        return fig
-
-    return (plot_realized_trajectories,)
-
-
-@app.cell
-def _(
-    cfg,
-    ground_truth,
-    plot_realized_trajectories,
-    realized_y_guided,
-    realized_y_unguided,
-    var,
-):
-    plot_realized_trajectories(cfg["y"], realized_y_guided, realized_y_unguided, ground_truth, var)
-    return
-
-
-@app.cell
-def _():
-    # the planning should really happening with respect to the forecast itself
-    return
-
-
-@app.cell
-def _():
+    # analysis of change wrt to the unguided states
+    # compute the N differences
     return
 
 

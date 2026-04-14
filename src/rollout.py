@@ -46,29 +46,33 @@ def rollout(
 
     ### iter
 
-    mask_terms = []  # realized guidance
-    mask_term = init_mask_term
+    final_mask_terms = []  # realized guidance
+    all_mask_terms = []
+    mask_term = float(init_mask_term)     
+    final_mask_terms.append(mask_term)
     for n in range(1, N+1):
         if guidance_flag:
             # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
             y_n = get_guidance(y[n], mask_term)
         else:
             y_n = None
-        state, mask_term = gen_model.rollout_step(
-            x_cond=x_cond, 
-            mask=mask,
-            y_n=y_n,
-            lambda_=lambda_
-        )
+        TEST = True
+        if not TEST:
+            state, mask_terms_n = gen_model.rollout_step(
+                x_cond=x_cond, 
+                mask=mask,
+                y_n=y_n,
+                lambda_=lambda_
+            )
+            mask_term = mask_terms_n[-1]
+        else:
+            mask_term = 0.0
+            mask_terms_n = [mask_term]*25
+            state = x_start["state"]
 
         ### save states
-
-        # for testing 
-        # mask_term = 0.0
-        # state = x_start["state"]
-
-        mask_term = float(mask_term)  # cast from torch
-        mask_terms.append(mask_term)
+        final_mask_terms.append(float(mask_term))
+        all_mask_terms.append([float(mt) for mt in mask_terms_n])
 
         state_denorm = ds.denormalize(state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds
@@ -86,5 +90,9 @@ def rollout(
                 "lead_time_hours": x_start["lead_time_hours"],
             }
     
-    dict_ = {"mask_terms": mask_terms}
-    save_to_json(dict_, rollout_dir, "mask_terms")
+    if guidance_flag:
+        dict_ = {
+            "final_mask_terms": final_mask_terms,
+            "all_mask_terms": all_mask_terms
+        }
+        save_to_json(dict_, rollout_dir, "mask_terms")

@@ -36,13 +36,13 @@ def N_schedule(
 
     values = [
         torch.tensor(
-            alpha + peak * (math.sin(math.pi * n / (N + 1)) ** flatness),
+            alpha + peak * (math.sin(math.pi * n / (N)) ** flatness),
             dtype=torch.float32,
         )
-        for n in range(1, N + 1)
+        for n in range(1, N)
     ]
 
-    return [torch.tensor(0.0, dtype=torch.float32)] + values
+    return [torch.tensor(0.0, dtype=torch.float32)] + values + [torch.tensor(0.0, dtype=torch.float32)]
 
 def T_schedule(T: int, flatness: float, peak: float): 
     if T == 1: 

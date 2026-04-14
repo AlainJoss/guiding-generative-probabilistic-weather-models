@@ -58,7 +58,6 @@ def _(mo):
 
 @app.cell
 def _():
-
     from pathlib import Path 
     from datetime import datetime, timedelta
 
@@ -94,9 +93,16 @@ def _():
 
 @app.cell
 def _():
-    from src.utils import read_states, xr_to_torch
+    from src.utils import read_states, xr_to_torch, list_tens_to_floats
 
-    return read_states, xr_to_torch
+    return list_tens_to_floats, read_states, xr_to_torch
+
+
+@app.cell
+def _():
+    from src.funcs import N_schedule, T_schedule, compute_mean_rollout
+
+    return N_schedule, T_schedule, compute_mean_rollout
 
 
 @app.cell
@@ -149,20 +155,9 @@ def _(device, get_dataset, get_model):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Setup
-    - funcs
-    - constants
-    - sliders and dropdowns
-    - ids
+    ## Interactivity
     """)
     return
-
-
-@app.cell
-def _():
-    from src.funcs import N_schedule, T_schedule
-
-    return N_schedule, T_schedule
 
 
 @app.cell
@@ -177,8 +172,8 @@ def _():
 
 
 @app.cell
-def _(PARTITIONS, cfg, mo):
-    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=cfg["partition"], label="partition: ")
+def _(PARTITIONS, mo, unguided_cfg):
+    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=unguided_cfg["partition"], label="partition: ")
     return (partition_dropdown,)
 
 
@@ -189,9 +184,9 @@ def _(partition_dropdown):
 
 
 @app.cell
-def _(LEVELS_DICT, cfg, mo, partition):
+def _(LEVELS_DICT, mo, partition, unguided_cfg):
     LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=cfg["level"], label="level: ")
+    level_slider = mo.ui.slider(steps=LEVELS, value=unguided_cfg["level"], label="level: ")
     return LEVELS, level_slider
 
 
@@ -202,9 +197,9 @@ def _(level_slider):
 
 
 @app.cell
-def _(VARIABLES_DICT, cfg, mo, partition):
+def _(VARIABLES_DICT, mo, partition, unguided_cfg):
     VARIABLES = VARIABLES_DICT[partition]
-    VARIABLE_DEFAULT = cfg["var"] if partition == cfg["partition"] else VARIABLES[0]
+    VARIABLE_DEFAULT = unguided_cfg["var"] if partition == unguided_cfg["partition"] else VARIABLES[0]
     var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="variable : ")
     return VARIABLES, var_dropdown
 
@@ -296,17 +291,16 @@ def _(ds):
 
 
 @app.cell
-def _(cfg):
-    timestamp = cfg["timestamp"]
-    M = cfg["M"]
-    N = cfg["N"]
+def _(unguided_cfg):
+    timestamp = unguided_cfg["timestamp"]
+    M = unguided_cfg["M"]
+    N = unguided_cfg["N"]
     return M, N, timestamp
 
 
 @app.cell
 def _(N, TIMESTAMPS, timestamp_idx):
     timestamps = TIMESTAMPS[timestamp_idx:timestamp_idx+N+1] 
-    timestamps
     return (timestamps,)
 
 
@@ -337,19 +331,6 @@ def _(ds, level_idx, partition, var_idx, x_start):
 def _(get_guidance_trajectory, mean_rollout, y_trajectory):
     planned_guidance = get_guidance_trajectory(y_trajectory, mean_rollout)
     return (planned_guidance,)
-
-
-@app.cell
-def _(planned_guidance, plot_dual_trajectory, timestamps, var, y_trajectory):
-    y_trajectory_plot = plot_dual_trajectory(
-        timestamps=timestamps,
-        y_trajectory=y_trajectory,
-        guidance_trajectory=planned_guidance,
-        var=var,
-        ymin_left=-1,
-        ymax_left=1
-    )
-    return (y_trajectory_plot,)
 
 
 @app.cell(hide_code=True)
@@ -387,19 +368,21 @@ def _(Path, mo, refresh_button):
 @app.cell
 def _(pick_unguided_rollout_dropdown, read_json):
     unguided_rollout_dir = pick_unguided_rollout_dropdown.value
-    cfg = read_json(unguided_rollout_dir, "config")
-    return cfg, unguided_rollout_dir
+    unguided_cfg = read_json(unguided_rollout_dir, "config")
+    return unguided_cfg, unguided_rollout_dir
 
 
 @app.cell
-def _(cfg, mo, pick_unguided_rollout_dropdown):
+def _(mo, pick_unguided_rollout_dropdown, refresh_button, unguided_cfg):
     experiment_dropdown = mo.vstack([
         mo.hstack([
-            pick_unguided_rollout_dropdown,
+            pick_unguided_rollout_dropdown, refresh_button
         ], justify="start"),
-        mo.vstack([
-            mo.md("<br>".join(f"{k}: {v}" for k, v in cfg.items()))
-        ]),
+        mo.accordion(
+            {
+                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in unguided_cfg.items()))
+            }
+        )
     ])
     return (experiment_dropdown,)
 
@@ -417,7 +400,7 @@ def _(
     M,
     TIMESTAMPS,
     avg_over_mask,
-    cfg,
+    compute_mean_rollout,
     ds,
     get_slice,
     level,
@@ -427,6 +410,7 @@ def _(
     read_states,
     slice,
     timestamp_idx,
+    unguided_cfg,
     unguided_rollout_dir,
     var,
     var_idx,
@@ -437,7 +421,7 @@ def _(
     ensemble_rollout.append([avg_over_mask(slice, mask)]*M)
     ground_truth.append(avg_over_mask(slice, mask))
 
-    for n in range(1, cfg["N"]+1):
+    for n in range(1, unguided_cfg["N"]+1):
         timestamp_n = TIMESTAMPS[timestamp_idx+n]
         state_n = ds[timestamp_idx+n]["state"]
         slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
@@ -448,20 +432,30 @@ def _(
         avgs = [avg_over_mask(slice_, mask) for slice_ in slices]
 
         ensemble_rollout.append(avgs)
-    return ensemble_rollout, ground_truth
 
-
-@app.cell
-def _():
-    from src.funcs import compute_mean_rollout
-
-    return (compute_mean_rollout,)
-
-
-@app.cell
-def _(compute_mean_rollout, ensemble_rollout):
     mean_rollout = compute_mean_rollout(ensemble_rollout)
-    return (mean_rollout,)
+    return ensemble_rollout, ground_truth, mean_rollout
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Plots
+    """)
+    return
+
+
+@app.cell
+def _(planned_guidance, plot_dual_trajectory, timestamps, var, y_trajectory):
+    y_trajectory_plot = plot_dual_trajectory(
+        timestamps=timestamps,
+        y_trajectory=y_trajectory,
+        guidance_trajectory=planned_guidance,
+        var=var,
+        ymin_left=-1,
+        ymax_left=1
+    )
+    return (y_trajectory_plot,)
 
 
 @app.cell
@@ -493,12 +487,6 @@ def _(mo):
     mo.md(r"""
     ## Config
     """)
-    return
-
-
-@app.cell
-def _(refresh_button):
-    refresh_button
     return
 
 
@@ -538,18 +526,6 @@ def _(mo):
     mo.md(r"""
     ### Guidance config
     """)
-    return
-
-
-@app.cell
-def _(
-    ensemble_rollout,
-    ground_truth,
-    mean_rollout,
-    planned_guidance,
-    y_trajectory,
-):
-    y_trajectory, planned_guidance, ground_truth, ensemble_rollout, mean_rollout
     return
 
 
@@ -619,6 +595,7 @@ def _(mo):
 @app.cell
 def _(
     N,
+    alpha,
     device,
     ds,
     ensemble_rollout,
@@ -627,12 +604,12 @@ def _(
     lambda_,
     level,
     level_idx,
+    list_tens_to_floats,
     mask_corners,
     mean_rollout,
     model,
     partition,
     planned_guidance,
-    result_dir,
     rollout,
     run_button,
     save_to_json,
@@ -642,15 +619,17 @@ def _(
     timestamp_idx,
     timestamps,
     torch,
+    unguided_cfg,
     var,
     var_idx,
+    w,
     x_start,
     y_trajectory,
 ):
     if run_button.value and status == "RUNNING":
         # try:
         rollout_dir = ensure_rollout_dir("guided", N)
-    
+
         rollout(
             guidance_flag=True,
             rollout_dir=rollout_dir,
@@ -668,6 +647,7 @@ def _(
         )
 
         config = {
+            "unguided_rollout_dir": unguided_cfg["unguided_rollout_dir"],
             "N": N,
             "mask_corners": mask_corners,
             "timestamp": str(timestamp),
@@ -678,16 +658,18 @@ def _(
             "var": var,
             "var_idx": int(var_idx),
             "timestamps": timestamps,
-            "planned_guidance": planned_guidance,
-            "ground_truth": ground_truth,
-            "ensemble_rollout": ensemble_rollout,
-            "mean_rollout": mean_rollout,
-            "y_perc": y_trajectory,
-            "lambda_": lambda_
+            "planned_guidance": list_tens_to_floats(planned_guidance),
+            "ground_truth": list_tens_to_floats(ground_truth),
+            "ensemble_rollout": [list_tens_to_floats(list_) for list_ in ensemble_rollout],
+            "mean_rollout": list_tens_to_floats(mean_rollout),
+            "y_perc": list_tens_to_floats(y_trajectory),
+            "lambda_": list_tens_to_floats(lambda_),
+            "alpha": alpha,
+            "w": w
         }
 
 
-        save_to_json(config, result_dir, "config")
+        save_to_json(config, rollout_dir, "config")
 
         #     set_status("IDLE")
         # except Exception as e:
@@ -696,18 +678,6 @@ def _(
 
         # finally:
         #     set_status("IDLE")
-    return
-
-
-@app.cell
-def _(mean_rollout, planned_guidance):
-    planned_guidance[0]
-    mean_rollout[0]
-    return
-
-
-@app.cell
-def _():
     return
 
 

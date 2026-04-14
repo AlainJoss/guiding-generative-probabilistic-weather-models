@@ -101,3 +101,6 @@ def xr_to_torch(slice_: xr.DataArray):
 
 def tensordict_to_xr(tensordict):
     return 
+
+def list_tens_to_floats(list_):
+    return [tensor.item() for tensor in list_]
