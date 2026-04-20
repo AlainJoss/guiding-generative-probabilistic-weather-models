@@ -66,7 +66,7 @@ def rollout(
                 x_cond=x_cond,
                 mask=mask,
                 y_n=y_n,
-                lambda_=lambda_
+                lambda_=lambda_,
                 seed=seed
             )
         else:

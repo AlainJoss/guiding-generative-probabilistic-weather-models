@@ -32,7 +32,7 @@ gen_model = gen_model.to(device)
 ##### set up #####
 
 # select X_start
-X_start = ds[675]
+X_start = ds[0]
 X_start = state_to_device(X_start, device)
 
 ##### run #####
@@ -47,7 +47,7 @@ for m in range(1, M + 1):
     samples = gen_model.sample_rollout(
         batch=X_start,
         iterations=N,
-        member=m,
+        member=0,
     ).cpu()  # [B=1, iterations, ...]
 
     for n in range(1, N + 1):

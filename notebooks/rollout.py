@@ -20,6 +20,17 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    #### TODO
+    - need to think about how to set up ablation study
+    - which other plots
+    - which parameters / methods to iterate over
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## Setup
     """)
     return
@@ -107,9 +118,14 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    ROLLOUT_TYPES = ["gt-weather", "model-ensemble"]
-    rollout_type_dropdown = mo.ui.dropdown(ROLLOUT_TYPES, value=ROLLOUT_TYPES[0], label="rollout type: ")
-    return
+    seeded_run_dropdown = mo.ui.checkbox(label="seeded run")
+    return (seeded_run_dropdown,)
+
+
+@app.cell
+def _(seeded_run_dropdown):
+    seeded_run = seeded_run_dropdown.value
+    return (seeded_run,)
 
 
 @app.cell
@@ -245,6 +261,14 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### TODO: check start date is actually 00:60, seems odd
+    """)
+    return
+
+
 @app.cell
 def _(
     M_slider,
@@ -255,11 +279,13 @@ def _(
     mo,
     partition_dropdown,
     rollout_dist_plot,
+    seeded_run_dropdown,
     timestamp_dropdown,
     var_dropdown,
 ):
     mo.vstack([
         timestamp_dropdown,
+        seeded_run_dropdown,
         mo.hstack([N_slider, mo.md(f"days ({N} steps)")], justify="start"),
         mo.hstack([M_slider, mo.md(f"ensemble members")], justify="start"),
         mo.hstack([
@@ -282,7 +308,13 @@ def _(mo):
 
 
 @app.cell
-def _(Path, ds, model, rollout):
+def _(seeded_run):
+    seeded_run
+    return
+
+
+@app.cell
+def _(Path, ds, model, rollout, seeded_run):
     def ensemble_rollout(rollout_dir: Path, M: int, N: int, x_start):
         for m in range(1, M+1):
             print(f"m: {m}/{M}")
@@ -300,7 +332,8 @@ def _(Path, ds, model, rollout):
                 partition=None, # partition
                 level_idx=None, # level_idx
                 var_idx=None, # var_idx
-                m=m
+                m=m,
+                seeded_run=seeded_run
             )
 
     return (ensemble_rollout,)

@@ -167,7 +167,7 @@ class GuidedFlow(BaseLightningModule):
         self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z, mask_term = self.sample(x_cond, self.mu, y_n, mask, lambda_)
+        z, mask_term = self.sample(x_cond, self.mu, y_n, mask, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat, mask_term
@@ -185,8 +185,10 @@ class GuidedFlow(BaseLightningModule):
         ##### init #####
         # draw noise
         generator = torch.Generator(device=self.device)
-        if seed:
-            generator.manual_seed(0)
+        if seed is not None:
+            seed=0
+            generator.manual_seed(seed)
+            print(f"set seed: {seed}")
         z = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )

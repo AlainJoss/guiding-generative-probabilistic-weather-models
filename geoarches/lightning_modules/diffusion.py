@@ -371,6 +371,8 @@ class DiffusionModule(BaseLightningModule):
 
         for i in tqdm(range(iterations), disable=disable_tqdm):
             seed_i = member + 1000 * i + batch_nb * 10**6
+            seed_i=0
+            print(seed_i)
             sample = self.sample(loop_batch, seed=seed_i, disable_tqdm=True, **kwargs)
             preds_future.append(sample)
             loop_batch = dict(
