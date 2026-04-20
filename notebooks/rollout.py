@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.0"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -178,6 +178,13 @@ def _(M_slider, N_slider, TIMESTAMPS, timestamp_dropdown):
 
 
 @app.cell
+def _(timestamp, timestamp_idx):
+    # timestamp_idx, var_idx, level_idx
+    timestamp, timestamp_idx
+    return
+
+
+@app.cell
 def _(ds, level_idx, partition, timestamp_idx, var_idx):
     x_start = ds[timestamp_idx]
     slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
@@ -277,8 +284,8 @@ def _(mo):
 @app.cell
 def _(Path, ds, model, rollout):
     def ensemble_rollout(rollout_dir: Path, M: int, N: int, x_start):
-        for m in range(M):
-            print(f"m: {m+1}/{M}")
+        for m in range(1, M+1):
+            print(f"m: {m}/{M}")
             rollout(
                 guidance_flag=False,
                 rollout_dir=rollout_dir,
@@ -293,6 +300,7 @@ def _(Path, ds, model, rollout):
                 partition=None, # partition
                 level_idx=None, # level_idx
                 var_idx=None, # var_idx
+                m=m
             )
 
     return (ensemble_rollout,)
@@ -338,7 +346,6 @@ def _(
     partition,
     run_button,
     save_to_json,
-    set_status,
     state_to_device,
     status,
     timestamp,
@@ -362,7 +369,7 @@ def _(
         } 
 
         save_to_json(config, rollout_dir, "config")
-        set_status("IDLE")
+        #     set_status("IDLE")
 
         # except Exception as e:
         #     rollout_dir.unlink()

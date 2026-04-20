@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.0"
+__generated_with = "0.23.1"
 app = marimo.App(width="medium", css_file="")
 
 
@@ -86,48 +86,29 @@ def _():
 
 @app.cell
 def _():
-    from src.visualization import visualize_mask_terms_over_N
-
-    return (visualize_mask_terms_over_N,)
-
-
-@app.cell
-def _():
-    from src.utils import read_states, xr_to_torch, list_tens_to_floats
-
-    return list_tens_to_floats, read_states, xr_to_torch
-
-
-@app.cell
-def _():
-    from src.funcs import N_schedule, T_schedule, compute_mean_rollout
-
-    return N_schedule, T_schedule, compute_mean_rollout
-
-
-@app.cell
-def _():
-    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-
-    return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
-
-
-@app.cell
-def _():
     from src.interaction import (
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
-    from src.funcs import avg_over_mask, get_guidance_trajectory
+    from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from src.rollout import rollout
     from src.utils import (
         ensure_rollout_dir,
         get_dataset, get_model, state_to_device,
-        read_state, get_slice, save_to_json, read_json
+        read_state, get_slice, save_to_json, read_json,
+        read_states, xr_to_torch, list_tens_to_floats
     )
+    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.visualization import visualize_mask_terms_over_N
 
     return (
+        LEVELS_DICT,
+        N_schedule,
+        PARTITIONS,
+        T_schedule,
+        VARIABLES_DICT,
         avg_over_mask,
+        compute_mean_rollout,
         ensure_rollout_dir,
         get_dataset,
         get_guidance_trajectory,
@@ -135,13 +116,17 @@ def _():
         get_mask_from_corners,
         get_model,
         get_slice,
+        list_tens_to_floats,
         plot_dual_trajectory,
         plot_trajectory,
         read_json,
+        read_states,
         rollout,
         save_to_json,
         state_to_device,
         visualize_map,
+        visualize_mask_terms_over_N,
+        xr_to_torch,
     )
 
 
@@ -474,6 +459,25 @@ def _(
     return (rollout_dist_plot,)
 
 
+@app.cell
+def _(M, ensemble_rollout, mean_rollout, timestamps):
+    from src.visualization import plot_ensemble_rollout
+    realized_guidance_plot = plot_ensemble_rollout(
+        timestamps=timestamps,
+        mean_rollout=mean_rollout,
+        ensemble_rollout=ensemble_rollout,
+        title="Ensemble rollout",
+        subtitle=f"{M} members",
+    )
+    return (realized_guidance_plot,)
+
+
+@app.cell
+def _(realized_guidance_plot):
+    realized_guidance_plot
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -525,6 +529,16 @@ def _(
 def _(mo):
     mo.md(r"""
     ### Guidance config
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### TODO:
+    - swap rollout_dist_plot with newer version present in analyze.py
+    - implement slider for alpha max (so step becomes more variable-adjustable)
     """)
     return
 
@@ -592,6 +606,15 @@ def _(mo):
     return (run_button,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    #### TODO:
+    - implement a logger for experiments and print error to log file instead of this
+    """)
+    return
+
+
 @app.cell
 def _(
     N,
@@ -644,10 +667,11 @@ def _(
             partition=partition,
             level_idx=level_idx,
             var_idx=var_idx,
+            m=1
         )
 
         config = {
-            "unguided_rollout_dir": unguided_cfg["unguided_rollout_dir"],
+            "unguided_rollout_dir": unguided_cfg["rollout_dir"],
             "N": N,
             "mask_corners": mask_corners,
             "timestamp": str(timestamp),

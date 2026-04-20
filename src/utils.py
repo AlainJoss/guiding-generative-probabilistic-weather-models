@@ -59,9 +59,9 @@ def get_timestamp():
     timestamp = date + "_" + time
     return timestamp
 
-def ensure_rollout_dir(rollout_dir: Path, N):
+def ensure_rollout_dir(sub_dir: Path, N):
     timestamp = get_timestamp()
-    result_dir = Path("rollouts", rollout_dir, f"{timestamp}")
+    result_dir = Path("rollouts", sub_dir, f"{timestamp}")
     result_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, N+1):
         path = Path(result_dir, f"{n}")
@@ -77,10 +77,8 @@ def get_last_experiment_dir():
 def state_to_device(state, device):
     return {k: v[None].to(device) for k, v in state.items()}
 
-def save_state(rollout_dir: Path, array, n: str):
-    def get_random_id(length=8):
-        return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
-    path = rollout_dir / f"{n}" / f"{get_random_id()}.nc"
+def save_state(rollout_dir: Path, array, n: int, m: int):
+    path = rollout_dir / f"{n}" / f"{m}.nc"
     array.to_netcdf(path)
 
 def read_state(path: Path):

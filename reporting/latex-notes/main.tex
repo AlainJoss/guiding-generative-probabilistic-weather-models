@@ -125,7 +125,7 @@ First, we map the predicted residual in flow space, $r_t^\theta(z_t)$, back to n
 \begin{align*} 
     \hat{x}^{\text{norm}}_t &= \hat{x}^{\text{det}} + \sigma^{\text{res}} \odot r_t^\theta(z_t),
 \end{align*}
-where $\hat{x}^{\text{det}}$ is the prediction of the deterministic model, and $\sigma^{\text{res}}$ is the residual scaling constant used during training, with the same shape as $r_t^\theta$.
+where $\hat{x}^{\text{det}}$ is the prediction of the deterministic model, and $\sigma^{\text{res}}$ is the residual scaling constant used during training, with the spatial dimensions =1 and same number of levels and variables as $r_t^\theta$.
 Note that we are correctly using the clean prediction of the residual $r_t^\theta$, as opposed to the noisy state $z_{t+1}$. 
 
 We then map this normalized prediction back to the original data space using the inverse $z$-normalization:

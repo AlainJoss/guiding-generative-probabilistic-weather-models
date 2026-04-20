@@ -175,6 +175,7 @@ experiments/generated
 modelstore/
 geoarches/stats/
 rollouts/
+marimo-pair/
 
 journal/latex-notes/*
 !journal/latex-notes/main.pdf

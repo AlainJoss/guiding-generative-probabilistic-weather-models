@@ -1,17 +1,12 @@
-import json
-
-import torch
-
 from src.utils import (
-    save_state, 
+    save_state,
     state_to_device,
+    save_to_json,
+    ensure_rollout_dir,
 )
-from src.funcs import get_mask_tensordict
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
-
-# TODO: create run func and call from marimo after setup!
 
 ##### load #####
 
@@ -24,7 +19,7 @@ ds = Era5Forecast(
 )
 
 # model
-model = 1
+model = 0
 module_target = "geoarches.lightning_modules.{}"
 MODELS = ["diffusion.DiffusionModule", "guided_diffusion.GuidedFlow"]
 device = "mps"
@@ -37,50 +32,36 @@ gen_model = gen_model.to(device)
 ##### set up #####
 
 # select X_start
-X_start = ds[0]
+X_start = ds[675]
 X_start = state_to_device(X_start, device)
-
-partition = "surface"  # str
-var_idx = 2  # int
-level_idx = 0  # int
-spatial_mask = torch.zeros((121, 240), device=device, dtype=torch.float32)
-spatial_mask[100, 100] = 1
-
-# note: something is not unrolled here ...
-mask = get_mask_tensordict(X_start["state"][0], partition, var_idx, level_idx, spatial_mask)
-
-y_t = torch.tensor(200, device=device, dtype=torch.float32)
 
 ##### run #####
 
-sampled_state = gen_model.rollout_step(
-    x_cond=X_start, 
-    y_t=y_t, 
-    mask=mask
-).cpu()
-# TODO: this has later to be moved to rollout(N)
-sampled_state = gen_model.denormalize(sampled_state)
+N = 2
+M = 1  # ensemble size
+lead_s = int(X_start["lead_time_hours"].item()) * 3600
+start_timestamp = X_start["timestamp"].cpu()
+rollout_dir = ensure_rollout_dir("old_model", N=N)
 
-##### save #####
+for m in range(1, M + 1):
+    samples = gen_model.sample_rollout(
+        batch=X_start,
+        iterations=N,
+        member=m,
+    ).cpu()  # [B=1, iterations, ...]
 
-# TODO: get from ui
-timestamp = X_start["timestamp"].cpu()
-sampled_state = ds.convert_to_xarray(sampled_state, timestamp)
+    for n in range(1, N + 1):
+        sample = samples[:, n - 1]  # keep batch dim → [B=1, ...]
+        st = ds.denormalize(sample)
+        ts = start_timestamp + n * lead_s
+        st_xr = ds.convert_to_xarray(st, ts)
+        save_state(rollout_dir, st_xr, n=n, m=m)
 
-save_state(sampled_state)
+config = {
+    "rollout_dir": str(rollout_dir),
+    "M": M,
+    "N": N,
+    "timestamp": str(start_timestamp),
+}
 
-timestamp = "2020-01-02T00:00:00" # this is actually annoying since there is only one
-start_ts_idx = ...  # enables to retrieve ground truth from timestamp to timestamp+N
-partition = "surface"  # str
-var = "2m_temperature"
-var_idx = 2  # int
-level = ...
-level_idx = 0  # int  # NOTE: some variables do not have level coordinate
-mask = ...
-N = ...
-
-
-def save_config(config):
-    path = ""
-    with open(path, "w"):
-        json.dump(config)
+save_to_json(config, rollout_dir, "config")

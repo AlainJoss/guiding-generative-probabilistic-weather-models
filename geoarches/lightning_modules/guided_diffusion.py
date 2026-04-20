@@ -152,6 +152,7 @@ class GuidedFlow(BaseLightningModule):
         y_n: list[torch.Tensor] | None = None, # shape: 
         mask: torch.Tensor | None = None,  # shape: 
         lambda_: list[torch.Tensor] | None = None,
+        seed: int | None = None
     ):  
         # det prediction
         with torch.no_grad():
@@ -179,11 +180,13 @@ class GuidedFlow(BaseLightningModule):
         y_n: list[torch.Tensor] | None = None, # shape: 
         mask: torch.Tensor | None = None,  # shape: 
         lambda_: list[torch.Tensor] | None = None,
+        seed: int | None = None
     ):
         ##### init #####
         # draw noise
         generator = torch.Generator(device=self.device)
-        # generator.manual_seed(0)
+        if seed:
+            generator.manual_seed(0)
         z = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )

@@ -24,7 +24,8 @@ def rollout(
         gen_model: GuidedFlow, 
         mask_corners, init_mask_term,
         y, lambda_, N,
-        partition, level_idx, var_idx,
+        partition, level_idx, var_idx, m: int = 1,
+        seeded_run: bool | None = None
     ):
     """
     Switch "guidance" ON/OFF using the mask: None=OFF, torch.Tensor=ON.
@@ -38,47 +39,51 @@ def rollout(
         mask = get_mask_from_corners(*mask_corners)
         mask = mask.to(device)
         mask = get_mask_tensordict(x_start["state"][0], partition, var_idx, level_idx, mask)
+        mask_term = float(init_mask_term)
+        final_mask_terms = [mask_term]
+        all_mask_terms = []
     else:
-        mask=None
+        mask = None
 
     x_cond = x_start
     lead_time_seconds = 6 * 3600
 
     ### iter
 
-    final_mask_terms = []  # realized guidance
-    all_mask_terms = []
-    mask_term = float(init_mask_term)     
-    final_mask_terms.append(mask_term)
+    seed=None
     for n in range(1, N+1):
+        if seeded_run:
+            seed = 1000 * n
         if guidance_flag:
             # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
             y_n = get_guidance(y[n], mask_term)
         else:
             y_n = None
-        TEST = True
+
+        TEST = False
         if not TEST:
             state, mask_terms_n = gen_model.rollout_step(
-                x_cond=x_cond, 
+                x_cond=x_cond,
                 mask=mask,
                 y_n=y_n,
                 lambda_=lambda_
+                seed=seed
             )
-            mask_term = mask_terms_n[-1]
         else:
-            mask_term = 0.0
-            mask_terms_n = [mask_term]*25
+            mask_terms_n = [0.0]*25
             state = x_start["state"]
 
-        ### save states
-        final_mask_terms.append(float(mask_term))
-        all_mask_terms.append([float(mt) for mt in mask_terms_n])
+        if guidance_flag:
+            mask_term = float(mask_terms_n[-1])
+            final_mask_terms.append(float(mask_term))
+            all_mask_terms.append([float(mt) for mt in mask_terms_n])
 
+        ### save states
         state_denorm = ds.denormalize(state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
 
-        save_state(rollout_dir, state_xr, n=n)
+        save_state(rollout_dir, state_xr, n=n, m=m)
 
         # build next conditioning batch 
         if n < N:

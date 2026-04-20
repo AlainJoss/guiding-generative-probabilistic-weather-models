@@ -53,6 +53,9 @@ dependencies = [
     "pydantic-ai-slim>=1.71.0",
     "openai>=2.29.0",
     "openlayers>=0.1.6",
+    "polars>=1.39.3",
+    "umap-learn>=0.5.12",
+    "anthropic>=0.95.0",
 ]
 
 
@@ -108,5 +111,5 @@ geoarches-eval = 'geoarches.evaluation.eval_multistep:main'
 # [tool.marimo.runtime]
 # pythonpath = [".."]
 
-[tool.marimo.display]
-custom_css = ["assets/menlo.css"]
+# [tool.marimo.display]
+# custom_css = ["assets/menlo.css"]
