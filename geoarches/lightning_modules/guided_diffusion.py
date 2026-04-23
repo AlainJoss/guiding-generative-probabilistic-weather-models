@@ -122,32 +122,45 @@ class GuidedFlow(BaseLightningModule):
         return out
 
     # NOTE: may be useful later on
-    # def rollout(
-    #     self, 
-    #     N, 
-    #     x_cond,  # TODO: need a better name
-    #     y: list[torch.Tensor] | None = None, # shape: 
-    #     mask: torch.Tensor | None = None,  # shape: 
-    #     lambda_: list[torch.Tensor] | None = None,
-    # ):
-    #     realized_trajectory = []
+    def sample_rollout(
+        self, 
+        N, 
+        x_cond,  # TODO: need a better name
+        y: list[torch.Tensor] | None = None, # shape: 
+        mask: torch.Tensor | None = None,  # shape: 
+        lambda_: list[torch.Tensor] | None = None,
+        seed: int | None = None
+    ):
+        realized_trajectory = []
 
-    #     for n in range(N):
-    #         y_n = None if y is None else y[n]
-    #         x_hat = self.rollout_step(
-    #             x_cond=x_cond,
-    #             y_n=y_n,
-    #             mask=mask,
-    #             lambda_=lambda_
-    #         )
-    #         realized_trajectory.append(x_hat)
+        for n in range(N):
+            y_n = None if y is None else y[n]
+            x_hat, _ = self.sample(
+                x_cond=x_cond,
+                y_n=y_n,
+                mask=mask,
+                lambda_=lambda_,
+                seed=seed
+            )
+            realized_trajectory.append(x_hat)
+            
+            # after the last iteration no need to set this again
+            if n < N-1:
+                # in seconds
+                next_timestamp = x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600
+                x_cond = {
+                    "prev_state": x_cond["state"],
+                    "state": x_hat,
+                    "timestamp": next_timestamp,
+                    "lead_time_hours": x_cond["lead_time_hours"],
+                }
 
-    #         if n < N - 1:
-    #             x_cond = tensordict_cat([x_cond["state"], x_hat], dim=1)
+        return realized_trajectory
+    
+    def get_det_pred(self, x_cond):
+        return self.det_model(x_cond)
 
-    #     return realized_trajectory
-
-    def rollout_step(self,
+    def sample(self,
         x_cond,  # TODO: need a better name
         y_n: list[torch.Tensor] | None = None, # shape: 
         mask: torch.Tensor | None = None,  # shape: 
@@ -156,7 +169,8 @@ class GuidedFlow(BaseLightningModule):
     ):  
         # det prediction
         with torch.no_grad():
-            x_cond["pred_state"] = self.det_model(x_cond)
+            det_pred = self.det_model(x_cond)
+            x_cond["pred_state"] = det_pred
             
             # TODO: should place where-else once I have the correct rollout func
             self.sigma = self.sigma.to(self.device)
@@ -167,14 +181,14 @@ class GuidedFlow(BaseLightningModule):
         self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z, mask_term = self.sample(x_cond, self.mu, y_n, mask, lambda_, seed)
+        z, mask_term = self.denoise(x_cond, self.mu, y_n, mask, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat, mask_term
     
     # TODO: do not use batch, separate object for clarity 
     #       also the name is utter bs
-    def sample(self,
+    def denoise(self,
         x_cond, 
         mu,
         y_n: list[torch.Tensor] | None = None, # shape: 
@@ -186,9 +200,9 @@ class GuidedFlow(BaseLightningModule):
         # draw noise
         generator = torch.Generator(device=self.device)
         if seed is not None:
-            seed=0
             generator.manual_seed(seed)
             print(f"set seed: {seed}")
+            
         z = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )

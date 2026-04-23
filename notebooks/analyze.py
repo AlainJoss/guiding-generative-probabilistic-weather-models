@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.2"
 app = marimo.App()
 
 
@@ -687,7 +687,8 @@ def _(
 
 @app.cell
 def _(guided_rollout_dir, m, n, read_state, unguided_rollout_dir):
-    guided_state_n = read_state(get_rollout_path(guided_rollout_dir, n, m))
+    guided_state_n = read_state(get_rollout_path(guided_rollout_dir, n, "guided"))
+    deterministic_state_n = read_state(get_rollout_path(guided_rollout_dir, n, "deterministic"))
     unguided_state_n = read_state(get_rollout_path(unguided_rollout_dir, n, m))
     return guided_state_n, unguided_state_n
 
@@ -717,6 +718,8 @@ def _(guided_cfg, mo, pick_guided_rollout_dropdown, refresh_button):
 def _(mo):
     mo.md(r"""
     ## n-snapshots
+
+
 
     Single rollout step $n$, single ensemble member $m$, picked from the
     sliders below. Compare the **guided** posterior $x_{t+1}^{\text{guide}}$,

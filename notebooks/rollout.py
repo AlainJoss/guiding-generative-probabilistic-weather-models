@@ -1,18 +1,19 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.2"
 app = marimo.App(width="full")
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Ensemble rollout
-    - Define N
-    - Define M: number of members in ensemble
-    - Define TIMESTAMP: starting datetime
-    - Retrieve x_start from TIMESTAMP
-    - -> Rollout ensemble and collect trajectories
+    #### TODO
+    - check start date is actually 00:60, seems odd
+    - need to think about how to set up ablation study
+    - which other plots
+    - implement a logger for experiments and print error to log file instead of this
+    - remember: we are currently using one model only for the deterministic prediction
+    - should also number the deterministic predictions (otherwise they get overwritten)!
     """)
     return
 
@@ -20,10 +21,19 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### TODO
-    - need to think about how to set up ablation study
-    - which other plots
-    - which parameters / methods to iterate over
+    # PHASE 1
+
+    The aim of this first phase is to rollout an ensemble of M unguided models,
+    producing a trajectory over N model steps.
+
+    Proceed as follows:
+    - Define parameters:
+        - N: number of rollout steps (6h freq)
+        - M: number of ensemble-members
+        - timestamp: start datetime of the experiment
+        - mask: region and variable of interest
+    - Wait for the experiment to end (~3min for each sampling procedure).
+    - Start the guide.py notebook and define the guidance experiment there.
     """)
     return
 
@@ -43,7 +53,7 @@ def _():
     import torch
     import numpy as np
 
-    return Path, mo
+    return mo, torch
 
 
 @app.cell
@@ -118,18 +128,6 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    seeded_run_dropdown = mo.ui.checkbox(label="seeded run")
-    return (seeded_run_dropdown,)
-
-
-@app.cell
-def _(seeded_run_dropdown):
-    seeded_run = seeded_run_dropdown.value
-    return (seeded_run,)
-
-
-@app.cell
-def _(mo):
     M_slider = mo.ui.slider(1, 20, value=1, label="M: ")
     return (M_slider,)
 
@@ -194,10 +192,29 @@ def _(M_slider, N_slider, TIMESTAMPS, timestamp_dropdown):
 
 
 @app.cell
-def _(timestamp, timestamp_idx):
-    # timestamp_idx, var_idx, level_idx
-    timestamp, timestamp_idx
+def _(ds, tensor_timestamp_to_string):
+    tensor_timestamp_to_string(ds[0]["timestamp"])
     return
+
+
+@app.cell
+def _(tensor_timestamp_to_string, x_start):
+    import pandas as pd
+    times = pd.to_datetime(x_start["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
+    times.hour, times.month, tensor_timestamp_to_string(x_start["timestamp"])
+    return
+
+
+@app.cell
+def _(torch, x_start):
+    from datetime import datetime
+    def tensor_timestamp_to_string(timestamp: torch.Tensor, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+        ts = timestamp.item()
+        return datetime.fromtimestamp(ts).strftime(fmt)
+
+    # NOTE: it's in UTC time
+    tensor_timestamp_to_string(x_start["timestamp"])
+    return (tensor_timestamp_to_string,)
 
 
 @app.cell
@@ -253,22 +270,6 @@ def _(ground_truth, timestamps, var, visualize_mask_terms_over_N):
     return (rollout_dist_plot,)
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Config
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    #### TODO: check start date is actually 00:60, seems odd
-    """)
-    return
-
-
 @app.cell
 def _(
     M_slider,
@@ -279,13 +280,11 @@ def _(
     mo,
     partition_dropdown,
     rollout_dist_plot,
-    seeded_run_dropdown,
     timestamp_dropdown,
     var_dropdown,
 ):
     mo.vstack([
         timestamp_dropdown,
-        seeded_run_dropdown,
         mo.hstack([N_slider, mo.md(f"days ({N} steps)")], justify="start"),
         mo.hstack([M_slider, mo.md(f"ensemble members")], justify="start"),
         mo.hstack([
@@ -293,8 +292,8 @@ def _(
             var_dropdown,
             level_slider,
         ], justify="start"),
-        map_widget,
-        rollout_dist_plot
+        rollout_dist_plot,
+        map_widget
     ])
     return
 
@@ -305,38 +304,6 @@ def _(mo):
     ## Run
     """)
     return
-
-
-@app.cell
-def _(seeded_run):
-    seeded_run
-    return
-
-
-@app.cell
-def _(Path, ds, model, rollout, seeded_run):
-    def ensemble_rollout(rollout_dir: Path, M: int, N: int, x_start):
-        for m in range(1, M+1):
-            print(f"m: {m}/{M}")
-            rollout(
-                guidance_flag=False,
-                rollout_dir=rollout_dir,
-                ds=ds, 
-                x_start=x_start,
-                gen_model=model,
-                init_mask_term=None,
-                mask_corners=None, # mask_corners
-                y=None, # y
-                lambda_=None, # lambda_
-                N=N,
-                partition=None, # partition
-                level_idx=None, # level_idx
-                var_idx=None, # var_idx
-                m=m,
-                seeded_run=seeded_run
-            )
-
-    return (ensemble_rollout,)
 
 
 @app.cell
@@ -372,11 +339,13 @@ def _(
     M,
     N,
     device,
-    ensemble_rollout,
+    ds,
     ensure_rollout_dir,
     level,
     mask_corners,
+    model,
     partition,
+    rollout,
     run_button,
     save_to_json,
     state_to_device,
@@ -388,7 +357,25 @@ def _(
     if run_button.value and status == "RUNNING":
         # try:
         rollout_dir = ensure_rollout_dir("unguided", N)
-        ensemble_rollout(rollout_dir, M, N, state_to_device(x_start, device))
+        for m in range(1, M+1):
+            print(f"m: {m}/{M}")
+            rollout(
+                guidance_flag=False,
+                rollout_dir=rollout_dir,
+                ds=ds, 
+                x_start=state_to_device(x_start, device),
+                gen_model=model,
+                init_mask_term=None,
+                mask_corners=None, # mask_corners
+                y=None, # y
+                lambda_=None, # lambda_
+                N=N,
+                partition=None, # partition
+                level_idx=None, # level_idx
+                var_idx=None, # var_idx
+                m=m,
+                seed=None
+            )
 
         config = {
             "rollout_dir": str(rollout_dir),
@@ -412,17 +399,58 @@ def _(
 
         # finally:
         #     set_status("IDLE")
-    return
+    return (rollout_dir,)
 
 
 @app.cell
-def _():
+def _(mo):
+    config_button = mo.ui.run_button(label="Save config")
+    config_button
+    return (config_button,)
+
+
+@app.cell
+def _(
+    M,
+    N,
+    config_button,
+    level,
+    mask_corners,
+    partition,
+    rollout_dir,
+    save_to_json,
+    timestamp,
+    var,
+):
+    if config_button.value:
+        _config = {
+            "rollout_dir": str(rollout_dir),
+            "M": M,
+            "N": N,
+            "timestamp": str(timestamp),
+            "level": level,
+            "partition": partition,
+            "var": var,
+            "mask_corners": mask_corners
+        } 
+
+        save_to_json(_config, rollout_dir, "config")
     return
 
 
 @app.cell
 def _():
     # TODO: add other params to config!!
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
     return
 
 

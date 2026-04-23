@@ -1,4 +1,5 @@
 from pathlib import Path
+import random
 
 from tensordict.tensordict import TensorDict
 
@@ -11,9 +12,6 @@ from src.interaction import get_mask_from_corners
 
 from geoarches.dataloaders.era5 import Era5Forecast
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
-from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
-
-# TODO: create run func and call from marimo after setup!
 
 ##### load #####
 
@@ -25,7 +23,7 @@ def rollout(
         mask_corners, init_mask_term,
         y, lambda_, N,
         partition, level_idx, var_idx, m: int = 1,
-        seeded_run: bool | None = None
+        seed: int | None = None
     ):
     """
     Switch "guidance" ON/OFF using the mask: None=OFF, torch.Tensor=ON.
@@ -49,11 +47,7 @@ def rollout(
     lead_time_seconds = 6 * 3600
 
     ### iter
-
-    seed=None
     for n in range(1, N+1):
-        if seeded_run:
-            seed = 1000 * n
         if guidance_flag:
             # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
             y_n = get_guidance(y[n], mask_term)
@@ -62,13 +56,14 @@ def rollout(
 
         TEST = False
         if not TEST:
-            state, mask_terms_n = gen_model.rollout_step(
+            state, mask_terms_n = gen_model.sample(
                 x_cond=x_cond,
                 mask=mask,
                 y_n=y_n,
                 lambda_=lambda_,
-                seed=seed
+                seed=random.randint(1, 1000000)
             )
+            det_state = gen_model.mu
         else:
             mask_terms_n = [0.0]*25
             state = x_start["state"]
@@ -80,10 +75,16 @@ def rollout(
 
         ### save states
         state_denorm = ds.denormalize(state).cpu()
+        det_state_denorm = ds.denormalize(det_state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
+        det_state_xr = ds.convert_to_xarray(det_state_denorm, current_timestamp)
+        if guidance_flag:
+            save_state(rollout_dir, state_xr, n=n, m="guided")
+        else:
+            save_state(rollout_dir, state_xr, n=n, m=m)
 
-        save_state(rollout_dir, state_xr, n=n, m=m)
+        save_state(rollout_dir, det_state_xr, n=n, m="deterministic")
 
         # build next conditioning batch 
         if n < N:

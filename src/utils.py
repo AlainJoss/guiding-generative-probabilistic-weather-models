@@ -85,8 +85,9 @@ def read_state(path: Path):
     return xr.open_dataset(path, engine="netcdf4")
 
 def read_states(rollout_dir: Path, n: int):
-    paths = [path for path in rollout_dir.glob(f"{n}/*")]
-    return [read_state(path) for path in paths]
+    paths = [p for p in rollout_dir.glob(f"{n}/*.nc") if p.stem.isdigit()]
+    paths.sort(key=lambda p: int(p.stem))
+    return [read_state(p) for p in paths]
 
 def get_slice(state, partition, level, var, timestamp):
     if partition == "surface":

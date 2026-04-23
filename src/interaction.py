@@ -38,23 +38,27 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
 
 def plot_dual_trajectory(
     timestamps: list[str],
+    mean_rollout: list[float],
+    planned_guidance: list[float],
     y_trajectory: list[float],
-    guidance_trajectory: dict[str, float],
     var: str,
     ymin_left: float | None = None,
     ymax_left: float | None = None,
 ):
+    mr = np.asarray(mean_rollout, dtype=float)
+    pg = np.asarray(planned_guidance, dtype=float)
     y = np.asarray(y_trajectory, dtype=float)
-    g = np.asarray(guidance_trajectory, dtype=float)
 
     x = np.arange(len(timestamps))
 
-    fig, ax1 = plt.subplots(figsize=(6, 4), dpi=100)
+    fig, ax1 = plt.subplots(figsize=(12, 5), dpi=100)
 
-    ax1.plot(x, y, "b-", linewidth=2)
-    ax1.plot(x, y, "o", color="#9c27b0", markersize=5)
+    ax1.plot(x, mr, "-", linewidth=2, label="Mean rollout")
+    ax1.plot(x, mr, "o", markersize=5)
+    ax1.plot(x, pg, "-", linewidth=2, label="Planned guidance")
+    ax1.plot(x, pg, "s", markersize=4)
 
-    ax1.set_xlim((-0.5, 0.5) if len(y) == 1 else (0, len(y) - 1))
+    ax1.set_xlim((-0.5, 0.5) if len(mr) == 1 else (0, len(mr) - 1))
 
     xtick_positions = {0, len(timestamps) - 1}
     xtick_positions.update(
@@ -66,10 +70,9 @@ def plot_dual_trajectory(
     ax1.set_xticks(xtick_positions)
     ax1.set_xticklabels(xtick_labels, rotation=45, ha="right")
     ax1.set_xlabel("Timestamp")
-    ax1.set_ylabel("Percentage change")
+    ax1.set_ylabel(var)
     ax1.set_title("Trajectory")
     ax1.grid(True, alpha=0.3)
-    ax1.axhline(0, color="gray", linewidth=0.5)
 
     cur_ymin, cur_ymax = ax1.get_ylim()
     left_min = ymin_left if ymin_left is not None else cur_ymin
@@ -80,24 +83,25 @@ def plot_dual_trajectory(
     ax1.set_ylim(left_min, left_max)
 
     ax2 = ax1.twinx()
-    ax2.plot(x, g, "-", linewidth=2)
-    ax2.plot(x, g, "s", markersize=4)
-    ax2.set_ylabel(var)
+    ax2.plot(x, y, "-", linewidth=2, color="#9c27b0", label="Percentage change")
+    ax2.plot(x, y, "^", markersize=4, color="#9c27b0")
+    ax2.axhline(0, color="gray", linewidth=0.5)
+    ax2.set_ylabel("Percentage change")
 
+    l0, l1 = left_min, left_max
     y0, y1 = np.nanmin(y), np.nanmax(y)
-    g0, g1 = np.nanmin(g), np.nanmax(g)
-
     if y0 == y1:
         y0 -= 1
         y1 += 1
-    if g0 == g1:
-        g0 -= 1
-        g1 += 1
 
     def map_left_to_right(v):
-        return g0 + (v - y0) * (g1 - g0) / (y1 - y0)
+        return y0 + (v - l0) * (y1 - y0) / (l1 - l0)
 
-    ax2.set_ylim(map_left_to_right(left_min), map_left_to_right(left_max))
+    ax2.set_ylim(map_left_to_right(l0), map_left_to_right(l1))
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
 
     fig.tight_layout()
     return fig
@@ -111,7 +115,7 @@ def plot_trajectories_over_n(
     title: str | None = None,
     subtitle: str | None = None,
     figsize_per_row: tuple[float, float] = (7.0, 1.8),
-    dpi: int = 160,
+    dpi: int = 100,
     shared_y: bool = True,
 ):
     N = len(trajectories)
@@ -175,8 +179,8 @@ def plot_rmse_over_n(
     err_unguided: np.ndarray | None = None,
     title: str | None = None,
     subtitle: str | None = None,
-    figsize: tuple[float, float] = (9, 4.5),
-    dpi: int = 160,
+    figsize: tuple[float, float] = (12, 5),
+    dpi: int = 100,
     ylabel: str = "normalized RMSE (mask)",
     highlight_n: int | None = None,
 ):
@@ -266,8 +270,8 @@ def plot_variable_change_parallel(
     aggregated_per_n: list[dict],
     top_k: int | None = 20,
     rank_by: str = "max",
-    figsize: tuple[float, float] = (12, 6),
-    dpi: int = 160,
+    figsize: tuple[float, float] = (12, 5),
+    dpi: int = 100,
     title: str | None = None,
     subtitle: str | None = None,
     cmap: str = "viridis",
@@ -373,7 +377,7 @@ def plot_trajectory(
     title: str | None = "Trajectory"
 ):
     x = np.arange(len(trajectory))
-    fig, ax = plt.subplots(figsize=(6, 4), dpi=200)
+    fig, ax = plt.subplots(figsize=(12, 5), dpi=100)
     ax.plot(x, trajectory, "b-", linewidth=2)
     ax.plot(x, trajectory, "o", color="#9c27b0", markersize=5)
     ax.set_xlim(0, len(trajectory) - 1)
@@ -692,7 +696,7 @@ def plot_map_static(
     vmin=None,
     vmax=None,
     center=None,
-    figsize=(10, 5),
+    figsize=(12, 5),
     dpi=100,
     title=None,
     mask_edgecolor="red",
@@ -837,7 +841,7 @@ def make_interactive_map(
             x=list(rectangle_x),
             y=list(rectangle_y),
             puck_color=["green", "red"],
-            figsize=(12, 5.7),
+            figsize=(12, 5),
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
         )
@@ -853,10 +857,10 @@ def visualize_map(
     vmin=None,
     vmax=None,
     center=0,
-    figsize=(10, 5),
+    figsize=(12, 5),
     interactive=False,
     title=None,
-    dpi=200,
+    dpi=100,
     mask_2d=None,
     show=False,
     show_mask=False,
@@ -948,7 +952,7 @@ def visualize_grid(
     zoom_center_lon=0.0,
     zoom_center_lat=0.0,
     figsize_per_panel=(4.8, 3.4),
-    dpi=150,
+    dpi=100,
     tick_formatter=None,
     show_values=False,
     value_fmt=".2f",
@@ -1060,7 +1064,7 @@ def plot_states_over_n(
     analysis_type="absolute",
     cmap="coolwarm",
     figsize_per_panel=(4.8, 3.4),
-    dpi=160,
+    dpi=100,
     title=None,
     subtitle=None,
 ):

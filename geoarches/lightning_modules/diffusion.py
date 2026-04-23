@@ -165,6 +165,7 @@ class DiffusionModule(BaseLightningModule):
 
         # conditional by default
         times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
+        print(f"timestamp: {times}, month: {times.month}, hour: {times.hour}")
         month = torch.tensor(times.month).to(device)
         month_emb = self.month_embedder(month)
         hour = torch.tensor(times.hour).to(device)
@@ -191,91 +192,10 @@ class DiffusionModule(BaseLightningModule):
 
         return out
 
-    def training_step(self, batch, batch_nb):
-        # sample timesteps
-        device, bs = batch["state"].device, batch["state"].shape[0]
-
-        timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, (bs,), device=device
-        ).long()
-
-        noise = torch.randn_like(batch["next_state"])  # amazing it works
-
-        # by default
-        next_state = batch["next_state"]
-
-        if self.learn_residual == "default":
-            next_state = batch["next_state"] - batch["state"]
-
-        elif self.learn_residual == "pred":
-            if "pred_state" not in batch:
-                with torch.no_grad():
-                    batch["pred_state"] = self.det_model(batch).detach()
-            next_state = batch["next_state"] - batch["pred_state"]
-
-        if self.state_normalization:
-            next_state = tensordict_apply(torch.div, next_state, self.state_scaler.to(self.device))
-
-        # weighting scheme: logit normal
-        if self.sd3_timestep_sampling:
-            u = torch.normal(mean=0, std=1, size=(bs,), device="cpu").sigmoid()
-            indices = (u * self.noise_scheduler.config.num_train_timesteps).long()
-        else:
-            indices = timesteps.cpu()
-
-        timesteps = self.noise_scheduler.timesteps[indices].to(device)
-
-        schedule_timesteps = self.noise_scheduler.timesteps.to(device)
-
-        sigmas = self.noise_scheduler.sigmas.to(
-            device=device, dtype=next(iter(batch["state"].values())).dtype
-        )
-
-        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
-        sigma = sigmas[step_indices].flatten()[:, None, None, None, None]  # shape (bs,)
-
-        noisy_next_state = noise.apply(lambda x: x * sigma) + next_state.apply(
-            lambda x: x * (1.0 - sigma)
-        )
-        if self.prediction_type == "sample":
-            target_state = next_state
-        else:
-            target_state = noise - next_state
-
-        pred = self.forward(
-            batch,
-            noisy_next_state,
-            timesteps,
-        )
-        # compute loss
-
-        loss = self.loss(pred, target_state, timesteps)
-
-        self.mylog(loss=loss)
-
-        return loss
-
-    def loss(self, pred, gt, timesteps=None, **kwargs):
-        loss_coeffs = self.loss_coeffs.to(self.device)
-        if self.prediction_type == "sample":
-            # loss weighting strategy
-            sigmas = timesteps / self.noise_scheduler.config.num_train_timesteps
-            snr_weights = (1 - sigmas) / sigmas
-            snr_weights = snr_weights.to(self.device)[:, None, None, None, None]
-            loss_coeffs = loss_coeffs.apply(lambda x: x * snr_weights)
-
-        weighted_error = (pred - gt).abs().pow(self.pow).mul(loss_coeffs)
-        loss = sum(weighted_error.mean().values())
-        return loss
-    
-    def rollout_step(self, start_state, guidance_terms_denormalized, spatial_mask):
-        # batch = {k: v[None].to(self.device) for k, v in start_state.items()}
-        return self.sample(start_state)
-
     def sample(
         self,
         batch,
-        seed=0,
+        seed=None,
         num_steps=25,
         disable_tqdm=False,
         scale_input_noise=1.05,
@@ -296,6 +216,7 @@ class DiffusionModule(BaseLightningModule):
         generator = torch.Generator(device=self.device)
 
         if seed is not None:
+            print(f"seed: {seed}")
             generator.manual_seed(seed)
 
         noisy_state = batch["state"].apply(
@@ -372,7 +293,7 @@ class DiffusionModule(BaseLightningModule):
         for i in tqdm(range(iterations), disable=disable_tqdm):
             seed_i = member + 1000 * i + batch_nb * 10**6
             seed_i=0
-            print(seed_i)
+            print(f"seed_i: {seed_i}")
             sample = self.sample(loop_batch, seed=seed_i, disable_tqdm=True, **kwargs)
             preds_future.append(sample)
             loop_batch = dict(
@@ -385,138 +306,3 @@ class DiffusionModule(BaseLightningModule):
             return preds_future
         preds_future = torch.stack(preds_future, dim=1)
         return preds_future
-
-    def validation_step(self, batch, batch_nb):
-        # for the validation, we make some generations and log them
-        val_num_members = self.cfg.val.num_members
-        val_rollout_iterations = self.cfg.val.metrics_kwargs.rollout_iterations
-        samples = [
-            self.sample_rollout(
-                batch,
-                batch_nb=batch_nb,
-                iterations=val_rollout_iterations,
-                member=j,
-                disable_tqdm=True,
-            )
-            for j in tqdm(range(val_num_members))
-        ]
-        denormalize = self.trainer.val_dataloaders.dataset.denormalize
-
-        for metric in self.val_metrics:
-            metric.update(
-                denormalize(batch["future_states"][:, :val_rollout_iterations]),
-                [denormalize(sample) for sample in samples],
-            )
-        self.validation_samples[batch_nb] = [samples[0][:, 0], samples[1][:, 0]]
-
-    def on_validation_epoch_end(self):
-        for metric in self.val_metrics:
-            scores = metric.compute()
-            self.log_dict(scores, sync_dist=True)  # dont put on_epoch = True here
-            print(scores)
-            metric.reset()
-        self.validation_samples.clear()
-
-    def on_test_epoch_start(self):
-        dataset = self.trainer.test_dataloaders.dataset
-        self.test_outputs = []
-
-        suffix = getattr(self.cfg.inference, "test_filename_suffix", "")
-        now = datetime.today().strftime("%m%d%H%M")
-        self.test_filename = f"{dataset.domain}-{now}-num_steps={self.cfg.inference.num_steps}-members={self.cfg.inference.num_members}-{suffix}.zarr"
-        Path("evalstore").joinpath(self.name).mkdir(exist_ok=True, parents=True)
-        if self.cfg.inference.save_test_outputs:
-            self.zarr_writer = zarr.ZarrIterativeWriter(
-                Path("evalstore") / self.name / self.test_filename
-            )
-
-    def test_step(self, batch, batch_nb):
-        dataset = self.trainer.test_dataloaders.dataset
-
-        samples = [
-            self.sample_rollout(
-                batch,
-                batch_nb=batch_nb,
-                iterations=self.cfg.inference.metrics_kwargs.rollout_iterations,
-                member=j,
-                disable_tqdm=True,
-            )
-            for j in range(self.cfg.inference.num_members)
-        ]
-
-        if self.cfg.inference.save_test_outputs:
-            import xarray as xr
-
-            xr_dataset_list = [
-                dataset.convert_trajectory_to_xarray(
-                    sample,
-                    timestamp=batch["timestamp"],
-                    denormalize=True,
-                    levels=[300, 500, 700, 850],
-                )
-                for sample in samples
-            ]
-            xr_dataset = xr.concat(
-                xr_dataset_list,
-                pd.Index(
-                    list(range(self.cfg.inference.num_members)), name="number"
-                ),  # weirdy the dimension is named "number"
-            )
-            self.zarr_writer.write(xr_dataset, append_dim="time")
-
-        # compute metrics
-        if self.cfg.inference.save_test_outputs != "without_metrics":
-            for metric in self.test_metrics.values():
-                metric.update(
-                    dataset.denormalize(
-                        batch["future_states"]
-                    ),  # TODO: do eval with future states
-                    [dataset.denormalize(sample) for sample in samples],
-                )
-
-        if hasattr(self, "zarr_writer") and not (batch_nb + 1) % 2:
-            self.zarr_writer.to_netcdf(dump_id=batch_nb)
-        # log 24h metrics
-        return None
-
-    def on_test_epoch_end(self):
-        # save results
-        if self.cfg.inference.save_test_outputs == "without_metrics":
-            return
-
-        all_metrics = {}
-        for metric in self.test_metrics.values():
-            scores = metric.compute()
-
-            self.log_dict(scores, sync_dist=True)  # dont put on_epoch = True here
-            all_metrics.update(scores)
-            metric.reset()
-        all_metrics["hparams"] = dict(self.cfg.inference)
-
-        fname = self.test_filename.replace(".zarr", "_metrics.pt")
-        torch.save(all_metrics, Path("evalstore") / self.name / fname)
-
-        if hasattr(self, "zarr_writer"):
-            self.zarr_writer.to_netcdf(dump_id="final")
-
-    def configure_optimizers(self):
-        print("configure optimizers")
-        opt = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.lr,
-            betas=self.betas,
-            weight_decay=self.weight_decay,
-        )
-
-        sched = diffusers.optimization.get_cosine_schedule_with_warmup(
-            opt,
-            num_warmup_steps=self.num_warmup_steps,
-            num_training_steps=self.num_training_steps,
-            num_cycles=self.num_cycles,
-        )
-        sched = {
-            "scheduler": sched,
-            "interval": "step",  # or 'epoch'
-            "frequency": 1,
-        }
-        return [opt], [sched]

@@ -4,6 +4,14 @@ __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Comparison - my vs. their's implementation
+    """)
+    return
+
+
 @app.cell
 def _():
     from pathlib import Path 
@@ -66,6 +74,7 @@ def _(get_dataset):
 @app.cell
 def _(mo):
     refresh_button = mo.ui.button(label="refresh")
+    refresh_button
     return (refresh_button,)
 
 
@@ -78,7 +87,7 @@ def _(Path, mo, refresh_button):
         return (path / "config.json").exists()
 
 
-    unguided_rollouts = Path("rollouts", "unguided").glob("2026*")
+    unguided_rollouts = Path("rollouts", "new_model").glob("2026*")
     unguided_rollouts = sorted(
         [p for p in unguided_rollouts if has_config_json(p)],
         reverse=True,
@@ -189,12 +198,12 @@ def _(comparison_df):
 def _(comparison_df, mo):
     all_ok = bool(comparison_df["allclose"].all())
     worst = float(comparison_df["max_abs_diff"].max())
-    mo.md(f"**Overall allclose**: {all_ok}   **Worst max-abs-diff**: {worst:.3e}")
-    return
-
-
-@app.cell
-def _():
+    mo.vstack(
+        [
+            mo.md(f"Allclose over whole state? -> {all_ok}"),
+            mo.md(f"Worst max-abs-diff -> {worst:.3e}")
+        ]
+    )
     return
 
 
@@ -317,7 +326,7 @@ def _(
     )
 
     mo.vstack(
-        [
+        [   mo.md(f"### diff analysis"),
             mo.hstack(
                 [
                     cmp_partition_dropdown,

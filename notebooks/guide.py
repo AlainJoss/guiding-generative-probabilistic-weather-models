@@ -1,49 +1,22 @@
 import marimo
 
-__generated_with = "0.23.1"
+__generated_with = "0.23.2"
 app = marimo.App(width="medium", css_file="")
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Boiler plate
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## pipeline
-    - write data analyzer for playing around with N and mask before generating the rollout for the M distribution and start the guidance experiment.
-    - generate ensemble rollout as base trajectory
-    - define mask (or evolving masks) and define guidance (y) trajectory (extremified version of ensemble rollout trajectory over mask)
-    - set other params
-    - define weighted average Gaussian Kernel or future difference around region in loss function. Refine latex-notes with new definition of mask.
-    - Try out regularization term z^tK^z or just z^tIz=||z||^2
-    - Guide using the ground truth and see whether the accuracy of other variables improves.
-    - Guuide using dynamic mask instead of fixed one (future rollout but also regin difference)
-    - plot the sum of relative absolute change in variable from gen sample to gen guided sample.
-    - Define an ensemble of $G$ guided models.
-    - plot masks over N
-
-    ## todos
-    - capture total relative change per variable in mask and overall.
-    - correct the loss function in latex doc and explain why y not possible in denormalized space.
-    - convert temperature to degrees celsius
+    # todos
     - define masks with physical priors
     - define masks dynamically in N
     - experiment with multiple variables (and masks correspondingly)
-    - increase T and decrease lambda
-    - define fitness of
-
-    ## questions
-    - is the spatially interplay of variables respected when guiding samples?
-    - how do variables spatially interplay?
-
-    ## ideas
+    - define weighted average Gaussian Kernel or future difference around region in loss function. Refine latex-notes with new definition of mask.
+    - Try out regularization term z^tK^z or just z^tIz=||z||^2
+    - Guide using the ground truth and see whether the accuracy of other variables improves.
+    - Define an ensemble of $G$ guided models.
     - as baseline compute some basic facts about ArchesWeatherGen. For instance, how well it does (compared to its deterministic brother)? How does performance degrade as N of rollout increases?
+    - swap rollout_dist_plot with newer version present in analyze.py
     """)
     return
 
@@ -58,6 +31,7 @@ def _(mo):
 
 @app.cell
 def _():
+    import random
     from pathlib import Path 
     from datetime import datetime, timedelta
 
@@ -81,7 +55,7 @@ def _():
     from cartopy.crs import PlateCarree
 
     method_state = {"value": "CubicSpline"}
-    return Path, mo, torch
+    return Path, datetime, mo, np, torch
 
 
 @app.cell
@@ -171,7 +145,7 @@ def _(partition_dropdown):
 @app.cell
 def _(LEVELS_DICT, mo, partition, unguided_cfg):
     LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=unguided_cfg["level"], label="level: ")
+    level_slider = mo.ui.slider(steps=LEVELS, value=unguided_cfg["level"], label="level: ", debounce=True)
     return LEVELS, level_slider
 
 
@@ -246,8 +220,20 @@ def _(lambda_, plot_trajectory):
 
 
 @app.cell
-def _(mo):
-    alpha_slider = mo.ui.slider(-1, 1, value=0.5, label="alpha: ", step=0.01)
+def _(mo, np):
+    min_max_lambda_slider = mo.ui.slider(steps=np.logspace(-5,5,100), label="alpha boundaries: ")
+    return (min_max_lambda_slider,)
+
+
+@app.cell
+def _(min_max_lambda_slider):
+    min_max_lambda = min_max_lambda_slider.value
+    return (min_max_lambda,)
+
+
+@app.cell
+def _(min_max_lambda, mo):
+    alpha_slider = mo.ui.slider(-min_max_lambda, min_max_lambda, value=min_max_lambda/2, label="alpha: ", step=0.001)
     return (alpha_slider,)
 
 
@@ -271,8 +257,17 @@ def _(N, N_schedule, alpha, y_shape):
 
 @app.cell
 def _(ds):
+    # align with "state" timestamps
+    # first timestamp in ds is only available as "previous"!
     TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
     return (TIMESTAMPS,)
+
+
+@app.cell
+def _():
+    # ds[0]
+    # tensor_timestamp_to_string(torch.tensor([1577858400]))
+    return
 
 
 @app.cell
@@ -290,12 +285,35 @@ def _(N, TIMESTAMPS, timestamp_idx):
 
 
 @app.cell
+def _():
+    # unguided_cfg, timestamps, timestamp_idx, TIMESTAMPS
+    return
+
+
+@app.cell
 def _(LEVELS, TIMESTAMPS, VARIABLES, ds, level, timestamp, var):
     timestamp_idx = TIMESTAMPS.index(timestamp)
     var_idx = VARIABLES.index(var)
     level_idx = LEVELS.index(level) - 1
     x_start = ds[timestamp_idx]
     return level_idx, timestamp_idx, var_idx, x_start
+
+
+@app.cell
+def _(datetime, torch):
+    def tensor_timestamp_to_string(timestamp: torch.Tensor, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+        """
+        Convert a torch tensor containing a Unix timestamp to a formatted string.
+
+        Example:
+            tensor(1577923200) -> "2020-01-02 00:00:00"
+        """
+        ts = timestamp.item()
+        return datetime.fromtimestamp(ts).strftime(fmt)
+
+    # NOTE: it's in UTC time
+    # tensor_timestamp_to_string(x_start["timestamp"])
+    return
 
 
 @app.cell
@@ -333,7 +351,20 @@ def _(mo):
 
 
 @app.cell
-def _(Path, mo, refresh_button):
+def _(mo):
+    SUBFOLDERS = ["old_model", "new_model", "unguided"]
+    subfolder_selector = mo.ui.dropdown(label="Subfolder", value=SUBFOLDERS[0], options=SUBFOLDERS)
+    return (subfolder_selector,)
+
+
+@app.cell
+def _(subfolder_selector):
+    subfolder = subfolder_selector.value
+    return (subfolder,)
+
+
+@app.cell
+def _(Path, mo, refresh_button, subfolder):
     if refresh_button.value:
         pass
 
@@ -341,12 +372,12 @@ def _(Path, mo, refresh_button):
         return (path / "config.json").exists()
 
 
-    unguided_rollouts = Path("rollouts", "unguided").glob("2026*")
+    unguided_rollouts = Path("rollouts", subfolder).glob("2026*")
     unguided_rollouts = sorted(
         [p for p in unguided_rollouts if has_config_json(p)],
         reverse=True,
     )
-    pick_unguided_rollout_dropdown = mo.ui.dropdown(label="Pick unguided rollout", value=unguided_rollouts[0], options=unguided_rollouts)
+    pick_unguided_rollout_dropdown = mo.ui.dropdown(label="Experiment: ", value=unguided_rollouts[0], options=unguided_rollouts)
     return (pick_unguided_rollout_dropdown,)
 
 
@@ -358,10 +389,12 @@ def _(pick_unguided_rollout_dropdown, read_json):
 
 
 @app.cell
-def _(mo, pick_unguided_rollout_dropdown, refresh_button, unguided_cfg):
+def _(mo, pick_unguided_rollout_dropdown, subfolder_selector, unguided_cfg):
     experiment_dropdown = mo.vstack([
+        mo.md("Pick unguided rollout experiment."),
         mo.hstack([
-            pick_unguided_rollout_dropdown, refresh_button
+            subfolder_selector,
+            pick_unguided_rollout_dropdown
         ], justify="start"),
         mo.accordion(
             {
@@ -406,12 +439,17 @@ def _(
     ensemble_rollout.append([avg_over_mask(slice, mask)]*M)
     ground_truth.append(avg_over_mask(slice, mask))
 
+    # TODO: implement
+    deterministic_rollout = []
+
     for n in range(1, unguided_cfg["N"]+1):
         timestamp_n = TIMESTAMPS[timestamp_idx+n]
         state_n = ds[timestamp_idx+n]["state"]
         slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
         ground_truth.append(avg_over_mask(slice_n, mask))
         states = read_states(unguided_rollout_dir, n) 
+        # print(states)
+        # print("---")
         slices = [get_slice(state, partition, level, var, timestamp_n) for state in states]
         slices = [xr_to_torch(slice_) for slice_ in slices]
         avgs = [avg_over_mask(slice_, mask) for slice_ in slices]
@@ -431,14 +469,22 @@ def _(mo):
 
 
 @app.cell
-def _(planned_guidance, plot_dual_trajectory, timestamps, var, y_trajectory):
+def _(
+    mean_rollout,
+    planned_guidance,
+    plot_dual_trajectory,
+    timestamps,
+    var,
+    y_trajectory,
+):
     y_trajectory_plot = plot_dual_trajectory(
         timestamps=timestamps,
+        mean_rollout=mean_rollout,
+        planned_guidance=planned_guidance,
         y_trajectory=y_trajectory,
-        guidance_trajectory=planned_guidance,
         var=var,
-        ymin_left=-1,
-        ymax_left=1
+        ymin_left=None,
+        ymax_left=None,
     )
     return (y_trajectory_plot,)
 
@@ -448,40 +494,20 @@ def _(
     ensemble_rollout,
     ground_truth,
     mean_rollout,
-    planned_guidance,
     timestamps,
     var,
     visualize_mask_terms_over_N,
 ):
-    rollout_dist_plot = visualize_mask_terms_over_N(
-        var, timestamps, ensemble_rollout, mean_rollout, ground_truth, planned_guidance
+    ensemble_rollout_plot = visualize_mask_terms_over_N(
+        var, timestamps, mean_rollout=mean_rollout, ensemble_rollout=ensemble_rollout, ground_truth=ground_truth, 
     )
-    return (rollout_dist_plot,)
-
-
-@app.cell
-def _(M, ensemble_rollout, mean_rollout, timestamps):
-    from src.visualization import plot_ensemble_rollout
-    realized_guidance_plot = plot_ensemble_rollout(
-        timestamps=timestamps,
-        mean_rollout=mean_rollout,
-        ensemble_rollout=ensemble_rollout,
-        title="Ensemble rollout",
-        subtitle=f"{M} members",
-    )
-    return (realized_guidance_plot,)
-
-
-@app.cell
-def _(realized_guidance_plot):
-    realized_guidance_plot
-    return
+    return (ensemble_rollout_plot,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Guidance experiments
+    # PHASE 2 - guidance
     """)
     return
 
@@ -489,37 +515,102 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Config
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Mask config
+    ## Pick base unguided rollout
     """)
     return
 
 
 @app.cell
-def _(
-    experiment_dropdown,
-    level_slider,
-    map_widget,
-    mo,
-    partition_dropdown,
-    var_dropdown,
-):
+def _(mo, refresh_button):
     mo.vstack([
-        experiment_dropdown,
+        mo.md("Reload whole page if something fails."),
+        refresh_button
+    ])
+    return
+
+
+@app.cell
+def _(experiment_dropdown):
+    experiment_dropdown
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Configure mask
+    """)
+    return
+
+
+@app.cell
+def _(level_slider, map_widget, mo, partition_dropdown, var_dropdown):
+    mo.vstack([
+        mo.md("Define mask: variable + region of interest. By default the values are set to the ones defined in the unguided rollout experiment config.json file."),
         mo.hstack([
             partition_dropdown,
             var_dropdown,
             level_slider,
         ], justify="start"),
+        map_widget
+    ])
+    return
+
+
+@app.cell
+def _(ensemble_rollout_plot, mo):
+    mo.vstack([
+        mo.md("Compares the the average over the defined mask of the M-models generative ensemble to the ground truth."), 
+        ensemble_rollout_plot,
+    ])
+    return
+
+
+@app.cell
+def _(mo):
+    mo.vstack([
+        mo.md("Compares the the average over the defined mask of the M-models generative ensemble to the deterministic predictions at each step, to see how much the residual diverges from the deterministic prediction."), 
+        # ensemble_rollout_plot,
+    ])
+    return
+
+
+@app.cell
+def _():
+    # TODO: create plot
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Configure guidance
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Guidance @ diffusion time
+    """)
+    return
+
+
+@app.cell
+def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
+    mo.vstack([
+        mo.md("$\lambda_t$ controls how much the guidance vector is conditioning the vector field $u_t^{\\theta}$ at diffusion timestep $t$."),
         mo.vstack([
-            map_widget
+            mo.hstack([
+                lambda_shape_slider,
+                mo.md("controls the smoothness of the lambda trajectory")
+            ], justify="start"),
+            mo.hstack([
+                w_slider,
+                mo.md("controls the maximum value of lambda (always @ step 12)")
+            ], justify="start"),
+            lambda_trajectory_plot,
         ])
     ])
     return
@@ -528,17 +619,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Guidance config
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    #### TODO:
-    - swap rollout_dist_plot with newer version present in analyze.py
-    - implement slider for alpha max (so step becomes more variable-adjustable)
+    ### Guidance @ weather time
     """)
     return
 
@@ -546,26 +627,19 @@ def _(mo):
 @app.cell
 def _(
     alpha_slider,
-    lambda_shape_slider,
-    lambda_trajectory_plot,
+    min_max_lambda_slider,
     mo,
-    rollout_dist_plot,
-    w_slider,
     y_shape_slider,
     y_trajectory_plot,
 ):
-    mo.hstack([
+    mo.vstack([
         mo.vstack([
-            lambda_shape_slider,
-            w_slider,
-            lambda_trajectory_plot,
-        ]),
-        mo.vstack([
+            mo.md("Configure trajectory over N steps."), 
             y_shape_slider,
+            min_max_lambda_slider,
             alpha_slider,
             y_trajectory_plot,
-        ]),
-        rollout_dist_plot
+        ])
     ])
     return
 
@@ -573,7 +647,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Run guided rollout
+    ## Run experiment
     """)
     return
 
@@ -592,27 +666,26 @@ def _(run_button, set_status):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Monitor experiment from log file.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    run_button = mo.ui.run_button(label="Run")
+    run_button
+    return (run_button,)
+
+
 @app.cell
 def _(get_status, mo):
     status = get_status()
     mo.md(f"Experiment status: **{status}**")
     return (status,)
-
-
-@app.cell
-def _(mo):
-    run_button = mo.ui.run_button(label="Run experiment")
-    run_button
-    return (run_button,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    #### TODO:
-    - implement a logger for experiments and print error to log file instead of this
-    """)
-    return
 
 
 @app.cell
@@ -650,7 +723,7 @@ def _(
     y_trajectory,
 ):
     if run_button.value and status == "RUNNING":
-        # try:
+    # try:
         rollout_dir = ensure_rollout_dir("guided", N)
 
         rollout(
@@ -667,7 +740,8 @@ def _(
             partition=partition,
             level_idx=level_idx,
             var_idx=var_idx,
-            m=1
+            m=1,
+            seed=None
         )
 
         config = {
@@ -695,13 +769,18 @@ def _(
 
         save_to_json(config, rollout_dir, "config")
 
-        #     set_status("IDLE")
-        # except Exception as e:
-        #     print(f"Error: {type(e).__name__}: {e}")
-        #     raise
+    #     set_status("IDLE")
+    # except Exception as e:
+    #     print(f"Error: {type(e).__name__}: {e}")
+    #     raise
 
-        # finally:
-        #     set_status("IDLE")
+    # finally:
+    #     set_status("IDLE")
+    return
+
+
+@app.cell
+def _():
     return
 
 

@@ -56,6 +56,9 @@ dependencies = [
     "polars>=1.39.3",
     "umap-learn>=0.5.12",
     "anthropic>=0.95.0",
+    "nbformat>=5.10.4",
+    "nbconvert>=7.17.1",
+    "playwright>=1.58.0",
 ]
 
 
