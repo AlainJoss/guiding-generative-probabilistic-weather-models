@@ -68,13 +68,14 @@ def _():
 @app.cell
 def _():
     from src.utils import (
-        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device
+        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device, get_device
     )
     from src.rollout import rollout
 
     return (
         ensure_rollout_dir,
         get_dataset,
+        get_device,
         get_model,
         rollout,
         save_to_json,
@@ -100,8 +101,8 @@ def _():
 
 
 @app.cell
-def _():
-    device = "mps"
+def _(get_device):
+    device = get_device()
     return (device,)
 
 

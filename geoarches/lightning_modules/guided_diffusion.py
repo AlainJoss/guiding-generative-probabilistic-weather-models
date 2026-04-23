@@ -8,13 +8,20 @@ import logging
 from pathlib import Path
 from tqdm.auto import tqdm
 
-import geoarches.stats as geoarches_stats
+# import geoarches.stats as geoarches_stats
+geoarches_stats = (
+    Path(__file__).resolve().parents[3]
+    / "data"
+    / "stats"
+    / "pangu_norm_stats2_with_w.pt"
+)
+geoarches_stats_path = geoarches_stats
 from geoarches.backbones.dit import TimestepEmbedder
 from geoarches.lightning_modules import BaseLightningModule
 from geoarches.lightning_modules.base_module import AvgModule, load_module
 from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
-geoarches_stats_path = importlib.resources.files(geoarches_stats)
+# geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)

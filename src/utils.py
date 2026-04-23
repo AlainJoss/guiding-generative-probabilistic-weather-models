@@ -11,6 +11,15 @@ import torch
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
+from src.paths import ERA5
+
+def get_device():
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
 
 def save_to_json(dict_: dict, rollout_dir: Path, name:str):
     path = rollout_dir / f"{name}.json"
@@ -26,7 +35,7 @@ def read_json(rollout_dir, name:str):
 def get_xr_ds():
     timesteps = ["6", "12", "18", "0"]
     datasets = [
-        xr.open_dataset(f"data/era5_240/full/era5_240_2020_{ts}h.nc", engine="netcdf4")
+        xr.open_dataset(f"{ERA5}/{ts}h.nc", engine="netcdf4")
         for ts in timesteps
     ]
     return xr.concat(
@@ -40,7 +49,7 @@ def get_xr_ds():
 
 def get_dataset():
     return Era5Forecast(
-        path="data/era5_240/full",  # default path
+        path=ERA5,  # default path
         domain="test", # domain to consider. domain = 'test' loads the 2020 period
         load_prev=True,  # whether to load previous state
         norm_scheme="pangu",  # default normalization scheme
