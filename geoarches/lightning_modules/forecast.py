@@ -13,10 +13,18 @@ from tensordict.tensordict import TensorDict
 from geoarches.dataloaders import era5, zarr
 from geoarches.metrics.metric_base import compute_lat_weights, compute_lat_weights_weatherbench
 
-from .. import stats as geoarches_stats
+# changed for running on Renku
+# from .. import stats as geoarches_stats
+geoarches_stats = (
+    Path(__file__).resolve().parents[3]
+    / "data"
+    / "stats"
+    / "pangu_norm_stats2_with_w.pt"
+)
+geoarches_stats_path = geoarches_stats
 from .base_module import BaseLightningModule
 
-geoarches_stats_path = importlib.resources.files(geoarches_stats)
+# geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
 
 class ForecastModule(BaseLightningModule):

@@ -7,10 +7,11 @@ uv sync
 # now remove the poetry.lock
 
 # for storing my stuff
-mkdir experiments
+mkdir rollouts
 
 # for storing downloaded/generated data
-mkdir data evalstore modelstore wandblogs
+# need to change config files because they think stats in geoarches/stats
+mkdir data evalstore modelstore wandblogs stats
 
 # download model weights https://geoarches.readthedocs.io/en/latest/archesweather/setup/
 src="https://huggingface.co/gcouairon/ArchesWeather/resolve/main"
@@ -24,7 +25,7 @@ done
 
 # download ERA5 quantile statistics
 src="https://huggingface.co/gcouairon/ArchesWeather/resolve/main"
-wget -O geoarches/stats/era5-quantiles-2016_2022.nc $src/era5-quantiles-2016_2022.nc
+wget -O stats/era5-quantiles-2016_2022.nc $src/era5-quantiles-2016_2022.nc
 
 # change download code of dl_era because google cloud complaints with auth
 xr.open_zarr(
@@ -35,4 +36,14 @@ xr.open_zarr(
 uv run geoarches/download/dl_era.py --years 2020
 uv run geoarches/download/dl_era.py  # full dataset
 # copy paste docs/archesweather/run.ipynb and change from cd ../.. to cd ..
+
+# changed for running on Renku in era5.py and forecast.py
+# from .. import stats as geoarches_stats
+geoarches_stats = (
+    Path(__file__).resolve().parents[3]
+    / "data"
+    / "stats"
+    / "pangu_norm_stats2_with_w.pt"
+)
+
 ```
