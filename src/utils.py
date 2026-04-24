@@ -52,7 +52,7 @@ def get_dataset():
         domain="all",  # all files under ERA5; year-slicing happens on the time coord
         load_prev=True,  # whether to load previous state
         norm_scheme="pangu",  # default normalization scheme
-        lead_time_hours=6
+        lead_time_hours=24
     )
 
 def get_model(device):

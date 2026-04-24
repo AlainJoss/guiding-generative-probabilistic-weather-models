@@ -445,6 +445,12 @@ def _(pick_guided_rollout_dropdown):
 
 
 @app.cell
+def _(unguided_rollout_dir):
+    unguided_rollout_dir
+    return
+
+
+@app.cell
 def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
     guided_cfg = read_json(guided_rollout_dir, "config")
     unguided_rollout_dir = ROLLOUTS / Path(guided_cfg["unguided_rollout_dir"])

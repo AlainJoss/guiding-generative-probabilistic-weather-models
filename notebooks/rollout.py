@@ -263,6 +263,18 @@ def _(ground_truth, timestamps, var, visualize_mask_terms_over_N):
 
 
 @app.cell
+def _(mo):
+    test_flag_checkbox = mo.ui.checkbox(value=False, label="test")
+    return (test_flag_checkbox,)
+
+
+@app.cell
+def _(test_flag_checkbox):
+    TEST=test_flag_checkbox.value
+    return (TEST,)
+
+
+@app.cell
 def _(
     M_slider,
     N,
@@ -272,10 +284,12 @@ def _(
     mo,
     partition_dropdown,
     rollout_dist_plot,
+    test_flag_checkbox,
     timestamp_dropdown,
     var_dropdown,
 ):
     mo.vstack([
+        test_flag_checkbox,
         timestamp_dropdown,
         mo.hstack([N_slider, mo.md(f"days ({N} steps)")], justify="start"),
         mo.hstack([M_slider, mo.md(f"ensemble members")], justify="start"),
@@ -324,12 +338,6 @@ def _(get_status, mo):
     status = get_status()
     mo.md(f"Experiment status: **{status}**")
     return (status,)
-
-
-@app.cell
-def _():
-    TEST=True
-    return (TEST,)
 
 
 @app.cell

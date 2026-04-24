@@ -44,7 +44,7 @@ def rollout(
         mask = None
 
     x_cond = x_start
-    lead_time_seconds = 6 * 3600
+    lead_time_seconds = int(x_start["lead_time_hours"]) * 3600
 
     ### iter
     for n in range(1, N+1):

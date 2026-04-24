@@ -94,6 +94,7 @@ def _():
         plot_dual_trajectory,
         plot_trajectory,
         read_json,
+        read_state,
         read_states,
         rollout,
         save_to_json,
@@ -265,8 +266,11 @@ def _(N, N_schedule, alpha, y_shape):
 @app.cell
 def _(ds):
     # align with "state" timestamps
-    # first timestamp in ds is only available as "previous"!
-    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
+    # slice accounts for load_prev (skip first lead/timedelta raw ticks) and next_state (skip last lead/timedelta raw ticks)
+    _STRIDE = int(ds.lead_time_hours) // int(ds.timedelta)
+    TIMESTAMPS = [str(ts[2]).split(".")[0] for ts in ds.timestamps][
+        _STRIDE:-_STRIDE
+    ]
     return (TIMESTAMPS,)
 
 
@@ -287,7 +291,7 @@ def _(unguided_cfg):
 
 @app.cell
 def _(N, TIMESTAMPS, timestamp_idx):
-    timestamps = TIMESTAMPS[timestamp_idx:timestamp_idx+N+1] 
+    timestamps = [TIMESTAMPS[timestamp_idx + _STRIDE * k] for k in range(N + 1)]
     return (timestamps,)
 
 
@@ -301,13 +305,13 @@ def _():
 def _(LEVELS, TIMESTAMPS, VARIABLES, ds, level, timestamp, var):
     timestamp_idx = TIMESTAMPS.index(timestamp)
     var_idx = VARIABLES.index(var)
-    level_idx = LEVELS.index(level) - 1
+    level_idx = LEVELS.index(level)
     x_start = ds[timestamp_idx]
     return level_idx, timestamp_idx, var_idx, x_start
 
 
 @app.cell
-def _(datetime, torch):
+def _(datetime, torch, x_start):
     def tensor_timestamp_to_string(timestamp: torch.Tensor, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
         """
         Convert a torch tensor containing a Unix timestamp to a formatted string.
@@ -319,7 +323,7 @@ def _(datetime, torch):
         return datetime.fromtimestamp(ts).strftime(fmt)
 
     # NOTE: it's in UTC time
-    # tensor_timestamp_to_string(x_start["timestamp"])
+    tensor_timestamp_to_string(x_start["timestamp"])
     return
 
 
@@ -431,6 +435,7 @@ def _(
     level_idx,
     mask,
     partition,
+    read_state,
     read_states,
     slice,
     timestamp_idx,
@@ -442,28 +447,38 @@ def _(
 ):
     ground_truth = []
     ensemble_rollout = []
-    ensemble_rollout.append([avg_over_mask(slice, mask)]*M)
-    ground_truth.append(avg_over_mask(slice, mask))
+    gen_det_rollout = []
 
-    # TODO: implement
-    deterministic_rollout = []
+    init_value = avg_over_mask(slice, mask)
+    ground_truth.append(init_value)
+    ensemble_rollout.append([init_value] * M)
+    gen_det_rollout.append(init_value)
 
-    for n in range(1, unguided_cfg["N"]+1):
-        timestamp_n = TIMESTAMPS[timestamp_idx+n]
-        state_n = ds[timestamp_idx+n]["state"]
+    for n in range(1, unguided_cfg["N"] + 1):
+        timestamp_n = TIMESTAMPS[timestamp_idx + _STRIDE * n]
+        state_n = ds[timestamp_idx + _STRIDE * n]["state"]
         slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
         ground_truth.append(avg_over_mask(slice_n, mask))
-        states = read_states(unguided_rollout_dir, n) 
-        # print(states)
-        # print("---")
-        slices = [get_slice(state, partition, level, var, timestamp_n) for state in states]
+        states = read_states(unguided_rollout_dir, n)
+        det_state_n = read_state(
+            unguided_rollout_dir / f"{n}" / "deterministic.nc"
+        )
+        slices = [
+            get_slice(state, partition, level, var, timestamp_n)
+            for state in states
+        ]
         slices = [xr_to_torch(slice_) for slice_ in slices]
         avgs = [avg_over_mask(slice_, mask) for slice_ in slices]
+
+        slice_det = get_slice(det_state_n, partition, level, var, timestamp_n)
+        slice_det = xr_to_torch(slice_det)
+        avg_det = avg_over_mask(slice_det, mask)
+        gen_det_rollout.append(avg_det)
 
         ensemble_rollout.append(avgs)
 
     mean_rollout = compute_mean_rollout(ensemble_rollout)
-    return ensemble_rollout, ground_truth, mean_rollout
+    return ensemble_rollout, gen_det_rollout, ground_truth, mean_rollout
 
 
 @app.cell(hide_code=True)
@@ -498,6 +513,7 @@ def _(
 @app.cell
 def _(
     ensemble_rollout,
+    gen_det_rollout,
     ground_truth,
     mean_rollout,
     timestamps,
@@ -505,7 +521,12 @@ def _(
     visualize_mask_terms_over_N,
 ):
     ensemble_rollout_plot = visualize_mask_terms_over_N(
-        var, timestamps, mean_rollout=mean_rollout, ensemble_rollout=ensemble_rollout, ground_truth=ground_truth, 
+        var,
+        timestamps,
+        mean_rollout=mean_rollout,
+        ensemble_rollout=ensemble_rollout,
+        ground_truth=ground_truth,
+        gen_det_rollout=gen_det_rollout,
     )
     return (ensemble_rollout_plot,)
 
@@ -573,6 +594,14 @@ def _(ensemble_rollout_plot, mo):
 
 
 @app.cell
+def _(ensemble_rollout, ground_truth, mean_rollout):
+    ground_truth
+    ensemble_rollout
+    mean_rollout, ensemble_rollout, ground_truth
+    return
+
+
+@app.cell
 def _(mo):
     mo.vstack([
         mo.md("Compares the the average over the defined mask of the M-models generative ensemble to the deterministic predictions at each step, to see how much the residual diverges from the deterministic prediction."), 
@@ -590,35 +619,8 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Configure guidance
+    ## Configure guidance experiment
     """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Guidance @ diffusion time
-    """)
-    return
-
-
-@app.cell
-def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
-    mo.vstack([
-        mo.md("$\lambda_t$ controls how much the guidance vector is conditioning the vector field $u_t^{\\theta}$ at diffusion timestep $t$."),
-        mo.vstack([
-            mo.hstack([
-                lambda_shape_slider,
-                mo.md("controls the smoothness of the lambda trajectory")
-            ], justify="start"),
-            mo.hstack([
-                w_slider,
-                mo.md("controls the maximum value of lambda (always @ step 12)")
-            ], justify="start"),
-            lambda_trajectory_plot,
-        ])
-    ])
     return
 
 
@@ -645,6 +647,33 @@ def _(
             min_max_lambda_slider,
             alpha_slider,
             y_trajectory_plot,
+        ])
+    ])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Guidance @ diffusion time
+    """)
+    return
+
+
+@app.cell
+def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
+    mo.vstack([
+        mo.md("$\lambda_t$ controls how much the guidance vector is conditioning the vector field $u_t^{\\theta}$ at diffusion timestep $t$."),
+        mo.vstack([
+            mo.hstack([
+                lambda_shape_slider,
+                mo.md("controls the smoothness of the lambda trajectory")
+            ], justify="start"),
+            mo.hstack([
+                w_slider,
+                mo.md("controls the maximum value of lambda (always @ step 12)")
+            ], justify="start"),
+            lambda_trajectory_plot,
         ])
     ])
     return
