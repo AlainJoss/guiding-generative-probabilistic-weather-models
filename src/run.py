@@ -83,6 +83,7 @@ config = {
     "M": M,
     "N": N,
     "timestamp": str(start_timestamp),
+    
 }
 
 save_to_json(config, old_rollout_dir, "config")

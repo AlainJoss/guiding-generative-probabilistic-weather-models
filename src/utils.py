@@ -11,7 +11,7 @@ import torch
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
-from src.paths import ERA5
+from src.paths import ERA5, MODELSTORE
 
 def get_device():
     if torch.cuda.is_available():
@@ -33,7 +33,7 @@ def read_json(rollout_dir, name:str):
     return dict_
 
 def get_xr_ds():
-    timesteps = ["6", "12", "18", "0"]
+    timesteps = ["00", "06", "12", "18"]
     datasets = [
         xr.open_dataset(f"{ERA5}/{ts}h.nc", engine="netcdf4")
         for ts in timesteps
@@ -50,15 +50,16 @@ def get_xr_ds():
 def get_dataset():
     return Era5Forecast(
         path=ERA5,  # default path
-        domain="test", # domain to consider. domain = 'test' loads the 2020 period
+        domain="all",  # all files under ERA5; year-slicing happens on the time coord
         load_prev=True,  # whether to load previous state
         norm_scheme="pangu",  # default normalization scheme
         lead_time_hours=6
     )
 
 def get_model(device):
+    print(MODELSTORE)
     gen_model, _ = load_module(  # _ := gen_config
-        "archesweathergen",
+        MODELSTORE / "archesweathergen",
         module_target="geoarches.lightning_modules.guided_diffusion.GuidedFlow",
     )
     return gen_model.to(device)
@@ -68,9 +69,10 @@ def get_timestamp():
     timestamp = date + "_" + time
     return timestamp
 
+from src.paths import ROLLOUTS
 def ensure_rollout_dir(sub_dir: Path, N):
     timestamp = get_timestamp()
-    result_dir = Path("rollouts", sub_dir, f"{timestamp}")
+    result_dir = Path(ROLLOUTS, sub_dir, f"{timestamp}")
     result_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, N+1):
         path = Path(result_dir, f"{n}")
@@ -78,7 +80,7 @@ def ensure_rollout_dir(sub_dir: Path, N):
     return result_dir
 
 def get_last_experiment_dir():
-    paths = Path("rollouts", "guided").glob("2026*")
+    paths = Path(ROLLOUTS, "guided").glob("2026*")
     paths = sorted(paths)
     print(paths[-1])
     return paths[-1]

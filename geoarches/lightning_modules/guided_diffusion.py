@@ -8,20 +8,12 @@ import logging
 from pathlib import Path
 from tqdm.auto import tqdm
 
-# import geoarches.stats as geoarches_stats
-geoarches_stats = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "stats"
-    / "pangu_norm_stats2_with_w.pt"
-)
-geoarches_stats_path = geoarches_stats
 from geoarches.backbones.dit import TimestepEmbedder
 from geoarches.lightning_modules import BaseLightningModule
 from geoarches.lightning_modules.base_module import AvgModule, load_module
 from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
-# geoarches_stats_path = importlib.resources.files(geoarches_stats)
+from geoarches.paths import STATS_PATH
 
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
@@ -94,14 +86,14 @@ class GuidedFlow(BaseLightningModule):
 
         # sigma scaling factor (shape like usual states)
         pangu_stats = torch.load(
-            geoarches_stats_path / "pangu_norm_stats2_with_w.pt", weights_only=True
+            STATS_PATH / "pangu_norm_stats2_with_w.pt", weights_only=True
         )
         pangu_scaler = TensorDict(
             level=pangu_stats["level_std"], surface=pangu_stats["surface_std"]
         )
         scaler = TensorDict(
             **torch.load(
-                geoarches_stats_path / "deltapred24_aws_denorm.pt", weights_only=False
+                STATS_PATH / "deltapred24_aws_denorm.pt", weights_only=False
             )
         )
         scaler["level"][-1] *= 3  # we don't care too much about vertical velocity

@@ -60,6 +60,13 @@ def _():
 
 
 @app.cell
+def _():
+    from src.paths import ROLLOUTS
+
+    return (ROLLOUTS,)
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
     ## Funcs
@@ -415,7 +422,7 @@ def _(mo):
 
 
 @app.cell
-def _(Path, mo, refresh_button):
+def _(Path, ROLLOUTS, mo, refresh_button):
     if refresh_button.value:
         pass
 
@@ -423,7 +430,7 @@ def _(Path, mo, refresh_button):
         return (path / "config.json").exists()
 
 
-    guided_rollouts = Path("rollouts", "guided").glob("2026*")
+    guided_rollouts = Path(ROLLOUTS, "guided").glob("2026*")
     guided_rollouts = sorted(
         [p for p in guided_rollouts if has_config_json(p)],
         reverse=True,
@@ -439,9 +446,10 @@ def _(pick_guided_rollout_dropdown):
 
 
 @app.cell
-def _(Path, guided_rollout_dir, read_json):
+def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
     guided_cfg = read_json(guided_rollout_dir, "config")
-    unguided_rollout_dir = Path(guided_cfg["unguided_rollout_dir"])
+    unguided_rollout_dir = ROLLOUTS / Path(guided_cfg["unguided_rollout_dir"])
+
     unguided_cfg = read_json(unguided_rollout_dir, "config")
     return guided_cfg, unguided_cfg, unguided_rollout_dir
 

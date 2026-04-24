@@ -7,8 +7,6 @@ import torch.nn as nn
 from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
-# import ValueError
-
 
 def load_module(
     path: str,
@@ -26,10 +24,11 @@ def load_module(
         return_config: Whether to return cfg along with module, or just the instantiated module.
         ckpt_fname: Optional. Checkpoint filename under `checkpoints/`, otherwise chooses most recent file.
     """
-    if Path("modelstore").joinpath(path).exists():
-        path = Path("modelstore").joinpath(path)
-    else:
-        path = Path(path)
+    # if Path("modelstore").joinpath(path).exists():
+    #     path = Path("modelstore").joinpath(path)
+    # else:
+    #     path = Path(path)
+    path = Path(path)
     cfg = OmegaConf.load(path / "config.yaml")
     cfg.merge_with_dotlist(dotlist)
     if module_target is not None:
@@ -123,6 +122,7 @@ class BaseLightningModule(L.LightningModule):
         return [opt], [sched]
 
 
+from geoarches.paths import MODELSTORE
 class AvgModule(L.LightningModule):
     """
     Wrapper around several lightning modules to run forward and compute average prediction.
@@ -131,12 +131,11 @@ class AvgModule(L.LightningModule):
     def __init__(self, module_paths):
         super().__init__()
         path = module_paths[0]
-        if Path("modelstore").joinpath(path).exists():
-            path = Path("modelstore").joinpath(path)
-        else:
-            path = Path(path)
+        print(path)
+        path = MODELSTORE / path
+        print(path)
         self.cfg = OmegaConf.load(path / "config.yaml")
-        self.core = nn.ModuleList([load_module(p, return_config=False) for p in module_paths])
+        self.core = nn.ModuleList([load_module(MODELSTORE / p, return_config=False) for p in module_paths])
 
     def forward(self, *args, **kwargs):
         return torch.stack([m.forward(*args, **kwargs) for m in self.core], dim=0).mean(dim=0)

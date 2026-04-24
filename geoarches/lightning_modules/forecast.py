@@ -14,17 +14,8 @@ from geoarches.dataloaders import era5, zarr
 from geoarches.metrics.metric_base import compute_lat_weights, compute_lat_weights_weatherbench
 
 # changed for running on Renku
-# from .. import stats as geoarches_stats
-geoarches_stats = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "stats"
-    / "pangu_norm_stats2_with_w.pt"
-)
-geoarches_stats_path = geoarches_stats
+from geoarches.paths import STATS_PATH
 from .base_module import BaseLightningModule
-
-# geoarches_stats_path = importlib.resources.files(geoarches_stats)
 
 
 class ForecastModule(BaseLightningModule):
@@ -86,7 +77,7 @@ class ForecastModule(BaseLightningModule):
             # assumes include vertical wind component
 
             pangu_stats = torch.load(
-                geoarches_stats_path / "pangu_norm_stats2_with_w.pt", weights_only=True
+                STATS_PATH / "pangu_norm_stats2_with_w.pt", weights_only=True
             )
 
             # mul by first to remove norm, div by second to apply fake delta normalization

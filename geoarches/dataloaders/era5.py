@@ -10,13 +10,7 @@ import xarray as xr
 from tensordict.tensordict import TensorDict
 
 # changed from base implementation
-# from .. import stats as geoarches_stats
-geoarches_stats = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "stats"
-    / "pangu_norm_stats2_with_w.pt"
-)
+from geoarches.paths import STATS_PATH
 from .netcdf import XarrayDataset
 
 filename_filters = dict(
@@ -233,7 +227,7 @@ class Era5Forecast(Era5Dataset):
 
     def __init__(
         self,
-        path: str = "data/era5_240/full/",
+        path: str = "...",
         domain: str = "train",
         filename_filter: Callable | None = None,
         timedelta_hours: int = None,
@@ -294,9 +288,8 @@ class Era5Forecast(Era5Dataset):
         self.current_multistep = 1
 
         # include vertical component by default
-        # geoarches_stats_path = importlib.resources.files(geoarches_stats)     
-        geoarches_stats_path = geoarches_stats
-        norm_file_path = geoarches_stats_path / "pangu_norm_stats2_with_w.pt"
+        # geoarches_stats_path = importlib.resources.files(STATS_PATH)     
+        norm_file_path = STATS_PATH / "pangu_norm_stats2_with_w.pt"
         pangu_stats = torch.load(norm_file_path, weights_only=True)
 
         # normalization,

@@ -13,19 +13,15 @@ from tensordict.tensordict import TensorDict
 from tqdm import tqdm
 
 # import geoarches.stats as geoarches_stats
-geoarches_stats = (
-    Path(__file__).resolve().parents[3]
-    / "data"
-    / "stats"
-    / "pangu_norm_stats2_with_w.pt"
-)
-geoarches_stats_path = geoarches_stats
+# from ...data import stats as geoarches_stats
+
 from geoarches.backbones.dit import TimestepEmbedder
 from geoarches.dataloaders import era5, zarr
 from geoarches.lightning_modules import BaseLightningModule
 from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
-# geoarches_stats_path = importlib.resources.files(geoarches_stats)
+from geoarches.paths import STATS_PATH
+geoarches_stats_path = STATS_PATH
 
 
 class DiffusionModule(BaseLightningModule):

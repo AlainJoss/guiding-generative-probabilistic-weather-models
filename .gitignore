@@ -169,13 +169,14 @@ cython_debug/
 
 
 # my additions
-data/
+/data
 experiments/random.ipynb
 experiments/generated
 modelstore/
 geoarches/stats/
 rollouts/
 marimo-pair/
+uv.lock
 
 journal/latex-notes/*
 !journal/latex-notes/main.pdf

@@ -46,4 +46,10 @@ geoarches_stats = (
     / "pangu_norm_stats2_with_w.pt"
 )
 
+# run symlink to point to outside-repo data folder
+# NOTE: this has to be run each time spin up a cluster
+# should thus be included in a bash script, and the bash script should be run instead
+ln -s ../data data
+# then change all the data imports in the ArchesWeather package
+
 ```

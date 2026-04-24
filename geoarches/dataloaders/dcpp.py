@@ -4,7 +4,7 @@ import pandas as pd
 import torch
 from tensordict.tensordict import TensorDict
 
-from .. import stats as geoarches_stats
+from ...data import stats as geoarches_stats
 from .netcdf import XarrayDataset
 
 filename_filters = dict(

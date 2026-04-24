@@ -8,7 +8,8 @@ import torch.utils.checkpoint as gradient_checkpoint
 from tensordict.tensordict import TensorDict
 from timm.layers.mlp import SwiGLU
 
-import geoarches.stats as geoarches_stats
+from geoarches.paths import STATS_PATH
+
 from geoarches.backbones.archesweather_layers import ICNR_init
 
 from .archesweather_layers import (
@@ -40,9 +41,8 @@ class WeatherEncodeDecodeLayer(nn.Module):
         super().__init__()
         self.__dict__.update(locals())
 
-        geoarches_stats_path = importlib.resources.files(geoarches_stats)
         self.constant_masks = torch.load(
-            geoarches_stats_path / "archesweather_constant_masks.pt", weights_only=True
+            STATS_PATH / "archesweather_constant_masks.pt", weights_only=True
         )
         constant_dims = self.constant_masks.shape[0]
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 DATA = Path(__file__).parent.parent.resolve() / "data"
+# print(DATA)
 MODELSTORE = DATA / "modelstore"
 ROLLOUTS = DATA / "rollouts"
 ERA5 = DATA / "era5"

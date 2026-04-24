@@ -10,7 +10,7 @@ from torchmetrics import Metric
 from geoarches.dataloaders import era5
 from geoarches.metrics.label_wrapper import LabelDictWrapper, add_timedelta_index
 
-from .. import stats as geoarches_stats
+from geoarches.paths import STATS_PATH
 from . import metric_base
 from .metric_base import MetricBase, TensorDictMetricBase
 
