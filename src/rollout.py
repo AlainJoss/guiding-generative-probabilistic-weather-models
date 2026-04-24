@@ -13,8 +13,7 @@ from src.interaction import get_mask_from_corners
 from geoarches.dataloaders.era5 import Era5Forecast
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 
-##### load #####
-
+TEST = True
 def rollout(
         guidance_flag: bool,  # either guiding or not the sampling
         rollout_dir: Path, 
@@ -23,7 +22,8 @@ def rollout(
         mask_corners, init_mask_term,
         y, lambda_, N,
         partition, level_idx, var_idx, m: int = 1,
-        seed: int | None = None
+        seed: int | None = None,
+        test: bool = False
     ):
     """
     Switch "guidance" ON/OFF using the mask: None=OFF, torch.Tensor=ON.
@@ -54,8 +54,7 @@ def rollout(
         else:
             y_n = None
 
-        TEST = False
-        if not TEST:
+        if not test:
             state, mask_terms_n = gen_model.sample(
                 x_cond=x_cond,
                 mask=mask,
@@ -67,6 +66,7 @@ def rollout(
         else:
             mask_terms_n = [0.0]*25
             state = x_start["state"]
+            det_state = x_start["state"]
 
         if guidance_flag:
             mask_term = float(mask_terms_n[-1])

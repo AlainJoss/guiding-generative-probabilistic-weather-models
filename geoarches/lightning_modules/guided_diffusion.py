@@ -199,8 +199,8 @@ class GuidedFlow(BaseLightningModule):
         # draw noise
         generator = torch.Generator(device=self.device)
         if seed is not None:
-            generator.manual_seed(seed)
             print(f"set seed: {seed}")
+            generator.manual_seed(seed)
             
         z = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)

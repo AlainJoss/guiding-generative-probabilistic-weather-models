@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.2"
-app = marimo.App()
+app = marimo.App(width="medium")
 
 
 @app.cell
@@ -332,15 +332,14 @@ def _(mo):
 
 @app.cell
 def _():
-    from geoarches.dataloaders.era5 import Era5Forecast
+    from src.utils import get_dataset
 
-    ds = Era5Forecast(
-        path="data/era5_240/full",  # default path
-        domain="test", # domain to consider. domain = 'test' loads the 2020 period
-        load_prev=True,  # whether to load previous state
-        norm_scheme="pangu",  # default normalization scheme
-        lead_time_hours=6
-    )
+    return (get_dataset,)
+
+
+@app.cell
+def _(get_dataset):
+    ds = get_dataset()
     return (ds,)
 
 

@@ -1090,7 +1090,7 @@ def plot_states_over_n(
     last_norm = None
 
     for n_iter in range(1, N + 1):
-        guided_state = read_state(get_rollout_path(guided_rollout_dir, n_iter, m))
+        guided_state = read_state(get_rollout_path(guided_rollout_dir, n_iter, "guided"))
         unguided_state = read_state(get_rollout_path(unguided_rollout_dir, n_iter, m))
 
         sample = ds.denormalize(ds[timestamp_idx + n_iter])

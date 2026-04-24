@@ -389,7 +389,7 @@ class ForecastModuleWithCond(ForecastModule):
         device = batch["state"].device
         # convert time into str
         times = pd.to_datetime(batch["timestamp"].cpu().numpy(), unit="s").tz_localize(None)
-        print(f"times in ForecastModuleWithCond: {times}, {times.month}, {times.hour}")
+        # print(f"times in ForecastModuleWithCond: {times}, {times.month}, {times.hour}")
 
         month = torch.tensor(times.month).to(device)
         month_emb = self.month_embedder(month)

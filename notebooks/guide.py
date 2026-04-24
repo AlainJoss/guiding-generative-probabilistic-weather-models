@@ -105,6 +105,13 @@ def _():
 
 
 @app.cell
+def _():
+    from src.paths import ROLLOUTS
+
+    return (ROLLOUTS,)
+
+
+@app.cell
 def _(device, get_dataset, get_model):
     ds = get_dataset()
     model = get_model(device)
@@ -364,15 +371,14 @@ def _(subfolder_selector):
 
 
 @app.cell
-def _(Path, mo, refresh_button, subfolder):
+def _(Path, ROLLOUTS, mo, refresh_button, subfolder):
     if refresh_button.value:
         pass
 
     def has_config_json(path: Path) -> bool:
         return (path / "config.json").exists()
 
-
-    unguided_rollouts = Path("rollouts", subfolder).glob("2026*")
+    unguided_rollouts = Path(ROLLOUTS, subfolder).glob("2026*")
     unguided_rollouts = sorted(
         [p for p in unguided_rollouts if has_config_json(p)],
         reverse=True,
@@ -666,31 +672,34 @@ def _(run_button, set_status):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Monitor experiment from log file.
-    """)
-    return
+@app.cell
+def _(get_status):
+    status = get_status()
+    return (status,)
 
 
 @app.cell
 def _(mo):
     run_button = mo.ui.run_button(label="Run")
-    run_button
+    mo.vstack([
+        run_button,
+        # mo.md(f"Experiment status: **{get_status()}**")
+    ])
     return (run_button,)
 
 
 @app.cell
-def _(get_status, mo):
-    status = get_status()
-    mo.md(f"Experiment status: **{status}**")
-    return (status,)
+def _():
+    TEST=True
+    return (TEST,)
 
 
 @app.cell
 def _(
     N,
+    Path,
+    ROLLOUTS,
+    TEST,
     alpha,
     device,
     ds,
@@ -741,11 +750,13 @@ def _(
             level_idx=level_idx,
             var_idx=var_idx,
             m=1,
-            seed=None
+            seed=None,
+            test=TEST
         )
 
         config = {
             "unguided_rollout_dir": unguided_cfg["rollout_dir"],
+            "guided_rollout_dir": str(rollout_dir),
             "N": N,
             "mask_corners": mask_corners,
             "timestamp": str(timestamp),
@@ -767,7 +778,7 @@ def _(
         }
 
 
-        save_to_json(config, rollout_dir, "config")
+        save_to_json(config, Path(ROLLOUTS, "guided", rollout_dir), "config")
 
     #     set_status("IDLE")
     # except Exception as e:

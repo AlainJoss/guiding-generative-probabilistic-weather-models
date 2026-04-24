@@ -168,7 +168,7 @@ class DiffusionModule(BaseLightningModule):
 
         # conditional by default
         times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-        print(f"timestamp: {times}, month: {times.month}, hour: {times.hour}")
+        # print(f"timestamp: {times}, month: {times.month}, hour: {times.hour}")
         month = torch.tensor(times.month).to(device)
         month_emb = self.month_embedder(month)
         hour = torch.tensor(times.hour).to(device)
@@ -188,7 +188,7 @@ class DiffusionModule(BaseLightningModule):
             sigmas = sigmas[:, None, None, None, None]  # shape (bs,)
             # print(timesteps, sigmas)
 
-            print(f"sigma = {sigmas.item():.12f}")
+            # print(f"sigma = {sigmas.item():.12f}")
 
             # to transform model_output=sample to output=noise - sample
             out = (noisy_next_state - out).apply(lambda x: x / sigmas)

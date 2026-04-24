@@ -1,6 +1,4 @@
 import json
-import random
-import string
 
 from pathlib import Path 
 from datetime import datetime
@@ -11,7 +9,8 @@ import torch
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
-from src.paths import ERA5, MODELSTORE
+from src.paths import ERA5, MODELSTORE, ROLLOUTS
+
 
 def get_device():
     if torch.cuda.is_available():
@@ -69,15 +68,14 @@ def get_timestamp():
     timestamp = date + "_" + time
     return timestamp
 
-from src.paths import ROLLOUTS
-def ensure_rollout_dir(sub_dir: Path, N):
-    timestamp = get_timestamp()
-    result_dir = Path(ROLLOUTS, sub_dir, f"{timestamp}")
-    result_dir.mkdir(parents=True, exist_ok=True)
+def ensure_rollout_dir(sub_dir: Path, N) -> Path:
+    experiment_id = get_timestamp()
+    rollout_dir = Path(ROLLOUTS, sub_dir, f"{experiment_id}")
+    rollout_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, N+1):
-        path = Path(result_dir, f"{n}")
+        path = Path(rollout_dir, f"{n}")
         path.mkdir(parents=True, exist_ok=True)
-    return result_dir
+    return rollout_dir
 
 def get_last_experiment_dir():
     paths = Path(ROLLOUTS, "guided").glob("2026*")
@@ -88,8 +86,8 @@ def get_last_experiment_dir():
 def state_to_device(state, device):
     return {k: v[None].to(device) for k, v in state.items()}
 
-def save_state(rollout_dir: Path, array, n: int, m: int):
-    path = rollout_dir / f"{n}" / f"{m}.nc"
+def save_state(rollout_dir: str, array, n: int, m: int):
+    path = Path(rollout_dir, f"{n}", f"{m}.nc")
     array.to_netcdf(path)
 
 def read_state(path: Path):

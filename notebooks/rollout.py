@@ -53,31 +53,27 @@ def _():
     import torch
     import numpy as np
 
-    return mo, torch
+    return (mo,)
 
 
 @app.cell
 def _():
-    from src.utils import get_slice
-    from src.funcs import avg_over_mask
-    from src.visualization import visualize_mask_terms_over_N
+    from src.paths import ROLLOUTS
 
-    return avg_over_mask, visualize_mask_terms_over_N
+    return
 
 
 @app.cell
 def _():
     from src.utils import (
-        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device, get_device
+        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device, get_device, get_slice
     )
-    from src.rollout import rollout
 
     return (
         ensure_rollout_dir,
         get_dataset,
         get_device,
         get_model,
-        rollout,
         save_to_json,
         state_to_device,
     )
@@ -88,6 +84,27 @@ def _():
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
+
+
+@app.cell
+def _():
+    from src.rollout import rollout
+
+    return (rollout,)
+
+
+@app.cell
+def _():
+    from src.funcs import avg_over_mask
+
+    return (avg_over_mask,)
+
+
+@app.cell
+def _():
+    from src.visualization import visualize_mask_terms_over_N
+
+    return (visualize_mask_terms_over_N,)
 
 
 @app.cell
@@ -193,32 +210,6 @@ def _(M_slider, N_slider, TIMESTAMPS, timestamp_dropdown):
 
 
 @app.cell
-def _(ds, tensor_timestamp_to_string):
-    tensor_timestamp_to_string(ds[0]["timestamp"])
-    return
-
-
-@app.cell
-def _(tensor_timestamp_to_string, x_start):
-    import pandas as pd
-    times = pd.to_datetime(x_start["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-    times.hour, times.month, tensor_timestamp_to_string(x_start["timestamp"])
-    return
-
-
-@app.cell
-def _(torch, x_start):
-    from datetime import datetime
-    def tensor_timestamp_to_string(timestamp: torch.Tensor, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-        ts = timestamp.item()
-        return datetime.fromtimestamp(ts).strftime(fmt)
-
-    # NOTE: it's in UTC time
-    tensor_timestamp_to_string(x_start["timestamp"])
-    return (tensor_timestamp_to_string,)
-
-
-@app.cell
 def _(ds, level_idx, partition, timestamp_idx, var_idx):
     x_start = ds[timestamp_idx]
     slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
@@ -302,7 +293,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Run
+    ## Run experiment
     """)
     return
 
@@ -323,7 +314,7 @@ def _(run_button, set_status):
 
 @app.cell
 def _(mo):
-    run_button = mo.ui.run_button(label="Run experiment")
+    run_button = mo.ui.run_button(label="Run")
     run_button
     return (run_button,)
 
@@ -336,9 +327,16 @@ def _(get_status, mo):
 
 
 @app.cell
+def _():
+    TEST=True
+    return (TEST,)
+
+
+@app.cell
 def _(
     M,
     N,
+    TEST,
     device,
     ds,
     ensure_rollout_dir,
@@ -375,7 +373,8 @@ def _(
                 level_idx=None, # level_idx
                 var_idx=None, # var_idx
                 m=m,
-                seed=None
+                seed=None,
+                test=TEST
             )
 
         config = {
@@ -436,22 +435,6 @@ def _(
         } 
 
         save_to_json(_config, rollout_dir, "config")
-    return
-
-
-@app.cell
-def _():
-    # TODO: add other params to config!!
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
     return
 
 

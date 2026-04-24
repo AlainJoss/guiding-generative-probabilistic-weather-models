@@ -8,4 +8,5 @@ Run analysis:
 uv run marimo edit notebooks/rollout.py --watch --no-token
 uv run marimo edit notebooks/guide.py --watch --no-token
 uv run marimo edit notebooks/analyze.py --watch --no-token
+uv run -m src.run
 ```
