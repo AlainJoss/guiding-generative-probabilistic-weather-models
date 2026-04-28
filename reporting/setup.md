@@ -39,6 +39,7 @@ uv run geoarches/download/dl_era.py  # full dataset
 
 # changed for running on Renku in era5.py and forecast.py
 # from .. import stats as geoarches_stats
+
 geoarches_stats = (
     Path(__file__).resolve().parents[3]
     / "data"
@@ -52,4 +53,9 @@ geoarches_stats = (
 ln -s ../data data
 # then change all the data imports in the ArchesWeather package
 
+# changed model config yaml -> removed modelstore/
+- archesweather-m-seed0
+- archesweather-m-seed1
+- archesweather-m-skip-seed0
+- archesweather-m-skip-seed1
 ```

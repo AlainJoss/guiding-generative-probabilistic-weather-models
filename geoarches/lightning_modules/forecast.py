@@ -395,7 +395,7 @@ class ForecastModuleWithCond(ForecastModule):
         hour = torch.tensor(times.hour).to(device)
         hour_emb = self.hour_embedder(hour)
     
-        print(f"embedding time for det model - month:{int(month)}, hour:{int(hour)}")
+        # print(f"embedding time for det model - month:{int(month)}, hour:{int(hour)}")
 
         cond_emb = month_emb + hour_emb
 

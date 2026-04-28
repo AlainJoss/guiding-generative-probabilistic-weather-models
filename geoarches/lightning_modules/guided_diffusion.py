@@ -259,7 +259,7 @@ class GuidedFlow(BaseLightningModule):
         hour = torch.tensor(times.hour).to(self.device)
         hour_emb = self.hour_embedder(hour)
         timestep_emb = self.timestep_embedder(torch.tensor([t]).to(self.device))
-        print(f"embedding time for gen model - month:{int(month)}, hour:{int(hour)}")
+        # print(f"embedding time for gen model - month:{int(month)}, hour:{int(hour)}")
 
         time_embedding = month_emb + hour_emb + timestep_emb
         return time_embedding

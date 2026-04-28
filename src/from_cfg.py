@@ -76,7 +76,8 @@ def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
     return rollout_dir
 
 
-def main() -> None:
+def main():
+    print(">>> running experiment")
     args = parse_args()
     config = read_config(args.config_id)
     run_from_config(config, test=args.test)
