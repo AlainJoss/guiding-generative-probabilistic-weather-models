@@ -1,0 +1,21 @@
+{
+  "guidance_flag": false,
+  "M": 5,
+  "N": 30,
+  "timestamp": "2020-07-14T12:00:00",
+  "timestamp_idx": 778,
+  "level": 0,
+  "level_idx": -1,
+  "partition": "surface",
+  "var": "2m_temperature",
+  "var_idx": 2,
+  "mask_corners": [
+    -10.0,
+    2.0,
+    35.0,
+    45.0
+  ],
+  "init_mask_term": null,
+  "y": null,
+  "lambda_": null
+}

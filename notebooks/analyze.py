@@ -1,7 +1,7 @@
 import marimo
 
-__generated_with = "0.23.2"
-app = marimo.App(width="medium")
+__generated_with = "0.23.3"
+app = marimo.App(width="full")
 
 
 @app.cell
@@ -620,7 +620,6 @@ def _(get_guidance, plt):
         ax.set_xlabel("Timestamp", fontsize=10)
         ax.set_ylabel("Mask term", fontsize=10)
         ax.grid(True, alpha=0.25, linestyle=":")
-        ax.axhline(0, color="gray", linewidth=0.5, alpha=0.6)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
         ax.tick_params(axis="both", labelsize=9)
@@ -870,22 +869,18 @@ def _(
         guided_gt_map = _diff_maps["guided-gt"]
         guided_unguided_map = _diff_maps["guided-unguided"]
         next_current_map = _diff_maps["next-current"]
-        unguided_current_map = _diff_maps["unguided-current"]
-        guided_current_map = _diff_maps["guided-current"]
 
         state_map = None
         next_map = None
         unguided_map = None
         guided_map = None
     return (
-        guided_current_map,
         guided_gt_map,
         guided_map,
         guided_unguided_map,
         next_current_map,
         next_map,
         state_map,
-        unguided_current_map,
         unguided_gt_map,
         unguided_map,
     )
@@ -907,7 +902,6 @@ def _(guided_unguided, plot_zoom_histogram, zoom_centers, zoom_slider):
 def _(
     analysis_type,
     analysis_type_dropdown,
-    guided_current_map,
     guided_gt_map,
     guided_map,
     guided_unguided_map,
@@ -923,7 +917,6 @@ def _(
     show_mask_switch,
     show_values_checkbox,
     state_map,
-    unguided_current_map,
     unguided_gt_map,
     unguided_map,
     value_threshold_slider,
@@ -975,13 +968,12 @@ def _(
                     justify="start",
                 ),
                 zoom_slider,
-                mo.md("**Errors vs ground truth**"),
-                mo.hstack([unguided_gt_map, guided_gt_map, guided_unguided_map]),
-                mo.md("**Evolutions from current**"),
+                mo.md("Difference over states:"),
+                mo.hstack([next_current_map, guided_unguided_map]),
                 mo.hstack(
-                    [next_current_map, unguided_current_map, guided_current_map]
+                    [unguided_gt_map, guided_gt_map]
                 ),
-                mo.md("**Distribution in zoom region**"),
+                mo.md("Distribution in zoom region:"),
                 next_guided_hist,
             ]
         )
@@ -1642,6 +1634,14 @@ def _(
     )
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    > **Reading the plot:** above 0 is good (guidance helps), less than 0 is bad (guidance hurts).
+    """)
+    return
+
+
 @app.cell
 def _(
     agg_level_rel_per_n,
@@ -1649,22 +1649,24 @@ def _(
     rank_by_rmse_radio,
     top_k_rmse_slider,
 ):
-    rmse_level_fig, _ = plot_variable_change_parallel(
+    rmse_level_fig, rmse_level_ax = plot_variable_change_parallel(
         agg_level_rel_per_n,
         top_k=top_k_rmse_slider.value,
+        bottom_k=top_k_rmse_slider.value,
         rank_by=rank_by_rmse_radio.value,
         title="Relative RMSE improvement — per variable-level",
         subtitle="(RMSE_unguided - RMSE_guided) / RMSE_unguided on mask (normalized space); error bars = ensemble std",
         ylim=None,
         ylabel="relative RMSE improvement",
     )
+    rmse_level_ax.axhline(0, color="red", linestyle="--", linewidth=1.0, alpha=0.8)
     rmse_level_fig
     return
 
 
 @app.cell
 def _(agg_var_rel_per_n, plot_variable_change_parallel):
-    rmse_var_fig, _ = plot_variable_change_parallel(
+    rmse_var_fig, rmse_var_ax = plot_variable_change_parallel(
         agg_var_rel_per_n,
         top_k=None,
         rank_by="max",
@@ -1673,6 +1675,7 @@ def _(agg_var_rel_per_n, plot_variable_change_parallel):
         ylim=None,
         ylabel="relative RMSE improvement",
     )
+    rmse_var_ax.axhline(0, color="red", linestyle="--", linewidth=1.0, alpha=0.8)
     rmse_var_fig
     return
 

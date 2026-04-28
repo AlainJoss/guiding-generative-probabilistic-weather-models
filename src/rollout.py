@@ -1,6 +1,7 @@
 from pathlib import Path
 import random
 
+import torch
 from tensordict.tensordict import TensorDict
 
 from src.utils import (
@@ -13,21 +14,23 @@ from src.interaction import get_mask_from_corners
 from geoarches.dataloaders.era5 import Era5Forecast
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 
-TEST = True
 def rollout(
         guidance_flag: bool,  # either guiding or not the sampling
         rollout_dir: Path, 
-        ds: Era5Forecast, x_start: dict[TensorDict], 
+        ds: Era5Forecast, 
+        x_start: dict[TensorDict], 
         gen_model: GuidedFlow, 
-        mask_corners, init_mask_term,
-        y, lambda_, N,
-        partition, level_idx, var_idx, m: int = 1,
-        seed: int | None = None,
-        test: bool = False
+        mask_corners: list[float], 
+        init_mask_term: float = None,
+        y: list[torch.Tensor] = None, 
+        lambda_: list[torch.Tensor] = None,
+        N: int = None,
+        partition: str = None, 
+        level_idx: int = None, 
+        var_idx: int = None, 
+        m: int = 1,
+        test: bool = False,
     ):
-    """
-    Switch "guidance" ON/OFF using the mask: None=OFF, torch.Tensor=ON.
-    """
     ### init
 
     device = gen_model.device
@@ -73,20 +76,20 @@ def rollout(
             final_mask_terms.append(float(mask_term))
             all_mask_terms.append([float(mt) for mt in mask_terms_n])
 
-        ### save states
+        ### save
         state_denorm = ds.denormalize(state).cpu()
         det_state_denorm = ds.denormalize(det_state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
         det_state_xr = ds.convert_to_xarray(det_state_denorm, current_timestamp)
         if guidance_flag:
-            save_state(rollout_dir, state_xr, n=n, m="guided")
+            save_state(rollout_dir, state_xr, n=n, m=f"guided_{m}")
         else:
-            save_state(rollout_dir, state_xr, n=n, m=m)
+            save_state(rollout_dir, state_xr, n=n, m=f"unguided_{m}")
 
-        save_state(rollout_dir, det_state_xr, n=n, m="deterministic")
+        save_state(rollout_dir, det_state_xr, n=n, m=f"det_{m}")
 
-        # build next conditioning batch 
+        # build next conditioning state 
         if n < N:
             next_timestamp = x_cond["timestamp"] + lead_time_seconds
             x_cond = {
@@ -95,7 +98,7 @@ def rollout(
                 "timestamp": next_timestamp,
                 "lead_time_hours": x_start["lead_time_hours"],
             }
-    
+    ### save
     if guidance_flag:
         dict_ = {
             "final_mask_terms": final_mask_terms,

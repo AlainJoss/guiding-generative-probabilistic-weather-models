@@ -1,17 +1,17 @@
 import marimo
 
-__generated_with = "0.23.2"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Time encoding in ArchesWeather
+    # Time Conversion in ArchesWeather
 
-    In this notebook I showcase that, most probably something is going south with the time encoding in ArchesWeather. This might help explain why the models seems to have no notion of time of the day.
+    In this notebook, I show that something is most likely going wrong with the time conversion in ArchesWeather.
 
-    For instance, when we make a 3 day rollout (4*3=12 steps), the 2m_temperature (at any selected location) will not show the expected daily fluctuation when compared to the ground.
+    Specifically, when passing a weather state carrying a timestamp in seconds since 1970, the generative model fails to convert it correctly to a datetime. As a result, the hour of the day is extracted incorrectly.
     """)
     return
 
@@ -31,7 +31,14 @@ def _():
 def _():
     from geoarches.dataloaders.era5 import Era5Forecast
 
-    return (Era5Forecast,)
+    return
+
+
+@app.cell
+def _():
+    from src.utils import get_dataset
+
+    return (get_dataset,)
 
 
 @app.cell
@@ -47,23 +54,15 @@ def _(datetime, torch):
 
 
 @app.cell
-def _(Era5Forecast):
-    ds = Era5Forecast(
-        path="data/era5_240/full",
-        load_prev=True, 
-        norm_scheme="pangu",
-        domain="test",  
-        lead_time_hours=6,
-    )
+def _(get_dataset):
+    ds = get_dataset()
     return (ds,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### List of all timestamps
-
-    This is extracted from the dataset object containing all tensor_dicts (weather states).
+    First five timestamps in the dataset:
     """)
     return
 
@@ -71,69 +70,36 @@ def _(mo):
 @app.cell
 def _(ds):
     all_timestamps = [ts[2] for ts in ds.timestamps]
-    all_timestamps[0:8]
+    all_timestamps[0:5]
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Example weather state tensor dict.
+    ### Select a weather state
+
+    I now select the weather state from the `ERA5Forecast` object corresponding to the following timestamp:
     """)
     return
 
 
 @app.cell
 def _(ds):
-    ds[0]
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Index slider
-    Slide the index of the state to retrieve. Each state has a timestamp in this form: "timestamp":1577858400.
-    This represent the time has passed from 1970 in seconds, and has to be converted in a timestamps with date and time (year, month, day, hour).
-
-    Spoiler: the conversion is correct in the deterministic model, wrong in the generative one.
-
-    Slide the index of the weather states to retrieve different ones and compare the conversion done by the two models (det vs. gen).
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    slide_x_start = mo.ui.slider(start=0, stop=16, step=1, label="slide start index: ")
-    slide_x_start
-    return (slide_x_start,)
-
-
-@app.cell
-def _(slide_x_start):
-    x_start_index = slide_x_start.value
-    return (x_start_index,)
-
-
-@app.cell
-def _(ds, x_start_index):
-    x_start = ds[x_start_index]
+    x_start = ds[2]
     return (x_start,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### My timestamp extraction
+    second state and corresponding timestamp:
     """)
     return
 
 
 @app.cell
 def _(tensor_timestamp_to_string, x_start):
-    # makes sense, because we also load the previous
-    # in fact, if we set previous to False the timestamp will start at 00:00, nice
     tensor_timestamp_to_string(x_start["timestamp"])
     return
 
@@ -141,36 +107,9 @@ def _(tensor_timestamp_to_string, x_start):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Here I use the datetime module instead of pandas to be sure about the conversion.
+    ### Deterministic Model
 
-    The timestamp is correct. It is shifted by 6h wrt to the list of all timestamps since we also load the previous state. If we set the load_prev = False it correctly aligns with the list of all timestamps.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Time extraction in deterministic model
-    """)
-    return
-
-
-@app.cell
-def _(pd, torch, x_start):
-    # before embedding time in ForecastModuleWithCond
-    times_det = pd.to_datetime(x_start["timestamp"].cpu().numpy(), unit="s").tz_localize(None)
-
-    times_det, torch.tensor(times_det.month), torch.tensor(times_det.hour)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Correct.
-
-    Convertion used:
+    To make a prediction, we pass the weather state to the deterministic model. The model converts the timestamp as follows:
     ```python
     time = pd.to_datetime(x_start["timestamp"].cpu().numpy(), unit="s").tz_localize(None)
 
@@ -180,10 +119,34 @@ def _(mo):
     return
 
 
+@app.cell
+def _(pd, torch, x_start):
+    # before embedding time in ForecastModuleWithCond
+    times_det = pd.to_datetime(x_start["timestamp"].cpu().numpy(), unit="s").tz_localize(None)
+
+    (f"timestamp: {times_det}, month: {torch.tensor(times_det.month)}, hour: {torch.tensor(times_det.hour)}")
+    return
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Time extraction in generative model
+    The conversion works as expected.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Generative Model
+
+    We pass the same state to the generative model, which converts the timestamp as follows:
+    ```python
+    time = pd.to_datetime(x_start["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
+
+    print(time, torch.tensor(times_det.month), torch.tensor(times_det.hour))
+    ```
     """)
     return
 
@@ -192,42 +155,17 @@ def _(mo):
 def _(pd, torch, x_start):
     # in the sampling procedure before embedding time
     times = pd.to_datetime(x_start["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-    # should be rounded up, but the model will learn the right thing
-    times, torch.tensor(times.month), torch.tensor(times.hour)
+    (f"timestamp: {times}, month: {torch.tensor(times.month)}, hour: {torch.tensor(times.hour)}")
     return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Incorrect.
+    The conversion is incorrect.
 
-    Convertion used:
-    ```python
-    time = pd.to_datetime(x_start["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-
-    print(time, torch.tensor(times_det.month), torch.tensor(times_det.hour))
-    ```
-
-    The time extraction in the generative model goes south because multiplying the seconds by 10^9 doesn't achieve the correct result, which in turn is achieved when using unit="s". This conversion has probably not been tested before including it in the codebase.
+    As a consequence, the generative model cannot properly use the hour of the day as conditioning information. The same issue also affects the month, except for timestamps in January.
     """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Consequences
-
-    Since this also affects the training of the diffusion model, I assume that the model doesn't have any notion of time, because it only sees 1 and 23 ... .
-
-    Furthermore, I previously tested the RMSE of the deterministic model compared to the one of the generative one, which was comparatively (significantly) worse. This might explain why that is. Not having a (correct) notion of time of the day predictably really harmful for modeling weather correctly.
-    """)
-    return
-
-
-@app.cell
-def _():
     return
 
 

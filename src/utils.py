@@ -1,7 +1,7 @@
 import json
 
 from pathlib import Path 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import xarray as xr
 import torch
@@ -9,16 +9,18 @@ import torch
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
-from src.paths import ERA5, MODELSTORE, ROLLOUTS
+from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS
 
 
 def get_device():
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        device = torch.device("cuda")
     elif torch.backends.mps.is_available():
-        return torch.device("mps")
+        device = torch.device("mps")
     else:
-        return torch.device("cpu")
+        device = torch.device("cpu")
+    print(f"running on device: {device}")
+    return device
 
 def save_to_json(dict_: dict, rollout_dir: Path, name:str):
     path = rollout_dir / f"{name}.json"
@@ -52,7 +54,8 @@ def get_dataset():
         domain="all",  # all files under ERA5; year-slicing happens on the time coord
         load_prev=True,  # whether to load previous state
         norm_scheme="pangu",  # default normalization scheme
-        lead_time_hours=24
+        lead_time_hours=24,
+        timedelta_hours=6
     )
 
 def get_model(device):
@@ -63,14 +66,22 @@ def get_model(device):
     )
     return gen_model.to(device)
 
-def get_timestamp():
+def get_now_timestamp():
     date, time = str(datetime.now().replace(microsecond=0)).split(" ")
-    timestamp = date + "_" + time
-    return timestamp
+    return date + "_" + time
+
+def get_new_rollout_dir_path(sub_dir: str):
+    experiment_id = get_now_timestamp()
+    return Path(ROLLOUTS, sub_dir, f"{experiment_id}")
+
+def ensure_new_config_dir_path(sub_dir: str):
+    experiment_id = get_now_timestamp()
+    config_dir = Path(CONFIGS, sub_dir, f"{experiment_id}")
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
 
 def ensure_rollout_dir(sub_dir: Path, N) -> Path:
-    experiment_id = get_timestamp()
-    rollout_dir = Path(ROLLOUTS, sub_dir, f"{experiment_id}")
+    rollout_dir = get_new_rollout_dir_path(sub_dir)
     rollout_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, N+1):
         path = Path(rollout_dir, f"{n}")
@@ -93,9 +104,9 @@ def save_state(rollout_dir: str, array, n: int, m: int):
 def read_state(path: Path):
     return xr.open_dataset(path, engine="netcdf4")
 
-def read_states(rollout_dir: Path, n: int):
-    paths = [p for p in rollout_dir.glob(f"{n}/*.nc") if p.stem.isdigit()]
-    paths.sort(key=lambda p: int(p.stem))
+def read_states(rollout_dir: Path, state_type: str, n: int):
+    paths = list((rollout_dir / f"{n}").glob(f"{state_type}_[0-9]*.nc"))    
+    paths.sort(key=lambda p: int(p.stem.rsplit("_", 1)[-1]))
     return [read_state(p) for p in paths]
 
 def get_slice(state, partition, level, var, timestamp):
@@ -107,8 +118,12 @@ def get_slice(state, partition, level, var, timestamp):
 def xr_to_torch(slice_: xr.DataArray):
     return torch.tensor(slice_.to_numpy())
 
-def tensordict_to_xr(tensordict):
-    return 
-
 def list_tens_to_floats(list_):
     return [tensor.item() for tensor in list_]
+
+def tensor_timestamp_to_string(
+    timestamp: torch.Tensor,
+    fmt: str = "%Y-%m-%d %H:%M:%S",
+) -> str:
+    ts = timestamp.item()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(fmt)

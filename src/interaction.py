@@ -269,6 +269,7 @@ def _place_axes_title(fig, ax, *, title=None, subtitle=None,
 def plot_variable_change_parallel(
     aggregated_per_n: list[dict],
     top_k: int | None = 20,
+    bottom_k: int | None = None,
     rank_by: str = "max",
     figsize: tuple[float, float] = (12, 5),
     dpi: int = 100,
@@ -310,8 +311,16 @@ def plot_variable_change_parallel(
         raise ValueError(f"rank_by must be 'max' or 'mean', got {rank_by!r}")
 
     order = np.argsort(-score)
+    sel = []
     if top_k is not None:
-        order = order[:top_k]
+        sel.extend(order[:top_k].tolist())
+    else:
+        sel.extend(order.tolist())
+    if bottom_k is not None:
+        for j in order[::-1][:bottom_k].tolist():
+            if j not in sel:
+                sel.append(j)
+    order = np.array(sel, dtype=int)
 
     sel_keys = [keys[j] for j in order]
     sel_means = means[:, order]
@@ -359,7 +368,11 @@ def plot_variable_change_parallel(
         frameon=False,
         fontsize=8,
         ncol=ncol,
-        title=f"top {K_sel} by {rank_by}",
+        title=(
+            f"top {top_k or '∞'} + bottom {bottom_k or 0} by {rank_by}"
+            if bottom_k
+            else f"top {K_sel} by {rank_by}"
+        ),
         title_fontsize=9,
     )
 
@@ -834,6 +847,7 @@ def make_interactive_map(
             zorder=10,
         )
         ax.add_patch(rect)
+        fig.subplots_adjust(left=0.04, right=0.96, top=0.93, bottom=0.10)
 
     return mo.ui.anywidget(
         ChartPuck.from_callback(
@@ -841,7 +855,7 @@ def make_interactive_map(
             x=list(rectangle_x),
             y=list(rectangle_y),
             puck_color=["green", "red"],
-            figsize=(12, 5),
+            figsize=(10, 5),
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
         )

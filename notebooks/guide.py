@@ -1,22 +1,13 @@
 import marimo
 
-__generated_with = "0.23.2"
+__generated_with = "0.23.3"
 app = marimo.App(width="medium", css_file="")
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # todos
-    - define masks with physical priors
-    - define masks dynamically in N
-    - experiment with multiple variables (and masks correspondingly)
-    - define weighted average Gaussian Kernel or future difference around region in loss function. Refine latex-notes with new definition of mask.
-    - Try out regularization term z^tK^z or just z^tIz=||z||^2
-    - Guide using the ground truth and see whether the accuracy of other variables improves.
-    - Define an ensemble of $G$ guided models.
-    - as baseline compute some basic facts about ArchesWeatherGen. For instance, how well it does (compared to its deterministic brother)? How does performance degrade as N of rollout increases?
-    - swap rollout_dist_plot with newer version present in analyze.py
+    # Setup
     """)
     return
 
@@ -55,7 +46,7 @@ def _():
     from cartopy.crs import PlateCarree
 
     method_state = {"value": "CubicSpline"}
-    return Path, datetime, mo, np, torch
+    return Path, mo, np, plt, torch
 
 
 @app.cell
@@ -94,7 +85,6 @@ def _():
         plot_dual_trajectory,
         plot_trajectory,
         read_json,
-        read_state,
         read_states,
         rollout,
         save_to_json,
@@ -267,18 +257,9 @@ def _(N, N_schedule, alpha, y_shape):
 def _(ds):
     # align with "state" timestamps
     # slice accounts for load_prev (skip first lead/timedelta raw ticks) and next_state (skip last lead/timedelta raw ticks)
-    _STRIDE = int(ds.lead_time_hours) // int(ds.timedelta)
-    TIMESTAMPS = [str(ts[2]).split(".")[0] for ts in ds.timestamps][
-        _STRIDE:-_STRIDE
-    ]
-    return (TIMESTAMPS,)
-
-
-@app.cell
-def _():
-    # ds[0]
-    # tensor_timestamp_to_string(torch.tensor([1577858400]))
-    return
+    STRIDE = int(ds.lead_time_hours) // int(ds.timedelta)
+    TIMESTAMPS = [str(ts[2]).split(".")[0] for ts in ds.timestamps][STRIDE:-STRIDE]
+    return STRIDE, TIMESTAMPS
 
 
 @app.cell
@@ -290,15 +271,9 @@ def _(unguided_cfg):
 
 
 @app.cell
-def _(N, TIMESTAMPS, timestamp_idx):
-    timestamps = [TIMESTAMPS[timestamp_idx + _STRIDE * k] for k in range(N + 1)]
+def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
+    timestamps = [TIMESTAMPS[timestamp_idx + STRIDE * k] for k in range(N + 1)]
     return (timestamps,)
-
-
-@app.cell
-def _():
-    # unguided_cfg, timestamps, timestamp_idx, TIMESTAMPS
-    return
 
 
 @app.cell
@@ -311,23 +286,6 @@ def _(LEVELS, TIMESTAMPS, VARIABLES, ds, level, timestamp, var):
 
 
 @app.cell
-def _(datetime, torch, x_start):
-    def tensor_timestamp_to_string(timestamp: torch.Tensor, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
-        """
-        Convert a torch tensor containing a Unix timestamp to a formatted string.
-
-        Example:
-            tensor(1577923200) -> "2020-01-02 00:00:00"
-        """
-        ts = timestamp.item()
-        return datetime.fromtimestamp(ts).strftime(fmt)
-
-    # NOTE: it's in UTC time
-    tensor_timestamp_to_string(x_start["timestamp"])
-    return
-
-
-@app.cell
 def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
     mask_corners = get_mask_corners_from_widget(map_widget)
     mask = get_mask_from_corners(*mask_corners)
@@ -336,14 +294,13 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
 
 @app.cell
 def _(ds, level_idx, partition, var_idx, x_start):
-    # don't really like the batch dim ... [0]
     slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
     return (slice,)
 
 
 @app.cell
-def _(get_guidance_trajectory, mean_rollout, y_trajectory):
-    planned_guidance = get_guidance_trajectory(y_trajectory, mean_rollout)
+def _(get_guidance_trajectory, mean_unguided_rollout, y_trajectory):
+    planned_guidance = get_guidance_trajectory(y_trajectory, mean_unguided_rollout)
     return (planned_guidance,)
 
 
@@ -364,7 +321,7 @@ def _(mo):
 @app.cell
 def _(mo):
     SUBFOLDERS = ["old_model", "new_model", "unguided"]
-    subfolder_selector = mo.ui.dropdown(label="Subfolder", value=SUBFOLDERS[0], options=SUBFOLDERS)
+    subfolder_selector = mo.ui.dropdown(label="Subfolder", value=SUBFOLDERS[2], options=SUBFOLDERS)
     return (subfolder_selector,)
 
 
@@ -418,7 +375,7 @@ def _(mo, pick_unguided_rollout_dropdown, subfolder_selector, unguided_cfg):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Ensemble rollout
+    ### Mask terms over rollouts
     """)
     return
 
@@ -426,6 +383,7 @@ def _(mo):
 @app.cell
 def _(
     M,
+    STRIDE,
     TIMESTAMPS,
     avg_over_mask,
     compute_mean_rollout,
@@ -435,7 +393,6 @@ def _(
     level_idx,
     mask,
     partition,
-    read_state,
     read_states,
     slice,
     timestamp_idx,
@@ -446,39 +403,171 @@ def _(
     xr_to_torch,
 ):
     ground_truth = []
-    ensemble_rollout = []
-    gen_det_rollout = []
+    unguided_rollout = []
+    det_rollout = []
 
     init_value = avg_over_mask(slice, mask)
     ground_truth.append(init_value)
-    ensemble_rollout.append([init_value] * M)
-    gen_det_rollout.append(init_value)
+    unguided_rollout.append([init_value] * M)
+    det_rollout.append([init_value] * M)
 
+    # TODO: adapt to new structure
     for n in range(1, unguided_cfg["N"] + 1):
-        timestamp_n = TIMESTAMPS[timestamp_idx + _STRIDE * n]
-        state_n = ds[timestamp_idx + _STRIDE * n]["state"]
-        slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
-        ground_truth.append(avg_over_mask(slice_n, mask))
-        states = read_states(unguided_rollout_dir, n)
-        det_state_n = read_state(
-            unguided_rollout_dir / f"{n}" / "deterministic.nc"
-        )
-        slices = [
+        timestamp_n = TIMESTAMPS[timestamp_idx + STRIDE * n]
+
+        # ground truth
+        gt_state_n = ds[timestamp_idx + STRIDE * n]["state"]
+        gt_slice_n = ds.denormalize(gt_state_n)[partition][var_idx, level_idx]
+        ground_truth.append(avg_over_mask(gt_slice_n, mask))
+
+        # unguided
+        unguided_states = read_states(unguided_rollout_dir, "unguided", n)
+
+        unguided_slices = [
             get_slice(state, partition, level, var, timestamp_n)
-            for state in states
+            for state in unguided_states
         ]
-        slices = [xr_to_torch(slice_) for slice_ in slices]
-        avgs = [avg_over_mask(slice_, mask) for slice_ in slices]
+        unguided_slices = [xr_to_torch(s) for s in unguided_slices]
+        unguided_avgs = [avg_over_mask(s, mask) for s in unguided_slices]
+        unguided_rollout.append(unguided_avgs)
 
-        slice_det = get_slice(det_state_n, partition, level, var, timestamp_n)
-        slice_det = xr_to_torch(slice_det)
-        avg_det = avg_over_mask(slice_det, mask)
-        gen_det_rollout.append(avg_det)
+        # det
+        det_states = read_states(unguided_rollout_dir, "det", n)
+        det_slices = [
+            get_slice(state, partition, level, var, timestamp_n)
+            for state in det_states
+        ]
+        det_slices = [xr_to_torch(s) for s in det_slices]
+        det_avgs = [avg_over_mask(s, mask) for s in det_slices]
+        det_rollout.append(det_avgs)
 
-        ensemble_rollout.append(avgs)
+    # means
+    mean_unguided_rollout = compute_mean_rollout(unguided_rollout)
+    mean_det_rollout = compute_mean_rollout(det_rollout)
+    return det_rollout, ground_truth, mean_unguided_rollout, unguided_rollout
 
-    mean_rollout = compute_mean_rollout(ensemble_rollout)
-    return ensemble_rollout, gen_det_rollout, ground_truth, mean_rollout
+
+@app.cell
+def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
+    def plot_ensemble_rmse(gen_rmse, det_rmse, var):
+        fig, ax = plt.subplots(figsize=(8, 3.5), dpi=110)
+        steps = list(range(len(gen_rmse)))
+        ax.plot(
+            steps,
+            gen_rmse,
+            marker="o",
+            label="generative (M-ensemble)",
+            color="C0",
+        )
+        ax.plot(steps, det_rmse, marker="s", label="deterministic (M)", color="C3")
+        ax.set_xlabel("rollout step n")
+        ax.set_ylabel(f"RMSE  [{var}]")
+        ax.set_title("Ensemble RMSE vs ground truth (avg-over-mask scalar)")
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        return fig
+
+
+    def ensemble_rmse_per_step(ensemble, ground_truth):
+        return [
+            float(np.sqrt(np.mean([(float(m) - float(gt)) ** 2 for m in members])))
+            for members, gt in zip(ensemble, ground_truth)
+        ]
+
+
+    gen_rmse_per_step = ensemble_rmse_per_step(unguided_rollout, ground_truth)
+    det_rmse_per_step = ensemble_rmse_per_step(det_rollout, ground_truth)
+    rmse_plot = plot_ensemble_rmse(gen_rmse_per_step, det_rmse_per_step, var)
+    rmse_plot
+    return
+
+
+@app.cell
+def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
+    def member_rmse_over_steps(ensemble, ground_truth):
+        M = len(ensemble[0])
+        out = []
+        for m in range(M):
+            sq = [
+                (float(step_vals[m]) - float(gt)) ** 2
+                for step_vals, gt in zip(ensemble, ground_truth)
+            ]
+            out.append(float(np.sqrt(np.mean(sq))))
+        return out
+
+
+    def plot_paired_member_rmse(gen_rmse_m, det_rmse_m, var):
+        M = len(gen_rmse_m)
+        x = np.arange(M)
+        width = 0.4
+        fig, ax = plt.subplots(figsize=(max(6, 0.5 * M + 2), 3.5), dpi=110)
+        ax.bar(x - width / 2, gen_rmse_m, width, label="generative", color="C0")
+        ax.bar(x + width / 2, det_rmse_m, width, label="deterministic", color="C3")
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"m{m+1}" for m in range(M)])
+        ax.set_xlabel("ensemble member")
+        ax.set_ylabel(f"temporal RMSE  [{var}]")
+        ax.set_title("Per-member RMSE over N steps (vs ground truth)")
+        ax.grid(True, axis="y", alpha=0.3)
+        ax.legend()
+        fig.tight_layout()
+        return fig
+
+
+    gen_rmse_per_member = member_rmse_over_steps(unguided_rollout, ground_truth)
+    det_rmse_per_member = member_rmse_over_steps(det_rollout, ground_truth)
+    paired_rmse_plot = plot_paired_member_rmse(
+        gen_rmse_per_member, det_rmse_per_member, var
+    )
+    paired_rmse_plot
+    return
+
+
+@app.cell
+def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
+    def relative_error_matrix(unguided, det, ground_truth):
+        """[M, N+1] matrix of |gen - gt| - |det - gt|. Negative = generative closer."""
+        M = len(unguided[0])
+        N1 = len(unguided)
+        mat = np.zeros((M, N1))
+        for n in range(N1):
+            gt_n = float(ground_truth[n])
+            for m in range(M):
+                gen_err = abs(float(unguided[n][m]) - gt_n)
+                det_err = abs(float(det[n][m]) - gt_n)
+                mat[m, n] = gen_err - det_err
+        return mat
+
+
+    def plot_relative_perf_matrix(mat, var):
+        M, N1 = mat.shape
+        vmax = float(np.max(np.abs(mat))) or 1.0
+        fig, ax = plt.subplots(
+            figsize=(max(6, 0.45 * N1 + 2), max(3, 0.35 * M + 1.5)), dpi=110
+        )
+        im = ax.imshow(mat, aspect="auto", cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+        ax.set_xticks(np.arange(N1))
+        ax.set_xticklabels([str(n) for n in range(N1)])
+        ax.set_yticks(np.arange(M))
+        ax.set_yticklabels([f"m{m+1}" for m in range(M)])
+        ax.set_xlabel("rollout step n")
+        ax.set_ylabel("ensemble member m")
+        ax.set_title(
+            f"|gen - gt| - |det - gt|   [{var}]   (blue = gen better, red = det better)"
+        )
+        cbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+        cbar.set_label(f"abs-error diff [{var}]")
+        fig.tight_layout()
+        return fig
+
+
+    rel_perf_matrix = relative_error_matrix(
+        unguided_rollout, det_rollout, ground_truth
+    )
+    rel_perf_plot = plot_relative_perf_matrix(rel_perf_matrix, var)
+    rel_perf_plot
+    return
 
 
 @app.cell(hide_code=True)
@@ -491,7 +580,7 @@ def _(mo):
 
 @app.cell
 def _(
-    mean_rollout,
+    mean_unguided_rollout,
     planned_guidance,
     plot_dual_trajectory,
     timestamps,
@@ -500,7 +589,7 @@ def _(
 ):
     y_trajectory_plot = plot_dual_trajectory(
         timestamps=timestamps,
-        mean_rollout=mean_rollout,
+        mean_rollout=mean_unguided_rollout,
         planned_guidance=planned_guidance,
         y_trajectory=y_trajectory,
         var=var,
@@ -512,21 +601,20 @@ def _(
 
 @app.cell
 def _(
-    ensemble_rollout,
-    gen_det_rollout,
     ground_truth,
-    mean_rollout,
+    mean_unguided_rollout,
     timestamps,
+    unguided_rollout,
     var,
     visualize_mask_terms_over_N,
 ):
     ensemble_rollout_plot = visualize_mask_terms_over_N(
         var,
         timestamps,
-        mean_rollout=mean_rollout,
-        ensemble_rollout=ensemble_rollout,
+        mean_rollout=mean_unguided_rollout,
+        ensemble_rollout=unguided_rollout,
         ground_truth=ground_truth,
-        gen_det_rollout=gen_det_rollout,
+        # gen_det_rollout=det_rollout,
     )
     return (ensemble_rollout_plot,)
 
@@ -594,10 +682,8 @@ def _(ensemble_rollout_plot, mo):
 
 
 @app.cell
-def _(ensemble_rollout, ground_truth, mean_rollout):
-    ground_truth
-    ensemble_rollout
-    mean_rollout, ensemble_rollout, ground_truth
+def _():
+    # mean_rollout, ensemble_rollout, ground_truth
     return
 
 
@@ -719,7 +805,7 @@ def _(mo):
 
 @app.cell
 def _():
-    TEST=True
+    TEST=False
     return (TEST,)
 
 
@@ -732,7 +818,6 @@ def _(
     alpha,
     device,
     ds,
-    ensemble_rollout,
     ensure_rollout_dir,
     ground_truth,
     lambda_,
@@ -740,7 +825,7 @@ def _(
     level_idx,
     list_tens_to_floats,
     mask_corners,
-    mean_rollout,
+    mean_unguided_rollout,
     model,
     partition,
     planned_guidance,
@@ -754,6 +839,7 @@ def _(
     timestamps,
     torch,
     unguided_cfg,
+    unguided_rollout,
     var,
     var_idx,
     w,
@@ -771,7 +857,7 @@ def _(
             x_start=state_to_device(x_start, device),
             gen_model=model,
             mask_corners=mask_corners,
-            init_mask_term=torch.as_tensor(mean_rollout[0]),
+            init_mask_term=torch.as_tensor(mean_unguided_rollout[0]),
             y=torch.as_tensor(y_trajectory),  # needs to happen only here
             lambda_=lambda_,
             N=N,
@@ -798,8 +884,8 @@ def _(
             "timestamps": timestamps,
             "planned_guidance": list_tens_to_floats(planned_guidance),
             "ground_truth": list_tens_to_floats(ground_truth),
-            "ensemble_rollout": [list_tens_to_floats(list_) for list_ in ensemble_rollout],
-            "mean_rollout": list_tens_to_floats(mean_rollout),
+            "ensemble_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
+            "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
             "y_perc": list_tens_to_floats(y_trajectory),
             "lambda_": list_tens_to_floats(lambda_),
             "alpha": alpha,

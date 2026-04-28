@@ -1,27 +1,13 @@
 import marimo
 
-__generated_with = "0.23.2"
+__generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    #### TODO
-    - check start date is actually 00:60, seems odd
-    - need to think about how to set up ablation study
-    - which other plots
-    - implement a logger for experiments and print error to log file instead of this
-    - remember: we are currently using one model only for the deterministic prediction
-    - should also number the deterministic predictions (otherwise they get overwritten)!
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # PHASE 1
+    # PHASE 1 - unguided rollout
 
     The aim of this first phase is to rollout an ensemble of M unguided models,
     producing a trajectory over N model steps.
@@ -29,19 +15,11 @@ def _(mo):
     Proceed as follows:
     - Define parameters:
         - N: number of rollout steps (6h freq)
-        - M: number of ensemble-members
+        - M: number of non-guided ensemble-members
         - timestamp: start datetime of the experiment
         - mask: region and variable of interest
     - Wait for the experiment to end (~3min for each sampling procedure).
     - Start the guide.py notebook and define the guidance experiment there.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Setup
     """)
     return
 
@@ -52,21 +30,23 @@ def _():
     from pathlib import Path
     import torch
     import numpy as np
+    from datetime import datetime
 
     return (mo,)
 
 
 @app.cell
 def _():
-    from src.paths import ROLLOUTS
+    from src.paths import ROLLOUTS, CONFIGS
 
-    return
+    return (CONFIGS,)
 
 
 @app.cell
 def _():
     from src.utils import (
-        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device, get_device, get_slice
+        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device, get_device, get_slice,
+        tensor_timestamp_to_string, get_now_timestamp
     )
 
     return (
@@ -74,6 +54,7 @@ def _():
         get_dataset,
         get_device,
         get_model,
+        get_now_timestamp,
         save_to_json,
         state_to_device,
     )
@@ -131,22 +112,53 @@ def _(device, get_dataset, get_model):
 
 
 @app.cell
-def _(ds, mo):
-    # remove first and last, since we have two tensordicts less (because of prev and next)
-    TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]
-    timestamp_dropdown = mo.ui.dropdown(TIMESTAMPS, value=TIMESTAMPS[0], label="start state : ")
-    return TIMESTAMPS, timestamp_dropdown
+def _(ds):
+    STRIDE = int(ds.lead_time_hours) // int(ds.timedelta)
+    return (STRIDE,)
+
+
+@app.cell
+def _(STRIDE, ds, mo):
+    # remove first and last (we have two tensordicts less due to prev/next)
+    TIMESTAMPS = [str(ts[2]).split(".")[0] for ts in ds.timestamps][STRIDE:-STRIDE]
+    month_slider = mo.ui.slider(
+        start=1, stop=12, step=1, value=1, label="month: ", show_value=True, debounce=True
+    )
+    hour_slider = mo.ui.slider(
+        start=0, stop=18, step=6, value=0, label="hour: ", show_value=True, debounce=True
+    )
+    get_day, set_day = mo.state(2)
+    return TIMESTAMPS, get_day, hour_slider, month_slider, set_day
+
+
+@app.cell(hide_code=True)
+def _(get_day, mo, month_slider, set_day):
+    import calendar
+
+    _max_day = calendar.monthrange(2020, month_slider.value)[1]
+    _cur = min(get_day(), _max_day)
+    day_slider = mo.ui.slider(
+        start=1,
+        stop=_max_day,
+        step=1,
+        value=_cur,
+        label="day: ",
+        show_value=True,
+        on_change=set_day,
+        debounce=True
+    )
+    return (day_slider,)
 
 
 @app.cell
 def _(mo):
-    N_slider = mo.ui.slider(1, 20, value=1, label="N: ")
+    N_slider = mo.ui.slider(1, 30, value=1, label="N: ", show_value=True, debounce=True)
     return (N_slider,)
 
 
 @app.cell
 def _(mo):
-    M_slider = mo.ui.slider(1, 20, value=1, label="M: ")
+    M_slider = mo.ui.slider(1, 20, value=1, label="M: ", show_value=True, debounce=True)
     return (M_slider,)
 
 
@@ -165,7 +177,7 @@ def _(partition_dropdown):
 @app.cell
 def _(LEVELS_DICT, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level: ")
+    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level: ", show_value=True, debounce=True)
     return LEVELS, level_slider
 
 
@@ -200,12 +212,28 @@ def _(LEVELS, VARIABLES, level, var):
 
 
 @app.cell
-def _(M_slider, N_slider, TIMESTAMPS, timestamp_dropdown):
-    timestamp = timestamp_dropdown.value
+def _(
+    M_slider,
+    N_slider,
+    STRIDE,
+    TIMESTAMPS,
+    day_slider,
+    hour_slider,
+    month_slider,
+):
+    # build timestamp from sliders; fall back to closest preceding TIMESTAMP if invalid (e.g. day=31 in Feb)
+    _target = f"2020-{month_slider.value:02d}-{day_slider.value:02d}T{hour_slider.value:02d}:00:00"
+    if _target in TIMESTAMPS:
+        timestamp = _target
+    else:
+        _candidates = [t for t in TIMESTAMPS if t <= _target]
+        timestamp = _candidates[-1] if _candidates else TIMESTAMPS[0]
     M = M_slider.value
-    N = N_slider.value * 4
+    N = N_slider.value
     timestamp_idx = TIMESTAMPS.index(timestamp)
-    timestamps = TIMESTAMPS[timestamp_idx:timestamp_idx+N+1] 
+    timestamps = TIMESTAMPS[
+        timestamp_idx : timestamp_idx + STRIDE * N + 1 : STRIDE
+    ]
     return M, N, timestamp, timestamp_idx, timestamps
 
 
@@ -239,6 +267,7 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
 @app.cell
 def _(
     N,
+    STRIDE,
     avg_over_mask,
     ds,
     level_idx,
@@ -248,8 +277,8 @@ def _(
     var_idx,
 ):
     ground_truth = []
-    for n in range(N+1):
-        state_n = ds[timestamp_idx+n]["state"]
+    for n in range(N + 1):
+        state_n = ds[timestamp_idx + STRIDE * n]["state"]
         slice_n = ds.denormalize(state_n)[partition][var_idx, level_idx]
         avg = avg_over_mask(slice_n, mask)
         ground_truth.append(avg)
@@ -275,32 +304,50 @@ def _(test_flag_checkbox):
 
 
 @app.cell
+def _():
+    # tensor_timestamp_to_string(x_start["timestamp"])
+    return
+
+
+@app.cell
 def _(
     M_slider,
-    N,
     N_slider,
+    day_slider,
+    hour_slider,
     level_slider,
     map_widget,
     mo,
+    month_slider,
     partition_dropdown,
     rollout_dist_plot,
     test_flag_checkbox,
-    timestamp_dropdown,
+    timestamp,
     var_dropdown,
 ):
-    mo.vstack([
-        test_flag_checkbox,
-        timestamp_dropdown,
-        mo.hstack([N_slider, mo.md(f"days ({N} steps)")], justify="start"),
-        mo.hstack([M_slider, mo.md(f"ensemble members")], justify="start"),
-        mo.hstack([
-            partition_dropdown,
-            var_dropdown,
-            level_slider,
-        ], justify="start"),
-        rollout_dist_plot,
-        map_widget
-    ])
+    mo.vstack(
+        [
+            test_flag_checkbox,
+            mo.hstack(
+                [month_slider, day_slider, hour_slider, mo.md(f"→ {timestamp}")],
+                justify="start",
+            ),
+            mo.hstack(
+                [N_slider, mo.md("→ 24h model steps")], justify="start"
+            ),
+            mo.hstack([M_slider, mo.md("→ ensemble members")], justify="start"),
+            mo.hstack(
+                [
+                    partition_dropdown,
+                    var_dropdown,
+                    level_slider,
+                ],
+                justify="start",
+            ),
+            rollout_dist_plot,
+            map_widget,
+        ]
+    )
     return
 
 
@@ -308,36 +355,16 @@ def _(
 def _(mo):
     mo.md(r"""
     ## Run experiment
+    Either rollout or save config for later run.
     """)
     return
 
 
 @app.cell
 def _(mo):
-    get_status, set_status = mo.state("IDLE")
-    return get_status, set_status
-
-
-@app.cell
-def _(run_button, set_status):
-    set_status("IDLE")
-    if run_button.value:
-        set_status("RUNNING")
-    return
-
-
-@app.cell
-def _(mo):
-    run_button = mo.ui.run_button(label="Run")
+    run_button = mo.ui.run_button(label="Rollout")
     run_button
     return (run_button,)
-
-
-@app.cell
-def _(get_status, mo):
-    status = get_status()
-    mo.md(f"Experiment status: **{status}**")
-    return (status,)
 
 
 @app.cell
@@ -356,36 +383,34 @@ def _(
     run_button,
     save_to_json,
     state_to_device,
-    status,
     timestamp,
     var,
     x_start,
 ):
-    if run_button.value and status == "RUNNING":
-        # try:
+    def run_rollout():
         rollout_dir = ensure_rollout_dir("unguided", N)
-        for m in range(1, M+1):
+        for m in range(1, M + 1):
             print(f"m: {m}/{M}")
             rollout(
                 guidance_flag=False,
                 rollout_dir=rollout_dir,
-                ds=ds, 
+                ds=ds,
                 x_start=state_to_device(x_start, device),
                 gen_model=model,
                 init_mask_term=None,
-                mask_corners=None, # mask_corners
-                y=None, # y
-                lambda_=None, # lambda_
+                mask_corners=None,  # mask_corners
+                y=None,  # y
+                lambda_=None,  # lambda_
                 N=N,
-                partition=None, # partition
-                level_idx=None, # level_idx
-                var_idx=None, # var_idx
+                partition=None,  # partition
+                level_idx=None,  # level_idx
+                var_idx=None,  # var_idx
                 m=m,
                 seed=None,
-                test=TEST
+                test=TEST,
             )
 
-        config = {
+        rollout_config = {
             "rollout_dir": str(rollout_dir),
             "M": M,
             "N": N,
@@ -393,21 +418,15 @@ def _(
             "level": level,
             "partition": partition,
             "var": var,
-            "mask_corners": mask_corners
-        } 
+            "mask_corners": mask_corners,
+        }
 
-        save_to_json(config, rollout_dir, "config")
-        #     set_status("IDLE")
-
-        # except Exception as e:
-        #     rollout_dir.unlink()
-        #     print(f"Error: {type(e).__name__}: {e}")
-        #     raise
+        save_to_json(rollout_config, rollout_dir, "config")
 
 
-        # finally:
-        #     set_status("IDLE")
-    return (rollout_dir,)
+    if run_button.value:
+        run_rollout()
+    return
 
 
 @app.cell
@@ -419,35 +438,42 @@ def _(mo):
 
 @app.cell
 def _(
+    CONFIGS,
     M,
     N,
     config_button,
+    get_now_timestamp,
     level,
+    level_idx,
     mask_corners,
     partition,
-    rollout_dir,
     save_to_json,
     timestamp,
+    timestamp_idx,
     var,
+    var_idx,
 ):
     if config_button.value:
-        _config = {
-            "rollout_dir": str(rollout_dir),
+        config_id = get_now_timestamp()
+        config_dir = CONFIGS / "unguided"
+        experiment_config = {
+            "guidance_flag": False,
             "M": M,
             "N": N,
             "timestamp": str(timestamp),
+            "timestamp_idx": timestamp_idx,
             "level": level,
+            "level_idx": level_idx,
             "partition": partition,
             "var": var,
-            "mask_corners": mask_corners
-        } 
+            "var_idx": var_idx,
+            "mask_corners": mask_corners,
+            "init_mask_term": None,
+            "y": None,
+            "lambda_": None
+        }
 
-        save_to_json(_config, rollout_dir, "config")
-    return
-
-
-@app.cell
-def _():
+        save_to_json(experiment_config, config_dir, f"{config_id}")
     return
 
 

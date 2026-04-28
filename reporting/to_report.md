@@ -1,5 +1,3 @@
-
-
 Done
 - write data analyzer for playing around with N and mask before generating the rollout for the M distribution and start the guidance experiment.
 - generate ensemble rollout as base trajectory

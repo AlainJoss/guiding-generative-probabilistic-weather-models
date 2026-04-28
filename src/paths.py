@@ -1,6 +1,10 @@
 from pathlib import Path
 
-DATA = Path(__file__).parent.parent.resolve() / "data"
+ROOT = Path(__file__).parent.parent.resolve()
+
+CONFIGS = ROOT / "configs"
+
+DATA = ROOT / "data"
 # print(DATA)
 MODELSTORE = DATA / "modelstore"
 ROLLOUTS = DATA / "rollouts"

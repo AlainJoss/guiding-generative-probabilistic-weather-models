@@ -34,15 +34,23 @@ def N_schedule(
     if N < 1:
         raise ValueError("N must be >= 1")
 
+    zero = torch.tensor(0.0, dtype=torch.float32)
+
+    if N == 1:
+        return [
+            zero,
+            torch.tensor(alpha + peak, dtype=torch.float32),
+        ]
+
     values = [
         torch.tensor(
-            alpha + peak * (math.sin(math.pi * n / (N)) ** flatness),
+            alpha + peak * (math.sin(math.pi * n / N) ** flatness),
             dtype=torch.float32,
         )
         for n in range(1, N)
     ]
 
-    return [torch.tensor(0.0, dtype=torch.float32)] + values + [torch.tensor(0.0, dtype=torch.float32)]
+    return [zero] + values + [zero]
 
 def T_schedule(T: int, flatness: float, peak: float): 
     if T == 1: 
