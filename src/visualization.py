@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 
+plt.rcParams["font.family"] = "Menlo"
+
 
 def _to_float_list(xs):
     if xs is None:
@@ -17,6 +19,7 @@ def visualize_mask_terms_over_N(
     gen_det_rollout: list[float] | None = None,
     title: str | None = None,
     subtitle: str | None = None,
+    dpi: int = 100
 ):
     if (
         ensemble_rollout is None
@@ -43,7 +46,7 @@ def visualize_mask_terms_over_N(
         "det": "#d62728",
     }
 
-    fig, ax = plt.subplots(figsize=(10, 5), dpi=160)
+    fig, ax = plt.subplots(figsize=(12, 5), dpi=dpi)
 
     if ensemble_rollout is not None:
         rows = [[float(v) for v in row] for row in ensemble_rollout]
@@ -145,5 +148,5 @@ def visualize_mask_terms_over_N(
             ha="center", va="top", fontsize=9, color="#555",
         )
 
-    fig.tight_layout(rect=(0.0, 0.0, 0.82, 0.93))
+    # fig.tight_layout(rect=(0.0, 0.0, 0.82, 0.93))
     return fig

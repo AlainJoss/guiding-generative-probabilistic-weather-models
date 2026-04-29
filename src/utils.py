@@ -59,7 +59,6 @@ def get_dataset():
     )
 
 def get_model(device):
-    print(MODELSTORE)
     gen_model, _ = load_module(  # _ := gen_config
         MODELSTORE / "archesweathergen",
         module_target="geoarches.lightning_modules.guided_diffusion.GuidedFlow",
@@ -70,18 +69,16 @@ def get_now_timestamp():
     date, time = str(datetime.now().replace(microsecond=0)).split(" ")
     return date + "_" + time
 
-def get_new_rollout_dir_path(sub_dir: str):
-    experiment_id = get_now_timestamp()
-    return Path(ROLLOUTS, sub_dir, f"{experiment_id}")
-
 def ensure_new_config_dir_path(sub_dir: str):
     experiment_id = get_now_timestamp()
     config_dir = Path(CONFIGS, sub_dir, f"{experiment_id}")
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
-def ensure_rollout_dir(sub_dir: Path, N) -> Path:
-    rollout_dir = get_new_rollout_dir_path(sub_dir)
+def ensure_rollout_dir(sub_dir: Path, N, experiment_id: str = None) -> Path:
+    if experiment_id is None:
+        experiment_id = get_now_timestamp()
+    rollout_dir = Path(ROLLOUTS, sub_dir, f"{experiment_id}")
     rollout_dir.mkdir(parents=True, exist_ok=True)
     for n in range(1, N+1):
         path = Path(rollout_dir, f"{n}")

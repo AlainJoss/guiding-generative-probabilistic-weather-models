@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full")
+app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
@@ -85,7 +85,7 @@ def _():
 def _():
     from src.visualization import visualize_mask_terms_over_N
 
-    return (visualize_mask_terms_over_N,)
+    return
 
 
 @app.cell
@@ -95,7 +95,12 @@ def _():
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
 
-    return get_mask_corners_from_widget, get_mask_from_corners, visualize_map
+    return (
+        get_mask_corners_from_widget,
+        get_mask_from_corners,
+        plot_dual_trajectory,
+        visualize_map,
+    )
 
 
 @app.cell
@@ -286,8 +291,10 @@ def _(
 
 
 @app.cell
-def _(ground_truth, timestamps, var, visualize_mask_terms_over_N):
-    rollout_dist_plot = visualize_mask_terms_over_N(var, timestamps, ground_truth=ground_truth)
+def _(ground_truth, plot_dual_trajectory, timestamps, var):
+    rollout_dist_plot = plot_dual_trajectory(
+        timestamps, var, ground_truth=ground_truth, right_axis=False
+    )
     return (rollout_dist_plot,)
 
 
@@ -295,12 +302,6 @@ def _(ground_truth, timestamps, var, visualize_mask_terms_over_N):
 def _(mo):
     test_flag_checkbox = mo.ui.checkbox(value=False, label="test")
     return (test_flag_checkbox,)
-
-
-@app.cell
-def _(test_flag_checkbox):
-    TEST=test_flag_checkbox.value
-    return (TEST,)
 
 
 @app.cell
@@ -321,13 +322,11 @@ def _(
     month_slider,
     partition_dropdown,
     rollout_dist_plot,
-    test_flag_checkbox,
     timestamp,
     var_dropdown,
 ):
     mo.vstack(
         [
-            test_flag_checkbox,
             mo.hstack(
                 [month_slider, day_slider, hour_slider, mo.md(f"→ {timestamp}")],
                 justify="start",
@@ -361,9 +360,12 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
+def _(mo, test_flag_checkbox):
     run_button = mo.ui.run_button(label="Rollout")
-    run_button
+    mo.vstack([
+        test_flag_checkbox,
+        run_button
+    ])
     return (run_button,)
 
 
@@ -371,24 +373,61 @@ def _(mo):
 def _(
     M,
     N,
-    TEST,
+    level,
+    level_idx,
+    mask_corners,
+    partition,
+    timestamp,
+    timestamp_idx,
+    var,
+    var_idx,
+):
+    rollout_config = {
+        "guidance_flag": False,
+        "M": M,
+        "N": N,
+        "timestamp": str(timestamp),
+        "timestamp_idx": timestamp_idx,
+        "level": level,
+        "level_idx": level_idx,
+        "partition": partition,
+        "var": var,
+        "var_idx": var_idx,
+        "mask_corners": mask_corners,
+        "init_mask_term": None,
+        "y": None,
+        "lambda_": None
+    }
+    return (rollout_config,)
+
+
+@app.cell
+def _():
+    # TODO: implement smart trick with kwargs (or args?)
+    return
+
+
+@app.cell
+def _(
+    M,
+    N,
     device,
     ds,
     ensure_rollout_dir,
-    level,
-    mask_corners,
+    get_now_timestamp,
     model,
-    partition,
     rollout,
+    rollout_config,
     run_button,
     save_to_json,
     state_to_device,
-    timestamp,
-    var,
+    test_flag_checkbox,
     x_start,
 ):
     def run_rollout():
-        rollout_dir = ensure_rollout_dir("unguided", N)
+        rollout_id = get_now_timestamp()
+        rollout_dir = ensure_rollout_dir("unguided", N, rollout_id)
+        rollout_config["rollout_id"]=rollout_id
         for m in range(1, M + 1):
             print(f"m: {m}/{M}")
             rollout(
@@ -406,20 +445,8 @@ def _(
                 level_idx=None,  # level_idx
                 var_idx=None,  # var_idx
                 m=m,
-                seed=None,
-                test=TEST,
+                test=test_flag_checkbox.value,
             )
-
-        rollout_config = {
-            "rollout_dir": str(rollout_dir),
-            "M": M,
-            "N": N,
-            "timestamp": str(timestamp),
-            "level": level,
-            "partition": partition,
-            "var": var,
-            "mask_corners": mask_corners,
-        }
 
         save_to_json(rollout_config, rollout_dir, "config")
 
@@ -437,43 +464,12 @@ def _(mo):
 
 
 @app.cell
-def _(
-    CONFIGS,
-    M,
-    N,
-    config_button,
-    get_now_timestamp,
-    level,
-    level_idx,
-    mask_corners,
-    partition,
-    save_to_json,
-    timestamp,
-    timestamp_idx,
-    var,
-    var_idx,
-):
+def _(CONFIGS, config_button, get_now_timestamp, rollout_config, save_to_json):
     if config_button.value:
         config_id = get_now_timestamp()
         config_dir = CONFIGS / "unguided"
-        experiment_config = {
-            "guidance_flag": False,
-            "M": M,
-            "N": N,
-            "timestamp": str(timestamp),
-            "timestamp_idx": timestamp_idx,
-            "level": level,
-            "level_idx": level_idx,
-            "partition": partition,
-            "var": var,
-            "var_idx": var_idx,
-            "mask_corners": mask_corners,
-            "init_mask_term": None,
-            "y": None,
-            "lambda_": None
-        }
-
-        save_to_json(experiment_config, config_dir, f"{config_id}")
+        # no need to add the config_id to the config
+        save_to_json(rollout_config, config_dir, f"{config_id}")
     return
 
 

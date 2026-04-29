@@ -10,6 +10,8 @@ import geopandas as gpd
 import geodatasets
 from wigglystuff import ChartPuck
 
+plt.rcParams["font.family"] = "Menlo"
+
 
 def get_mask_corners_from_widget(map_widget):
     x0, x1 = map_widget.value["x"]
@@ -38,41 +40,79 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
 
 def plot_dual_trajectory(
     timestamps: list[str],
-    mean_rollout: list[float],
-    planned_guidance: list[float],
-    y_trajectory: list[float],
     var: str,
+    mean_rollout: list[float] | None = None,
+    planned_guidance: list[float] | None = None,
+    ground_truth: list[float] | None = None,
+    y_trajectory: list[float] | None = None,
+    ensemble_rollout: list[list[float]] | None = None,
     ymin_left: float | None = None,
     ymax_left: float | None = None,
+    right_axis: bool = True,
+    dpi: int = 100,
 ):
-    mr = np.asarray(mean_rollout, dtype=float)
-    pg = np.asarray(planned_guidance, dtype=float)
-    y = np.asarray(y_trajectory, dtype=float)
-
-    x = np.arange(len(timestamps))
-
-    fig, ax1 = plt.subplots(figsize=(12, 5), dpi=100)
-
-    ax1.plot(x, mr, "-", linewidth=2, label="Mean rollout")
-    ax1.plot(x, mr, "o", markersize=5)
-    ax1.plot(x, pg, "-", linewidth=2, label="Planned guidance")
-    ax1.plot(x, pg, "s", markersize=4)
-
-    ax1.set_xlim((-0.5, 0.5) if len(mr) == 1 else (0, len(mr) - 1))
-
-    xtick_positions = {0, len(timestamps) - 1}
-    xtick_positions.update(
-        i for i, ts in enumerate(timestamps) if str(ts).endswith("00:00:00")
+    mr = [float(v) for v in mean_rollout] if mean_rollout is not None else None
+    pg = [float(v) for v in planned_guidance] if planned_guidance is not None else None
+    gt = [float(v) for v in ground_truth] if ground_truth is not None else None
+    y = (
+        np.asarray([float(v) * 100.0 for v in y_trajectory], dtype=float)
+        if y_trajectory is not None
+        else None
     )
-    xtick_positions = sorted(xtick_positions)
-    xtick_labels = [timestamps[i] for i in xtick_positions]
 
-    ax1.set_xticks(xtick_positions)
-    ax1.set_xticklabels(xtick_labels, rotation=45, ha="right")
-    ax1.set_xlabel("Timestamp")
-    ax1.set_ylabel(var)
-    ax1.set_title("Trajectory")
-    ax1.grid(True, alpha=0.3)
+    N = len(timestamps)
+    x = list(range(N))
+
+    C = {
+        "gt": "#2ca02c",
+        "mean": "#9467bd",
+        "ensemble": "#7f7f7f",
+        "offline": "#ff7f0e",
+        "y": "#9c27b0",
+    }
+
+    fig, ax1 = plt.subplots(figsize=(12, 5), dpi=dpi)
+
+    if ensemble_rollout is not None:
+        rows = [[float(v) for v in row] for row in ensemble_rollout]
+        M = min(len(row) for row in rows)
+        trimmed = [row[:M] for row in rows]
+        for i in range(M):
+            yi = [trimmed[n][i] for n in range(N)]
+            ax1.plot(x, yi, "-", color=C["ensemble"], linewidth=0.6, alpha=0.35, zorder=1)
+        lower = [min(row) for row in trimmed]
+        upper = [max(row) for row in trimmed]
+        ax1.fill_between(
+            x, lower, upper,
+            color=C["ensemble"], alpha=0.12,
+            label=f"Ensemble (M={M})", zorder=1,
+        )
+
+    if pg is not None:
+        ax1.plot(x, pg, "-", linewidth=1.6, color=C["offline"], alpha=0.9,
+                 label="Planned guidance", zorder=3)
+    if mr is not None:
+        ax1.plot(x, mr, "-", linewidth=1.6, color=C["mean"], alpha=0.9,
+                 label="Mean rollout", zorder=3)
+    if gt is not None:
+        ax1.plot(x, gt, "-", linewidth=1.8, color=C["gt"], alpha=0.95,
+                 label="Ground truth", zorder=4)
+
+    tick_idx = [i for i, ts in enumerate(timestamps) if str(ts).endswith("00:00:00")]
+    if 0 not in tick_idx:
+        tick_idx = [0] + tick_idx
+    if N - 1 not in tick_idx:
+        tick_idx.append(N - 1)
+    ax1.set_xticks(tick_idx)
+    ax1.set_xticklabels(
+        [timestamps[i] for i in tick_idx], rotation=35, ha="right", fontsize=6
+    )
+    ax1.set_xlabel("Timestamp", fontsize=10)
+    ax1.set_ylabel(var, fontsize=10)
+    ax1.grid(True, alpha=0.25, linestyle=":")
+    for spine in ("top",):
+        ax1.spines[spine].set_visible(False)
+    ax1.tick_params(axis="both", labelsize=9)
 
     cur_ymin, cur_ymax = ax1.get_ylim()
     left_min = ymin_left if ymin_left is not None else cur_ymin
@@ -82,28 +122,40 @@ def plot_dual_trajectory(
         left_max += 1
     ax1.set_ylim(left_min, left_max)
 
-    ax2 = ax1.twinx()
-    ax2.plot(x, y, "-", linewidth=2, color="#9c27b0", label="Percentage change")
-    ax2.plot(x, y, "^", markersize=4, color="#9c27b0")
-    ax2.axhline(0, color="gray", linewidth=0.5)
-    ax2.set_ylabel("Percentage change")
+    if right_axis and y is not None:
+        ax2 = ax1.twinx()
+        ax2.plot(x, y, "-", linewidth=1.4, color=C["y"], alpha=0.4,
+                 label="Percentage change", zorder=2)
+        ax2.axhline(0, color="gray", linewidth=0.5)
+        ax2.set_ylabel("Percentage change (%)", fontsize=10)
+        ax2.spines["top"].set_visible(False)
+        ax2.tick_params(axis="both", labelsize=9)
 
-    l0, l1 = left_min, left_max
-    y0, y1 = np.nanmin(y), np.nanmax(y)
-    if y0 == y1:
-        y0 -= 1
-        y1 += 1
+        l0, l1 = left_min, left_max
+        y0, y1 = float(np.nanmin(y)), float(np.nanmax(y))
+        if y0 == y1:
+            y0 -= 1
+            y1 += 1
 
-    def map_left_to_right(v):
-        return y0 + (v - l0) * (y1 - y0) / (l1 - l0)
+        def map_left_to_right(v):
+            return y0 + (v - l0) * (y1 - y0) / (l1 - l0)
 
-    ax2.set_ylim(map_left_to_right(l0), map_left_to_right(l1))
+        ax2.set_ylim(map_left_to_right(l0), map_left_to_right(l1))
 
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(
+            lines1 + lines2, labels1 + labels2,
+            loc="best", frameon=True, framealpha=0.85,
+            edgecolor="none", fontsize=9,
+        )
+    else:
+        ax1.legend(
+            loc="best", frameon=True, framealpha=0.85,
+            edgecolor="none", fontsize=9,
+        )
 
-    fig.tight_layout()
+    fig.suptitle(f"Trajectory {var}", fontsize=13, fontweight="bold")
     return fig
 
 
@@ -168,7 +220,7 @@ def plot_trajectories_over_n(
     if subtitle:
         fig.text(0.5, 0.975, subtitle, ha="center", va="top", fontsize=9, color="#555")
 
-    fig.tight_layout(rect=(0.03, 0.0, 1.0, 0.96 if (title or subtitle) else 1.0))
+    # fig.tight_layout()
     return fig, axes
 
 
@@ -236,7 +288,7 @@ def plot_rmse_over_n(
             linewidth=1.8, zorder=4,
         )
 
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.93 if (title or subtitle) else 1.0))
+    # fig.tight_layout()
     _place_axes_title(fig, ax, title=title, subtitle=subtitle)
     return fig, ax
 
@@ -377,7 +429,7 @@ def plot_variable_change_parallel(
     )
 
     right = 0.78 if ncol == 1 else 0.70
-    fig.tight_layout(rect=(0.0, 0.0, right, 0.93 if (title or subtitle) else 1.0))
+    # fig.tight_layout()
     _place_axes_title(fig, ax, title=title, subtitle=subtitle)
     return fig, ax
 
@@ -387,25 +439,31 @@ def plot_trajectory(
     var: str,
     ymin: float | None = None,
     ymax: float | None = None,
-    title: str | None = "Trajectory"
+    title: str | None = "Trajectory",
+    dpi: int = 100
 ):
+    plt.rcParams["font.family"] = "Menlo"
     x = np.arange(len(trajectory))
-    fig, ax = plt.subplots(figsize=(12, 5), dpi=100)
-    ax.plot(x, trajectory, "b-", linewidth=2)
-    ax.plot(x, trajectory, "o", color="#9c27b0", markersize=5)
-    ax.set_xlim(0, len(trajectory) - 1)
+    fig, ax = plt.subplots(figsize=(12, 5), dpi=dpi)
+    ax.plot(x, trajectory, "-", linewidth=1.6, color="#9467bd", alpha=0.9)
+    ax.plot(x, trajectory, "o", color="#9c27b0", markersize=4, zorder=3)
+    ax.set_xlim(0, max(len(trajectory) - 1, 1))
     ax.set_xticks(np.arange(len(trajectory)))
-    ax.set_xlabel("step")
-    ax.set_ylabel(f"{var}")
-    ax.set_title(title)
-    ax.grid(True, alpha=0.3)
+    ax.set_xlabel("$t$", fontsize=10)
+    ax.set_ylabel(f"{var}", fontsize=10, labelpad=15)
+    ax.grid(True, alpha=0.25, linestyle=":")
     ax.axhline(0, color="gray", linewidth=0.5)
+    ax.spines["top"].set_visible(False)
+    ax.tick_params(axis="both", labelsize=9)
 
     current_ymin, current_ymax = ax.get_ylim()
     final_ymin = ymin if ymin is not None else current_ymin
     final_ymax = ymax if ymax is not None else current_ymax
     ax.set_ylim(final_ymin, final_ymax)
 
+    if title:
+        fig.suptitle(title, fontsize=13, y=0.995)
+    # fig.tight_layout()
     return fig
 
 
@@ -667,6 +725,9 @@ def draw_base_map(
         norm=norm,
         shading="flat",
     )
+    ax.set_xlim(float(lon_e_plot[0]), float(lon_e_plot[-1]))
+    ax.set_ylim(float(lat_e_plot[-1]), float(lat_e_plot[0]))
+    ax.margins(0)
 
     if world is None:
         world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
@@ -687,16 +748,20 @@ def draw_base_map(
             lat_min=value_lat_min,
             lat_max=value_lat_max,
         )
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
+    ax.set_xlabel("Longitude", fontsize=10)
+    ax.set_ylabel("Latitude", fontsize=10)
+    ax.tick_params(axis="both", labelsize=9)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
 
     if title is not None:
-        ax.set_title(title)
+        ax.set_title(title, fontsize=13)
 
     if add_colorbar:
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="4%", pad=0.08)
-        ax.figure.colorbar(im, cax=cax)
+        cbar = ax.figure.colorbar(im, cax=cax)
+        cbar.ax.tick_params(labelsize=9)
 
     return im
 
@@ -786,7 +851,7 @@ def plot_map_static(
         center_lat=zoom_center_lat,
     )
 
-    plt.tight_layout()
+    # plt.tight_layout()
 
     if show:
         plt.show()
@@ -808,6 +873,7 @@ def make_interactive_map(
     rectangle_x=(-10.0, 2.0),
     rectangle_y=(45.0, 35.0),
 ):
+    plt.rcParams["font.family"] = "Menlo"
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
     world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
@@ -847,7 +913,7 @@ def make_interactive_map(
             zorder=10,
         )
         ax.add_patch(rect)
-        fig.subplots_adjust(left=0.04, right=0.96, top=0.93, bottom=0.10)
+        # fig.tight_layout()
 
     return mo.ui.anywidget(
         ChartPuck.from_callback(
@@ -1047,7 +1113,7 @@ def visualize_grid(
 
         im = ax.collections[0]
 
-    fig.tight_layout(rect=(0, 0, 0.92, 1))
+    # fig.tight_layout()
     cbar_ax = fig.add_axes([0.93, 0.12, 0.015, 0.76])
     cbar = fig.colorbar(im, cax=cbar_ax)
     if unit_label:
@@ -1077,7 +1143,7 @@ def plot_states_over_n(
     show_mask=False,
     analysis_type="absolute",
     cmap="coolwarm",
-    figsize_per_panel=(4.8, 3.4),
+    figsize_per_panel=(12, 5),
     dpi=100,
     title=None,
     subtitle=None,
@@ -1104,8 +1170,8 @@ def plot_states_over_n(
     last_norm = None
 
     for n_iter in range(1, N + 1):
-        guided_state = read_state(get_rollout_path(guided_rollout_dir, n_iter, "guided"))
-        unguided_state = read_state(get_rollout_path(unguided_rollout_dir, n_iter, m))
+        guided_state = read_state(get_rollout_path(guided_rollout_dir, n_iter, f"guided_{1}"))
+        unguided_state = read_state(get_rollout_path(unguided_rollout_dir, n_iter, f"unguided_{m}"))
 
         sample = ds.denormalize(ds[timestamp_idx + n_iter])
         ts = sample["timestamp"].unsqueeze(0)

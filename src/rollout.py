@@ -8,7 +8,7 @@ from src.utils import (
     save_state, 
     save_to_json
 )
-from src.funcs import get_mask_tensordict, get_guidance
+from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
 
 from geoarches.dataloaders.era5 import Era5Forecast
@@ -53,7 +53,7 @@ def rollout(
     for n in range(1, N+1):
         if guidance_flag:
             # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
-            y_n = get_guidance(y[n], mask_term)
+            y_n = y[n]
         else:
             y_n = None
 

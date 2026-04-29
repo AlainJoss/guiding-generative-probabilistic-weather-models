@@ -25,6 +25,25 @@ def get_guidance_trajectory(y: list[float], mean_rollout: list[float]):
         for idx, _ in enumerate(mean_rollout)
     ]
 
+def get_inverse_guidance(guidance: float, mask_avg: float, eps: float = 1e-12):
+    denom = np.abs(mask_avg)
+    if denom < eps:
+        raise ValueError(
+            "Cannot invert guidance when mask_avg is zero or very close to zero."
+        )
+
+    return (guidance - mask_avg) / denom
+
+def get_inverse_guidance_trajectory(
+    planned_guidance: list[float],
+    mean_rollout: list[float],
+    eps: float = 1e-12,
+):
+    return [
+        get_inverse_guidance(planned_guidance[idx], mean_rollout[idx], eps=eps)
+        for idx, _ in enumerate(mean_rollout)
+    ]
+
 def N_schedule(
     N: int,
     flatness: float,
@@ -52,12 +71,9 @@ def N_schedule(
 
     return [zero] + values + [zero]
 
-def T_schedule(T: int, flatness: float, peak: float): 
-    if T == 1: 
-        return [torch.tensor(0.0, dtype=torch.float32)] 
-    return [
-        torch.tensor( peak * (math.sin(math.pi * t / (T - 1)) ** flatness), dtype=torch.float32, ) for t in range(T)
-           ] 
+def T_schedule(alpha: float, w: float): 
+    T=25
+    return [torch.tensor( w * (math.sin(math.pi * t / (T - 1)) ** alpha), dtype=torch.float32, ) for t in range(T)] 
 
 def compute_mean_rollout(rollout_trajectory: dict[str, list]) -> dict[str, float]:
     mean_trajectory = []

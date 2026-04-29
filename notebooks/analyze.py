@@ -7,7 +7,7 @@ app = marimo.App(width="full")
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Boiler plate
+    # Setup
     """)
     return
 
@@ -44,12 +44,13 @@ def _():
     )
     from src.interaction import visualize_map, get_mask_from_corners, get_mask_center
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-    from src.funcs import avg_over_mask
+    from src.funcs import avg_over_mask, get_guidance
 
     return (
         LEVELS_DICT,
         PARTITIONS,
         VARIABLES_DICT,
+        get_guidance,
         get_mask_center,
         get_mask_from_corners,
         get_slice,
@@ -401,7 +402,7 @@ def get_rollout_path(rollout_dir, n, m):
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Results analysis
+    # PHASE 3 - results analysis
     """)
     return
 
@@ -431,7 +432,7 @@ def _(Path, ROLLOUTS, mo, refresh_button):
 
     guided_rollouts = Path(ROLLOUTS, "guided").glob("2026*")
     guided_rollouts = sorted(
-        [p for p in guided_rollouts if has_config_json(p)],
+        [p.name for p in guided_rollouts if has_config_json(p)],
         reverse=True,
     )
     pick_guided_rollout_dropdown = mo.ui.dropdown(label="Pick guided rollout", value=guided_rollouts[0], options=guided_rollouts)
@@ -439,21 +440,15 @@ def _(Path, ROLLOUTS, mo, refresh_button):
 
 
 @app.cell
-def _(pick_guided_rollout_dropdown):
-    guided_rollout_dir = pick_guided_rollout_dropdown.value
+def _(Path, ROLLOUTS, pick_guided_rollout_dropdown):
+    guided_rollout_dir = Path(ROLLOUTS, "guided", pick_guided_rollout_dropdown.value)
     return (guided_rollout_dir,)
-
-
-@app.cell
-def _(unguided_rollout_dir):
-    unguided_rollout_dir
-    return
 
 
 @app.cell
 def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
     guided_cfg = read_json(guided_rollout_dir, "config")
-    unguided_rollout_dir = ROLLOUTS / Path(guided_cfg["unguided_rollout_dir"])
+    unguided_rollout_dir =  Path(ROLLOUTS, "unguided", guided_cfg["unguided_rollout_id"])
 
     unguided_cfg = read_json(unguided_rollout_dir, "config")
     return guided_cfg, unguided_cfg, unguided_rollout_dir
@@ -653,16 +648,9 @@ def _(get_guidance, plt):
 
 
 @app.cell
-def _():
-    from src.funcs import get_guidance
-
-    return (get_guidance,)
-
-
-@app.cell
 def _(guided_cfg, guided_rollout_dir, read_json):
     timestamps = guided_cfg["timestamps"]
-    y_perc = guided_cfg["y_perc"]
+    y_perc = guided_cfg["y_trajectory"]
     planned_guidance = guided_cfg["planned_guidance"]
     ground_truth_ = guided_cfg["ground_truth"]
 
@@ -699,9 +687,9 @@ def _(
 
 @app.cell
 def _(guided_rollout_dir, m, n, read_state, unguided_rollout_dir):
-    guided_state_n = read_state(get_rollout_path(guided_rollout_dir, n, "guided"))
-    deterministic_state_n = read_state(get_rollout_path(guided_rollout_dir, n, "deterministic"))
-    unguided_state_n = read_state(get_rollout_path(unguided_rollout_dir, n, m))
+    guided_state_n = read_state(get_rollout_path(guided_rollout_dir, n, f"guided_{1}"))
+    deterministic_state_n = read_state(get_rollout_path(guided_rollout_dir, n, f"det_{m}"))
+    unguided_state_n = read_state(get_rollout_path(unguided_rollout_dir, n, f"unguided_{m}"))
     return guided_state_n, unguided_state_n
 
 
