@@ -98,9 +98,9 @@ def _():
 
 @app.cell
 def _():
-    from src.paths import ROLLOUTS
+    from src.paths import ROLLOUTS, CONFIGS
 
-    return (ROLLOUTS,)
+    return CONFIGS, ROLLOUTS
 
 
 @app.cell
@@ -501,6 +501,14 @@ def _(
     return det_rollout, ground_truth, mean_unguided_rollout, unguided_rollout
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Check deterministic rollout
+    """)
+    return
+
+
 @app.cell
 def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
     def plot_ensemble_rmse(gen_rmse, det_rmse, var):
@@ -869,6 +877,7 @@ def _(
     y_trajectory,
 ):
     config = {
+        "guidance_flag": True,
         "guidance_mode": guidance_mode_dropdown.value, 
         "unguided_rollout_id": unguided_cfg["rollout_id"],
         "N": N,
@@ -882,14 +891,14 @@ def _(
         "var": var,
         "var_idx": int(var_idx),
         "timestamps": timestamps,
+        "init_mask_term": float(mean_unguided_rollout[0]),
         "ground_truth": list_tens_to_floats(ground_truth),
-        "ensemble_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
+        "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
-        "y_trajectory": list_tens_to_floats(y_trajectory),
+        "y": list_tens_to_floats(y_trajectory),
         "lambda_": list_tens_to_floats(lambda_),
         "alpha": alpha,
         "w": w_slider.value,
-        "init_mask_term": float(mean_unguided_rollout[0]),
     }
     return (config,)
 

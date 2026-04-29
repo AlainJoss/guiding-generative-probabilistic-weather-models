@@ -466,35 +466,42 @@ def _(mo):
 def _(get_guidance, plt):
     def realized_guidance_branches(
         realized_terms: list[float],
-        y_perc: list[float],
+        planned_guidance: list[float],
+        mean_rollout: list[float],
     ) -> list[float]:
-        if len(realized_terms) != len(y_perc):
-            raise ValueError("realized_terms and y_perc must have the same length")
+        if len(realized_terms) != len(planned_guidance) or len(realized_terms) != len(mean_rollout):
+            raise ValueError(
+                "realized_terms, planned_guidance, and mean_rollout must have the same length"
+            )
 
         branches = [realized_terms[0]]
         for n in range(1, len(realized_terms)):
-            branches.append(get_guidance(y_perc[n], realized_terms[n - 1]))
+            m_n = mean_rollout[n]
+            abs_m = abs(m_n) if m_n != 0 else 1.0
+            y_n = (planned_guidance[n] - m_n) / abs_m
+            branches.append(get_guidance(y_n, realized_terms[n - 1]))
         return branches
 
 
     def plot_guidance_branching(
         timestamps: list[str],
         realized_terms: list[float],
-        y_perc: list[float],
-        planned_guidance: list[float] | None = None,
+        planned_guidance: list[float],
+        mean_rollout: list[float],
         ground_truth: list[float] | None = None,
-        mean_rollout: list[float] | None = None,
         ensemble_rollout: list[list[float]] | None = None,
         title: str | None = "Realized guidance",
         subtitle: str | None = None,
     ):
         N = len(timestamps)
-        if N != len(realized_terms) or len(realized_terms) != len(y_perc):
+        if N != len(realized_terms) or len(realized_terms) != len(planned_guidance):
             raise ValueError(
-                "timestamps, realized_terms, and y_perc must have the same length"
+                "timestamps, realized_terms, and planned_guidance must have the same length"
             )
         x = list(range(N))
-        branch_targets = realized_guidance_branches(realized_terms, y_perc)
+        branch_targets = realized_guidance_branches(
+            realized_terms, planned_guidance, mean_rollout
+        )
 
         C = {
             "realized": "#1f77b4",
@@ -650,13 +657,13 @@ def _(get_guidance, plt):
 @app.cell
 def _(guided_cfg, guided_rollout_dir, read_json):
     timestamps = guided_cfg["timestamps"]
-    y_perc = guided_cfg["y_trajectory"]
-    planned_guidance = guided_cfg["planned_guidance"]
+    planned_guidance = guided_cfg["y"]
+    # planned_guidance = guided_cfg["planned_guidance"]
     ground_truth_ = guided_cfg["ground_truth"]
 
     # this should come from rollout_dir/mask_terms.json
     realized_terms = read_json(guided_rollout_dir, "mask_terms")["final_mask_terms"]
-    return ground_truth_, planned_guidance, realized_terms, timestamps, y_perc
+    return ground_truth_, planned_guidance, realized_terms, timestamps
 
 
 @app.cell
@@ -667,18 +674,16 @@ def _(
     plot_guidance_branching,
     realized_terms,
     timestamps,
-    y_perc,
 ):
     # NOTE:
     # - first branch of online and offline planned should coincide
     realized_guidance_plot = plot_guidance_branching(
         timestamps=timestamps,
         realized_terms=realized_terms,
-        y_perc=y_perc,
         planned_guidance=planned_guidance,
-        ground_truth=ground_truth_,
         mean_rollout=guided_cfg["mean_rollout"],
-        ensemble_rollout=guided_cfg["ensemble_rollout"],
+        ground_truth=ground_truth_,
+        ensemble_rollout=guided_cfg["unguided_rollout"],
         title="Realized guidance analysis",
         subtitle="mask term along the rollout: realized vs online / offline plans, ground truth, mean & ensemble",
     )

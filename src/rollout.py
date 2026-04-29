@@ -36,7 +36,6 @@ def rollout(
     device = gen_model.device
 
     if guidance_flag:
-        y = y.to(device)
         mask = get_mask_from_corners(*mask_corners)
         mask = mask.to(device)
         mask = get_mask_tensordict(x_start["state"][0], partition, var_idx, level_idx, mask)
@@ -53,7 +52,7 @@ def rollout(
     for n in range(1, N+1):
         if guidance_flag:
             # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
-            y_n = y[n]
+            y_n = torch.tensor(y[n]).to(device)
         else:
             y_n = None
 

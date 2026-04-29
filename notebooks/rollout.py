@@ -212,34 +212,35 @@ def _(var_dropdown):
 @app.cell
 def _(LEVELS, VARIABLES, level, var):
     var_idx = VARIABLES.index(var)
-    level_idx = LEVELS.index(level) - 1
+    level_idx = LEVELS.index(level)
     return level_idx, var_idx
 
 
 @app.cell
-def _(
-    M_slider,
-    N_slider,
-    STRIDE,
-    TIMESTAMPS,
-    day_slider,
-    hour_slider,
-    month_slider,
-):
-    # build timestamp from sliders; fall back to closest preceding TIMESTAMP if invalid (e.g. day=31 in Feb)
+def _(TIMESTAMPS, day_slider, hour_slider, month_slider):
     _target = f"2020-{month_slider.value:02d}-{day_slider.value:02d}T{hour_slider.value:02d}:00:00"
     if _target in TIMESTAMPS:
         timestamp = _target
     else:
         _candidates = [t for t in TIMESTAMPS if t <= _target]
         timestamp = _candidates[-1] if _candidates else TIMESTAMPS[0]
+    timestamp_idx = TIMESTAMPS.index(timestamp)
+    return timestamp, timestamp_idx
+
+
+@app.cell(hide_code=True)
+def _(M_slider, N_slider):
     M = M_slider.value
     N = N_slider.value
-    timestamp_idx = TIMESTAMPS.index(timestamp)
+    return M, N
+
+
+@app.cell(hide_code=True)
+def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
     timestamps = TIMESTAMPS[
         timestamp_idx : timestamp_idx + STRIDE * N + 1 : STRIDE
     ]
-    return M, N, timestamp, timestamp_idx, timestamps
+    return (timestamps,)
 
 
 @app.cell
@@ -249,15 +250,30 @@ def _(ds, level_idx, partition, timestamp_idx, var_idx):
     return slice, x_start
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    get_mask_xy, set_mask_xy = mo.state(((-10.0, 2.0), (45.0, 35.0)))
+    return get_mask_xy, set_mask_xy
+
+
 @app.cell
-def _(slice, visualize_map):
+def _(get_mask_xy, set_mask_xy, slice, visualize_map):
+    _mx, _my = get_mask_xy()
     map_widget = visualize_map(
         slice,
         title="Select mask region",
         interactive=True,
         vmin=slice.min(),
         vmax=slice.max(),
-        center= slice.mean()
+        center=slice.mean(),
+        rectangle_x=_mx,
+        rectangle_y=_my,
+    )
+    map_widget.widget.observe(
+        lambda _c: set_mask_xy(
+            (tuple(map_widget.widget.x), tuple(map_widget.widget.y))
+        ),
+        names=["x", "y"],
     )
     return (map_widget,)
 
@@ -317,11 +333,9 @@ def _(
     day_slider,
     hour_slider,
     level_slider,
-    map_widget,
     mo,
     month_slider,
     partition_dropdown,
-    rollout_dist_plot,
     timestamp,
     var_dropdown,
 ):
@@ -343,10 +357,20 @@ def _(
                 ],
                 justify="start",
             ),
-            rollout_dist_plot,
-            map_widget,
         ]
     )
+    return
+
+
+@app.cell
+def _(rollout_dist_plot):
+    rollout_dist_plot
+    return
+
+
+@app.cell
+def _(map_widget):
+    map_widget
     return
 
 
@@ -396,7 +420,7 @@ def _(
         "mask_corners": mask_corners,
         "init_mask_term": None,
         "y": None,
-        "lambda_": None
+        "lambda_": None,
     }
     return (rollout_config,)
 

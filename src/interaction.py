@@ -924,6 +924,7 @@ def make_interactive_map(
             figsize=(10, 5),
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
+            throttle=1000
         )
     )
 
@@ -952,6 +953,8 @@ def visualize_map(
     value_fontsize=6,
     value_color="black",
     value_threshold=None,
+    rectangle_x=(-10.0, 2.0),
+    rectangle_y=(45.0, 35.0),
 ):
     if interactive:
         return make_interactive_map(
@@ -961,6 +964,8 @@ def visualize_map(
             vmax=vmax,
             center=center,
             title=title,
+            rectangle_x=rectangle_x,
+            rectangle_y=rectangle_y,
         )
 
     return plot_map_static(
