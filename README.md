@@ -12,5 +12,6 @@ uv run -m src.run
 uv run -m src.from_cfg --config-id "2026-04-28_17:03:02" --test
 python -m src.from_cfg --config-id "2026-04-28_17:03:02" --test
 source .venv/bin/activate
+python -m src.run_all_configs --test
 ```
 
