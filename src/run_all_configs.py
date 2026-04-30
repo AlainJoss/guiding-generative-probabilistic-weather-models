@@ -4,7 +4,7 @@ from typing import Any
 
 from src.paths import CONFIGS
 from src.utils import read_json
-from src.from_cfg import run_from_config
+from run_from_cfg import run_from_config
 
 
 def parse_args() -> argparse.Namespace:

@@ -50,6 +50,7 @@ def plot_dual_trajectory(
     ymax_left: float | None = None,
     right_axis: bool = True,
     dpi: int = 100,
+    figsize: tuple = (12, 5)
 ):
     mr = [float(v) for v in mean_rollout] if mean_rollout is not None else None
     pg = [float(v) for v in planned_guidance] if planned_guidance is not None else None
@@ -71,7 +72,7 @@ def plot_dual_trajectory(
         "y": "#9c27b0",
     }
 
-    fig, ax1 = plt.subplots(figsize=(12, 5), dpi=dpi)
+    fig, ax1 = plt.subplots(figsize=figsize, dpi=dpi)
 
     if ensemble_rollout is not None:
         rows = [[float(v) for v in row] for row in ensemble_rollout]
@@ -198,7 +199,7 @@ def plot_trajectories_over_n(
         ax = axes[i, 0]
         x = np.arange(len(traj))
         ax.plot(x, traj, "-", color=line_color, linewidth=1.6, alpha=0.9)
-        ax.plot(x, traj, "o", color=marker_color, markersize=3.5, zorder=3)
+        # ax.plot(x, traj, "o", color=marker_color, markersize=3.5, zorder=3)
         ax.axhline(0, color="gray", linewidth=0.6, alpha=0.7)
         ax.grid(True, alpha=0.25, linestyle=":")
         ax.set_xlim(0, max(len(traj) - 1, 1))
@@ -440,11 +441,12 @@ def plot_trajectory(
     ymin: float | None = None,
     ymax: float | None = None,
     title: str | None = "Trajectory",
-    dpi: int = 100
+    dpi: int = 100,
+    figsize: tuple =(12,5)
 ):
     plt.rcParams["font.family"] = "Menlo"
     x = np.arange(len(trajectory))
-    fig, ax = plt.subplots(figsize=(12, 5), dpi=dpi)
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     ax.plot(x, trajectory, "-", linewidth=1.6, color="#9467bd", alpha=0.9)
     ax.plot(x, trajectory, "o", color="#9c27b0", markersize=4, zorder=3)
     ax.set_xlim(0, max(len(trajectory) - 1, 1))
@@ -774,7 +776,7 @@ def plot_map_static(
     vmin=None,
     vmax=None,
     center=None,
-    figsize=(12, 5),
+    figsize=(14, 5),
     dpi=100,
     title=None,
     mask_edgecolor="red",
@@ -915,13 +917,15 @@ def make_interactive_map(
         ax.add_patch(rect)
         # fig.tight_layout()
 
+        # Important: do not call fig.tight_layout() here.
+
     return mo.ui.anywidget(
         ChartPuck.from_callback(
             draw_fn=draw_map,
             x=list(rectangle_x),
             y=list(rectangle_y),
             puck_color=["green", "red"],
-            figsize=(10, 5),
+            figsize=(10.31, 5),
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
             throttle=1000
@@ -938,7 +942,7 @@ def visualize_map(
     vmin=None,
     vmax=None,
     center=0,
-    figsize=(12, 5),
+    figsize=(15, 5),
     interactive=False,
     title=None,
     dpi=100,

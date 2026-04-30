@@ -4,48 +4,18 @@ __generated_with = "0.23.3"
 app = marimo.App(width="medium", css_file="")
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    # Setup
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Load
-    """)
-    return
-
-
 @app.cell
 def _():
-    import random
     from pathlib import Path 
     from datetime import datetime, timedelta
 
     import marimo as mo
     import numpy as np
-    import geopandas as gpd
-    import geodatasets
     import torch
 
-    from wigglystuff import ChartPuck
-    from scipy.interpolate import CubicSpline
 
     import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-    import matplotlib.colors as mcolors
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-    from matplotlib import colors
 
-    import cartopy.feature as cfeature
-    from cartopy.crs import PlateCarree
-
-    method_state = {"value": "CubicSpline"}
     return Path, mo, np, plt, torch
 
 
@@ -77,7 +47,6 @@ def _():
         ensure_rollout_dir,
         get_dataset,
         get_guidance_trajectory,
-        get_mask_corners_from_widget,
         get_mask_from_corners,
         get_model,
         get_now_timestamp,
@@ -108,14 +77,6 @@ def _(device, get_dataset, get_model):
     ds = get_dataset()
     model = get_model(device)
     return ds, model
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Interactivity
-    """)
-    return
 
 
 @app.cell
@@ -169,27 +130,6 @@ def _(var_dropdown):
 
 
 @app.cell
-def _(slice, visualize_map):
-    map_widget = visualize_map(
-        slice,
-        title="Select mask region",
-        interactive=True,
-        vmin=slice.min(),
-        vmax=slice.max(),
-        center= slice.mean()
-    )
-    return (map_widget,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### flow-time ui elements
-    """)
-    return
-
-
-@app.cell
 def _(mo):
     w_slider = mo.ui.slider(1, 3, value=1.0, label="w: ", step=1, show_value=True, debounce=True)
     lambda_shape_slider = mo.ui.slider(1.0, 3.0, step=1, value=1.0, label="$\\alpha$: ", show_value=True, debounce=True)
@@ -200,12 +140,6 @@ def _(mo):
 def _(T_schedule, lambda_shape_slider, w_slider):
     lambda_ = T_schedule(lambda_shape_slider.value, w_slider.value) 
     return (lambda_,)
-
-
-@app.cell
-def _(lambda_, plot_trajectory):
-    lambda_trajectory_plot = plot_trajectory(lambda_, "$\lambda_t$", ymax=3, ymin=0, title="Guidance strength-schedule $\{\lambda_t\}_{t=0}^{T-1}$")
-    return (lambda_trajectory_plot,)
 
 
 @app.cell
@@ -239,14 +173,6 @@ def _(min_max_lambda, mo):
 def _(alpha_slider):
     alpha = alpha_slider.value / 100
     return (alpha,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### weather-time ui elements
-    """)
-    return
 
 
 @app.cell
@@ -340,8 +266,8 @@ def _(LEVELS, TIMESTAMPS, VARIABLES, ds, level, timestamp, var):
 
 
 @app.cell
-def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
-    mask_corners = get_mask_corners_from_widget(map_widget)
+def _(get_mask_from_corners, unguided_cfg):
+    mask_corners = tuple(unguided_cfg["mask_corners"])
     mask = get_mask_from_corners(*mask_corners)
     return mask, mask_corners
 
@@ -350,14 +276,6 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
 def _(ds, level_idx, partition, var_idx, x_start):
     slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
     return (slice,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## The rollout experiment stuff
-    """)
-    return
 
 
 @app.cell
@@ -424,14 +342,6 @@ def _(mo, pick_unguided_rollout_dropdown, subfolder_selector, unguided_cfg):
         )
     ])
     return (experiment_dropdown,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Mask terms over rollouts
-    """)
-    return
 
 
 @app.cell
@@ -502,10 +412,8 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
+def _():
     # Check deterministic rollout
-    """)
     return
 
 
@@ -541,7 +449,6 @@ def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
     gen_rmse_per_step = ensemble_rmse_per_step(unguided_rollout, ground_truth)
     det_rmse_per_step = ensemble_rmse_per_step(det_rollout, ground_truth)
     rmse_plot = plot_ensemble_rmse(gen_rmse_per_step, det_rmse_per_step, var)
-    rmse_plot
     return
 
 
@@ -582,7 +489,6 @@ def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
     paired_rmse_plot = plot_paired_member_rmse(
         gen_rmse_per_member, det_rmse_per_member, var
     )
-    paired_rmse_plot
     return
 
 
@@ -628,15 +534,12 @@ def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
         unguided_rollout, det_rollout, ground_truth
     )
     rel_perf_plot = plot_relative_perf_matrix(rel_perf_matrix, var)
-    rel_perf_plot
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Plots
-    """)
+@app.cell
+def _():
+    # rmse_plot, paired_rmse_plot, rel_perf_plot
     return
 
 
@@ -661,6 +564,7 @@ def _(
         ensemble_rollout=unguided_rollout,
         ymin_left=None,
         ymax_left=None,
+        figsize=(10,3)
     )
     return (y_trajectory_plot,)
 
@@ -733,6 +637,22 @@ def _(mo):
 
 
 @app.cell
+def _(mask, slice, visualize_map):
+    map_widget = visualize_map(
+        slice,
+        title="Mask region",
+        interactive=False,
+        mask_2d=mask,
+        show_mask=True,
+        vmin=slice.min(),
+        vmax=slice.max(),
+        center=slice.mean(),
+        figsize=(24,5.15)
+    )
+    return (map_widget,)
+
+
+@app.cell
 def _(level_slider, map_widget, mo, partition_dropdown, var_dropdown):
     mo.vstack([
         mo.md("The mask specifies the variable, level, and region of interest. By default, these values are taken from the unguided rollout experiment's `config.json` file."),
@@ -766,7 +686,7 @@ def _(
     if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
         weather_time_vstack = mo.vstack(
             [
-                mo.md("The guidance trajectory is the sequence of target values for the masked spatial average that we aim to steer the generative model towards over the $N$ weather steps."),
+                mo.md("The guidance trajectory is the sequence of target values (masked spatial average) that we use to steer the generative model over the $N$ weather steps."),
                 guidance_mode_dropdown,
                 mo.hstack([alpha_slider, min_max_lambda_slider], justify="start"),
                 y_trajectory_plot,
@@ -786,6 +706,16 @@ def _(mo):
     ### Guidance @ diffusion time
     """)
     return
+
+
+@app.cell
+def _(lambda_, plot_trajectory):
+    lambda_trajectory_plot = plot_trajectory(
+        lambda_, "$\lambda_t$", ymax=3, ymin=0, 
+        title="Guidance strength-schedule $\{\lambda_t\}_{t=0}^{T-1}$",
+        figsize=(10.85, 2.5)
+    )
+    return (lambda_trajectory_plot,)
 
 
 @app.cell

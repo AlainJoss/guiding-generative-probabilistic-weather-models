@@ -83,13 +83,6 @@ def _():
 
 @app.cell
 def _():
-    from src.visualization import visualize_mask_terms_over_N
-
-    return
-
-
-@app.cell
-def _():
     from src.interaction import (
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
@@ -252,13 +245,13 @@ def _(ds, level_idx, partition, timestamp_idx, var_idx):
 
 @app.cell(hide_code=True)
 def _(mo):
-    get_mask_xy, set_mask_xy = mo.state(((-10.0, 2.0), (45.0, 35.0)))
-    return get_mask_xy, set_mask_xy
+    get_corners, set_corners = mo.state((-10.0, 2.0, 45.0, 35.0))
+    return get_corners, set_corners
 
 
 @app.cell
-def _(get_mask_xy, set_mask_xy, slice, visualize_map):
-    _mx, _my = get_mask_xy()
+def _(get_corners, set_corners, slice, visualize_map):
+    lx0, lx1, ly0, ly1 = get_corners()
     map_widget = visualize_map(
         slice,
         title="Select mask region",
@@ -266,12 +259,12 @@ def _(get_mask_xy, set_mask_xy, slice, visualize_map):
         vmin=slice.min(),
         vmax=slice.max(),
         center=slice.mean(),
-        rectangle_x=_mx,
-        rectangle_y=_my,
+        rectangle_x=(lx0, lx1),
+        rectangle_y=(ly0, ly1),
     )
     map_widget.widget.observe(
-        lambda _c: set_mask_xy(
-            (tuple(map_widget.widget.x), tuple(map_widget.widget.y))
+        lambda _c: set_corners(
+            (*map_widget.widget.x, *map_widget.widget.y)
         ),
         names=["x", "y"],
     )
@@ -309,7 +302,7 @@ def _(
 @app.cell
 def _(ground_truth, plot_dual_trajectory, timestamps, var):
     rollout_dist_plot = plot_dual_trajectory(
-        timestamps, var, ground_truth=ground_truth, right_axis=False
+        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(12, 2)
     )
     return (rollout_dist_plot,)
 
@@ -321,56 +314,46 @@ def _(mo):
 
 
 @app.cell
-def _():
-    # tensor_timestamp_to_string(x_start["timestamp"])
-    return
-
-
-@app.cell
 def _(
     M_slider,
     N_slider,
     day_slider,
     hour_slider,
     level_slider,
+    map_widget,
     mo,
     month_slider,
     partition_dropdown,
+    rollout_dist_plot,
     timestamp,
     var_dropdown,
 ):
-    mo.vstack(
-        [
-            mo.hstack(
-                [month_slider, day_slider, hour_slider, mo.md(f"→ {timestamp}")],
-                justify="start",
-            ),
-            mo.hstack(
-                [N_slider, mo.md("→ 24h model steps")], justify="start"
-            ),
-            mo.hstack([M_slider, mo.md("→ ensemble members")], justify="start"),
-            mo.hstack(
-                [
-                    partition_dropdown,
-                    var_dropdown,
-                    level_slider,
-                ],
-                justify="start",
-            ),
-        ]
-    )
-    return
-
-
-@app.cell
-def _(rollout_dist_plot):
-    rollout_dist_plot
-    return
-
-
-@app.cell
-def _(map_widget):
+    mo.vstack([
+        mo.hstack([
+            mo.vstack(
+                [   
+                    timestamp,
+                    mo.hstack(
+                        [month_slider, day_slider, hour_slider],
+                        justify="start",
+                    ),
+                    mo.hstack(
+                        [N_slider, mo.md("(24h model steps)")], justify="start"
+                    ),
+                    mo.hstack([M_slider, mo.md("(ensemble members)")], justify="start"),
+                    mo.hstack(
+                        [
+                            partition_dropdown,
+                            var_dropdown,
+                            level_slider,
+                        ],
+                        justify="start",
+                    ),
+            ]),
+        ]),
+    rollout_dist_plot,
     map_widget
+    ])
     return
 
 
@@ -423,12 +406,6 @@ def _(
         "lambda_": None,
     }
     return (rollout_config,)
-
-
-@app.cell
-def _():
-    # TODO: implement smart trick with kwargs (or args?)
-    return
 
 
 @app.cell

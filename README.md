@@ -15,3 +15,9 @@ source .venv/bin/activate
 python -m src.run_all_configs --test
 ```
 
+Setup:
+```
+ln -s ../data data
+# or
+ln -s ~/switchdrive/data data
+```

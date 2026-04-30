@@ -51,7 +51,7 @@ def rollout(
     ### iter
     for n in range(1, N+1):
         if guidance_flag:
-            # NOTE: y[0] == 0 and will be ignored since we start at n=1, nice
+            # trick: y[0] == 0 and will be ignored since we start at n=1, nice
             y_n = torch.tensor(y[n]).to(device)
         else:
             y_n = None

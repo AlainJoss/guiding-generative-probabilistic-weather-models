@@ -11,6 +11,7 @@ from src.utils import (
     save_to_json,
     state_to_device,
     get_device,
+    get_now_timestamp
 )
 from src.rollout import rollout
 
@@ -40,7 +41,8 @@ def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
     model = get_model(device)
 
     x_start = ds[config["timestamp_idx"]]
-    rollout_dir = ensure_rollout_dir(rollout_type, config["N"])
+    rollout_id = get_now_timestamp()
+    rollout_dir = ensure_rollout_dir("unguided", config["N"], rollout_id)
 
     for m in range(1, config["M"] + 1):
         print(f"m: {m}/{config['M']}")
@@ -66,13 +68,11 @@ def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
     save_to_json(
         {
             **config,
-            "rollout_dir": str(rollout_dir)
+            "rollout_id": rollout_id
         },
         rollout_dir,
         "config",
     )
-
-    print(f"Saved rollout to: {rollout_dir}")
     return rollout_dir
 
 
