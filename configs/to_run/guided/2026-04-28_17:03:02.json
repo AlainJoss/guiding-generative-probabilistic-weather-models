@@ -2,8 +2,8 @@
   "guidance_flag": true,
   "guidance_mode": "manual_trajectory",
   "rollout_id": "2026-04-28_17:03:02",
-  "N": 30,
-  "M": 8,
+  "N": 4,
+  "M": 2,
   "mask_corners": [
     -10.0,
     2.0,
