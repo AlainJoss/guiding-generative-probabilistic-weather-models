@@ -18,9 +18,12 @@ uv run -m src.run_all_configs --test --config-type guided
 
 Setup:
 ```
+# on Renku
 ln -s ../data data
-# or
+# locally
 ln -s ~/switchdrive/data data
 
 # remember to git pull after running config
+# also when changing code locally
+git pull
 ```
