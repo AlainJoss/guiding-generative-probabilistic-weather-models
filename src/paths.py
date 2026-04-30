@@ -1,7 +1,5 @@
 from pathlib import Path
-
 import os
-
 
 ROOT = Path(__file__).parent.parent.resolve()
 
@@ -11,7 +9,8 @@ CONFIGS = ROOT / "configs"
 DATA = ROOT / "data"
 
 # use to connect: ln -s ~/switchdrive data 
-if not os.path.exists(DATA): 
+if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
+# if not os.path.exists(DATA): 
     DATA = Path("~", "switchdrive").expanduser()
 
 print(f"DATA path: {DATA}")

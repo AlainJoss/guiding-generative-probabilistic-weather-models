@@ -140,7 +140,7 @@ def _(np, plt):
 
         return fig
 
-    return (plot_zoom_histogram,)
+    return
 
 
 @app.cell
@@ -722,17 +722,9 @@ def _(guided_cfg, mo, pick_guided_rollout_dropdown, refresh_button):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## n-snapshots
+    ## Inspect states
 
-
-
-    Single rollout step $n$, single ensemble member $m$, picked from the
-    sliders below. Compare the **guided** posterior $x_{t+1}^{\text{guide}}$,
-    the **unguided** sample $x_{t+1}^{\text{gen}}$, the ground-truth next
-    state $x_{t+1}$, and the current state $x_t$. The `analysis_type`
-    dropdown toggles between absolute fields and difference maps
-    (`guided - unguided`, `next - current`, etc.). The mask outline and zoom
-    controls below let you focus on the guidance region.
+    Analyze all relevant weather states interactively.
     """)
     return
 
@@ -841,11 +833,10 @@ def _(
 
         _diff_maps = {}
         for _label, _arr in _diff_panels:
-            _mu, _mx = _stats_diff(_arr, _mask_np)
             _diff_maps[_label] = visualize_map(
                 _arr,
                 mask_2d=_mask_np,
-                title=f"{_label}   $\mu$={_fmt(_mu)}  |max|={_fmt(_mx)}",
+                title=f"{_label}",
                 vmin=-_diff_absmax,
                 vmax=_diff_absmax,
                 center=0.0,
@@ -880,15 +871,15 @@ def _(
 
 
 @app.cell
-def _(guided_unguided, plot_zoom_histogram, zoom_centers, zoom_slider):
-    next_guided_hist = plot_zoom_histogram(
-        guided_unguided,
-        zoom=zoom_slider.value,
-        center_lon=zoom_centers[0],
-        center_lat=zoom_centers[1],
-        title="unguided-guided - value dist in zoom area",
-    )
-    return (next_guided_hist,)
+def _():
+    # next_guided_hist = plot_zoom_histogram(
+    #     guided_unguided,
+    #     zoom=zoom_slider.value,
+    #     center_lon=zoom_centers[0],
+    #     center_lat=zoom_centers[1],
+    #     title="unguided-guided - value dist in zoom area",
+    # )
+    return
 
 
 @app.cell
@@ -904,7 +895,6 @@ def _(
     mo,
     n_slider,
     next_current_map,
-    next_guided_hist,
     next_map,
     partition_dropdown,
     show_mask_switch,
@@ -966,8 +956,6 @@ def _(
                 mo.hstack(
                     [unguided_gt_map, guided_gt_map]
                 ),
-                mo.md("Distribution in zoom region:"),
-                next_guided_hist,
             ]
         )
     to_show
@@ -1109,8 +1097,7 @@ def _(all_mask_terms, plot_trajectories_over_n):
     trajectories_over_n_plot,_ = plot_trajectories_over_n(
         trajectories=all_mask_terms,
         var="mask term",
-        title="Realized guidance over N",
-        subtitle="mask-averaged loss term across diffusion steps, one panel per rollout step n",
+        title="Realized guidance over T",
     )
     trajectories_over_n_plot
     return

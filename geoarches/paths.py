@@ -7,7 +7,7 @@ ROOT = Path(__file__).parent.parent.resolve()
 DATA = ROOT / "data"
 
 # use to connect: ln -s ~/switchdrive data 
-if not os.path.exists(DATA): 
+if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
 
 print(f"DATA path: {DATA}")
