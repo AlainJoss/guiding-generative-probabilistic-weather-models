@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_config(config_type: str, config_id: str) -> dict[str, Any]:
-    return read_json(CONFIGS / config_type, config_id)
+    return read_json(CONFIGS / "to_run" / config_type, config_id)
 
 
 def run_from_config(config: dict[str, Any], config_type: str, test: bool = False) -> Path:
