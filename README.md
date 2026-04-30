@@ -4,26 +4,34 @@ Resources:
 - [Notes](/reporting/latex-notes/main.pdf)
 
 Run analysis:
-```
-uv run marimo edit notebooks/rollout.py --watch --no-token
-uv run marimo edit notebooks/guide.py --watch --no-token
-uv run marimo edit notebooks/analyze.py --watch --no-token
+```bash
+# compare original vs. new implementation
 uv run -m src.run
-uv run -m src.from_cfg --config-id "2026-04-28_17:03:02" --test
-python -m src.from_cfg --config-id "2026-04-28_17:03:02" --test
-source .venv/bin/activate
+# run 
+uv run -m src.from_cfg --test --config-id "2026-04-28_17:03:02" # TODO correct
 python -m src.run_all_configs --config-type guided
 uv run -m src.run_all_configs --test --config-type guided
 ```
 
-Setup:
+Dashboards:
+```bash
+uv run marimo run notebooks/guide.py
+uv run marimo run notebooks/rollout.py
+uv run marimo run notebooks/analyze.py
+uv run marimo edit notebooks/rollout.py --watch --no-token
+uv run marimo edit notebooks/guide.py --watch --no-token
+uv run marimo edit notebooks/analyze.py --watch --no-token
 ```
+
+Setup:
+```bash
 # on Renku
 ln -s ../data data
 # locally
-ln -s ~/switchdrive/data data
+ln -s ~/switchdrive data
 
-# remember to git pull after running config
+# remember to git push after running config
+git add . && git commit -m "Run configs." && git push origin main
 # also when changing code locally
 git pull
 ```

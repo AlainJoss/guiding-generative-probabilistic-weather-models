@@ -24,4 +24,5 @@ Guidance:
 - swap rollout_dist_plot with newer version present in analyze.py
 
 Results organization:
+- manage paths in single place, so whenever I change something I don't have to change it everywhere
 - save all separate tensors in single file

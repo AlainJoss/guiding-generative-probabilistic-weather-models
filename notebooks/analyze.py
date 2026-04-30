@@ -429,7 +429,7 @@ def _(Path, ROLLOUTS, mo, refresh_button):
     def has_config_json(path: Path) -> bool:
         return (path / "config.json").exists()
 
-
+    print(Path(ROLLOUTS, "guided"))
     guided_rollouts = Path(ROLLOUTS, "guided").glob("2026*")
     guided_rollouts = sorted(
         [p.name for p in guided_rollouts if has_config_json(p)],
