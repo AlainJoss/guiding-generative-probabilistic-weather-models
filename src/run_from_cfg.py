@@ -11,34 +11,29 @@ from src.utils import (
     save_to_json,
     state_to_device,
     get_device,
-    get_now_timestamp
 )
 from src.rollout import rollout
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-id", type=str, required=True)
+    parser.add_argument("--config-id", type=str, required=True, required=True)
+    parser.add_argument("--config-type", choices=["guided", "unguided"], required=True)
     parser.add_argument("--test", action="store_true")
     return parser.parse_args()
 
 
-def read_config(config_id: str) -> dict[str, Any]:
-    config_dir = (
-        CONFIGS / "guided"
-        if (CONFIGS / "guided" / f"{config_id}.json").exists()
-        else CONFIGS / "unguided"
-    )
-    return read_json(config_dir, config_id)
+def read_config(config_type: str, config_id: str) -> dict[str, Any]:
+    return read_json(CONFIGS / config_type, config_id)
 
 
-def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
+def run_from_config(config: dict[str, Any], config_type: str, test: bool = False) -> Path:
     device = get_device()
     ds = get_dataset()
     model = get_model(device)
 
     x_start = ds[config["timestamp_idx"]]
-    rollout_dir = ensure_rollout_dir("unguided", config["N"], config["rollout_id"])
+    rollout_dir = ensure_rollout_dir(config_type, config["N"], config["rollout_id"])
 
     for m in range(1, config["M"] + 1):
         print(f"m: {m}/{config['M']}")
@@ -73,10 +68,10 @@ def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
 
 
 def main():
-    print(">>> running experiment")
+    print("running experiment")
     args = parse_args()
-    config = read_config(args.config_id)
-    run_from_config(config, test=args.test)
+    config = read_config(args.config_type, args.config_id)
+    run_from_config(config, args.config_type, test=args.test)
 
 
 if __name__ == "__main__":

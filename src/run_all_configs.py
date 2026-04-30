@@ -9,7 +9,7 @@ from src.run_from_cfg import run_from_config
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", action="store_true")
-    parser.add_argument("--config-type", choices=["guided", "unguided"])
+    parser.add_argument("--config-type", choices=["guided", "unguided"], required=True)
     return parser.parse_args()
 
 
@@ -36,17 +36,19 @@ def main():
     for idx, (config_id, config) in enumerate(configs, start=1):
         print(f"running config {idx}/{len(configs)}: {config_id}")
 
-        rollout_dir = run_from_config(config, test=args.test)
+        rollout_dir = run_from_config(config, args.config_type, test=args.test)
 
-        print(f"finished config {config_id}")
         print(f"saved rollout to: {rollout_dir}")
 
     # move configs after running
     src_dir = CONFIGS / "to_run" / args.config_type
     dst_dir = CONFIGS / "archive" /args.config_type
-
+    
     for file in src_dir.glob("*.json"):
-        file.rename(dst_dir / file.name)
+        dst = dst_dir / file.name
+        if dst.exists():
+            raise FileExistsError(f"Archive file already exists: {dst}")
+        file.rename(dst)
         print(f"moved {file.name} -> {dst_dir}")
 
 if __name__ == "__main__":
