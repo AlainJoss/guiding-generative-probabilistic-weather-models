@@ -8,9 +8,8 @@ Run analysis:
 # compare original vs. new implementation
 uv run -m src.run
 # run 
-uv run -m src.from_cfg --test --config-id "2026-04-28_17:03:02" # TODO correct
+python -m src.from_cfg --config-id "2026-04-28_17:03:02" --config-type unguided
 python -m src.run_all_configs --config-type guided
-uv run -m src.run_all_configs --test --config-type guided
 ```
 
 Dashboards:

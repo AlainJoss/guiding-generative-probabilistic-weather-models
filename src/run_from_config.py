@@ -17,7 +17,7 @@ from src.rollout import rollout
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-id", type=str, required=True, required=True)
+    parser.add_argument("--config-id", type=str, required=True)
     parser.add_argument("--config-type", choices=["guided", "unguided"], required=True)
     parser.add_argument("--test", action="store_true")
     return parser.parse_args()
