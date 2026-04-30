@@ -33,16 +33,12 @@ def read_config(config_id: str) -> dict[str, Any]:
 
 
 def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
-    guidance_flag = config["guidance_flag"]
-    rollout_type = "guided" if guidance_flag else "unguided"
-
     device = get_device()
     ds = get_dataset()
     model = get_model(device)
 
     x_start = ds[config["timestamp_idx"]]
-    rollout_id = get_now_timestamp()
-    rollout_dir = ensure_rollout_dir("unguided", config["N"], rollout_id)
+    rollout_dir = ensure_rollout_dir("unguided", config["N"], config["rollout_id"])
 
     for m in range(1, config["M"] + 1):
         print(f"m: {m}/{config['M']}")
@@ -68,7 +64,7 @@ def run_from_config(config: dict[str, Any], test: bool = False) -> Path:
     save_to_json(
         {
             **config,
-            "rollout_id": rollout_id
+            "rollout_id": config["rollout_id"]
         },
         rollout_dir,
         "config",

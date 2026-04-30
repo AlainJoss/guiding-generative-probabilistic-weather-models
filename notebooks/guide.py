@@ -49,7 +49,6 @@ def _():
         get_guidance_trajectory,
         get_mask_from_corners,
         get_model,
-        get_now_timestamp,
         get_slice,
         list_tens_to_floats,
         plot_dual_trajectory,
@@ -809,7 +808,7 @@ def _(
     config = {
         "guidance_flag": True,
         "guidance_mode": guidance_mode_dropdown.value, 
-        "unguided_rollout_id": unguided_cfg["rollout_id"],
+        "rollout_id": unguided_cfg["rollout_id"],
         "N": N,
         "M": M,
         "mask_corners": mask_corners,
@@ -842,7 +841,6 @@ def _(
     device,
     ds,
     ensure_rollout_dir,
-    get_now_timestamp,
     lambda_,
     level_idx,
     mask_corners,
@@ -857,13 +855,12 @@ def _(
     status,
     test_flag_checkbox,
     torch,
+    unguided_cfg,
     var_idx,
     x_start,
 ):
     if run_button.value and status == "RUNNING":
-        rollout_id = get_now_timestamp()
-        rollout_dir = ensure_rollout_dir("guided", N, rollout_id)
-        config["rollout_id"] = rollout_id
+        rollout_dir = ensure_rollout_dir("guided", N, unguided_cfg["rollout_id"])
         rollout(
             guidance_flag=True,
             rollout_dir=rollout_dir,
@@ -893,17 +890,11 @@ def _(mo):
 
 
 @app.cell
-def _(CONFIGS, config, config_button, get_now_timestamp, save_to_json):
+def _(CONFIGS, config, config_button, save_to_json, unguided_cfg):
     if config_button.value:
-        config_id = get_now_timestamp()
-        config_dir = CONFIGS / "guided"
+        config_dir = CONFIGS / "to_run" / "guided"
         # no need to add the config_id to the config
-        save_to_json(config, config_dir, f"{config_id}")
-    return
-
-
-@app.cell
-def _():
+        save_to_json(config, config_dir, f"{unguided_cfg['rollout_id']}")
     return
 
 

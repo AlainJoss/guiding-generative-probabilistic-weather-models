@@ -468,9 +468,14 @@ def _(mo):
 def _(CONFIGS, config_button, get_now_timestamp, rollout_config, save_to_json):
     if config_button.value:
         config_id = get_now_timestamp()
-        config_dir = CONFIGS / "unguided"
+        config_dir = CONFIGS / "to_run" / "unguided"
         # no need to add the config_id to the config
         save_to_json(rollout_config, config_dir, f"{config_id}")
+    return
+
+
+@app.cell
+def _():
     return
 
 

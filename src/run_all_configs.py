@@ -1,26 +1,20 @@
 import argparse
-from pathlib import Path
 from typing import Any
 
 from src.paths import CONFIGS
 from src.utils import read_json
-from run_from_cfg import run_from_config
+from src.run_from_cfg import run_from_config
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--test", action="store_true")
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Optional maximum number of configs to run.",
-    )
+    parser.add_argument("--config-type", choices=["guided", "unguided"])
     return parser.parse_args()
 
 
-def load_unguided_configs() -> list[tuple[str, dict[str, Any]]]:
-    config_dir = CONFIGS / "unguided"
+def load_configs(config_type) -> list[tuple[str, dict[str, Any]]]:
+    config_dir = CONFIGS / "to_run" / f"{config_type}"
 
     config_paths = sorted(config_dir.glob("*.json"))
 
@@ -35,21 +29,25 @@ def load_unguided_configs() -> list[tuple[str, dict[str, Any]]]:
 def main():
     args = parse_args()
 
-    configs = load_unguided_configs()
+    configs = load_configs(args.config_type)
 
-    if args.limit is not None:
-        configs = configs[: args.limit]
-
-    print(f">>> found {len(configs)} unguided configs")
+    print(f"found {len(configs)} configs")
 
     for idx, (config_id, config) in enumerate(configs, start=1):
-        print(f"\n>>> running config {idx}/{len(configs)}: {config_id}")
+        print(f"running config {idx}/{len(configs)}: {config_id}")
 
         rollout_dir = run_from_config(config, test=args.test)
 
-        print(f">>> finished config {config_id}")
-        print(f">>> saved rollout to: {rollout_dir}")
+        print(f"finished config {config_id}")
+        print(f"saved rollout to: {rollout_dir}")
 
+    # move configs after running
+    src_dir = CONFIGS / "to_run" / args.config_type
+    dst_dir = CONFIGS / "archive" /args.config_type
+
+    for file in src_dir.glob("*.json"):
+        file.rename(dst_dir / file.name)
+        print(f"moved {file.name} -> {dst_dir}")
 
 if __name__ == "__main__":
     main()
