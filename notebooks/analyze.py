@@ -45,6 +45,7 @@ def _():
     from src.interaction import visualize_map, get_mask_from_corners, get_mask_center
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from src.funcs import avg_over_mask, get_guidance
+    from src.analysis_plots import extract_zoom_values
 
     return (
         LEVELS_DICT,
@@ -72,74 +73,6 @@ def _(mo):
     mo.md(r"""
     ## Funcs
     """)
-    return
-
-
-@app.cell
-def _(np, plt):
-    def extract_zoom_values(
-        array_2d,
-        *,
-        zoom,
-        center_lon=0.0,
-        center_lat=0.0,
-    ):
-        array_2d = np.asarray(array_2d)
-        ny, nx = array_2d.shape
-
-        lon_e = np.linspace(-180.0, 180.0, nx + 1, endpoint=True)
-        lat_e = np.linspace(90.0, -90.0, ny + 1, endpoint=True)
-
-        lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-        lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
-
-        zoom = max(1, int(zoom))
-
-        full_lon_span = 360.0
-        full_lat_span = 180.0
-
-        lon_span = full_lon_span / zoom
-        lat_span = full_lat_span / zoom
-
-        lon_min = max(-180.0, center_lon - lon_span / 2)
-        lon_max = min(180.0, center_lon + lon_span / 2)
-        lat_min = max(-90.0, center_lat - lat_span / 2)
-        lat_max = min(90.0, center_lat + lat_span / 2)
-
-        lon_mask = (lon_c >= lon_min) & (lon_c <= lon_max)
-        lat_mask = (lat_c >= lat_min) & (lat_c <= lat_max)
-
-        zoom_values = array_2d[np.ix_(lat_mask, lon_mask)]
-        return zoom_values[np.isfinite(zoom_values)]
-
-
-    def plot_zoom_histogram(
-        array_2d,
-        *,
-        zoom,
-        center_lon=0.0,
-        center_lat=0.0,
-        bins=30,
-        title="Value distribution in zoom zone",
-        figsize=(11.75, 5.45),
-        dpi=200,
-    ):
-        values = extract_zoom_values(
-            array_2d,
-            zoom=zoom,
-            center_lon=center_lon,
-            center_lat=center_lat,
-        )
-
-        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-        ax.hist(values, bins=bins)
-        ax.set_title(title)
-        ax.set_xlabel("Value")
-        ax.set_ylabel("Count")
-        ax.grid(True, alpha=0.3)
-
-        return fig
-
     return
 
 
@@ -448,7 +381,7 @@ def _(Path, ROLLOUTS, pick_guided_rollout_dropdown):
 @app.cell
 def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
     guided_cfg = read_json(guided_rollout_dir, "config")
-    unguided_rollout_dir =  Path(ROLLOUTS, "unguided", guided_cfg["unguided_rollout_id"])
+    unguided_rollout_dir =  Path(ROLLOUTS, "unguided", guided_cfg["rollout_id"])
 
     unguided_cfg = read_json(unguided_rollout_dir, "config")
     return guided_cfg, unguided_cfg, unguided_rollout_dir
@@ -458,6 +391,56 @@ def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
 def _(mo):
     mo.md(r"""
     ## Realized guidance
+    """)
+    return
+
+
+@app.cell
+def _(guided_cfg, guided_rollout_dir, read_json):
+    timestamps = guided_cfg["timestamps"]
+    planned_guidance = guided_cfg["y"]
+    # planned_guidance = guided_cfg["planned_guidance"]
+    ground_truth_ = guided_cfg["ground_truth"]
+
+    # this should come from rollout_dir/mask_terms.json
+    realized_terms = read_json(guided_rollout_dir, "mask_terms")["final_mask_terms"]
+    return ground_truth_, planned_guidance, realized_terms, timestamps
+
+
+@app.cell
+def _(guided_rollout_dir, m, n, read_state, unguided_rollout_dir):
+    guided_state_n = read_state(get_rollout_path(guided_rollout_dir, n, f"guided_{1}"))
+    deterministic_state_n = read_state(get_rollout_path(guided_rollout_dir, n, f"det_{m}"))
+    unguided_state_n = read_state(get_rollout_path(unguided_rollout_dir, n, f"unguided_{m}"))
+    return guided_state_n, unguided_state_n
+
+
+@app.cell
+def _(get_mask_from_corners, guided_cfg):
+    mask = get_mask_from_corners(*guided_cfg["mask_corners"])
+    return (mask,)
+
+
+@app.cell
+def _(guided_cfg, mo, pick_guided_rollout_dropdown, refresh_button):
+    mo.vstack([
+        mo.hstack([
+            pick_guided_rollout_dropdown, refresh_button,
+        ], justify="start"),
+        mo.accordion(
+            {
+                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in guided_cfg.items())),
+            }
+        )
+    ])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Realized guidance
+    Shows the evolution of the mask term over the N forecast steps.
     """)
     return
 
@@ -655,15 +638,9 @@ def _(get_guidance, plt):
 
 
 @app.cell
-def _(guided_cfg, guided_rollout_dir, read_json):
-    timestamps = guided_cfg["timestamps"]
-    planned_guidance = guided_cfg["y"]
-    # planned_guidance = guided_cfg["planned_guidance"]
-    ground_truth_ = guided_cfg["ground_truth"]
-
-    # this should come from rollout_dir/mask_terms.json
-    realized_terms = read_json(guided_rollout_dir, "mask_terms")["final_mask_terms"]
-    return ground_truth_, planned_guidance, realized_terms, timestamps
+def _(planned_guidance, realized_terms):
+    planned_guidance, realized_terms
+    return
 
 
 @app.cell
@@ -685,37 +662,14 @@ def _(
         ground_truth=ground_truth_,
         ensemble_rollout=guided_cfg["unguided_rollout"],
         title="Realized guidance analysis",
-        subtitle="mask term along the rollout: realized vs online / offline plans, ground truth, mean & ensemble",
+        subtitle="mask term along the rollout",
     )
     return (realized_guidance_plot,)
 
 
 @app.cell
-def _(guided_rollout_dir, m, n, read_state, unguided_rollout_dir):
-    guided_state_n = read_state(get_rollout_path(guided_rollout_dir, n, f"guided_{1}"))
-    deterministic_state_n = read_state(get_rollout_path(guided_rollout_dir, n, f"det_{m}"))
-    unguided_state_n = read_state(get_rollout_path(unguided_rollout_dir, n, f"unguided_{m}"))
-    return guided_state_n, unguided_state_n
-
-
-@app.cell
-def _(get_mask_from_corners, guided_cfg):
-    mask = get_mask_from_corners(*guided_cfg["mask_corners"])
-    return (mask,)
-
-
-@app.cell
-def _(guided_cfg, mo, pick_guided_rollout_dropdown, refresh_button):
-    mo.vstack([
-        mo.hstack([
-            pick_guided_rollout_dropdown, refresh_button,
-        ], justify="start"),
-        mo.accordion(
-            {
-                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in guided_cfg.items())),
-            }
-        )
-    ])
+def _(realized_guidance_plot):
+    realized_guidance_plot
     return
 
 
@@ -872,6 +826,33 @@ def _(
 
 @app.cell
 def _():
+    # def plot_zoom_histogram(
+    #     array_2d,
+    #     *,
+    #     zoom,
+    #     center_lon=0.0,
+    #     center_lat=0.0,
+    #     bins=30,
+    #     title="Value distribution in zoom zone",
+    #     figsize=(11.75, 5.45),
+    #     dpi=200,
+    # ):
+    #     values = extract_zoom_values(
+    #         array_2d,
+    #         zoom=zoom,
+    #         center_lon=center_lon,
+    #         center_lat=center_lat,
+    #     )
+
+    #     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    #     ax.hist(values, bins=bins)
+    #     ax.set_title(title)
+    #     ax.set_xlabel("Value")
+    #     ax.set_ylabel("Count")
+    #     ax.grid(True, alpha=0.3)
+
+    #     return fig
+
     # next_guided_hist = plot_zoom_histogram(
     #     guided_unguided,
     #     zoom=zoom_slider.value,
@@ -1100,29 +1081,6 @@ def _(all_mask_terms, plot_trajectories_over_n):
         title="Realized guidance over T",
     )
     trajectories_over_n_plot
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ### Realized guidance analysis
-
-    End-of-sampling comparison along the rollout. The **realized** line is
-    the mask term actually reached by the guided sample at each step. The
-    **online planned** dashed segments show, for each step $n$, the target
-    the online planner aims for given the previous realized value. The
-    **offline planned** curve is the full trajectory planned before sampling
-    begins. **Ground truth** is the mask term evaluated on ERA5; **mean
-    rollout** and the **ensemble** envelope show what an unguided ensemble
-    would produce over the same window.
-    """)
-    return
-
-
-@app.cell
-def _(realized_guidance_plot):
-    realized_guidance_plot
     return
 
 

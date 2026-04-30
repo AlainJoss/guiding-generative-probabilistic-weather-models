@@ -85,8 +85,22 @@ def _(mo):
 
 
 @app.cell
-def _(ds):
-    x_start = ds[2]
+def _(mo):
+    slider = mo.ui.slider(0, 10, step=1, show_value=True)
+    slider
+    return (slider,)
+
+
+@app.cell
+def _(slider):
+    idx = slider.value
+    return (idx,)
+
+
+@app.cell
+def _(ds, idx):
+    x_start = ds[idx]
+    x_start
     return (x_start,)
 
 
@@ -113,7 +127,7 @@ def _(mo):
     ```python
     time = pd.to_datetime(x_start["timestamp"].cpu().numpy(), unit="s").tz_localize(None)
 
-    print(time, torch.tensor(times_det.month), torch.tensor(times_det.hour))
+    print(time, torch.tensor(time.month), torch.tensor(time.hour))
     ```
     """)
     return
@@ -145,7 +159,7 @@ def _(mo):
     ```python
     time = pd.to_datetime(x_start["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
 
-    print(time, torch.tensor(times_det.month), torch.tensor(times_det.hour))
+    print(time, torch.tensor(time.month), torch.tensor(time.hour))
     ```
     """)
     return

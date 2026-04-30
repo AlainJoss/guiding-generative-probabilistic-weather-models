@@ -794,6 +794,7 @@ def _(
     mask_corners,
     mean_unguided_rollout,
     partition,
+    planned_guidance,
     timestamp,
     timestamp_idx,
     timestamps,
@@ -802,7 +803,6 @@ def _(
     var,
     var_idx,
     w_slider,
-    y_trajectory,
 ):
     config = {
         "guidance_flag": True,
@@ -823,7 +823,7 @@ def _(
         "ground_truth": list_tens_to_floats(ground_truth),
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
-        "y": list_tens_to_floats(y_trajectory),
+        "y": list_tens_to_floats(planned_guidance),
         "lambda_": list_tens_to_floats(lambda_),
         "alpha": alpha,
         "w": w_slider.value,
