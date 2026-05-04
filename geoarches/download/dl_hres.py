@@ -75,7 +75,10 @@ if __name__ == "__main__":
     Path(args.folder).mkdir(parents=True, exist_ok=True)
 
     file = "2016-2022-6h-240x121_equiangular_with_poles_conservative.zarr"
-    ds = xr.open_zarr("gs://weatherbench2/datasets/hres_t0/" + file, chunks="auto")
+    ds = xr.open_zarr("gs://weatherbench2/datasets/hres_t0/" + file, 
+                      chunks="auto", 
+                      storage_options={"token": "anon"}  # or {"anon": True} depending on gcsfs version
+    )
     # Drop zarr input chunk encoding so that we can rechunk when we write.
     ds = ds.drop_encoding()
 

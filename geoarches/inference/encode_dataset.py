@@ -58,11 +58,11 @@ else:
     module, cfg = load_module(model_uids[0])
     module.to(device).eval()
 
-
+from src.paths import ERA5
 # create dataset and dataloader
 ds = instantiate(
     cfg.dataloader.dataset,
-    path="data/era5_240/full/",
+    path=ERA5,
     domain="all",
 )
 
@@ -75,7 +75,7 @@ dl = torch.utils.data.DataLoader(
     ds, batch_size=1, num_workers=3, shuffle=False, collate_fn=collate_fn
 )
 
-current_year = 1979
+current_year = 2020
 xr_list = []
 for i, batch in tqdm(enumerate(dl)):
     fname = Path(args.output_path).joinpath(f"era5_240_pred_{current_year}_0h.nc")

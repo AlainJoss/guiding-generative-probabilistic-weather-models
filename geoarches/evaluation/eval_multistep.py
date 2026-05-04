@@ -11,7 +11,7 @@ Example commandline:
     python -m geoarches.evaluation.eval_multistep \
         --pred_path data/ifs_ens/ \
         --output_dir evalstore/ens/ \
-        --groundtruth_path data/hres/ \
+        --groundtruth_path data/era5 \
         --level_vars geopotential u_component_of_wind v_component_of_wind temperature specific_humidity \
         --metrics hres_brier_skill_score
 """

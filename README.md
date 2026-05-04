@@ -6,6 +6,7 @@ Resources:
 Run analysis:
 ```bash
 # compare original vs. new implementation
+sh experiments/eval_pipeline.sh
 uv run -m src.run
 # run 
 python -m src.run_from_config --config-id "2026-04-28_17:03:02" --config-type guided
