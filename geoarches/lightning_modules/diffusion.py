@@ -104,6 +104,7 @@ class DiffusionModule(BaseLightningModule):
                 for metric_name, metric in cfg.inference.metrics.items()
             }
         )
+        
         # define coeffs for loss
 
         pressure_levels = torch.tensor(era5.pressure_levels).float()
@@ -219,7 +220,6 @@ class DiffusionModule(BaseLightningModule):
         generator = torch.Generator(device=self.device)
 
         if seed is not None:
-            print(f"seed: {seed}")
             generator.manual_seed(seed)
 
         noisy_state = batch["state"].apply(
@@ -295,7 +295,7 @@ class DiffusionModule(BaseLightningModule):
 
         for i in tqdm(range(iterations), disable=disable_tqdm):
             seed_i = member + 1000 * i + batch_nb * 10**6
-            seed_i=0
+            # seed_i=0
             print(f"seed_i: {seed_i}")
             sample = self.sample(loop_batch, seed=seed_i, disable_tqdm=True, **kwargs)
             preds_future.append(sample)

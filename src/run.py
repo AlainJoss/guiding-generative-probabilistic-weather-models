@@ -16,6 +16,7 @@ ds = Era5Forecast(
     load_prev=True,  # whether to load previous state
     norm_scheme="pangu",  # default normalization scheme
     domain="test",  # domain to consider. domain = 'test' loads the 2020 period
+    lead_time_hours=24,
     lead_time_hours=6,
 )
 
@@ -30,6 +31,31 @@ old_model, old_config = load_module(
     module_target=module_target.format(MODELS[model]),
 )
 old_model = old_model.to(device)
+
+
+
+det_model, det_config = load_module(
+    "archesweather-m-seed0",
+    avg_with_modules=[
+        "archesweather-m-seed1",
+        "archesweather-m-skip-seed0",
+        "archesweather-m-skip-seed1",
+    ],
+)
+
+# for multiple indices
+det_model = det_model.to(device)
+# we can also do multistep rollouts with the deterministic model:
+batch = {k: v[None].to(device) for k, v in ds[0].items()}
+pred_multistep = det_model.forward_multistep(batch, iters=10)  # this does a 10-day rollout
+# the rollout dimension is the second dimension in the predicted tensors
+pred_multistep
+
+# compute RMSE at each step
+# go to next id
+
+# after loop save results in table (2x) and plot the the average rmse over all horizons for both plots
+
 
 # model = 1
 # new_model, new_config = load_module(

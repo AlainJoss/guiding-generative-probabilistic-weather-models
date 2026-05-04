@@ -48,14 +48,15 @@ def get_xr_ds():
         join="exact",
     ).sortby("time")
 
-def get_dataset():
+def get_dataset(multistep:int=1):
     return Era5Forecast(
         path=ERA5,  # default path
         domain="all",  # all files under ERA5; year-slicing happens on the time coord
         load_prev=True,  # whether to load previous state
         norm_scheme="pangu",  # default normalization scheme
         lead_time_hours=24,
-        timedelta_hours=6
+        timedelta_hours=6,
+        multistep=multistep
     )
 
 def get_model(device):

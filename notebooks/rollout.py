@@ -57,6 +57,7 @@ def _():
         get_now_timestamp,
         save_to_json,
         state_to_device,
+        tensor_timestamp_to_string,
     )
 
 
@@ -234,6 +235,18 @@ def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
         timestamp_idx : timestamp_idx + STRIDE * N + 1 : STRIDE
     ]
     return (timestamps,)
+
+
+@app.cell
+def _(timestamp):
+    timestamp
+    return
+
+
+@app.cell
+def _(tensor_timestamp_to_string, x_start):
+    tensor_timestamp_to_string(x_start["timestamp"])
+    return
 
 
 @app.cell

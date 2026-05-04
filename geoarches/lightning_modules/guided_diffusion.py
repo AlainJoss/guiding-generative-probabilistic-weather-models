@@ -179,14 +179,14 @@ class GuidedFlow(BaseLightningModule):
         self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z, mask_term = self.denoise(x_cond, self.mu, y_n, mask, lambda_, seed)
+        z, mask_term = self.flow_step(x_cond, self.mu, y_n, mask, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
         return x_hat, mask_term
     
     # TODO: do not use batch, separate object for clarity 
     #       also the name is utter bs
-    def denoise(self,
+    def flow_step(self,
         x_cond, 
         mu,
         y_n: list[torch.Tensor] | None = None, # shape: 

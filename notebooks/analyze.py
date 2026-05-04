@@ -749,7 +749,7 @@ def _(
             _abs_maps[_label] = visualize_map(
                 _arr,
                 mask_2d=_mask_np,
-                title=f"{_label}   $\mu$={_fmt(_mu)}  |max|={_fmt(_mx)}",
+                title=f"{_label}",
                 vmin=_abs_vmin,
                 vmax=_abs_vmax,
                 center=_abs_center,

@@ -10,9 +10,11 @@ from torchmetrics import Metric
 from geoarches.dataloaders import era5
 from geoarches.metrics.label_wrapper import LabelDictWrapper, add_timedelta_index
 
-from geoarches.paths import STATS_PATH
 from . import metric_base
 from .metric_base import MetricBase, TensorDictMetricBase
+
+from geoarches.paths import STATS_PATH
+geoarches_stats_path = STATS_PATH
 
 
 class BrierSkillScore(Metric, MetricBase):
@@ -203,8 +205,8 @@ class Era5BrierSkillScore(TensorDictMetricBase):
                 See param `lead_time_hours`.
         """
         # Quantiles for each var across gridpoints and times.
-        with resources.as_file(resources.files(geoarches_stats).joinpath(quantiles_filepath)) as f:
-            q = xr.open_dataset(f).transpose(..., "latitude", "longitude")
+        q_path = geoarches_stats_path / quantiles_filepath
+        q = xr.open_dataset(q_path).transpose(..., "latitude", "longitude")
         self.surface_high_quantiles = torch.from_numpy(
             q[era5.surface_variables]
             .sel({"quantile": high_quantile_levels}, method="nearest")
