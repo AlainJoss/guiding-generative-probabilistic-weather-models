@@ -57,7 +57,6 @@ def _():
         get_now_timestamp,
         save_to_json,
         state_to_device,
-        tensor_timestamp_to_string,
     )
 
 
@@ -238,14 +237,14 @@ def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
 
 
 @app.cell
-def _(timestamp):
-    timestamp
+def _():
+    # timestamp
     return
 
 
 @app.cell
-def _(tensor_timestamp_to_string, x_start):
-    tensor_timestamp_to_string(x_start["timestamp"])
+def _():
+    # tensor_timestamp_to_string(x_start["timestamp"])
     return
 
 
@@ -264,6 +263,7 @@ def _(mo):
 
 @app.cell
 def _(get_corners, set_corners, slice, visualize_map):
+    # enables to save state of widget
     lx0, lx1, ly0, ly1 = get_corners()
     map_widget = visualize_map(
         slice,
@@ -344,10 +344,9 @@ def _(
     mo.vstack([
         mo.hstack([
             mo.vstack(
-                [   
-                    timestamp,
+                [
                     mo.hstack(
-                        [month_slider, day_slider, hour_slider],
+                        [month_slider, day_slider, hour_slider, mo.md(f"({timestamp})")],
                         justify="start",
                     ),
                     mo.hstack(
