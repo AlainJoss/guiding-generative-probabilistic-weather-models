@@ -27,12 +27,14 @@ class ZarrIterativeWriter:
             xr_dataset.to_zarr(self.path, **args)
 
     def to_netcdf(self, dump_id=0):
-        """
-        useful for not hitting inodes limit and rsyncing to remote
-        this has to be called once in the main process, otherwise every process will convert to netcdf
-        """
         with self.synchronizer:
             nc_path = self.path.parent / self.path.name.replace(".zarr", f"_{dump_id}.nc")
+
             if not nc_path.exists():
-                xr.open_zarr(self.path).to_netcdf(nc_path)
-                shutil.rmtree(self.path)
+                ds = xr.open_zarr(self.path)
+                try:
+                    ds.to_netcdf(nc_path)
+                finally:
+                    ds.close()
+
+            shutil.rmtree(self.path)
