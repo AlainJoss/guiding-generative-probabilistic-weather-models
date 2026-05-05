@@ -56,7 +56,6 @@ def _():
         get_model,
         get_now_timestamp,
         save_to_json,
-        batchify_and_move,
     )
 
 
@@ -130,20 +129,25 @@ def _(STRIDE, ds, mo):
 
 
 @app.cell(hide_code=True)
-def _(get_day, mo, month_slider, set_day):
+def _(TIMESTAMPS, get_day, mo, month_slider, set_day):
     import calendar
 
     _max_day = calendar.monthrange(2020, month_slider.value)[1]
-    _cur = min(get_day(), _max_day)
+    _month_days = sorted(
+        {int(t[8:10]) for t in TIMESTAMPS if int(t[5:7]) == month_slider.value}
+    )
+    _min_day = _month_days[0] if _month_days else 1
+    _max_day = _month_days[-1] if _month_days else _max_day
+    _cur = min(max(get_day(), _min_day), _max_day)
     day_slider = mo.ui.slider(
-        start=1,
+        start=_min_day,
         stop=_max_day,
         step=1,
         value=_cur,
         label="day: ",
         show_value=True,
         on_change=set_day,
-        debounce=True
+        debounce=True,
     )
     return (day_slider,)
 

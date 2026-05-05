@@ -861,6 +861,7 @@ def _(
 ):
     if run_button.value and status == "RUNNING":
         rollout_dir = ensure_rollout_dir("guided", N, unguided_cfg["rollout_id"])
+        # TODO: rollout_dir = ROLLOUTS / f"{rollout_id}"
         rollout(
             guidance_flag=True,
             rollout_dir=rollout_dir,

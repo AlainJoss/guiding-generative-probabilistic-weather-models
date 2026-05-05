@@ -11,6 +11,7 @@ uv run -m src.run
 # run 
 python -m src.run_from_config --config-id "2026-04-28_17:03:02" --config-type guided
 python -m src.run_all_configs --config-type guided
+uv run marimo edit notebooks/timestamp_discrepancy.py --watch --no-token
 ```
 
 Dashboards:

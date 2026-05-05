@@ -90,8 +90,11 @@ def main():
     with torch.no_grad():
         for idx in range(len(ds)):
             sample = ds[idx]
-            batch = batchify_and_move(sample, device)
+        
+            print("timestamp from dataset:", tensor_timestamp_to_string(sample["timestamp"]))
 
+            batch = batchify_and_move(sample, device)
+        
             member_datasets = []
 
             for member in range(num_members):

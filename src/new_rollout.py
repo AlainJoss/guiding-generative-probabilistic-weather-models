@@ -19,8 +19,8 @@ from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 
 def rollout(
         guidance_flag: bool,  # either guiding or not the sampling
-        rollout_id: Path, 
-        ds: Era5Forecast, 
+        rollout_dir: Path, 
+        ds: Era5Forecast,  # must be of multistep type, so we can extract the ground truth
         x_cond: dict[TensorDict], 
         flow_model: GuidedFlow, 
         mask_corners: list[float], 
@@ -35,34 +35,46 @@ def rollout(
         test: bool = False,
     ):
 
+    if test:  # just to make sure
+        guidance_flag = False
+
     device = flow_model.device
-    y = [y[n].to(device) for n in range(N)]
-    lambda_ = [lambda_[t].to(device) for t in range(25)]
 
     if guidance_flag:
+        y = [y[n].to(device) for n in range(N)]
+        lambda_ = [lambda_[t].to(device) for t in range(25)]
         mask = get_mask_from_corners(*mask_corners)
         mask = mask.to(device)
         mask = get_mask_tensordict(x_cond["state"][0], partition, var_idx, level_idx, mask)
+    else:
+        # retrieve and save ground truth in the same form as the unguided rollout
+        # TODO: need to correct this: make function to extract ground truth
+        ground_truth = torch.cat([x_cond["state"], x_cond["future_states"]], dim=0)
+        ground_truth = rollout_to_xarray(ds, ground_truth, x_cond["timestamp"], -1)
 
     M_mask_terms = {}
     member_datasets = []
     for m in range(1, M+1):
         print(f"member={m}")
-        if guidance_flag:
-            sample_multistep, mask_terms = flow_model.sample_rollout(
-                x_cond,
-                member=m,
-                iterations=N,
-                # ... # y, lambda ... init_mask_term (check in particular)
-            )
-            M_mask_terms[f"{m}"] = mask_terms
+        if not test:
+            if guidance_flag:
+                sample_multistep, mask_terms = flow_model.sample_rollout(
+                    x_cond,
+                    member=m,
+                    iterations=N,
+                    # ... # y, lambda ... init_mask_term (check in particular)
+                )
+                M_mask_terms[f"{m}"] = mask_terms
+            else: 
+                sample_multistep = flow_model.sample_rollout(
+                            x_cond,
+                            batch_nb=0, # TODO: fix
+                            member=m,  
+                            iterations=N,
+                        )
         else: 
-            sample_multistep = flow_model.sample_rollout(
-                        x_cond,
-                        batch_nb=0, # TODO: fix
-                        member=m,  
-                        iterations=N,
-                    )
+            sample_multistep = ground_truth
+
         xr_member = rollout_to_xarray(
             ds=ds,
             sample_multistep=sample_multistep,
@@ -72,11 +84,10 @@ def rollout(
         member_datasets.append(xr_member)
 
     xr_pred = xr.concat(member_datasets, dim="member")
-    out_file = ROLLOUTS / f"{rollout_id}" / f"guided.nc"
-    xr_pred.to_netcdf(out_file)
+    xr_pred.to_netcdf(rollout_dir / f"guided.nc")
 
     if guidance_flag:
-        ... # save the mask terms
+        save_to_json(M_mask_terms, rollout_dir, "mask_terms")
 
 
 

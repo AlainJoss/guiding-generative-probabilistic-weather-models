@@ -55,7 +55,7 @@ def _(datetime, torch):
 
 @app.cell
 def _(get_dataset):
-    ds = get_dataset()
+    ds = get_dataset(multistep=6)
     return (ds,)
 
 

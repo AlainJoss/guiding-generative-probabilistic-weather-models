@@ -19,7 +19,10 @@ def rollout_to_xarray(ds, sample_multistep, init_timestamp, member):
         denormalize=True,
     )
 
-    return xr_rollout.expand_dims(member=[member])
+    if member == -1:
+        return xr_rollout
+    else: 
+        return xr_rollout.expand_dims(member=[member])
 
 def get_device():
     if torch.cuda.is_available():
