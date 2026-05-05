@@ -5,10 +5,10 @@ set -euo pipefail
 # Config
 # -------------------------
 
-MULTISTEP=2
+MULTISTEP=6
 DET_MEMBERS=4
-GEN_MEMBERS=2
-MAX_SAMPLES=2
+GEN_MEMBERS=4
+MAX_SAMPLES=10
 
 PRED_DIR="data/multistep"
 EVAL_DIR="data/eval"
@@ -48,6 +48,14 @@ GEN_TIME_BRIER_METRIC="${GEN_TIME_EVAL}/test-multistep=${MULTISTEP}-era5_brier_s
 # -------------------------
 
 python -m src.run_multistep \
+  --model "${GEN_TIME_MODEL}" \
+  --output-name "${GEN_TIME_SAVE}" \
+  --multistep "${MULTISTEP}" \
+  --num-members "${GEN_MEMBERS}" \
+  --max-samples "${MAX_SAMPLES}" \
+  --force
+
+python -m src.run_multistep \
   --model "${DET_MODEL}" \
   --output-name "${DET_SAVE}" \
   --multistep "${MULTISTEP}" \
@@ -61,15 +69,6 @@ python -m src.run_multistep \
   --num-members "${GEN_MEMBERS}" \
   --max-samples "${MAX_SAMPLES}" \
   --force
-
-python -m src.run_multistep \
-  --model "${GEN_TIME_MODEL}" \
-  --output-name "${GEN_TIME_SAVE}" \
-  --multistep "${MULTISTEP}" \
-  --num-members "${GEN_MEMBERS}" \
-  --max-samples "${MAX_SAMPLES}" \
-  --force
-
 
 # -------------------------
 # 2. Evaluate rollouts

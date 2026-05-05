@@ -12,6 +12,15 @@ from geoarches.dataloaders.era5 import Era5Forecast
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS
 
 
+def rollout_to_xarray(ds, sample_multistep, init_timestamp, member):
+    xr_rollout = ds.convert_trajectory_to_xarray(
+        preds_future=sample_multistep,
+        timestamp=init_timestamp.cpu(),
+        denormalize=True,
+    )
+
+    return xr_rollout.expand_dims(member=[member])
+
 def get_device():
     if torch.cuda.is_available():
         device = torch.device("cuda")

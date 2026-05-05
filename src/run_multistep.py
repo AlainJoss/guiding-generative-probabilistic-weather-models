@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 from src.paths import ERA5, DET_MODEL_PATHS, GEN_MODEL_PATH
-from src.utils import get_device, tensor_timestamp_to_string, batchify_and_move
+from src.utils import get_device, tensor_timestamp_to_string, batchify_and_move, rollout_to_xarray
 
 from geoarches.dataloaders.era5 import Era5Forecast
 from geoarches.lightning_modules import load_module
@@ -39,16 +39,6 @@ def load_gen_model(device):
         module_target="geoarches.lightning_modules.diffusion.DiffusionModule",
     )
     return model.to(device).eval(), cfg
-
-
-def rollout_to_xarray(ds, sample_multistep, init_timestamp, member):
-    xr_rollout = ds.convert_trajectory_to_xarray(
-        preds_future=sample_multistep,
-        timestamp=init_timestamp.cpu(),
-        denormalize=True,
-    )
-
-    return xr_rollout.expand_dims(member=[member])
 
 
 def main():
