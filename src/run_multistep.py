@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--multistep", type=int, default=10)
     parser.add_argument("--num-members", type=int, default=1)
     parser.add_argument("--max-samples", type=int, default=0)
+    parser.add_argument("--output-name", type=str, default=None)
     parser.add_argument("--force", action="store_true")  # if data/multistep/...zarr already exists, delete it first.
     args = parser.parse_args()
 
@@ -92,15 +93,14 @@ def main():
         models = [model]
         num_members = args.num_members
 
+    save_name = args.output_name or args.model
     out_path = (
         Path("data/multistep")
-        / f"{args.model}_multistep={args.multistep}_members={num_members}.zarr"
+        / f"{save_name}_multistep={args.multistep}_members={num_members}.zarr"
     )
 
     writer = zarr.ZarrIterativeWriter(out_path, force=args.force)
-
     written = 0
-
     with torch.no_grad():
         for idx in range(len(ds)):
             sample = ds[idx]

@@ -167,6 +167,7 @@ class DiffusionModule(BaseLightningModule):
         if "det" in conditional_keys:
             input_state = tensordict_cat([pred_state, input_state], dim=1)
 
+        # TODO: correct this one and check
         # conditional by default
         times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
         # print(f"timestamp: {times}, month: {times.month}, hour: {times.hour}")

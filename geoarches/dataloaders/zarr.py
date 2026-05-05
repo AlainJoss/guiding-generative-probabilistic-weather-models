@@ -37,4 +37,4 @@ class ZarrIterativeWriter:
                 finally:
                     ds.close()
 
-            shutil.rmtree(self.path)
+            # shutil.rmtree(self.path)
