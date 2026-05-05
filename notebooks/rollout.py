@@ -465,18 +465,18 @@ def _(
         "y": None,
         "lambda_": None,
     }
-    return (rollout_config,)
+    return
 
 
 @app.cell
 def _(
     M,
     N,
+    config,
     ensure_rollout_dir,
     get_now_timestamp,
     model,
     rollout,
-    rollout_config,
     run_button,
     save_to_json,
     test_flag_checkbox,
@@ -485,27 +485,25 @@ def _(
     def run_rollout():
         rollout_id = get_now_timestamp()
         rollout_dir = ensure_rollout_dir(rollout_id)
-        rollout_config["rollout_id"]=rollout_id
-        for m in range(1, M + 1):
-            print(f"m: {m}/{M}")
-            rollout(
-                guidance_flag=False,
-                rollout_dir=rollout_dir,
-                timestamp=timestamp,
-                flow_model=model,
-                init_mask_term=None,
-                mask_corners=None,  # mask_corners
-                y=None,  # y
-                lambda_=None,  # lambda_
-                N=N,
-                partition=None,  # partition
-                level_idx=None,  # level_idx
-                var_idx=None,  # var_idx
-                M=M,
-                test=test_flag_checkbox.value,
-            )
+        config["rollout_id"]=rollout_id
+        rollout(
+            guidance_flag=False,
+            rollout_dir=rollout_dir,
+            timestamp=timestamp,
+            flow_model=model,
+            init_mask_term=None,
+            mask_corners=None,  # mask_corners
+            y=None,  # y
+            lambda_=None,  # lambda_
+            N=N,
+            partition=None,  # partition
+            level_idx=None,  # level_idx
+            var_idx=None,  # var_idx
+            M=M,
+            test=test_flag_checkbox.value,
+        )
 
-        save_to_json(rollout_config, rollout_dir, "config")
+        save_to_json(config, rollout_dir, "config")
 
 
     if run_button.value:
@@ -521,12 +519,12 @@ def _(mo):
 
 
 @app.cell
-def _(CONFIGS, config_button, get_now_timestamp, rollout_config, save_to_json):
+def _(CONFIGS, config, config_button, get_now_timestamp, save_to_json):
     if config_button.value:
         config_id = get_now_timestamp()
-        config_dir = CONFIGS / "to_run" / "unguided"
+        config_dir = CONFIGS / "unguided"
         # no need to add the config_id to the config
-        save_to_json(rollout_config, config_dir, f"{config_id}")
+        save_to_json(config, config_dir, f"{config_id}")
     return
 
 

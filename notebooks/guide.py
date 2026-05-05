@@ -15,7 +15,7 @@ def _():
 
     import matplotlib.pyplot as plt
 
-    return Path, mo, torch
+    return mo, torch
 
 
 @app.cell
@@ -28,7 +28,7 @@ def _():
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from src.rollout import rollout
     from src.utils import (
-        ensure_rollout_dir, read_nc,
+        read_nc,
         get_dataset, get_model, batchify_and_move,
         get_slice, save_to_json, read_json,
         xr_to_torch, list_tens_to_floats, get_now_timestamp,
@@ -72,7 +72,7 @@ def _():
 def _():
     from src.paths import ROLLOUTS, CONFIGS
 
-    return CONFIGS, ROLLOUTS
+    return (CONFIGS,)
 
 
 @app.cell
@@ -646,6 +646,12 @@ def _(mo, test_flag_checkbox):
 
 
 @app.cell
+def _(mean_unguided_rollout):
+    init_mask_term = float(mean_unguided_rollout[0])
+    return (init_mask_term,)
+
+
+@app.cell
 def _(
     M,
     N,
@@ -653,6 +659,7 @@ def _(
     config,
     ground_truth,
     guidance_mode_dropdown,
+    init_mask_term,
     lambda_,
     lambda_shape_slider,
     level,
@@ -685,7 +692,7 @@ def _(
         "var": var,
         "var_idx": int(var_idx),
         "timestamps": timestamps,
-        "init_mask_term": float(mean_unguided_rollout[0]),
+        "init_mask_term": init_mask_term,
         "ground_truth": list_tens_to_floats(ground_truth),
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
@@ -700,14 +707,12 @@ def _(
 
 @app.cell
 def _(
+    M,
     N,
-    Path,
-    ROLLOUTS,
-    ds,
+    init_mask_term,
     lambda_,
     level_idx,
     mask_corners,
-    mean_unguided_rollout,
     model,
     new_config,
     partition,
@@ -718,29 +723,28 @@ def _(
     save_to_json,
     status,
     test_flag_checkbox,
-    torch,
+    timestamp,
     var_idx,
-    x_start,
 ):
     if run_button.value and status == "RUNNING":
         rollout(
-            guidance_flag=True,
+            guidance_flag=False,
             rollout_dir=rollout_dir,
-            ds=ds,
-            x_start=x_start,
-            gen_model=model,
-            mask_corners=mask_corners,
-            init_mask_term=torch.as_tensor(mean_unguided_rollout[0]),
-            y=torch.as_tensor(planned_guidance),
-            lambda_=lambda_,
+            timestamp=timestamp,
+            flow_model=model,
+            init_mask_term=init_mask_term,
+            mask_corners=mask_corners,  # mask_corners
+            y=planned_guidance,  # y
+            lambda_=lambda_,  # lambda_
             N=N,
-            partition=partition,
-            level_idx=level_idx,
-            var_idx=var_idx,
-            m=1,
-            test=test_flag_checkbox.value
+            partition=partition,  # partition
+            level_idx=level_idx,  # level_idx
+            var_idx=var_idx,  # var_idx
+            M=M,
+            test=test_flag_checkbox.value,
         )
-        save_to_json(new_config, Path(ROLLOUTS, "guided", rollout_dir), "config")
+
+        save_to_json(new_config, rollout_dir, "config")
     return
 
 
@@ -752,12 +756,17 @@ def _(mo):
 
 
 @app.cell
-def _(CONFIGS, config, config_button, save_to_json):
+def _(CONFIGS, config, config_button, new_config, save_to_json):
     # manually move config to archive once things are done
     if config_button.value:
-        config_dir = CONFIGS / "to_run" / "guided"
+        config_dir = CONFIGS / "guided"
         # no need to add the config_id to the config
-        save_to_json(config, config_dir, f"{config['rollout_id']}")
+        save_to_json(new_config, config_dir, f"{config['rollout_id']}")
+    return
+
+
+@app.cell
+def _():
     return
 
 
