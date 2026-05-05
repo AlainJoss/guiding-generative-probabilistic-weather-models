@@ -82,3 +82,36 @@ def compute_mean_rollout(rollout_trajectory: dict[str, list]) -> dict[str, float
         mean_trajectory.append(sum(values) / len(values))
 
     return mean_trajectory
+
+
+# 
+def main():
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(
+        description="Print lambda_ schedule from T_schedule(alpha, w)."
+    )
+    parser.add_argument("--alpha", type=float, required=True)
+    parser.add_argument("--w", type=float, required=True)
+    parser.add_argument(
+        "--format",
+        choices=["json", "python", "plain"],
+        default="json",
+    )
+
+    args = parser.parse_args()
+
+    lambda_ = T_schedule(args.alpha, args.w)
+    lambda_ = [float(x.item()) for x in lambda_]
+
+    if args.format == "json":
+        print(json.dumps(lambda_))
+    elif args.format == "python":
+        print(lambda_)
+    else:
+        print(" ".join(str(x) for x in lambda_))
+
+
+if __name__ == "__main__":
+    main()

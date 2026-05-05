@@ -156,7 +156,7 @@ def plot_dual_trajectory(
             edgecolor="none", fontsize=9,
         )
 
-    fig.suptitle(f"Trajectory {var}", fontsize=13, fontweight="bold")
+    fig.suptitle(f"{var} {N}-day trajectory", fontsize=13, fontweight="bold")
     return fig
 
 

@@ -175,7 +175,7 @@ def _(partition_dropdown):
 @app.cell
 def _(LEVELS_DICT, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level: ", show_value=True, debounce=True)
+    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level  ", show_value=True, debounce=True)
     return LEVELS, level_slider
 
 
@@ -342,11 +342,12 @@ def _(
     var_dropdown,
 ):
     mo.vstack([
+        mo.md("Unguided rollout parameters:"),
         mo.hstack([
             mo.vstack(
                 [
                     mo.hstack(
-                        [month_slider, day_slider, hour_slider, mo.md(f"({timestamp})")],
+                        [mo.md("Experiment start: "), month_slider, day_slider, hour_slider, mo.md(f"({timestamp})")],
                         justify="start",
                     ),
                     mo.hstack(
@@ -355,6 +356,7 @@ def _(
                     mo.hstack([M_slider, mo.md("(ensemble members)")], justify="start"),
                     mo.hstack(
                         [
+                            mo.md("Mask: "),
                             partition_dropdown,
                             var_dropdown,
                             level_slider,

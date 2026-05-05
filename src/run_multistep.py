@@ -13,37 +13,6 @@ from geoarches.dataloaders import zarr
 from geoarches.lightning_modules import load_module
 
 
-"""
-Run deterministic full-ish:
-python -m experiments.run_multistep \
-  --model det \
-  --multistep 10 \
-  --max-samples 3 \
-  --num-members 4 \
-  --force
-
-Then feed those to evaluation:
-python -m geoarches.evaluation.eval_multistep \
-  --pred_path data/multistep/det_multistep=10_members=1_0.nc \
-  --output_dir data/eval/det \
-  --groundtruth_path data/era5 \
-  --multistep 10 \
-  --metrics era5_ensemble_metrics era5_brier_skill_score \
-  --eval_batch_size 1 \
-  --num_workers 0
-
-Now plot ensemble metrics:
-python -m geoarches.evaluation.plot \
-  --output_dir data/plots/det_multistep=10 \
-  --metric_paths data/eval/det/det_multistep=10_members=1_0-era5_ensemble_metrics.nc \
-  --model_names_for_legend det \
-  --model_colors blue \
-  --metrics rmse \
-  --vars T2m SP Z500 T850 \
-  --force
-"""
-
-
 DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-seed0",
     MODELSTORE / "archesweather-m-seed1",

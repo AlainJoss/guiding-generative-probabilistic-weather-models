@@ -5,10 +5,10 @@ set -euo pipefail
 # Config
 # -------------------------
 
-MULTISTEP=6
-DET_MEMBERS=4
-GEN_MEMBERS=4
-MAX_SAMPLES=30
+MULTISTEP=2
+DET_MEMBERS=2
+GEN_MEMBERS=2
+MAX_SAMPLES=2
 
 PRED_DIR="data/multistep"
 EVAL_DIR="data/eval"

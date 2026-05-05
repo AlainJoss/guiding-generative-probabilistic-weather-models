@@ -788,6 +788,7 @@ def _(
     ground_truth,
     guidance_mode_dropdown,
     lambda_,
+    lambda_shape_slider,
     level,
     level_idx,
     list_tens_to_floats,
@@ -824,8 +825,9 @@ def _(
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
         "y": list_tens_to_floats(planned_guidance),
+        "y_perc": alpha,
         "lambda_": list_tens_to_floats(lambda_),
-        "alpha": alpha,
+        "alpha": lambda_shape_slider.value,
         "w": w_slider.value,
     }
     return (config,)

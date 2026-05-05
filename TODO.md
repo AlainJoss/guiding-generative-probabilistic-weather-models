@@ -1,6 +1,7 @@
 # TODOs
 
 Rollout:
+- retrieve ground truth trough xarrays, collapse experiments into same style xarrays
 - implement a logger for experiments and print error to log file instead of this
 
 Analysis:
