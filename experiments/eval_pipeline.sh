@@ -6,7 +6,6 @@ set -euo pipefail
 # -------------------------
 
 MULTISTEP=2
-DET_MEMBERS=4
 GEN_MEMBERS=2
 MAX_SAMPLES=2
 
@@ -16,24 +15,22 @@ PLOT_DIR="data/plots"
 
 GROUNDTRUTH_PATH="data/era5"
 
-DET_MODEL="det_ens"
-GEN_MODEL="gen"
+# Old models, kept for reference
+# DET_MODEL="det_ens"
+# GEN_MODEL="gen"
 
-DET_PRED="${PRED_DIR}/${DET_MODEL}_multistep=${MULTISTEP}_members=${DET_MEMBERS}_0.nc"
-GEN_PRED="${PRED_DIR}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0.nc"
+GEN_MODEL_TIME_CORRECT="gen_time_correct"
+SAVE_NAME="gen_time"
 
-DET_EVAL="${EVAL_DIR}/${DET_MODEL}_multistep=${MULTISTEP}"
-GEN_EVAL="${EVAL_DIR}/${GEN_MODEL}_multistep=${MULTISTEP}"
+GEN_TIME_PRED="${PRED_DIR}/${SAVE_NAME}_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0.nc"
+GEN_TIME_EVAL="${EVAL_DIR}/${SAVE_NAME}_multistep=${MULTISTEP}"
 
-DET_ENSEMBLE_METRIC="${DET_EVAL}/${DET_MODEL}_multistep=${MULTISTEP}_members=${DET_MEMBERS}_0-era5_ensemble_metrics.nc"
-GEN_ENSEMBLE_METRIC="${GEN_EVAL}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0-era5_ensemble_metrics.nc"
-
-DET_BRIER_METRIC="${DET_EVAL}/${DET_MODEL}_multistep=${MULTISTEP}_members=${DET_MEMBERS}_0-era5_brier_skill_score.nc"
-GEN_BRIER_METRIC="${GEN_EVAL}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0-era5_brier_skill_score.nc"
+GEN_TIME_ENSEMBLE_METRIC="${GEN_TIME_EVAL}/${SAVE_NAME}_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0-era5_ensemble_metrics.nc"
+GEN_TIME_BRIER_METRIC="${GEN_TIME_EVAL}/${SAVE_NAME}_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0-era5_brier_skill_score.nc"
 
 
 # -------------------------
-# 1. Run deterministic ensemble rollouts
+# Old deterministic ensemble rollout
 # -------------------------
 
 # python -m src.run_multistep \
@@ -44,7 +41,7 @@ GEN_BRIER_METRIC="${GEN_EVAL}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_
 
 
 # -------------------------
-# 2. Run generative ensemble rollouts
+# Old generative rollout
 # -------------------------
 
 # python -m src.run_multistep \
@@ -56,12 +53,53 @@ GEN_BRIER_METRIC="${GEN_EVAL}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_
 
 
 # -------------------------
-# 3. Evaluate deterministic ensemble
+# 1. Run time-corrected generative rollout
+# -------------------------
+
+python -m src.run_multistep \
+  --model "${GEN_MODEL_TIME_CORRECT}" \
+  --output-name "${SAVE_NAME}" \
+  --multistep "${MULTISTEP}" \
+  --num-members "${GEN_MEMBERS}" \
+  --max-samples "${MAX_SAMPLES}" \
+  --force
+
+
+# -------------------------
+# Old deterministic eval
+# -------------------------
+
+# python -m geoarches.evaluation.eval_multistep \
+#   --pred_path "${DET_PRED}" \
+#   --output_dir "${DET_EVAL}" \
+#   --groundtruth_path "${GROUNDTRUTH_PATH}" \
+#   --multistep "${MULTISTEP}" \
+#   --metrics era5_ensemble_metrics era5_brier_skill_score \
+#   --eval_batch_size 1 \
+#   --num_workers 0
+
+
+# -------------------------
+# Old generative eval
+# -------------------------
+
+# python -m geoarches.evaluation.eval_multistep \
+#   --pred_path "${GEN_PRED}" \
+#   --output_dir "${GEN_EVAL}" \
+#   --groundtruth_path "${GROUNDTRUTH_PATH}" \
+#   --multistep "${MULTISTEP}" \
+#   --metrics era5_ensemble_metrics era5_brier_skill_score \
+#   --eval_batch_size 1 \
+#   --num_workers 0
+
+
+# -------------------------
+# 2. Evaluate time-corrected generative rollout
 # -------------------------
 
 python -m geoarches.evaluation.eval_multistep \
-  --pred_path "${DET_PRED}" \
-  --output_dir "${DET_EVAL}" \
+  --pred_path "${GEN_TIME_PRED}" \
+  --output_dir "${GEN_TIME_EVAL}" \
   --groundtruth_path "${GROUNDTRUTH_PATH}" \
   --multistep "${MULTISTEP}" \
   --metrics era5_ensemble_metrics era5_brier_skill_score \
@@ -70,50 +108,32 @@ python -m geoarches.evaluation.eval_multistep \
 
 
 # -------------------------
-# 4. Evaluate generative ensemble
-# -------------------------
-
-python -m geoarches.evaluation.eval_multistep \
-  --pred_path "${GEN_PRED}" \
-  --output_dir "${GEN_EVAL}" \
-  --groundtruth_path "${GROUNDTRUTH_PATH}" \
-  --multistep "${MULTISTEP}" \
-  --metrics era5_ensemble_metrics era5_brier_skill_score \
-  --eval_batch_size 1 \
-  --num_workers 0
-
-
-# -------------------------
-# 5. Plot ensemble metrics: det_ens vs gen
+# 3. Plot ensemble metrics
 # -------------------------
 
 python -m geoarches.evaluation.plot \
-  --output_dir "${PLOT_DIR}/det_ens_vs_gen_multistep=${MULTISTEP}_ensemble" \
-  --metric_paths \
-    "${DET_ENSEMBLE_METRIC}" \
-    "${GEN_ENSEMBLE_METRIC}" \
-  --model_names_for_legend det_ens gen \
-  --model_colors blue orange \
+  --output_dir "${PLOT_DIR}/${SAVE_NAME}_multistep=${MULTISTEP}_ensemble" \
+  --metric_paths "${GEN_TIME_ENSEMBLE_METRIC}" \
+  --model_names_for_legend "${SAVE_NAME}" \
+  --model_colors orange \
   --metrics rmse crps fcrps spskr \
   --vars T2m SP Z500 T850 Q700 U850 V850 \
   --force
 
 
 # -------------------------
-# 6. Plot Brier skill score: det_ens vs gen
+# 4. Plot Brier skill score
 # -------------------------
 
 python -m geoarches.evaluation.plot \
-  --output_dir "${PLOT_DIR}/det_ens_vs_gen_multistep=${MULTISTEP}_brier" \
-  --metric_paths \
-    "${DET_BRIER_METRIC}" \
-    "${GEN_BRIER_METRIC}" \
-  --model_names_for_legend det_ens gen \
-  --model_colors blue orange \
+  --output_dir "${PLOT_DIR}/${SAVE_NAME}_multistep=${MULTISTEP}_brier" \
+  --metric_paths "${GEN_TIME_BRIER_METRIC}" \
+  --model_names_for_legend "${SAVE_NAME}" \
+  --model_colors orange \
   --metrics brierskillscore \
   --vars T2m SP Z500 T850 Q700 U850 V850 \
   --brier_quantile_levels high high high high high high high \
   --force
 
 
-echo "Done. det_ens vs gen rollouts, metrics, and plots are saved."
+echo "Done. ${SAVE_NAME} rollouts, metrics, and plots are saved."
