@@ -892,6 +892,7 @@ def _(mo):
 
 @app.cell
 def _(CONFIGS, config, config_button, save_to_json, unguided_cfg):
+    # manually move config to archive once things are done
     if config_button.value:
         config_dir = CONFIGS / "to_run" / "guided"
         # no need to add the config_id to the config

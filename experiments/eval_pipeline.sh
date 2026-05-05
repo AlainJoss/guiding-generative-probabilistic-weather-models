@@ -6,7 +6,7 @@ set -euo pipefail
 # -------------------------
 
 MULTISTEP=2
-DET_MEMBERS=2
+DET_MEMBERS=4
 GEN_MEMBERS=2
 MAX_SAMPLES=2
 
@@ -36,23 +36,23 @@ GEN_BRIER_METRIC="${GEN_EVAL}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_
 # 1. Run deterministic ensemble rollouts
 # -------------------------
 
-python -m src.run_multistep \
-  --model "${DET_MODEL}" \
-  --multistep "${MULTISTEP}" \
-  --max-samples "${MAX_SAMPLES}" \
-  --force
+# python -m src.run_multistep \
+#   --model "${DET_MODEL}" \
+#   --multistep "${MULTISTEP}" \
+#   --max-samples "${MAX_SAMPLES}" \
+#   --force
 
 
 # -------------------------
 # 2. Run generative ensemble rollouts
 # -------------------------
 
-python -m src.run_multistep \
-  --model "${GEN_MODEL}" \
-  --multistep "${MULTISTEP}" \
-  --num-members "${GEN_MEMBERS}" \
-  --max-samples "${MAX_SAMPLES}" \
-  --force
+# python -m src.run_multistep \
+#   --model "${GEN_MODEL}" \
+#   --multistep "${MULTISTEP}" \
+#   --num-members "${GEN_MEMBERS}" \
+#   --max-samples "${MAX_SAMPLES}" \
+#   --force
 
 
 # -------------------------

@@ -20,7 +20,6 @@ DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-skip-seed1",
 ]
 
-
 def load_det_avg_model(device):
     model, cfg = load_module(
         DET_MODEL_PATHS[0],
@@ -39,6 +38,13 @@ def load_det_ens_models(device):
             cfg = cfg_i
 
     return models, cfg
+
+def load_gen_time_correct_model(device):
+    model, cfg = load_module(
+        MODELSTORE / "archesweathergen",
+        module_target="geoarches.lightning_modules.diffusion.DiffusionModuleTimeCorrect",
+    )
+    return model.to(device).eval(), cfg
 
 def load_gen_model(device):
     model, cfg = load_module(
@@ -59,7 +65,7 @@ def rollout_to_xarray(ds, sample_multistep, init_timestamp, member):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["det_avg", "det_ens", "gen"], required=True)
+    parser.add_argument("--model", choices=["det_avg", "det_ens", "gen", "gen_time_correct"], required=True)
     parser.add_argument("--multistep", type=int, default=10)
     parser.add_argument("--num-members", type=int, default=1)
     parser.add_argument("--max-samples", type=int, default=0)
@@ -88,8 +94,12 @@ def main():
         models, cfg = load_det_ens_models(device)
         num_members = len(models)
 
-    else:
+    elif args.model == "gen":
         model, cfg = load_gen_model(device)
+        models = [model]
+        num_members = args.num_members
+    else:
+        model, cfg = load_gen_time_correct_model(device)
         models = [model]
         num_members = args.num_members
 
