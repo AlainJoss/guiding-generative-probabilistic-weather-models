@@ -36,7 +36,7 @@ GEN_BRIER_METRIC="${GEN_EVAL}/${GEN_MODEL}_multistep=${MULTISTEP}_members=${GEN_
 # 1. Run deterministic ensemble rollouts
 # -------------------------
 
-python -m experiments.run_multistep \
+python -m src.run_multistep \
   --model "${DET_MODEL}" \
   --multistep "${MULTISTEP}" \
   --max-samples "${MAX_SAMPLES}" \
@@ -47,7 +47,7 @@ python -m experiments.run_multistep \
 # 2. Run generative ensemble rollouts
 # -------------------------
 
-python -m experiments.run_multistep \
+python -m src.run_multistep \
   --model "${GEN_MODEL}" \
   --multistep "${MULTISTEP}" \
   --num-members "${GEN_MEMBERS}" \
