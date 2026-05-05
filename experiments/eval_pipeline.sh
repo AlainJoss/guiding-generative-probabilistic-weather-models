@@ -112,10 +112,13 @@ python -m geoarches.evaluation.eval_multistep \
 # -------------------------
 
 python -m geoarches.evaluation.plot \
-  --output_dir "${PLOT_DIR}/${SAVE_NAME}_multistep=${MULTISTEP}_ensemble" \
-  --metric_paths "${GEN_TIME_ENSEMBLE_METRIC}" \
-  --model_names_for_legend "${SAVE_NAME}" \
-  --model_colors orange \
+  --output_dir "${PLOT_DIR}/det_ens_vs_gen_vs_gen_time_multistep=${MULTISTEP}_ensemble" \
+  --metric_paths \
+    "data/eval/det_ens_multistep=${MULTISTEP}/det_ens_multistep=${MULTISTEP}_members=4_0-era5_ensemble_metrics.nc" \
+    "data/eval/gen_multistep=${MULTISTEP}/gen_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0-era5_ensemble_metrics.nc" \
+    "${GEN_TIME_ENSEMBLE_METRIC}" \
+  --model_names_for_legend det_ens gen gen_time \
+  --model_colors blue orange green \
   --metrics rmse crps fcrps spskr \
   --vars T2m SP Z500 T850 Q700 U850 V850 \
   --force
@@ -126,14 +129,16 @@ python -m geoarches.evaluation.plot \
 # -------------------------
 
 python -m geoarches.evaluation.plot \
-  --output_dir "${PLOT_DIR}/${SAVE_NAME}_multistep=${MULTISTEP}_brier" \
-  --metric_paths "${GEN_TIME_BRIER_METRIC}" \
-  --model_names_for_legend "${SAVE_NAME}" \
-  --model_colors orange \
+  --output_dir "${PLOT_DIR}/det_ens_vs_gen_vs_gen_time_multistep=${MULTISTEP}_brier" \
+  --metric_paths \
+    "data/eval/det_ens_multistep=${MULTISTEP}/det_ens_multistep=${MULTISTEP}_members=4_0-era5_brier_skill_score.nc" \
+    "data/eval/gen_multistep=${MULTISTEP}/gen_multistep=${MULTISTEP}_members=${GEN_MEMBERS}_0-era5_brier_skill_score.nc" \
+    "${GEN_TIME_BRIER_METRIC}" \
+  --model_names_for_legend det_ens gen gen_time \
+  --model_colors blue orange green \
   --metrics brierskillscore \
   --vars T2m SP Z500 T850 Q700 U850 V850 \
   --brier_quantile_levels high high high high high high high \
   --force
-
 
 echo "Done. ${SAVE_NAME} rollouts, metrics, and plots are saved."
