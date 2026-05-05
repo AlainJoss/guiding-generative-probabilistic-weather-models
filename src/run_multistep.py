@@ -42,7 +42,7 @@ def load_det_ens_models(device):
 def load_gen_time_correct_model(device):
     model, cfg = load_module(
         MODELSTORE / "archesweathergen",
-        module_target="geoarches.lightning_modules.diffusion.DiffusionModuleTimeCorrect",
+        module_target="geoarches.lightning_modules.diffusion_time_correct.DiffusionModuleTimeCorrect",
     )
     return model.to(device).eval(), cfg
 
