@@ -28,7 +28,7 @@ def _():
     from src.rollout import rollout
     from src.utils import (
         ensure_rollout_dir,
-        get_dataset, get_model, state_to_device,
+        get_dataset, get_model, batchify_and_move,
         read_state, get_slice, save_to_json, read_json,
         read_states, xr_to_torch, list_tens_to_floats, get_now_timestamp
     )
@@ -56,7 +56,6 @@ def _():
         read_states,
         rollout,
         save_to_json,
-        state_to_device,
         visualize_map,
         visualize_mask_terms_over_N,
         xr_to_torch,

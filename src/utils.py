@@ -92,8 +92,11 @@ def get_last_experiment_dir():
     print(paths[-1])
     return paths[-1]
 
-def state_to_device(state, device):
-    return {k: v[None].to(device) for k, v in state.items()}
+def batchify_and_move(sample, device):
+    return {
+        k: v[None].to(device) if hasattr(v, "to") else v
+        for k, v in sample.items()
+    }
 
 def save_state(rollout_dir: str, array, n: int, m: int):
     path = Path(rollout_dir, f"{n}", f"{m}.nc")

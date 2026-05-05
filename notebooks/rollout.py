@@ -45,7 +45,7 @@ def _():
 @app.cell
 def _():
     from src.utils import (
-        get_dataset, get_model, ensure_rollout_dir, save_to_json, state_to_device, get_device, get_slice,
+        get_dataset, get_model, ensure_rollout_dir, save_to_json, batchify_and_move, get_device, get_slice,
         tensor_timestamp_to_string, get_now_timestamp
     )
 
@@ -56,7 +56,7 @@ def _():
         get_model,
         get_now_timestamp,
         save_to_json,
-        state_to_device,
+        batchify_and_move,
     )
 
 

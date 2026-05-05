@@ -9,7 +9,7 @@ from src.utils import (
     get_model,
     ensure_rollout_dir,
     save_to_json,
-    state_to_device,
+    batchify_and_move,
     get_device,
 )
 from src.rollout import rollout
@@ -42,7 +42,7 @@ def run_from_config(config: dict[str, Any], config_type: str, test: bool = False
             guidance_flag=config["guidance_flag"],
             rollout_dir=rollout_dir,
             ds=ds,
-            x_start=state_to_device(x_start, device),
+            x_start=batchify_and_move(x_start, device),
             gen_model=model,
             init_mask_term=config["init_mask_term"],
             mask_corners=config["mask_corners"],

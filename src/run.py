@@ -1,6 +1,6 @@
 from src.utils import (
     save_state,
-    state_to_device,
+    batchify_and_move,
     save_to_json,
     ensure_rollout_dir,
 )
@@ -68,7 +68,7 @@ pred_multistep
 
 # select X_start
 x_start = ds[0]
-x_start = state_to_device(x_start, device)
+x_start = batchify_and_move(x_start, device)
 
 ##### run #####
 TIMESTAMPS = [str(ts[2]).split('.')[0] for ts in ds.timestamps][1:-1]

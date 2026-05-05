@@ -64,11 +64,9 @@ def rollout(
                 lambda_=lambda_,
                 seed=random.randint(1, 1000000)
             )
-            det_state = gen_model.mu
         else:
             mask_terms_n = [0.0]*25
             state = x_start["state"]
-            det_state = x_start["state"]
 
         if guidance_flag:
             mask_term = float(mask_terms_n[-1])
@@ -77,16 +75,12 @@ def rollout(
 
         ### save
         state_denorm = ds.denormalize(state).cpu()
-        det_state_denorm = ds.denormalize(det_state).cpu()
         current_timestamp = x_cond["timestamp"].cpu() + lead_time_seconds
         state_xr = ds.convert_to_xarray(state_denorm, current_timestamp)
-        det_state_xr = ds.convert_to_xarray(det_state_denorm, current_timestamp)
         if guidance_flag:
             save_state(rollout_dir, state_xr, n=n, m=f"guided_{m}")
         else:
             save_state(rollout_dir, state_xr, n=n, m=f"unguided_{m}")
-
-        save_state(rollout_dir, det_state_xr, n=n, m=f"det_{m}")
 
         # build next conditioning state 
         if n < N:

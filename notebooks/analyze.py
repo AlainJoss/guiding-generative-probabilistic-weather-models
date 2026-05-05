@@ -30,7 +30,7 @@ def _():
     import matplotlib.pyplot as plt
     import pandas as pd
 
-    return Path, mo, np, pd, plt, xr
+    return Path, mo, np, plt, xr
 
 
 @app.cell
@@ -69,19 +69,10 @@ def _():
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ## Funcs
-    """)
-    return
+def _():
+    from src.utils import get_dataset, tensor_timestamp_to_string
 
-
-@app.cell
-def _(pd):
-    def unix_tensor_to_iso(ts):
-        return pd.to_datetime(int(ts.item()), unit="s").strftime("%Y-%m-%dT%H:%M:%S")
-
-    return (unix_tensor_to_iso,)
+    return get_dataset, tensor_timestamp_to_string
 
 
 @app.cell
@@ -227,8 +218,8 @@ def _(value_threshold_slider):
 
 
 @app.cell
-def _(guided_cfg, mo):
-    n_slider = mo.ui.slider(steps=range(1, guided_cfg["N"]+1), value=1, label="n: ")
+def _(N, mo):
+    n_slider = mo.ui.slider(steps=range(1, N+1), value=1, label="n: ")
     return (n_slider,)
 
 
@@ -239,10 +230,10 @@ def _(n_slider):
 
 
 @app.cell
-def _(mo, unguided_cfg):
+def _(M, mo):
     m_slider = mo.ui.slider(
         start=1,
-        stop=unguided_cfg["M"],
+        stop=M,
         step=1,
         value=1,
         label="m: ",
@@ -265,20 +256,13 @@ def _(mo):
 
 
 @app.cell
-def _():
-    from src.utils import get_dataset
-
-    return (get_dataset,)
-
-
-@app.cell
 def _(get_dataset):
     ds = get_dataset()
     return (ds,)
 
 
 @app.cell
-def _(ds, guided_cfg, n, unix_tensor_to_iso):
+def _(ds, guided_cfg, n, tensor_timestamp_to_string):
     x_start = ds[guided_cfg["timestamp_idx"]+n]
     x_start = ds.denormalize(x_start)
     current = ds.convert_to_xarray(x_start["state"].unsqueeze(0), x_start["timestamp"].unsqueeze(0))
@@ -286,7 +270,7 @@ def _(ds, guided_cfg, n, unix_tensor_to_iso):
 
     lead_time_seconds = x_start["lead_time_hours"] * 3600
     timestamp = x_start["timestamp"] - lead_time_seconds
-    timestamp = unix_tensor_to_iso(timestamp)
+    timestamp = tensor_timestamp_to_string(timestamp)
     return current, next, timestamp, x_start
 
 
@@ -373,18 +357,11 @@ def _(Path, ROLLOUTS, mo, refresh_button):
 
 
 @app.cell
-def _(Path, ROLLOUTS, pick_guided_rollout_dropdown):
+def _(Path, ROLLOUTS, pick_guided_rollout_dropdown, read_json):
     guided_rollout_dir = Path(ROLLOUTS, "guided", pick_guided_rollout_dropdown.value)
-    return (guided_rollout_dir,)
-
-
-@app.cell
-def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
     guided_cfg = read_json(guided_rollout_dir, "config")
     unguided_rollout_dir =  Path(ROLLOUTS, "unguided", guided_cfg["rollout_id"])
-
-    unguided_cfg = read_json(unguided_rollout_dir, "config")
-    return guided_cfg, unguided_cfg, unguided_rollout_dir
+    return guided_cfg, guided_rollout_dir, unguided_rollout_dir
 
 
 @app.cell
@@ -635,12 +612,6 @@ def _(get_guidance, plt):
         return fig
 
     return (plot_guidance_branching,)
-
-
-@app.cell
-def _(planned_guidance, realized_terms):
-    planned_guidance, realized_terms
-    return
 
 
 @app.cell
@@ -1074,6 +1045,11 @@ def _(mo):
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(all_mask_terms, plot_trajectories_over_n):
     trajectories_over_n_plot,_ = plot_trajectories_over_n(
         trajectories=all_mask_terms,
@@ -1124,9 +1100,9 @@ def _():
 
 
 @app.cell
-def _(unguided_cfg):
-    N = unguided_cfg["N"]
-    M = unguided_cfg["M"]
+def _(guided_cfg):
+    N = guided_cfg["N"]
+    M = guided_cfg["M"]
     return M, N
 
 

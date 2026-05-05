@@ -170,7 +170,7 @@ class DiffusionModule(BaseLightningModule):
         # TODO: correct this one and check
         # conditional by default
         times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
-        # print(f"timestamp: {times}, month: {times.month}, hour: {times.hour}")
+        print(f"timestamp: {times}, month: {times.month}, hour: {times.hour}")
         month = torch.tensor(times.month).to(device)
         month_emb = self.month_embedder(month)
         hour = torch.tensor(times.hour).to(device)
