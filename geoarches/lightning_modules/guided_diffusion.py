@@ -123,27 +123,28 @@ class GuidedFlow(BaseLightningModule):
     def sample_rollout(
         self, 
         N, 
+        member: int,
         x_cond,  # TODO: need a better name
         y: list[torch.Tensor] | None = None, # shape: 
         mask: torch.Tensor | None = None,  # shape: 
-        lambda_: list[torch.Tensor] | None = None,
-        seed: int | None = None
+        lambda_: list[torch.Tensor] | None = None
     ):
         realized_trajectory = []
-
-        for n in range(N):
+        mask_terms = []
+        for n in range(1, N+1):
             y_n = None if y is None else y[n]
-            x_hat, _ = self.sample(
+            x_hat, mask_term = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
                 mask=mask,
                 lambda_=lambda_,
-                seed=seed
+                seed=member + 1000 * n  # + batch_nb * 10**6
             )
             realized_trajectory.append(x_hat)
+            mask_terms.append(mask_term)
             
             # after the last iteration no need to set this again
-            if n < N-1:
+            if n < N:
                 # in seconds
                 next_timestamp = x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600
                 x_cond = {
@@ -153,7 +154,8 @@ class GuidedFlow(BaseLightningModule):
                     "lead_time_hours": x_cond["lead_time_hours"],
                 }
 
-        return realized_trajectory
+        realized_trajectory = torch.stack(realized_trajectory, dim=1)
+        return realized_trajectory, mask_terms
     
     def get_det_pred(self, x_cond):
         return self.det_model(x_cond)
@@ -291,7 +293,8 @@ class GuidedFlow(BaseLightningModule):
     
     def grad_loss(self, mask, mu, y_t, z_t):
         sigma_z = tensordict_apply(torch.mul, z_t, self.sigma)
-        x_hat_norm = tensordict_apply(torch.add, mu, sigma_z) + self.mu
+        # x_hat_norm = tensordict_apply(torch.add, mu, sigma_z)
+        x_hat_norm = mu + sigma_z
         x_hat = self.denormalize(x_hat_norm)
         x_hat_masked = tensordict_apply(torch.mul, mask, x_hat) 
 

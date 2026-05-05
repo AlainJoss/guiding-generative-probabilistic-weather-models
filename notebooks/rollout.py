@@ -24,6 +24,14 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    TODO: in plot don't remove the timestamps that are not 00!
+    """)
+    return
+
+
 @app.cell
 def _():
     import marimo as mo
@@ -118,26 +126,59 @@ def _(ds):
 def _(STRIDE, ds, mo):
     # remove first and last (we have two tensordicts less due to prev/next)
     TIMESTAMPS = [str(ts[2]).split(".")[0] for ts in ds.timestamps][STRIDE:-STRIDE]
-    month_slider = mo.ui.slider(
-        start=1, stop=12, step=1, value=1, label="month: ", show_value=True, debounce=True
-    )
     hour_slider = mo.ui.slider(
-        start=0, stop=18, step=6, value=0, label="hour: ", show_value=True, debounce=True
+        start=0,
+        stop=18,
+        step=6,
+        value=0,
+        label="hour: ",
+        show_value=True,
+        debounce=True,
     )
     get_day, set_day = mo.state(2)
-    return TIMESTAMPS, get_day, hour_slider, month_slider, set_day
+    get_month, set_month = mo.state(1)
+    return TIMESTAMPS, get_day, get_month, hour_slider, set_day, set_month
 
 
 @app.cell(hide_code=True)
-def _(TIMESTAMPS, get_day, mo, month_slider, set_day):
+def _(N_slider, STRIDE, TIMESTAMPS, get_month, mo, set_month):
+    _max_valid_idx = len(TIMESTAMPS) - 1 - STRIDE * N_slider.value
+    _valid_months = sorted(
+        {int(t[5:7]) for i, t in enumerate(TIMESTAMPS) if i <= _max_valid_idx}
+    )
+    _max_month = _valid_months[-1] if _valid_months else 1
+    _cur_m = min(max(get_month(), 1), _max_month)
+    month_slider = mo.ui.slider(
+        start=1,
+        stop=_max_month,
+        step=1,
+        value=_cur_m,
+        label="month: ",
+        show_value=True,
+        debounce=True,
+        on_change=set_month,
+    )
+    return (month_slider,)
+
+
+@app.cell(hide_code=True)
+def _(N_slider, STRIDE, TIMESTAMPS, get_day, mo, month_slider, set_day):
     import calendar
 
-    _max_day = calendar.monthrange(2020, month_slider.value)[1]
+    _max_valid_idx = len(TIMESTAMPS) - 1 - STRIDE * N_slider.value
     _month_days = sorted(
-        {int(t[8:10]) for t in TIMESTAMPS if int(t[5:7]) == month_slider.value}
+        {
+            int(t[8:10])
+            for i, t in enumerate(TIMESTAMPS)
+            if int(t[5:7]) == month_slider.value and i <= _max_valid_idx
+        }
     )
-    _min_day = _month_days[0] if _month_days else 1
-    _max_day = _month_days[-1] if _month_days else _max_day
+    if not _month_days:
+        _month_days = sorted(
+            {int(t[8:10]) for t in TIMESTAMPS if int(t[5:7]) == month_slider.value}
+        )
+    _min_day = _month_days[0]
+    _max_day = _month_days[-1]
     _cur = min(max(get_day(), _min_day), _max_day)
     day_slider = mo.ui.slider(
         start=_min_day,
@@ -221,8 +262,7 @@ def _(TIMESTAMPS, day_slider, hour_slider, month_slider):
     else:
         _candidates = [t for t in TIMESTAMPS if t <= _target]
         timestamp = _candidates[-1] if _candidates else TIMESTAMPS[0]
-    timestamp_idx = TIMESTAMPS.index(timestamp)
-    return timestamp, timestamp_idx
+    return (timestamp,)
 
 
 @app.cell(hide_code=True)
@@ -241,9 +281,11 @@ def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
 
 
 @app.cell
-def _():
-    # timestamp
-    return
+def _(ds, timestamp):
+    from src.utils import get_x_cond
+    x_cond, timestamp_idx = get_x_cond(ds, timestamp)
+    # tensor_timestamp_to_string(x_cond["timestamp"])
+    return (timestamp_idx,)
 
 
 @app.cell
@@ -256,7 +298,7 @@ def _():
 def _(ds, level_idx, partition, timestamp_idx, var_idx):
     x_start = ds[timestamp_idx]
     slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
-    return slice, x_start
+    return (slice,)
 
 
 @app.cell(hide_code=True)
@@ -430,8 +472,6 @@ def _(
 def _(
     M,
     N,
-    device,
-    ds,
     ensure_rollout_dir,
     get_now_timestamp,
     model,
@@ -439,22 +479,20 @@ def _(
     rollout_config,
     run_button,
     save_to_json,
-    state_to_device,
     test_flag_checkbox,
-    x_start,
+    timestamp,
 ):
     def run_rollout():
         rollout_id = get_now_timestamp()
-        rollout_dir = ensure_rollout_dir("unguided", N, rollout_id)
+        rollout_dir = ensure_rollout_dir(rollout_id)
         rollout_config["rollout_id"]=rollout_id
         for m in range(1, M + 1):
             print(f"m: {m}/{M}")
             rollout(
                 guidance_flag=False,
                 rollout_dir=rollout_dir,
-                ds=ds,
-                x_start=state_to_device(x_start, device),
-                gen_model=model,
+                timestamp=timestamp,
+                flow_model=model,
                 init_mask_term=None,
                 mask_corners=None,  # mask_corners
                 y=None,  # y
@@ -463,7 +501,7 @@ def _(
                 partition=None,  # partition
                 level_idx=None,  # level_idx
                 var_idx=None,  # var_idx
-                m=m,
+                M=M,
                 test=test_flag_checkbox.value,
             )
 
@@ -489,11 +527,6 @@ def _(CONFIGS, config_button, get_now_timestamp, rollout_config, save_to_json):
         config_dir = CONFIGS / "to_run" / "unguided"
         # no need to add the config_id to the config
         save_to_json(rollout_config, config_dir, f"{config_id}")
-    return
-
-
-@app.cell
-def _():
     return
 
 

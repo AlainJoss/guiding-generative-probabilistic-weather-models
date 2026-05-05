@@ -43,7 +43,7 @@ def _():
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
-    from src.rollout import rollout
+    from old_rollout import rollout
     from src.utils import (
         ensure_rollout_dir,
         get_dataset, get_model, batchify_and_move,

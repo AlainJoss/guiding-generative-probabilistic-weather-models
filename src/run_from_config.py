@@ -1,3 +1,10 @@
+"""
+python -m src.run_from_config \
+  --config-id 2026-05-05_17:37:52 \
+  --config-type unguided \
+  --test
+"""
+
 import argparse
 from pathlib import Path
 from typing import Any
@@ -5,12 +12,11 @@ from typing import Any
 from src.paths import CONFIGS
 from src.utils import (
     read_json,
-    get_dataset,
     get_model,
     ensure_rollout_dir,
     save_to_json,
-    batchify_and_move,
     get_device,
+    get_now_timestamp
 )
 from src.rollout import rollout
 
@@ -24,54 +30,60 @@ def parse_args() -> argparse.Namespace:
 
 
 def read_config(config_type: str, config_id: str) -> dict[str, Any]:
-    return read_json(CONFIGS / "to_run" / config_type, config_id)
+    return read_json(CONFIGS / config_type, config_id)
 
 
-def run_from_config(config: dict[str, Any], config_type: str, test: bool = False) -> Path:
+def run_from_config(
+    config: dict[str, Any],
+    config_type: str,
+    test: bool = False,
+) -> Path:
     device = get_device()
-    ds = get_dataset()
-    model = get_model(device)
+    flow_model = get_model(device)
 
-    x_start = ds[config["timestamp_idx"]]
-    rollout_dir = ensure_rollout_dir(config_type, config["N"], config["rollout_id"])
+    rollout_id = get_now_timestamp()
+    rollout_dir = ensure_rollout_dir(rollout_id)
+    config["rollout_id"]=rollout_id
 
-    for m in range(1, config["M"] + 1):
-        print(f"m: {m}/{config['M']}")
-
-        rollout(
-            guidance_flag=config["guidance_flag"],
-            rollout_dir=rollout_dir,
-            ds=ds,
-            x_start=batchify_and_move(x_start, device),
-            gen_model=model,
-            init_mask_term=config["init_mask_term"],
-            mask_corners=config["mask_corners"],
-            y=config["y"],
-            lambda_=config["lambda_"],
-            N=config["N"],
-            partition=config["partition"],
-            level_idx=config["level_idx"],
-            var_idx=config["var_idx"],
-            m=m,
-            test=test,
-        )
+    rollout(
+        guidance_flag=config["guidance_flag"],
+        rollout_dir=rollout_dir,
+        flow_model=flow_model,
+        timestamp=config["timestamp"],
+        mask_corners=config["mask_corners"],
+        init_mask_term=config["init_mask_term"],
+        y=config.get("y"),
+        lambda_=config.get("lambda_"),
+        N=config["N"],
+        partition=config["partition"],
+        level_idx=config["level_idx"],
+        var_idx=config["var_idx"],
+        M=config["M"],
+        test=test,
+    )
 
     save_to_json(
-        {
-            **config,
-            "rollout_id": config["rollout_id"]
-        },
+        config,
         rollout_dir,
         "config",
     )
+
     return rollout_dir
 
 
 def main():
     print("running experiment")
+
     args = parse_args()
     config = read_config(args.config_type, args.config_id)
-    run_from_config(config, args.config_type, test=args.test)
+
+    rollout_dir = run_from_config(
+        config,
+        args.config_type,
+        test=args.test,
+    )
+
+    print(f"saved rollout to: {rollout_dir}")
 
 
 if __name__ == "__main__":

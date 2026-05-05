@@ -5,12 +5,154 @@ import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import marimo as mo
+from matplotlib.ticker import FormatStrFormatter
 
 import geopandas as gpd
 import geodatasets
 from wigglystuff import ChartPuck
 
 plt.rcParams["font.family"] = "Menlo"
+
+def visualize_mask_terms_over_N(
+    var: str,
+    timestamps: list[str],
+    ensemble_rollout: list[list[float]] | None = None,
+    mean_rollout: list[float] | None = None,
+    ground_truth: list[float] | None = None,
+    planned_guidance: list[float] | None = None,
+    title: str | None = None,
+    subtitle: str | None = None,
+    dpi: int = 100,
+):
+    def _to_float_list(xs):
+        if xs is None:
+            return None
+        return [float(v) for v in xs]
+
+    if (
+        ensemble_rollout is None
+        and mean_rollout is None
+        and ground_truth is None
+        and planned_guidance is None
+    ):
+        raise ValueError("At least one rollout must be provided")
+
+    N = len(timestamps)
+    x = list(range(N))
+
+    mean_rollout = _to_float_list(mean_rollout)
+    ground_truth = _to_float_list(ground_truth)
+    planned_guidance = _to_float_list(planned_guidance)
+
+    colors = {
+        "ground_truth": "#2ca02c",
+        "mean": "#9467bd",
+        "ensemble": "#7f7f7f",
+        "guidance": "#ff7f0e",
+    }
+
+    fig, ax = plt.subplots(figsize=(12, 5), dpi=dpi)
+
+    if ensemble_rollout is not None:
+        rows = [[float(v) for v in row] for row in ensemble_rollout]
+        M = min(len(row) for row in rows)
+        rows = [row[:M] for row in rows]
+
+        for m in range(M):
+            values_m = [rows[n][m] for n in range(N)]
+            ax.plot(
+                x,
+                values_m,
+                color=colors["ensemble"],
+                linewidth=0.6,
+                alpha=0.35,
+            )
+
+        lower = [min(row) for row in rows]
+        upper = [max(row) for row in rows]
+
+        ax.fill_between(
+            x,
+            lower,
+            upper,
+            color=colors["ensemble"],
+            alpha=0.12,
+            label=f"Ensemble range (M={M})",
+        )
+
+    if planned_guidance is not None:
+        ax.plot(
+            x,
+            planned_guidance,
+            linewidth=1.6,
+            color=colors["guidance"],
+            label="Planned guidance",
+        )
+
+    if mean_rollout is not None:
+        ax.plot(
+            x,
+            mean_rollout,
+            linewidth=1.6,
+            color=colors["mean"],
+            label="Mean rollout",
+        )
+
+    if ground_truth is not None:
+        ax.plot(
+            x,
+            ground_truth,
+            linewidth=1.8,
+            color=colors["ground_truth"],
+            label="Ground truth",
+        )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(timestamps, rotation=35, ha="right", fontsize=8)
+
+    ax.set_xlabel("Timestamp", fontsize=10)
+    ax.set_ylabel(var, fontsize=10)
+    ax.grid(True, alpha=0.25, linestyle=":")
+
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+
+    ax.tick_params(axis="both", labelsize=9)
+
+    # Always format left y-axis with 2 decimals
+    ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+
+    # If a right y-axis exists, format it too.
+    # This catches axes created elsewhere with twinx().
+    for other_ax in fig.axes:
+        other_ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
+
+    ax.legend(
+        loc="upper right",
+        frameon=False,
+        fontsize=9,
+    )
+
+    fig.suptitle(
+        title or f"Rollout distribution {var}",
+        fontsize=13,
+        fontweight="bold",
+        x=0.41,
+        y=0.995,
+    )
+
+    if subtitle:
+        fig.text(
+            0.41,
+            0.955,
+            subtitle,
+            ha="center",
+            va="top",
+            fontsize=9,
+            color="#555",
+        )
+
+    return fig
 
 
 def get_mask_corners_from_widget(map_widget):

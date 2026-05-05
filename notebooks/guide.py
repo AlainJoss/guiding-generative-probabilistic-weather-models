@@ -15,25 +15,26 @@ def _():
 
     import matplotlib.pyplot as plt
 
-    return Path, mo, np, plt, torch
+    return Path, mo, torch
 
 
 @app.cell
 def _():
     from src.interaction import (
         visualize_map, get_mask_corners_from_widget, 
-        get_mask_from_corners, plot_trajectory, plot_dual_trajectory
+        get_mask_from_corners, plot_trajectory, plot_dual_trajectory,
+        visualize_mask_terms_over_N
     )
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from src.rollout import rollout
     from src.utils import (
-        ensure_rollout_dir,
+        ensure_rollout_dir, read_nc,
         get_dataset, get_model, batchify_and_move,
-        read_state, get_slice, save_to_json, read_json,
-        read_states, xr_to_torch, list_tens_to_floats, get_now_timestamp
+        get_slice, save_to_json, read_json,
+        xr_to_torch, list_tens_to_floats, get_now_timestamp,
+        get_x_cond
     )
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-    from src.visualization import visualize_mask_terms_over_N
 
     return (
         LEVELS_DICT,
@@ -43,23 +44,28 @@ def _():
         VARIABLES_DICT,
         avg_over_mask,
         compute_mean_rollout,
-        ensure_rollout_dir,
         get_dataset,
         get_guidance_trajectory,
         get_mask_from_corners,
         get_model,
-        get_slice,
+        get_x_cond,
         list_tens_to_floats,
         plot_dual_trajectory,
         plot_trajectory,
         read_json,
-        read_states,
+        read_nc,
         rollout,
         save_to_json,
         visualize_map,
         visualize_mask_terms_over_N,
-        xr_to_torch,
     )
+
+
+@app.cell
+def _():
+    from src.funcs import get_inverse_guidance_trajectory
+
+    return (get_inverse_guidance_trajectory,)
 
 
 @app.cell
@@ -88,8 +94,8 @@ def _():
 
 
 @app.cell
-def _(PARTITIONS, mo, unguided_cfg):
-    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=unguided_cfg["partition"], label="partition: ")
+def _(PARTITIONS, config, mo):
+    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=config["partition"], label="partition: ")
     return (partition_dropdown,)
 
 
@@ -100,9 +106,9 @@ def _(partition_dropdown):
 
 
 @app.cell
-def _(LEVELS_DICT, mo, partition, unguided_cfg):
+def _(LEVELS_DICT, config, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=unguided_cfg["level"], label="level: ", show_value=True, debounce=True)
+    level_slider = mo.ui.slider(steps=LEVELS, value=config["level"], label="level: ", show_value=True, debounce=True)
     return LEVELS, level_slider
 
 
@@ -113,9 +119,9 @@ def _(level_slider):
 
 
 @app.cell
-def _(VARIABLES_DICT, mo, partition, unguided_cfg):
+def _(VARIABLES_DICT, config, mo, partition):
     VARIABLES = VARIABLES_DICT[partition]
-    VARIABLE_DEFAULT = unguided_cfg["var"] if partition == unguided_cfg["partition"] else VARIABLES[0]
+    VARIABLE_DEFAULT = config["var"] if partition == config["partition"] else VARIABLES[0]
     var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="variable : ")
     return VARIABLES, var_dropdown
 
@@ -180,13 +186,6 @@ def _(mo):
 
 
 @app.cell
-def _():
-    from src.funcs import get_inverse_guidance_trajectory
-
-    return (get_inverse_guidance_trajectory,)
-
-
-@app.cell
 def _(
     GUIDANCE_MODES,
     N,
@@ -233,38 +232,31 @@ def get_ensemble_upper_bound(unguided_rollout):
 
 
 @app.cell
-def _(ds):
-    STRIDE = int(ds.lead_time_hours) // int(ds.timedelta)
-    TIMESTAMPS = [str(ts[2]).split(".")[0] for ts in ds.timestamps][STRIDE:-STRIDE]
-    return STRIDE, TIMESTAMPS
-
-
-@app.cell
-def _(unguided_cfg):
-    timestamp = unguided_cfg["timestamp"]
-    M = unguided_cfg["M"]
-    N = unguided_cfg["N"]
+def _(config):
+    timestamp = config["timestamp"]
+    M = config["M"]
+    N = config["N"]
     return M, N, timestamp
 
 
 @app.cell
-def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
-    timestamps = [TIMESTAMPS[timestamp_idx + STRIDE * k] for k in range(N + 1)]
-    return (timestamps,)
+def _():
+    from src.utils import get_rollout_dir, get_experiment_ids
+
+    return get_experiment_ids, get_rollout_dir
 
 
 @app.cell
-def _(LEVELS, TIMESTAMPS, VARIABLES, ds, level, timestamp, var):
-    timestamp_idx = TIMESTAMPS.index(timestamp)
+def _(LEVELS, VARIABLES, ds, get_x_cond, level, timestamp, var):
     var_idx = VARIABLES.index(var)
     level_idx = LEVELS.index(level)
-    x_start = ds[timestamp_idx]
+    x_start, timestamp_idx = get_x_cond(ds, timestamp)
     return level_idx, timestamp_idx, var_idx, x_start
 
 
 @app.cell
-def _(get_mask_from_corners, unguided_cfg):
-    mask_corners = tuple(unguided_cfg["mask_corners"])
+def _(config, get_mask_from_corners):
+    mask_corners = tuple(config["mask_corners"])
     mask = get_mask_from_corners(*mask_corners)
     return mask, mask_corners
 
@@ -282,33 +274,11 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    SUBFOLDERS = ["old_model", "new_model", "unguided"]
-    subfolder_selector = mo.ui.dropdown(label="Subfolder", value=SUBFOLDERS[2], options=SUBFOLDERS)
-    return (subfolder_selector,)
-
-
-@app.cell
-def _(subfolder_selector):
-    subfolder = subfolder_selector.value
-    return (subfolder,)
-
-
-@app.cell
-def _(Path, ROLLOUTS, mo, refresh_button, subfolder):
+def _(get_experiment_ids, mo, refresh_button):
     if refresh_button.value:
         pass
 
-
-    def has_config_json(path: Path) -> bool:
-        return (path / "config.json").exists()
-
-
-    unguided_rollouts = Path(ROLLOUTS, subfolder).glob("2026*")
-    unguided_rollouts = sorted(
-        [p.name for p in unguided_rollouts if has_config_json(p)],
-        reverse=True,
-    )
+    unguided_rollouts = get_experiment_ids("unguided")
     pick_unguided_rollout_dropdown = mo.ui.dropdown(
         label="Experiment: ", value=unguided_rollouts[0], options=unguided_rollouts
     )
@@ -316,25 +286,29 @@ def _(Path, ROLLOUTS, mo, refresh_button, subfolder):
 
 
 @app.cell
-def _(Path, ROLLOUTS, pick_unguided_rollout_dropdown, read_json, subfolder):
-    unguided_rollout_dir = Path(
-        ROLLOUTS, subfolder, pick_unguided_rollout_dropdown.value
-    )
-    unguided_cfg = read_json(unguided_rollout_dir, "config")
-    return unguided_cfg, unguided_rollout_dir
+def _(get_rollout_dir, pick_unguided_rollout_dropdown, read_json):
+    rollout_dir = get_rollout_dir(pick_unguided_rollout_dropdown.value)
+    config = read_json(rollout_dir, "config")
+    return config, rollout_dir
 
 
 @app.cell
-def _(mo, pick_unguided_rollout_dropdown, subfolder_selector, unguided_cfg):
+def _(read_nc, rollout_dir):
+    ground_truth_xr = read_nc(rollout_dir, "ground_truth")
+    unguided_xr = read_nc(rollout_dir ,"unguided")
+    return ground_truth_xr, unguided_xr
+
+
+@app.cell
+def _(config, mo, pick_unguided_rollout_dropdown):
     experiment_dropdown = mo.vstack([
         mo.md("Pick unguided rollout experiment."),
         mo.hstack([
-            subfolder_selector,
             pick_unguided_rollout_dropdown
         ], justify="start"),
         mo.accordion(
             {
-                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in unguided_cfg.items()))
+                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in config.items()))
             }
         )
     ])
@@ -343,201 +317,93 @@ def _(mo, pick_unguided_rollout_dropdown, subfolder_selector, unguided_cfg):
 
 @app.cell
 def _(
-    M,
-    STRIDE,
-    TIMESTAMPS,
     avg_over_mask,
     compute_mean_rollout,
-    ds,
-    get_slice,
+    ground_truth_xr,
     level,
-    level_idx,
     mask,
-    partition,
-    read_states,
-    slice,
-    timestamp_idx,
-    unguided_cfg,
-    unguided_rollout_dir,
+    torch,
+    unguided_xr,
     var,
-    var_idx,
-    xr_to_torch,
 ):
+    def xr_slice_to_torch(xr_ds, var, timestamp, level=None):
+        da = xr_ds[var].sel(time=timestamp)
+
+        if "level" in da.dims and level is not None:
+            da = da.sel(level=int(level))
+
+        return torch.tensor(da.values)
+
+
+    def avg_xr_over_mask(xr_ds, var, timestamp, mask, level=None, member=None):
+        da = xr_ds[var].sel(time=timestamp)
+
+        if member is not None and "member" in da.dims:
+            da = da.sel(member=member)
+
+        if "level" in da.dims and level is not None:
+            da = da.sel(level=int(level))
+
+        x = torch.tensor(da.values, dtype=mask.dtype)
+        return avg_over_mask(x, mask)
+
+
+    # timestamps to compare:
+    # ground_truth has init + N future times
+    # unguided has only N future times
+    # timestamps to compare:
+    # ground_truth has init + N future times
+    # unguided has only N future times
+    members = list(unguided_xr.member.values)
+
     ground_truth = []
     unguided_rollout = []
-    det_rollout = []
 
-    init_value = avg_over_mask(slice, mask)
-    ground_truth.append(init_value)
-    unguided_rollout.append([init_value] * M)
-    det_rollout.append([init_value] * M)
+    init_timestamp = ground_truth_xr.time.values[0]
+    future_timestamps = list(unguided_xr.time.values)
 
-    # TODO: adapt to new structure
-    for n in range(1, unguided_cfg["N"] + 1):
-        timestamp_n = TIMESTAMPS[timestamp_idx + STRIDE * n]
+    # Use this one for plotting
+    timestamps = [init_timestamp] + future_timestamps
 
-        # ground truth
-        gt_state_n = ds[timestamp_idx + STRIDE * n]["state"]
-        gt_slice_n = ds.denormalize(gt_state_n)[partition][var_idx, level_idx]
-        ground_truth.append(avg_over_mask(gt_slice_n, mask))
+    # step 0: only ground truth exists
+    init_avg = avg_xr_over_mask(
+        ground_truth_xr,
+        var=var,
+        timestamp=init_timestamp,
+        mask=mask,
+        level=level,
+    )
 
-        # unguided
-        unguided_states = read_states(unguided_rollout_dir, "unguided", n)
+    ground_truth.append(init_avg)
+    unguided_rollout.append([init_avg] * len(members))
 
-        unguided_slices = [
-            get_slice(state, partition, level, var, timestamp_n)
-            for state in unguided_states
+    # steps 1..N: both ground_truth and unguided exist
+    for timestamp_n in future_timestamps:
+        gt_avg = avg_xr_over_mask(
+            ground_truth_xr,
+            var=var,
+            timestamp=timestamp_n,
+            mask=mask,
+            level=level,
+        )
+        ground_truth.append(gt_avg)
+
+        unguided_avgs = [
+            avg_xr_over_mask(
+                unguided_xr,
+                var=var,
+                timestamp=timestamp_n,
+                mask=mask,
+                level=level,
+                member=m,
+            )
+            for m in members
         ]
-        unguided_slices = [xr_to_torch(s) for s in unguided_slices]
-        unguided_avgs = [avg_over_mask(s, mask) for s in unguided_slices]
+
         unguided_rollout.append(unguided_avgs)
 
-        # det
-        det_states = read_states(unguided_rollout_dir, "det", n)
-        det_slices = [
-            get_slice(state, partition, level, var, timestamp_n)
-            for state in det_states
-        ]
-        det_slices = [xr_to_torch(s) for s in det_slices]
-        det_avgs = [avg_over_mask(s, mask) for s in det_slices]
-        det_rollout.append(det_avgs)
-
-    # means
     mean_unguided_rollout = compute_mean_rollout(unguided_rollout)
-    mean_det_rollout = compute_mean_rollout(det_rollout)
-    return det_rollout, ground_truth, mean_unguided_rollout, unguided_rollout
-
-
-@app.cell(hide_code=True)
-def _():
-    # Check deterministic rollout
-    return
-
-
-@app.cell
-def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
-    def plot_ensemble_rmse(gen_rmse, det_rmse, var):
-        fig, ax = plt.subplots(figsize=(8, 3.5), dpi=110)
-        steps = list(range(len(gen_rmse)))
-        ax.plot(
-            steps,
-            gen_rmse,
-            marker="o",
-            label="generative (M-ensemble)",
-            color="C0",
-        )
-        ax.plot(steps, det_rmse, marker="s", label="deterministic (M)", color="C3")
-        ax.set_xlabel("rollout step n")
-        ax.set_ylabel(f"RMSE  [{var}]")
-        ax.set_title("Ensemble RMSE vs ground truth (avg-over-mask scalar)")
-        ax.grid(True, alpha=0.3)
-        ax.legend()
-        fig.tight_layout()
-        return fig
-
-
-    def ensemble_rmse_per_step(ensemble, ground_truth):
-        return [
-            float(np.sqrt(np.mean([(float(m) - float(gt)) ** 2 for m in members])))
-            for members, gt in zip(ensemble, ground_truth)
-        ]
-
-
-    gen_rmse_per_step = ensemble_rmse_per_step(unguided_rollout, ground_truth)
-    det_rmse_per_step = ensemble_rmse_per_step(det_rollout, ground_truth)
-    rmse_plot = plot_ensemble_rmse(gen_rmse_per_step, det_rmse_per_step, var)
-    return
-
-
-@app.cell
-def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
-    def member_rmse_over_steps(ensemble, ground_truth):
-        M = len(ensemble[0])
-        out = []
-        for m in range(M):
-            sq = [
-                (float(step_vals[m]) - float(gt)) ** 2
-                for step_vals, gt in zip(ensemble, ground_truth)
-            ]
-            out.append(float(np.sqrt(np.mean(sq))))
-        return out
-
-
-    def plot_paired_member_rmse(gen_rmse_m, det_rmse_m, var):
-        M = len(gen_rmse_m)
-        x = np.arange(M)
-        width = 0.4
-        fig, ax = plt.subplots(figsize=(max(6, 0.5 * M + 2), 3.5), dpi=110)
-        ax.bar(x - width / 2, gen_rmse_m, width, label="generative", color="C0")
-        ax.bar(x + width / 2, det_rmse_m, width, label="deterministic", color="C3")
-        ax.set_xticks(x)
-        ax.set_xticklabels([f"m{m+1}" for m in range(M)])
-        ax.set_xlabel("ensemble member")
-        ax.set_ylabel(f"temporal RMSE  [{var}]")
-        ax.set_title("Per-member RMSE over N steps (vs ground truth)")
-        ax.grid(True, axis="y", alpha=0.3)
-        ax.legend()
-        fig.tight_layout()
-        return fig
-
-
-    gen_rmse_per_member = member_rmse_over_steps(unguided_rollout, ground_truth)
-    det_rmse_per_member = member_rmse_over_steps(det_rollout, ground_truth)
-    paired_rmse_plot = plot_paired_member_rmse(
-        gen_rmse_per_member, det_rmse_per_member, var
-    )
-    return
-
-
-@app.cell
-def _(det_rollout, ground_truth, np, plt, unguided_rollout, var):
-    def relative_error_matrix(unguided, det, ground_truth):
-        """[M, N+1] matrix of |gen - gt| - |det - gt|. Negative = generative closer."""
-        M = len(unguided[0])
-        N1 = len(unguided)
-        mat = np.zeros((M, N1))
-        for n in range(N1):
-            gt_n = float(ground_truth[n])
-            for m in range(M):
-                gen_err = abs(float(unguided[n][m]) - gt_n)
-                det_err = abs(float(det[n][m]) - gt_n)
-                mat[m, n] = gen_err - det_err
-        return mat
-
-
-    def plot_relative_perf_matrix(mat, var):
-        M, N1 = mat.shape
-        vmax = float(np.max(np.abs(mat))) or 1.0
-        fig, ax = plt.subplots(
-            figsize=(max(6, 0.45 * N1 + 2), max(3, 0.35 * M + 1.5)), dpi=110
-        )
-        im = ax.imshow(mat, aspect="auto", cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-        ax.set_xticks(np.arange(N1))
-        ax.set_xticklabels([str(n) for n in range(N1)])
-        ax.set_yticks(np.arange(M))
-        ax.set_yticklabels([f"m{m+1}" for m in range(M)])
-        ax.set_xlabel("rollout step n")
-        ax.set_ylabel("ensemble member m")
-        ax.set_title(
-            f"|gen - gt| - |det - gt|   [{var}]   (blue = gen better, red = det better)"
-        )
-        cbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
-        cbar.set_label(f"abs-error diff [{var}]")
-        fig.tight_layout()
-        return fig
-
-
-    rel_perf_matrix = relative_error_matrix(
-        unguided_rollout, det_rollout, ground_truth
-    )
-    rel_perf_plot = plot_relative_perf_matrix(rel_perf_matrix, var)
-    return
-
-
-@app.cell
-def _():
-    # rmse_plot, paired_rmse_plot, rel_perf_plot
-    return
+    return ground_truth, mean_unguided_rollout, timestamps, unguided_rollout
 
 
 @app.cell
@@ -784,6 +650,7 @@ def _(
     M,
     N,
     alpha,
+    config,
     ground_truth,
     guidance_mode_dropdown,
     lambda_,
@@ -798,16 +665,15 @@ def _(
     timestamp,
     timestamp_idx,
     timestamps,
-    unguided_cfg,
     unguided_rollout,
     var,
     var_idx,
     w_slider,
 ):
-    config = {
+    new_config = {
         "guidance_flag": True,
         "guidance_mode": guidance_mode_dropdown.value, 
-        "rollout_id": unguided_cfg["rollout_id"],
+        "rollout_id": config["rollout_id"],
         "N": N,
         "M": M,
         "mask_corners": mask_corners,
@@ -829,7 +695,7 @@ def _(
         "alpha": lambda_shape_slider.value,
         "w": w_slider.value,
     }
-    return (config,)
+    return (new_config,)
 
 
 @app.cell
@@ -837,36 +703,31 @@ def _(
     N,
     Path,
     ROLLOUTS,
-    config,
-    device,
     ds,
-    ensure_rollout_dir,
     lambda_,
     level_idx,
     mask_corners,
     mean_unguided_rollout,
     model,
+    new_config,
     partition,
     planned_guidance,
     rollout,
+    rollout_dir,
     run_button,
     save_to_json,
-    state_to_device,
     status,
     test_flag_checkbox,
     torch,
-    unguided_cfg,
     var_idx,
     x_start,
 ):
     if run_button.value and status == "RUNNING":
-        rollout_dir = ensure_rollout_dir("guided", N, unguided_cfg["rollout_id"])
-        # TODO: rollout_dir = ROLLOUTS / f"{rollout_id}"
         rollout(
             guidance_flag=True,
             rollout_dir=rollout_dir,
             ds=ds,
-            x_start=state_to_device(x_start, device),
+            x_start=x_start,
             gen_model=model,
             mask_corners=mask_corners,
             init_mask_term=torch.as_tensor(mean_unguided_rollout[0]),
@@ -879,7 +740,7 @@ def _(
             m=1,
             test=test_flag_checkbox.value
         )
-        save_to_json(config, Path(ROLLOUTS, "guided", rollout_dir), "config")
+        save_to_json(new_config, Path(ROLLOUTS, "guided", rollout_dir), "config")
     return
 
 
@@ -891,12 +752,12 @@ def _(mo):
 
 
 @app.cell
-def _(CONFIGS, config, config_button, save_to_json, unguided_cfg):
+def _(CONFIGS, config, config_button, save_to_json):
     # manually move config to archive once things are done
     if config_button.value:
         config_dir = CONFIGS / "to_run" / "guided"
         # no need to add the config_id to the config
-        save_to_json(config, config_dir, f"{unguided_cfg['rollout_id']}")
+        save_to_json(config, config_dir, f"{config['rollout_id']}")
     return
 
 

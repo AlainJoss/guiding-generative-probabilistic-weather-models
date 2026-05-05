@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import xarray as xr
 import torch
+import numpy as np
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
@@ -12,17 +13,109 @@ from geoarches.dataloaders.era5 import Era5Forecast
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS
 
 
-def rollout_to_xarray(ds, sample_multistep, init_timestamp, member):
-    xr_rollout = ds.convert_trajectory_to_xarray(
-        preds_future=sample_multistep,
-        timestamp=init_timestamp.cpu(),
-        denormalize=True,
+def get_x_cond(ds, timestamp):
+    target = np.datetime64(timestamp, "ns")
+
+    stride = 24 // int(ds.timedelta)
+    offset = int(ds.load_prev) * int(ds.lead_time_hours) // int(ds.timedelta)
+
+    ds_timestamps = [
+        np.datetime64(ts[2], "ns")
+        for ts in ds.timestamps
+    ]
+
+    ds_timestamps_24h = ds_timestamps[::stride]
+
+    if target not in ds_timestamps_24h:
+        raise ValueError(
+            f"{target} not found in 24h-strided timestamps. "
+            f"First: {ds_timestamps_24h[0]}, last: {ds_timestamps_24h[-1]}"
+        )
+
+    idx_24h = ds_timestamps_24h.index(target)
+    raw_idx = idx_24h * stride
+
+    dataset_idx = raw_idx - offset
+
+    if dataset_idx < 0:
+        raise ValueError(
+            f"{target} exists in ds.timestamps at raw_idx={raw_idx}, "
+            f"but ds[{dataset_idx}] would be needed because __getitem__ applies offset={offset}. "
+            f"Pick a later timestamp."
+        )
+
+    print(f"stride={stride}")
+    print(f"offset={offset}")
+    print(f"raw_idx={raw_idx}")
+    print(f"dataset_idx={dataset_idx}")
+    print(f"raw timestamp={ds_timestamps[raw_idx]}")
+
+    x_cond = ds[dataset_idx]
+
+    print(f"returned timestamp={tensor_timestamp_to_string(x_cond['timestamp'])}")
+
+    return x_cond, dataset_idx
+
+def read_nc(rollout_dir: Path, type_: str):
+    path = rollout_dir / f"{type_}.nc"
+    return xr.open_dataset(path)
+
+def get_experiment_ids(type_: str):
+    experiments = Path(ROLLOUTS).glob("2026*")
+
+    def has_config(path: Path) -> bool:
+        return (path / "config.json").exists()
+
+    def has_file(path: Path, type_: str) -> bool:
+        return (path / f"{type_}.nc").exists()
+
+    experiments = sorted(
+        [
+            p.name
+            for p in experiments
+            if has_config(p) and has_file(p, type_)
+        ],
+        reverse=True,
     )
+
+    return experiments
+
+def get_rollout_dir(id_: str):
+    return ROLLOUTS / id_
+
+def rollout_to_xarray(
+    ds,
+    sample_multistep,
+    init_timestamp,
+    member,
+    lead_time_hours=24,
+    include_init=False,
+):
+    sample_multistep = ds.denormalize(sample_multistep)
+
+    init_seconds = int(init_timestamp.cpu().flatten()[0].item())
+    step_iterations = sample_multistep.shape[1]
+
+    xr_steps = []
+
+    for i in range(step_iterations):
+        offset = i if include_init else i + 1
+        valid_seconds = init_seconds + lead_time_hours * 3600 * offset
+
+        xr_step = ds.convert_to_xarray(
+            sample_multistep[:, i],
+            timestamp=torch.tensor([valid_seconds]),
+        )
+
+        xr_steps.append(xr_step)
+
+    xr_rollout = xr.concat(xr_steps, dim="time")
 
     if member == -1:
         return xr_rollout
-    else: 
-        return xr_rollout.expand_dims(member=[member])
+
+    return xr_rollout.expand_dims(member=[member])
+
 
 def get_device():
     if torch.cuda.is_available():
@@ -88,14 +181,11 @@ def ensure_new_config_dir_path(sub_dir: str):
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
-def ensure_rollout_dir(sub_dir: Path, N, experiment_id: str = None) -> Path:
+def ensure_rollout_dir(experiment_id: str = None) -> Path:
     if experiment_id is None:
         experiment_id = get_now_timestamp()
-    rollout_dir = Path(ROLLOUTS, sub_dir, f"{experiment_id}")
+    rollout_dir = Path(ROLLOUTS, f"{experiment_id}")
     rollout_dir.mkdir(parents=True, exist_ok=True)
-    for n in range(1, N+1):
-        path = Path(rollout_dir, f"{n}")
-        path.mkdir(parents=True, exist_ok=True)
     return rollout_dir
 
 def get_last_experiment_dir():
@@ -110,17 +200,13 @@ def batchify_and_move(sample, device):
         for k, v in sample.items()
     }
 
-def save_state(rollout_dir: str, array, n: int, m: int):
-    path = Path(rollout_dir, f"{n}", f"{m}.nc")
-    array.to_netcdf(path)
-
 def read_state(path: Path):
     return xr.open_dataset(path, engine="netcdf4")
 
-def read_states(rollout_dir: Path, state_type: str, n: int):
-    paths = list((rollout_dir / f"{n}").glob(f"{state_type}_[0-9]*.nc"))    
-    paths.sort(key=lambda p: int(p.stem.rsplit("_", 1)[-1]))
-    return [read_state(p) for p in paths]
+# def read_states(rollout_dir: Path, state_type: str, n: int):
+#     paths = list((rollout_dir / f"{n}").glob(f"{state_type}_[0-9]*.nc"))    
+#     paths.sort(key=lambda p: int(p.stem.rsplit("_", 1)[-1]))
+#     return [read_state(p) for p in paths]
 
 def get_slice(state, partition, level, var, timestamp):
     if partition == "surface":
