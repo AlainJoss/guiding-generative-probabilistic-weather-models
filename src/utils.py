@@ -78,9 +78,9 @@ def rollout_to_xarray(
     lead_time_hours=24,
     include_init=False,
 ):
-    sample_multistep = ds.denormalize(sample_multistep)
+    sample_multistep = ds.denormalize(sample_multistep).detach().cpu()
 
-    init_seconds = int(init_timestamp.cpu().flatten()[0].item())
+    init_seconds = int(init_timestamp.detach().cpu().flatten()[0].item())
     step_iterations = sample_multistep.shape[1]
 
     xr_steps = []
