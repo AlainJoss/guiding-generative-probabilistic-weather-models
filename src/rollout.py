@@ -39,25 +39,21 @@ def rollout(
     ds = get_dataset(multistep=N)
     x_cond, timestamp_idx = get_x_cond(ds, timestamp)
 
-    if test:  # just to make sure
-        guidance_flag = False
-
     device = flow_model.device
     x_cond = batchify_and_move(x_cond, device)
     lead_time_hours = int(x_cond["lead_time_hours"].cpu().flatten()[0].item())
 
     if guidance_flag:
-        y = [y[n].to(device) for n in range(0, N + 1)]  # 0 because I need all ys
-        lambda_ = [lambda_[t].to(device) for t in range(25)]
+        y = [torch.tensor(y[n]).to(device) for n in range(0, N + 1)]  # 0 because I need all ys
+        lambda_ = [torch.tensor(lambda_[t]).to(device) for t in range(25)]
         mask = get_mask_from_corners(*mask_corners)
         mask = mask.to(device)
         mask = get_mask_tensordict(x_cond["state"][0], partition, var_idx, level_idx, mask)
-    else:
+    if not guidance_flag or test:
         ground_truth = torch.cat(
             [x_cond["state"].unsqueeze(1), x_cond["future_states"]],
             dim=1,
         )
-
         ground_truth = rollout_to_xarray(
             ds=ds,
             sample_multistep=ground_truth,

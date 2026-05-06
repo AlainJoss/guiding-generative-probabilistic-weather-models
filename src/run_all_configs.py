@@ -1,9 +1,11 @@
 """
 python -m src.run_all_configs \
-  --config-type guided \
-  --guidance-mode manual_trajectory \
-  --alpha 1.0 \
-  --w 2.0
+  --config-type unguided --test
+python -m src.run_all_configs \
+  --config-type guided --test
+#   --guidance-mode manual_trajectory \
+#   --alpha 1.0 \
+#   --w 2.0
 """
 
 import argparse
@@ -35,7 +37,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_configs(config_type: str) -> list[tuple[str, dict[str, Any]]]:
-    config_dir = CONFIGS / "to_run" / config_type
+    config_dir = CONFIGS / config_type
     config_paths = sorted(config_dir.glob("*.json"))
 
     configs = []

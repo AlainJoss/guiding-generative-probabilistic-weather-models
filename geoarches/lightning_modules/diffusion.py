@@ -176,6 +176,11 @@ class DiffusionModule(BaseLightningModule):
         hour = torch.tensor(times.hour).to(device)
         hour_emb = self.hour_embedder(hour)
         timestep_emb = self.timestep_embedder(timesteps)
+        print(
+            month_emb.norm().item(),
+            hour_emb.norm().item(),
+            timestep_emb.norm().item(),
+        )
 
         cond_emb = month_emb + hour_emb + timestep_emb
 

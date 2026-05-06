@@ -35,8 +35,12 @@ def _():
         get_x_cond
     )
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.funcs import get_inverse_guidance_trajectory
+    from src.paths import ROLLOUTS, CONFIGS
+    from src.utils import get_rollout_dir, get_experiment_ids
 
     return (
+        CONFIGS,
         LEVELS_DICT,
         N_schedule,
         PARTITIONS,
@@ -45,9 +49,12 @@ def _():
         avg_over_mask,
         compute_mean_rollout,
         get_dataset,
+        get_experiment_ids,
         get_guidance_trajectory,
+        get_inverse_guidance_trajectory,
         get_mask_from_corners,
         get_model,
+        get_rollout_dir,
         get_x_cond,
         list_tens_to_floats,
         plot_dual_trajectory,
@@ -59,20 +66,6 @@ def _():
         visualize_map,
         visualize_mask_terms_over_N,
     )
-
-
-@app.cell
-def _():
-    from src.funcs import get_inverse_guidance_trajectory
-
-    return (get_inverse_guidance_trajectory,)
-
-
-@app.cell
-def _():
-    from src.paths import ROLLOUTS, CONFIGS
-
-    return (CONFIGS,)
 
 
 @app.cell
@@ -237,13 +230,6 @@ def _(config):
     M = config["M"]
     N = config["N"]
     return M, N, timestamp
-
-
-@app.cell
-def _():
-    from src.utils import get_rollout_dir, get_experiment_ids
-
-    return get_experiment_ids, get_rollout_dir
 
 
 @app.cell
@@ -691,7 +677,7 @@ def _(
         "level_idx": None if level_idx is None else int(level_idx),
         "var": var,
         "var_idx": int(var_idx),
-        "timestamps": timestamps,
+        "timestamps": [str(ts) for ts in timestamps],
         "init_mask_term": init_mask_term,
         "ground_truth": list_tens_to_floats(ground_truth),
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],

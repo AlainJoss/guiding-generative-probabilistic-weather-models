@@ -16,7 +16,6 @@ from src.utils import (
     ensure_rollout_dir,
     save_to_json,
     get_device,
-    get_now_timestamp
 )
 from src.rollout import rollout
 
@@ -41,9 +40,7 @@ def run_from_config(
     device = get_device()
     flow_model = get_model(device)
 
-    rollout_id = get_now_timestamp()
-    rollout_dir = ensure_rollout_dir(rollout_id)
-    config["rollout_id"]=rollout_id
+    rollout_dir = ensure_rollout_dir(config["rollout_id"])
 
     rollout(
         guidance_flag=config["guidance_flag"],

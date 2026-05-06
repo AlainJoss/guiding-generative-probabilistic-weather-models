@@ -16,7 +16,6 @@ from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS
 def get_x_cond(ds, timestamp):
     target = np.datetime64(timestamp, "ns")
 
-    stride = 24 // int(ds.timedelta)
     offset = int(ds.load_prev) * int(ds.lead_time_hours) // int(ds.timedelta)
 
     ds_timestamps = [
@@ -24,35 +23,23 @@ def get_x_cond(ds, timestamp):
         for ts in ds.timestamps
     ]
 
-    ds_timestamps_24h = ds_timestamps[::stride]
-
-    if target not in ds_timestamps_24h:
+    if target not in ds_timestamps:
         raise ValueError(
-            f"{target} not found in 24h-strided timestamps. "
-            f"First: {ds_timestamps_24h[0]}, last: {ds_timestamps_24h[-1]}"
+            f"{target} not found in dataset timestamps. "
+            f"First: {ds_timestamps[0]}, last: {ds_timestamps[-1]}"
         )
 
-    idx_24h = ds_timestamps_24h.index(target)
-    raw_idx = idx_24h * stride
-
+    raw_idx = ds_timestamps.index(target)
     dataset_idx = raw_idx - offset
 
     if dataset_idx < 0:
         raise ValueError(
-            f"{target} exists in ds.timestamps at raw_idx={raw_idx}, "
+            f"{target} exists at raw_idx={raw_idx}, "
             f"but ds[{dataset_idx}] would be needed because __getitem__ applies offset={offset}. "
             f"Pick a later timestamp."
         )
 
-    print(f"stride={stride}")
-    print(f"offset={offset}")
-    print(f"raw_idx={raw_idx}")
-    print(f"dataset_idx={dataset_idx}")
-    print(f"raw timestamp={ds_timestamps[raw_idx]}")
-
     x_cond = ds[dataset_idx]
-
-    print(f"returned timestamp={tensor_timestamp_to_string(x_cond['timestamp'])}")
 
     return x_cond, dataset_idx
 
