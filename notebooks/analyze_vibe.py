@@ -14,7 +14,7 @@ def _():
     import matplotlib.pyplot as plt
     import xarray as xr
 
-    return Path, mo, np, pd, plt
+    return Path, mo, np, pd, plt, xr
 
 
 @app.cell
@@ -63,6 +63,63 @@ def _():
         read_nc,
         visualize_map,
     )
+
+
+@app.cell
+def _(config):
+    config
+    return
+
+
+@app.cell
+def _(mo, read_json, rollout_dir):
+    experiment_params = read_json(rollout_dir, "experiment_params")
+
+    guidance_mode_dropdown = mo.ui.dropdown(
+        options=experiment_params["guidance_type"],
+        value=experiment_params["guidance_type"][0],
+        label="guidance mode",
+    )
+
+    alpha_slider = mo.ui.slider(
+        start=min(experiment_params["alpha"]),
+        stop=max(experiment_params["alpha"]),
+        step=experiment_params["alpha"][1] - experiment_params["alpha"][0]
+        if len(experiment_params["alpha"]) > 1
+        else 1,
+        value=experiment_params["alpha"][0],
+        label="alpha",
+    )
+
+    w_slider = mo.ui.slider(
+        start=min(experiment_params["w"]),
+        stop=max(experiment_params["w"]),
+        step=experiment_params["w"][1] - experiment_params["w"][0]
+        if len(experiment_params["w"]) > 1
+        else 1,
+        value=experiment_params["w"][0],
+        label="w",
+    )
+
+    mo.vstack([
+        guidance_mode_dropdown,
+        alpha_slider,
+        w_slider,
+    ])
+    return
+
+
+@app.cell
+def _(alpha, guidance_mode, make_hash, rollout_dir, w, xr):
+    params = {
+        "guidance_mode": guidance_mode.value,
+        "alpha": alpha.value,
+        "w": w.value,
+    }
+
+    guided_id = make_hash(params)
+    xr_guided = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
+    return
 
 
 @app.cell
@@ -409,7 +466,7 @@ def _(completed_rollouts, pick_rollout_dropdown):
         rollout_dir = None
     else:
         rollout_dir = completed_rollouts[rollout_id]
-    return rollout_dir, rollout_id
+    return (rollout_dir,)
 
 
 @app.cell
@@ -435,14 +492,7 @@ def _(read_nc, rollout_dir):
 
 
 @app.cell
-def _(
-    config,
-    mo,
-    pick_rollout_dropdown,
-    refresh_button,
-    rollout_dir,
-    rollout_id,
-):
+def _(config, mo, pick_rollout_dropdown, refresh_button):
     experiment_picker = mo.vstack(
         [
             mo.hstack(
@@ -452,8 +502,6 @@ def _(
                 ],
                 justify="start",
             ),
-            mo.md(f"**rollout id:** `{rollout_id}`"),
-            mo.md(f"**rollout dir:** `{rollout_dir}`"),
             mo.accordion(
                 {
                     "Experiment params": mo.md(
@@ -469,14 +517,6 @@ def _(
 @app.cell
 def _(experiment_picker):
     experiment_picker
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## Analysis controls
-    """)
     return
 
 
@@ -593,7 +633,7 @@ def _(get_member_values, guided_xr, mo, unguided_xr):
     m_slider = mo.ui.slider(
         steps=member_values,
         value=member_values[0],
-        label="member: ",
+        label="m: ",
         show_value=True,
         debounce=True,
     )
@@ -751,14 +791,6 @@ def _(
         timestamps,
         unguided_rollout_terms,
     )
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## Data
-    """)
-    return
 
 
 @app.cell
@@ -1715,8 +1747,11 @@ def _(
 
 
 @app.cell
-def _(states_over_n_plot):
-    states_over_n_plot
+def _(m_slider, mo, states_over_n_plot):
+    mo.vstack([
+        m_slider,
+        states_over_n_plot
+    ])
     return
 
 

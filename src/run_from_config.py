@@ -1,7 +1,7 @@
 """
 python -m src.run_from_config \
   --config-id 2026-05-05_17:37:52 \
-  --config-type unguided \
+  --config-type guided \
   --test
 """
 
@@ -32,15 +32,39 @@ def read_config(config_type: str, config_id: str) -> dict[str, Any]:
     return read_json(CONFIGS / config_type, config_id)
 
 
+GUIDANCE_PARAM_KEYS = ["guidance_mode", "alpha", "w"]
+
+def update_experiment_params(
+    rollout_dir: Path,
+    config: dict[str, Any],
+) -> dict[str, list[Any]]:
+    try:
+        experiment_params = read_json(rollout_dir, "experiment_params")
+    except FileNotFoundError:
+        experiment_params = {k: [] for k in GUIDANCE_PARAM_KEYS}
+
+    for k in GUIDANCE_PARAM_KEYS:
+        experiment_params.setdefault(k, [])
+
+        value = config[k]
+        if value not in experiment_params[k]:
+            experiment_params[k].append(value)
+
+    save_to_json(experiment_params, rollout_dir, "experiment_params")
+    return experiment_params
+
+
 def run_from_config(
     config: dict[str, Any],
-    config_type: str,
     test: bool = False,
 ) -> Path:
     device = get_device()
     flow_model = get_model(device)
 
     rollout_dir = ensure_rollout_dir(config["rollout_id"])
+    
+    if config["guidance_flag"]:
+        update_experiment_params(rollout_dir, config)
 
     rollout(
         guidance_flag=config["guidance_flag"],
@@ -57,12 +81,7 @@ def run_from_config(
         var_idx=config["var_idx"],
         M=config["M"],
         test=test,
-    )
-
-    save_to_json(
-        config,
-        rollout_dir,
-        "config",
+        config=config,
     )
 
     return rollout_dir
@@ -76,7 +95,6 @@ def main():
 
     rollout_dir = run_from_config(
         config,
-        args.config_type,
         test=args.test,
     )
 

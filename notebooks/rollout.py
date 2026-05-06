@@ -57,14 +57,7 @@ def _():
         tensor_timestamp_to_string, get_now_timestamp
     )
 
-    return (
-        ensure_rollout_dir,
-        get_dataset,
-        get_device,
-        get_model,
-        get_now_timestamp,
-        save_to_json,
-    )
+    return get_dataset, get_device, get_model, get_now_timestamp, save_to_json
 
 
 @app.cell
@@ -78,7 +71,7 @@ def _():
 def _():
     from src.rollout import rollout
 
-    return (rollout,)
+    return
 
 
 @app.cell
@@ -113,7 +106,7 @@ def _(get_device):
 def _(device, get_dataset, get_model):
     ds = get_dataset()
     model = get_model(device)
-    return ds, model
+    return (ds,)
 
 
 @app.cell
@@ -284,14 +277,7 @@ def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
 def _(ds, timestamp):
     from src.utils import get_x_cond
     x_cond, timestamp_idx = get_x_cond(ds, timestamp)
-    # tensor_timestamp_to_string(x_cond["timestamp"])
     return (timestamp_idx,)
-
-
-@app.cell
-def _():
-    # tensor_timestamp_to_string(x_start["timestamp"])
-    return
 
 
 @app.cell
@@ -369,7 +355,7 @@ def _(ground_truth, plot_dual_trajectory, timestamps, var):
 @app.cell
 def _(mo):
     test_flag_checkbox = mo.ui.checkbox(value=False, label="test")
-    return (test_flag_checkbox,)
+    return
 
 
 @app.cell
@@ -420,20 +406,10 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Run experiment
-    Either rollout or save config for later run.
+    ## Save config
+    Run from terminal.
     """)
     return
-
-
-@app.cell
-def _(mo, test_flag_checkbox):
-    run_button = mo.ui.run_button(label="Rollout")
-    mo.vstack([
-        test_flag_checkbox,
-        run_button
-    ])
-    return (run_button,)
 
 
 @app.cell
@@ -469,49 +445,6 @@ def _(
 
 
 @app.cell
-def _(
-    M,
-    N,
-    config,
-    ensure_rollout_dir,
-    get_now_timestamp,
-    model,
-    rollout,
-    run_button,
-    save_to_json,
-    test_flag_checkbox,
-    timestamp,
-):
-    def run_rollout():
-        rollout_id = get_now_timestamp()
-        rollout_dir = ensure_rollout_dir(rollout_id)
-        config["rollout_id"]=rollout_id
-        rollout(
-            guidance_flag=False,
-            rollout_dir=rollout_dir,
-            timestamp=timestamp,
-            flow_model=model,
-            init_mask_term=None,
-            mask_corners=None,  # mask_corners
-            y=None,  # y
-            lambda_=None,  # lambda_
-            N=N,
-            partition=None,  # partition
-            level_idx=None,  # level_idx
-            var_idx=None,  # var_idx
-            M=M,
-            test=test_flag_checkbox.value,
-        )
-
-        save_to_json(config, rollout_dir, "config")
-
-
-    if run_button.value:
-        run_rollout()
-    return
-
-
-@app.cell
 def _(mo):
     config_button = mo.ui.run_button(label="Save config")
     config_button
@@ -524,7 +457,6 @@ def _(CONFIGS, config, config_button, get_now_timestamp, save_to_json):
         config_id = get_now_timestamp()
         config["rollout_id"]=config_id
         config_dir = CONFIGS / "unguided"
-        # no need to add the config_id to the config
         save_to_json(config, config_dir, f"{config_id}")
     return
 

@@ -10,7 +10,7 @@ from src.utils import (
     batchify_and_move,
     get_dataset,
     get_x_cond,
-    tensor_timestamp_to_string
+    get_now_timestamp
 )
 from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
@@ -34,6 +34,7 @@ def rollout(
         var_idx: int = None, 
         M: int = 1,
         test: bool = False,
+        config: dict = None
     ):
 
     ds = get_dataset(multistep=N)
@@ -92,10 +93,28 @@ def rollout(
 
     xr_pred = xr.concat(member_datasets, dim="member")
 
-    if guidance_flag:
-        xr_pred.to_netcdf(rollout_dir / "guided.nc")
-        save_to_json(M_mask_terms, rollout_dir, "mask_terms")
-    else:
-        xr_pred.to_netcdf(rollout_dir / "unguided.nc")
+    import json
+    import hashlib
 
-    ground_truth.to_netcdf(rollout_dir / "ground_truth.nc")
+    def make_hash(params):
+        s = json.dumps(params, sort_keys=True)
+        return hashlib.sha1(s.encode()).hexdigest()[:10]
+
+    if guidance_flag:
+        params = {
+            "guidance_mode": config["guidance_mode"],
+            "alpha": config["alpha"],
+            "w": config["w"],
+        }
+
+        guided_id = make_hash(params)
+        guided_path = rollout_dir / "guided" / guided_id
+        guided_path.mkdir(parents=True, exist_ok=True)
+
+        xr_pred.to_netcdf(guided_path / "guided.nc")
+        save_to_json(config, guided_path, "config")
+        save_to_json(M_mask_terms, guided_path, "mask_terms")
+    else:
+        save_to_json(config, rollout_dir, "config")
+        xr_pred.to_netcdf(rollout_dir / "unguided.nc")
+        ground_truth.to_netcdf(rollout_dir / "ground_truth.nc")

@@ -61,7 +61,6 @@ def _():
         plot_trajectory,
         read_json,
         read_nc,
-        rollout,
         save_to_json,
         visualize_map,
         visualize_mask_terms_over_N,
@@ -72,7 +71,7 @@ def _():
 def _(device, get_dataset, get_model):
     ds = get_dataset()
     model = get_model(device)
-    return ds, model
+    return (ds,)
 
 
 @app.cell
@@ -589,52 +588,16 @@ def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Run experiment
+    ## Save config
+    Run from terminal.
     """)
     return
 
 
 @app.cell
 def _(mo):
-    get_status, set_status = mo.state("IDLE")
-    return get_status, set_status
-
-
-@app.cell
-def _(run_button, set_status):
-    set_status("IDLE")
-    if run_button.value:
-        set_status("RUNNING")
-    return
-
-
-@app.cell
-def _(get_status):
-    status = get_status()
-    return (status,)
-
-
-@app.cell
-def _(mo):
     test_flag_checkbox = mo.ui.checkbox(value=False, label="test")
-    return (test_flag_checkbox,)
-
-
-@app.cell
-def _(mo, test_flag_checkbox):
-    run_button = mo.ui.run_button(label="Run")
-    mo.vstack([
-        test_flag_checkbox,
-        run_button,
-        # mo.md(f"Experiment status: **{get_status()}**")
-    ])
-    return (run_button,)
-
-
-@app.cell
-def _(mean_unguided_rollout):
-    init_mask_term = float(mean_unguided_rollout[0])
-    return (init_mask_term,)
+    return
 
 
 @app.cell
@@ -645,7 +608,6 @@ def _(
     config,
     ground_truth,
     guidance_mode_dropdown,
-    init_mask_term,
     lambda_,
     lambda_shape_slider,
     level,
@@ -678,7 +640,7 @@ def _(
         "var": var,
         "var_idx": int(var_idx),
         "timestamps": [str(ts) for ts in timestamps],
-        "init_mask_term": init_mask_term,
+        "init_mask_term": float(mean_unguided_rollout[0]),
         "ground_truth": list_tens_to_floats(ground_truth),
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
@@ -692,49 +654,6 @@ def _(
 
 
 @app.cell
-def _(
-    M,
-    N,
-    init_mask_term,
-    lambda_,
-    level_idx,
-    mask_corners,
-    model,
-    new_config,
-    partition,
-    planned_guidance,
-    rollout,
-    rollout_dir,
-    run_button,
-    save_to_json,
-    status,
-    test_flag_checkbox,
-    timestamp,
-    var_idx,
-):
-    if run_button.value and status == "RUNNING":
-        rollout(
-            guidance_flag=False,
-            rollout_dir=rollout_dir,
-            timestamp=timestamp,
-            flow_model=model,
-            init_mask_term=init_mask_term,
-            mask_corners=mask_corners,  # mask_corners
-            y=planned_guidance,  # y
-            lambda_=lambda_,  # lambda_
-            N=N,
-            partition=partition,  # partition
-            level_idx=level_idx,  # level_idx
-            var_idx=var_idx,  # var_idx
-            M=M,
-            test=test_flag_checkbox.value,
-        )
-
-        save_to_json(new_config, rollout_dir, "config")
-    return
-
-
-@app.cell
 def _(mo):
     config_button = mo.ui.run_button(label="Save config")
     config_button
@@ -743,10 +662,8 @@ def _(mo):
 
 @app.cell
 def _(CONFIGS, config, config_button, new_config, save_to_json):
-    # manually move config to archive once things are done
     if config_button.value:
         config_dir = CONFIGS / "guided"
-        # no need to add the config_id to the config
         save_to_json(new_config, config_dir, f"{config['rollout_id']}")
     return
 
