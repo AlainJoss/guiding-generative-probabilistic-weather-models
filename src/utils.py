@@ -1,4 +1,5 @@
 import json
+import hashlib
 
 from pathlib import Path 
 from datetime import datetime, timezone
@@ -11,6 +12,10 @@ from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS
+
+def make_hash(params):
+    s = json.dumps(params, sort_keys=True)
+    return hashlib.sha1(s.encode()).hexdigest()[:10]
 
 
 def get_x_cond(ds, timestamp):
@@ -54,7 +59,7 @@ def get_experiment_ids(type_: str):
         return (path / "config.json").exists()
 
     def has_file(path: Path, type_: str) -> bool:
-        return (path / f"{type_}.nc").exists()
+        return any(path.glob(f"**/{type_}.nc"))
 
     experiments = sorted(
         [

@@ -140,7 +140,9 @@ class GuidedFlow(BaseLightningModule):
                 lambda_=lambda_,
                 seed=member + 1000 * n  # + batch_nb * 10**6
             )
-            realized_trajectory.append(x_hat)
+            realized_trajectory.append(x_hat.cpu())
+            if self.device == torch.device("cuda"):
+                torch.cuda.empty_cache()
             mask_terms.append(mask_term)
             
             # after the last iteration no need to set this again
@@ -226,7 +228,8 @@ class GuidedFlow(BaseLightningModule):
                 dt = s_t
 
             # reset graph at each step and make z_t differentiable
-            z_t = z_t.apply(lambda x: x.detach().clone().requires_grad_(True))
+            if y_n is not None:
+                z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
             
             time_embedding = self.embedd_time(x_cond, t)      
             input_state = self.get_velocity_input_state(z_t, x_cond)
@@ -320,7 +323,7 @@ class GuidedFlow(BaseLightningModule):
             batch_size=z_t.batch_size,
             device=z_t.device,
         )
-        return grad_l, mask_term
+        return grad_l, mask_term.detach()
     
     def euler_step(self, z_t, u_t, dt):
         # z_new = z_t + h * u_t, where h = dt

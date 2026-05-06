@@ -10,7 +10,7 @@ from src.utils import (
     batchify_and_move,
     get_dataset,
     get_x_cond,
-    get_now_timestamp
+    make_hash
 )
 from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
@@ -92,13 +92,6 @@ def rollout(
         member_datasets.append(xr_member)
 
     xr_pred = xr.concat(member_datasets, dim="member")
-
-    import json
-    import hashlib
-
-    def make_hash(params):
-        s = json.dumps(params, sort_keys=True)
-        return hashlib.sha1(s.encode()).hexdigest()[:10]
 
     if guidance_flag:
         params = {

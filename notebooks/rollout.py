@@ -24,14 +24,6 @@ def _(mo):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    TODO: in plot don't remove the timestamps that are not 00!
-    """)
-    return
-
-
 @app.cell
 def _():
     import marimo as mo

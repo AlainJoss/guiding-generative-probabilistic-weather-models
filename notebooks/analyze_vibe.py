@@ -14,7 +14,7 @@ def _():
     import matplotlib.pyplot as plt
     import xarray as xr
 
-    return Path, mo, np, pd, plt, xr
+    return mo, np, pd, plt, xr
 
 
 @app.cell
@@ -48,7 +48,6 @@ def _():
     return (
         LEVELS_DICT,
         PARTITIONS,
-        ROLLOUTS,
         VARIABLES_DICT,
         get_dataset,
         get_experiment_ids,
@@ -66,108 +65,7 @@ def _():
 
 
 @app.cell
-def _(config):
-    config
-    return
-
-
-@app.cell
-def _(mo, read_json, rollout_dir):
-    experiment_params = read_json(rollout_dir, "experiment_params")
-
-    guidance_mode_dropdown = mo.ui.dropdown(
-        options=experiment_params["guidance_type"],
-        value=experiment_params["guidance_type"][0],
-        label="guidance mode",
-    )
-
-    alpha_slider = mo.ui.slider(
-        start=min(experiment_params["alpha"]),
-        stop=max(experiment_params["alpha"]),
-        step=experiment_params["alpha"][1] - experiment_params["alpha"][0]
-        if len(experiment_params["alpha"]) > 1
-        else 1,
-        value=experiment_params["alpha"][0],
-        label="alpha",
-    )
-
-    w_slider = mo.ui.slider(
-        start=min(experiment_params["w"]),
-        stop=max(experiment_params["w"]),
-        step=experiment_params["w"][1] - experiment_params["w"][0]
-        if len(experiment_params["w"]) > 1
-        else 1,
-        value=experiment_params["w"][0],
-        label="w",
-    )
-
-    mo.vstack([
-        guidance_mode_dropdown,
-        alpha_slider,
-        w_slider,
-    ])
-    return
-
-
-@app.cell
-def _(alpha, guidance_mode, make_hash, rollout_dir, w, xr):
-    params = {
-        "guidance_mode": guidance_mode.value,
-        "alpha": alpha.value,
-        "w": w.value,
-    }
-
-    guided_id = make_hash(params)
-    xr_guided = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
-    return
-
-
-@app.cell
-def _(Path, ROLLOUTS, get_experiment_ids, get_rollout_dir, np, pd):
-    REQUIRED_ROLLOUT_FILES = {
-        "config.json",
-        "guided.nc",
-        "unguided.nc",
-        "ground_truth.nc",
-    }
-
-
-    def has_completed_analysis_files(rollout_dir: Path) -> bool:
-        return all((rollout_dir / name).exists() for name in REQUIRED_ROLLOUT_FILES)
-
-
-    def find_completed_rollouts() -> dict[str, Path]:
-        """
-        Return {rollout_id: rollout_dir} for experiments containing:
-        config.json, guided.nc, unguided.nc, ground_truth.nc.
-
-        First tries the current project helper functions.
-        Then falls back to recursively scanning ROLLOUTS.
-        """
-        completed = {}
-
-        for kind in ["guided", "unguided"]:
-            try:
-                candidate_ids = get_experiment_ids(kind)
-
-                for rollout_id in candidate_ids:
-                    rollout_dir = Path(get_rollout_dir(rollout_id))
-
-                    if has_completed_analysis_files(rollout_dir):
-                        completed[str(rollout_id)] = rollout_dir
-
-            except Exception:
-                pass
-
-        for config_path in Path(ROLLOUTS).glob("**/config.json"):
-            rollout_dir = config_path.parent
-
-            if has_completed_analysis_files(rollout_dir):
-                completed.setdefault(rollout_dir.name, rollout_dir)
-
-        return dict(sorted(completed.items(), reverse=True))
-
-
+def _(np, pd):
     def format_time_value(t) -> str:
         return pd.to_datetime(t).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -198,26 +96,6 @@ def _(Path, ROLLOUTS, get_experiment_ids, get_rollout_dir, np, pd):
             return "single"
 
         return str(member)
-
-
-    def coerce_level_value(level_value, levels):
-        if level_value is None:
-            return None
-
-        if level_value in levels:
-            return level_value
-
-        for cast in (int, float, str):
-            try:
-                casted = cast(level_value)
-
-                if casted in levels:
-                    return casted
-
-            except Exception:
-                pass
-
-        return levels[0]
 
 
     def as_numpy_2d(x):
@@ -403,8 +281,6 @@ def _(Path, ROLLOUTS, get_experiment_ids, get_rollout_dir, np, pd):
     return (
         align_series_length,
         build_mask_rollouts,
-        coerce_level_value,
-        find_completed_rollouts,
         format_time_value,
         get_member_values,
         mean_rollout_terms,
@@ -436,59 +312,36 @@ def _(mo):
 
 
 @app.cell
-def _(find_completed_rollouts, mo, refresh_button):
+def _(get_experiment_ids, mo, refresh_button):
     if refresh_button.value:
         pass
 
-    completed_rollouts = find_completed_rollouts()
-    completed_rollout_ids = list(completed_rollouts.keys())
+    unguided_rollouts = get_experiment_ids("unguided")
+    print(unguided_rollouts)
+    pick_unguided_rollout_dropdown = mo.ui.dropdown(
+        label="Experiment: ", value=unguided_rollouts[0], options=unguided_rollouts
+    )
 
-    if len(completed_rollout_ids) == 0:
-        pick_rollout_dropdown = mo.ui.dropdown(
-            options=["NO_COMPLETED_ROLLOUTS_FOUND"],
-            value="NO_COMPLETED_ROLLOUTS_FOUND",
-            label="Pick rollout: ",
-        )
-    else:
-        pick_rollout_dropdown = mo.ui.dropdown(
-            options=completed_rollout_ids,
-            value=completed_rollout_ids[0],
-            label="Pick rollout: ",
-        )
-    return completed_rollouts, pick_rollout_dropdown
+    pick_rollout_dropdown = mo.ui.dropdown(
+        options=unguided_rollouts,
+        value=unguided_rollouts[0],
+        label="Pick rollout: ",
+    )
+    return pick_rollout_dropdown, pick_unguided_rollout_dropdown
 
 
 @app.cell
-def _(completed_rollouts, pick_rollout_dropdown):
-    rollout_id = pick_rollout_dropdown.value
-
-    if rollout_id == "NO_COMPLETED_ROLLOUTS_FOUND":
-        rollout_dir = None
-    else:
-        rollout_dir = completed_rollouts[rollout_id]
+def _(get_rollout_dir, pick_unguided_rollout_dropdown, read_json):
+    rollout_dir = get_rollout_dir(pick_unguided_rollout_dropdown.value)
+    unguided_config = read_json(rollout_dir, "config")
     return (rollout_dir,)
 
 
 @app.cell
-def _(read_json, rollout_dir):
-    if rollout_dir is None:
-        config = {}
-    else:
-        config = read_json(rollout_dir, "config")
-    return (config,)
-
-
-@app.cell
 def _(read_nc, rollout_dir):
-    if rollout_dir is None:
-        guided_xr = None
-        unguided_xr = None
-        ground_truth_xr = None
-    else:
-        guided_xr = read_nc(rollout_dir, "guided")
-        unguided_xr = read_nc(rollout_dir, "unguided")
-        ground_truth_xr = read_nc(rollout_dir, "ground_truth")
-    return ground_truth_xr, guided_xr, unguided_xr
+    unguided_xr = read_nc(rollout_dir, "unguided")
+    ground_truth_xr = read_nc(rollout_dir, "ground_truth")
+    return ground_truth_xr, unguided_xr
 
 
 @app.cell
@@ -512,6 +365,58 @@ def _(config, mo, pick_rollout_dropdown, refresh_button):
         ]
     )
     return (experiment_picker,)
+
+
+@app.cell
+def _(mo, read_json, rollout_dir):
+    experiment_params = read_json(rollout_dir, "experiment_params")
+
+    guidance_mode_dropdown = mo.ui.dropdown(
+        options=experiment_params["guidance_mode"],
+        value=experiment_params["guidance_mode"][0],
+        label="guidance mode",
+    )
+
+    alpha_slider = mo.ui.slider(
+        start=min(experiment_params["alpha"]),
+        stop=max(experiment_params["alpha"]),
+        step=experiment_params["alpha"][1] - experiment_params["alpha"][0]
+        if len(experiment_params["alpha"]) > 1
+        else 1,
+        value=experiment_params["alpha"][0],
+        label="alpha",
+    )
+
+    w_slider = mo.ui.slider(
+        start=min(experiment_params["w"]),
+        stop=max(experiment_params["w"]),
+        step=experiment_params["w"][1] - experiment_params["w"][0]
+        if len(experiment_params["w"]) > 1
+        else 1,
+        value=experiment_params["w"][0],
+        label="w",
+    )
+
+    mo.vstack([
+        guidance_mode_dropdown,
+        alpha_slider,
+        w_slider,
+    ])
+    return alpha_slider, guidance_mode_dropdown, w_slider
+
+
+@app.cell
+def _(alpha_slider, guidance_mode_dropdown, rollout_dir, w_slider, xr):
+    params = {
+        "guidance_mode": guidance_mode_dropdown.value,
+        "alpha": alpha_slider.value,
+        "w": w_slider.value,
+    }
+
+    from src.utils import make_hash
+    guided_id = make_hash(params)
+    guided_xr = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
+    return (guided_xr,)
 
 
 @app.cell
@@ -542,21 +447,9 @@ def _(partition_dropdown):
 
 
 @app.cell
-def _(LEVELS_DICT, coerce_level_value, config, partition):
+def _(LEVELS_DICT, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_default = coerce_level_value(config.get("level"), LEVELS)
-    return LEVELS, level_default
-
-
-@app.cell
-def _(LEVELS, level_default, mo):
-    level_slider = mo.ui.slider(
-        steps=LEVELS,
-        value=level_default,
-        label="level: ",
-        show_value=True,
-        debounce=True,
-    )
+    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level  ", show_value=True, debounce=True)
     return (level_slider,)
 
 
@@ -567,27 +460,13 @@ def _(level_slider):
 
 
 @app.cell
-def _(VARIABLES_DICT, config, partition):
+def _(VARIABLES_DICT, mo, partition):
     VARIABLES = VARIABLES_DICT[partition]
-
-    if config.get("partition") == partition and config.get("var") in VARIABLES:
-        variable_default = config["var"]
-    elif partition == "surface" and len(VARIABLES) > 2:
+    if partition == "surface":
         variable_default = VARIABLES[2]
-    elif partition != "surface" and len(VARIABLES) > 3:
-        variable_default = VARIABLES[3]
     else:
-        variable_default = VARIABLES[0]
-    return VARIABLES, variable_default
-
-
-@app.cell
-def _(VARIABLES, mo, variable_default):
-    var_dropdown = mo.ui.dropdown(
-        VARIABLES,
-        value=variable_default,
-        label="variable: ",
-    )
+        variable_default = VARIABLES[3]
+    var_dropdown = mo.ui.dropdown(VARIABLES, value=variable_default, label="variable : ")
     return (var_dropdown,)
 
 
@@ -598,17 +477,8 @@ def _(var_dropdown):
 
 
 @app.cell
-def _(config, ground_truth_xr, guided_xr, mo, unguided_xr):
-    if ground_truth_xr is None or guided_xr is None or unguided_xr is None:
-        N = int(config.get("N", 1))
-    else:
-        N = min(
-            int(config.get("N", len(unguided_xr.time.values))),
-            len(ground_truth_xr.time.values) - 1,
-            len(guided_xr.time.values),
-            len(unguided_xr.time.values),
-        )
-
+def _(config, mo):
+    N = config["N"]
     n_slider = mo.ui.slider(
         steps=range(1, N + 1),
         value=1,
@@ -626,7 +496,8 @@ def _(n_slider):
 
 
 @app.cell
-def _(get_member_values, guided_xr, mo, unguided_xr):
+def _(config, get_member_values, guided_xr, mo, unguided_xr):
+    M = config["M"]
     member_values = get_member_values(unguided_xr)
     guided_member_values = get_member_values(guided_xr)
 
@@ -879,6 +750,7 @@ def _(
 
 @app.cell
 def _(guided_unguided, mo, np):
+    # text thresh
     center_value_for_threshold = 0.0
 
     max_abs_diff_for_threshold = float(
