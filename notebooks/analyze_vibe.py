@@ -333,8 +333,8 @@ def _(get_experiment_ids, mo, refresh_button):
 @app.cell
 def _(get_rollout_dir, pick_unguided_rollout_dropdown, read_json):
     rollout_dir = get_rollout_dir(pick_unguided_rollout_dropdown.value)
-    unguided_config = read_json(rollout_dir, "config")
-    return (rollout_dir,)
+    config = read_json(rollout_dir, "config")
+    return config, rollout_dir
 
 
 @app.cell
