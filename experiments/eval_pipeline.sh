@@ -47,50 +47,50 @@ GEN_TIME_BRIER_METRIC="${GEN_TIME_EVAL}/test-multistep=${MULTISTEP}-era5_brier_s
 # 1. Run rollouts
 # -------------------------
 
-python -m src.run_multistep \
-  --model "${GEN_TIME_MODEL}" \
-  --output-name "${GEN_TIME_SAVE}" \
-  --multistep "${MULTISTEP}" \
-  --num-members "${GEN_MEMBERS}" \
-  --max-samples "${MAX_SAMPLES}" \
-  --force
+# python -m src.run_multistep \
+#   --model "${GEN_TIME_MODEL}" \
+#   --output-name "${GEN_TIME_SAVE}" \
+#   --multistep "${MULTISTEP}" \
+#   --num-members "${GEN_MEMBERS}" \
+#   --max-samples "${MAX_SAMPLES}" \
+#   --force
 
-python -m src.run_multistep \
-  --model "${DET_MODEL}" \
-  --output-name "${DET_SAVE}" \
-  --multistep "${MULTISTEP}" \
-  --max-samples "${MAX_SAMPLES}" \
-  --force
+# python -m src.run_multistep \
+#   --model "${DET_MODEL}" \
+#   --output-name "${DET_SAVE}" \
+#   --multistep "${MULTISTEP}" \
+#   --max-samples "${MAX_SAMPLES}" \
+#   --force
 
-python -m src.run_multistep \
-  --model "${GEN_MODEL}" \
-  --output-name "${GEN_SAVE}" \
-  --multistep "${MULTISTEP}" \
-  --num-members "${GEN_MEMBERS}" \
-  --max-samples "${MAX_SAMPLES}" \
-  --force
+# python -m src.run_multistep \
+#   --model "${GEN_MODEL}" \
+#   --output-name "${GEN_SAVE}" \
+#   --multistep "${MULTISTEP}" \
+#   --num-members "${GEN_MEMBERS}" \
+#   --max-samples "${MAX_SAMPLES}" \
+#   --force
 
 # -------------------------
 # 2. Evaluate rollouts
 # -------------------------
 
-python -m geoarches.evaluation.eval_multistep \
-  --pred_path "${DET_PRED}" \
-  --output_dir "${DET_EVAL}" \
-  --groundtruth_path "${GROUNDTRUTH_PATH}" \
-  --multistep "${MULTISTEP}" \
-  --metrics era5_ensemble_metrics era5_brier_skill_score \
-  --eval_batch_size 1 \
-  --num_workers 0
+# python -m geoarches.evaluation.eval_multistep \
+#   --pred_path "${DET_PRED}" \
+#   --output_dir "${DET_EVAL}" \
+#   --groundtruth_path "${GROUNDTRUTH_PATH}" \
+#   --multistep "${MULTISTEP}" \
+#   --metrics era5_ensemble_metrics era5_brier_skill_score \
+#   --eval_batch_size 1 \
+#   --num_workers 0
 
-python -m geoarches.evaluation.eval_multistep \
-  --pred_path "${GEN_PRED}" \
-  --output_dir "${GEN_EVAL}" \
-  --groundtruth_path "${GROUNDTRUTH_PATH}" \
-  --multistep "${MULTISTEP}" \
-  --metrics era5_ensemble_metrics era5_brier_skill_score \
-  --eval_batch_size 1 \
-  --num_workers 0
+# python -m geoarches.evaluation.eval_multistep \
+#   --pred_path "${GEN_PRED}" \
+#   --output_dir "${GEN_EVAL}" \
+#   --groundtruth_path "${GROUNDTRUTH_PATH}" \
+#   --multistep "${MULTISTEP}" \
+#   --metrics era5_ensemble_metrics era5_brier_skill_score \
+#   --eval_batch_size 1 \
+#   --num_workers 0
 
 python -m geoarches.evaluation.eval_multistep \
   --pred_path "${GEN_TIME_PRED}" \
