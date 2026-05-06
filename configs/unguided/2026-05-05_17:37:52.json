@@ -1,9 +1,9 @@
 {
   "guidance_flag": false,
   "M": 4,
-  "N": 12,
-  "timestamp": "2020-06-17T00:00:00",
-  "timestamp_idx": 668,
+  "N": 16,
+  "timestamp": "2020-01-15T12:00:00",
+  "timestamp_idx": 54,
   "level": 0,
   "level_idx": 0,
   "partition": "surface",
@@ -17,5 +17,6 @@
   ],
   "init_mask_term": null,
   "y": null,
-  "lambda_": null
+  "lambda_": null,
+  "rollout_id": "2026-05-05_17:37:52"
 }

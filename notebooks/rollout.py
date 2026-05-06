@@ -519,17 +519,10 @@ def _(mo):
 
 
 @app.cell
-def _(
-    CONFIGS,
-    config,
-    config_button,
-    get_now_timestamp,
-    rollout_id,
-    save_to_json,
-):
+def _(CONFIGS, config, config_button, get_now_timestamp, save_to_json):
     if config_button.value:
         config_id = get_now_timestamp()
-        config["rollout_id"]=rollout_id
+        config["rollout_id"]=config_id
         config_dir = CONFIGS / "unguided"
         # no need to add the config_id to the config
         save_to_json(config, config_dir, f"{config_id}")

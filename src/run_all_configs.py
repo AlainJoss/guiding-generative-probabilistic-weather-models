@@ -1,11 +1,17 @@
 """
 python -m src.run_all_configs \
-  --config-type unguided --test
+  --config-type unguided 
+
 python -m src.run_all_configs \
-  --config-type guided --test
-#   --guidance-mode manual_trajectory \
-#   --alpha 1.0 \
-#   --w 2.0
+  --config-type guided
+
+# Achtung: this will just overwrite the previous results every time. Need to make subdirs (new timestamps for guided experiments)
+# unguided rollouts can stay as they are as can the ground truth --> impacts analysis notebook, need to write subfoldering logic with experiment type (like manual or other), and if manual slide experiment variables (w and alpha)
+python -m src.run_all_configs \
+  --config-type guided \
+  --guidance-mode manual_trajectory \
+  --alpha 1.0 \
+  --w 2.0
 """
 
 import argparse
