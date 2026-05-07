@@ -9,7 +9,7 @@ Run analysis:
 bash experiments/eval_pipeline.sh
 uv run -m src.run
 # run 
-python -m src.run_from_config --config-id "2026-05-05_17:37:52" --config-type unguided --test
+python -m src.run_from_config --config-id "2026-05-05_17:37:52" --config-type guided --test
 python -m src.run_all_configs --config-type guided --test
 uv run marimo edit notebooks/timestamp_discrepancy.py --watch --no-token
 ```
