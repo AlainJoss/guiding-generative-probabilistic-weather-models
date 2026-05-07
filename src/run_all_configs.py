@@ -103,7 +103,6 @@ def main():
 
         rollout_dir = run_from_config(
             config,
-            args.config_type,
             test=args.test,
         )
 
