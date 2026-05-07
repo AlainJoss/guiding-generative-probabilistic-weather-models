@@ -79,7 +79,7 @@ def rollout(
                 mask=mask,
                 lambda_=lambda_
             )
-            M_mask_terms[f"{m}"] = [init_mask_term] + list_tens_to_floats(mask_terms)
+            M_mask_terms[f"{m}"] = [init_mask_term] + [list_tens_to_floats(inner) for inner in mask_terms]
         else: 
             sample_multistep = x_cond["future_states"]
 
