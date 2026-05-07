@@ -10,7 +10,8 @@ from src.utils import (
     batchify_and_move,
     get_dataset,
     get_x_cond,
-    make_hash
+    make_hash,
+    list_tens_to_floats,
 )
 from src.funcs import get_mask_tensordict
 from src.interaction import get_mask_from_corners
@@ -78,7 +79,7 @@ def rollout(
                 mask=mask,
                 lambda_=lambda_
             )
-            M_mask_terms[f"{m}"] = [init_mask_term] + mask_terms
+            M_mask_terms[f"{m}"] = [init_mask_term] + list_tens_to_floats(mask_terms)
         else: 
             sample_multistep = x_cond["future_states"]
 
