@@ -9,9 +9,6 @@ TEST_FLAG=""
 
 GUIDANCE_MODES=(
   "manual_trajectory"
-  "ground_truth"
-  "lower_boundary"
-  "upper_boundary"
 )
 
 # Only used for manual_trajectory
