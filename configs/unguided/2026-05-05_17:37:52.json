@@ -1,7 +1,7 @@
 {
   "guidance_flag": false,
-  "M": 2,
-  "N": 2,
+  "N": 8,
+  "M": 4,
   "timestamp": "2020-01-15T12:00:00",
   "timestamp_idx": 54,
   "level": 0,
