@@ -20,7 +20,7 @@ def _():
 
 @app.cell
 def _():
-    from ui.interaction import (
+    from src.ui.interaction import (
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory,
         visualize_mask_terms_over_N
