@@ -373,7 +373,7 @@ def _(Path, ROLLOUTS, mo, refresh_button):
         return (path / "config.json").exists()
 
     print(Path(ROLLOUTS, "guided"))
-    guided_rollouts = Path(ROLLOUTS, "guided").glob("2026*")
+    guided_rollouts = Path(ROLLOUTS).glob("2026*")
     guided_rollouts = sorted(
         [p.name for p in guided_rollouts if has_config_json(p)],
         reverse=True,
@@ -384,14 +384,14 @@ def _(Path, ROLLOUTS, mo, refresh_button):
 
 @app.cell
 def _(Path, ROLLOUTS, pick_guided_rollout_dropdown):
-    guided_rollout_dir = Path(ROLLOUTS, "guided", pick_guided_rollout_dropdown.value)
+    guided_rollout_dir = Path(ROLLOUTS, pick_guided_rollout_dropdown.value)
     return (guided_rollout_dir,)
 
 
 @app.cell
 def _(Path, ROLLOUTS, guided_rollout_dir, read_json):
     guided_cfg = read_json(guided_rollout_dir, "config")
-    unguided_rollout_dir =  Path(ROLLOUTS, "unguided", guided_cfg["rollout_id"])
+    unguided_rollout_dir =  Path(ROLLOUTS, guided_cfg["rollout_id"])
 
     unguided_cfg = read_json(unguided_rollout_dir, "config")
     return guided_cfg, unguided_cfg, unguided_rollout_dir

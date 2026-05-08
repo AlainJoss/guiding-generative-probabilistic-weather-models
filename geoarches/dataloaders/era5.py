@@ -325,6 +325,7 @@ class Era5Forecast(Era5Dataset):
 
         out = dict()
         #  load current state
+        # NOTE: I think this is a bug
         out["timestamp"] = torch.tensor(
             self.id2pt[i][2].item() // 10**9,  # how to convert to tensor ?
             dtype=torch.int32,

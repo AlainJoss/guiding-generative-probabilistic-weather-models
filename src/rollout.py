@@ -68,7 +68,7 @@ def rollout(
 
     M_mask_terms = {}
     member_datasets = []
-    for m in range(1, M+1):
+    for m in range(M):
         print(f"member={m}")
         if not test:
             sample_multistep, mask_terms = flow_model.sample_rollout(

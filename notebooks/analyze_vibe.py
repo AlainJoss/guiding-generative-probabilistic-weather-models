@@ -14,8 +14,9 @@ def _():
     import matplotlib.pyplot as plt
     import xarray as xr
     import matplotlib.dates as mdates
+    import matplotlib.patheffects as pe
 
-    return mdates, mo, np, pd, plt, xr
+    return mdates, mo, np, pd, pe, plt, xr
 
 
 @app.cell
@@ -298,9 +299,6 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     - Need a panel with visualizations I'm interested in with checkboxes!
-    - make are for realized guidance and mean realized guidance.
-    - check that guidance seeds are the same as unguided
-    - plot corresponding m member of unguided.
     """)
     return
 
@@ -308,6 +306,7 @@ def _(mo):
 @app.cell
 def _(mo):
     refresh_button = mo.ui.button(label="refresh")
+    refresh_button
     return (refresh_button,)
 
 
@@ -385,6 +384,7 @@ def _(mo, read_json, rollout_dir):
         else 1,
         value=experiment_params["alpha"][0],
         label="alpha",
+        debounce=True
     )
 
     w_slider = mo.ui.slider(
@@ -395,6 +395,7 @@ def _(mo, read_json, rollout_dir):
         else 1,
         value=experiment_params["w"][0],
         label="w",
+        debounce=True
     )
 
     mo.vstack([
@@ -797,11 +798,22 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    Make a vline at the current timestep!
+    """)
+    return
+
+
 @app.cell
-def _(mdates, np, pd, plt):
+def _(m, mdates, np, pd, pe, plt):
+
 
     def plot_guidance_tracking(
         timestamps: list[str],
+        member_idx: int,
+        n: int,
         guided_member: list[float],
         unguided_member: list[float],
         target_schedule: list[float] | None = None,
@@ -902,10 +914,32 @@ def _(mdates, np, pd, plt):
                     unguided_min,
                     unguided_max,
                     color=colors["unguided"],
-                    alpha=0.13,
+                    alpha=0.16,
                     linewidth=0,
                     label=f"Unguided ensemble range, M={num_unguided_members}",
                     zorder=1,
+                )
+
+                # subtle band edges
+                ax.plot(
+                    time_values,
+                    unguided_min,
+                    linestyle="-",
+                    linewidth=0.9,
+                    color=colors["unguided"],
+                    alpha=0.45,
+                    zorder=2,
+                    label="_nolegend_",
+                )
+                ax.plot(
+                    time_values,
+                    unguided_max,
+                    linestyle="-",
+                    linewidth=0.9,
+                    color=colors["unguided"],
+                    alpha=0.45,
+                    zorder=2,
+                    label="_nolegend_",
                 )
 
                 y_values.append(unguided_ensemble.reshape(-1))
@@ -915,13 +949,12 @@ def _(mdates, np, pd, plt):
                         time_values,
                         unguided_mean,
                         linestyle="--",
-                        linewidth=1.7,
+                        linewidth=1.5,
                         color=colors["unguided"],
                         alpha=0.85,
                         label="Unguided ensemble mean",
                         zorder=4,
                     )
-
 
             # ------------------------------------------------------------
             # Guided ensemble shadow
@@ -961,10 +994,32 @@ def _(mdates, np, pd, plt):
                     guided_min,
                     guided_max,
                     color=colors["guided"],
-                    alpha=0.14,
+                    alpha=0.18,
                     linewidth=0,
                     label=f"Guided ensemble range, M={num_guided_members}",
-                    zorder=2,
+                    zorder=3,
+                )
+
+                # subtle band edges
+                ax.plot(
+                    time_values,
+                    guided_min,
+                    linestyle="-",
+                    linewidth=0.9,
+                    color=colors["guided"],
+                    alpha=0.45,
+                    zorder=4,
+                    label="_nolegend_",
+                )
+                ax.plot(
+                    time_values,
+                    guided_max,
+                    linestyle="-",
+                    linewidth=0.9,
+                    color=colors["guided"],
+                    alpha=0.45,
+                    zorder=4,
+                    label="_nolegend_",
                 )
 
                 y_values.append(guided_ensemble.reshape(-1))
@@ -974,7 +1029,7 @@ def _(mdates, np, pd, plt):
                         time_values,
                         guided_mean,
                         linestyle="--",
-                        linewidth=1.8,
+                        linewidth=1.6,
                         color=colors["guided"],
                         alpha=0.85,
                         label="Guided ensemble mean",
@@ -995,7 +1050,6 @@ def _(mdates, np, pd, plt):
                     label="Planned guidance",
                     zorder=6,
                 )
-
                 y_values.append(target_schedule)
 
             # ------------------------------------------------------------
@@ -1012,35 +1066,52 @@ def _(mdates, np, pd, plt):
                     label="Ground truth",
                     zorder=7,
                 )
-
                 y_values.append(reference)
 
             # ------------------------------------------------------------
             # Selected unguided member
             # ------------------------------------------------------------
+            unguided_linewidth = 2.2
             ax.plot(
                 time_values,
                 unguided_member,
                 linestyle="-",
-                linewidth=2.0,
+                linewidth=unguided_linewidth,
                 color=colors["unguided"],
-                alpha=0.95,
-                label="Unguided member",
+                alpha=0.98,
+                label=f"Unguided member, m={m}",
                 zorder=8,
+                path_effects=[
+                    pe.Stroke(
+                        linewidth=unguided_linewidth + 2,
+                        # foreground="white",
+                        alpha=0.95,
+                    ),
+                    pe.Normal(),
+                ],
             )
 
             # ------------------------------------------------------------
             # Selected guided member
             # ------------------------------------------------------------
+            guided_linewidth = 2.8
             ax.plot(
                 time_values,
                 guided_member,
                 linestyle="-",
-                linewidth=2.6,
+                linewidth=guided_linewidth,
                 color=colors["guided"],
-                alpha=0.98,
-                label="Guided member",
+                alpha=0.99,
+                label=f"Guided member, m={m}",
                 zorder=9,
+                path_effects=[
+                    pe.Stroke(
+                        linewidth=guided_linewidth + 2,
+                        # foreground="white",
+                        alpha=0.95,
+                    ),
+                    pe.Normal(),
+                ],
             )
 
             # ------------------------------------------------------------
@@ -1051,7 +1122,6 @@ def _(mdates, np, pd, plt):
 
             locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
             formatter = mdates.ConciseDateFormatter(locator)
-
             ax.xaxis.set_major_locator(locator)
             ax.xaxis.set_major_formatter(formatter)
 
@@ -1086,7 +1156,6 @@ def _(mdates, np, pd, plt):
             y_all = np.concatenate(y_values)
             y_min, y_max = np.nanmin(y_all), np.nanmax(y_all)
             y_pad = 0.08 * (y_max - y_min) if y_max > y_min else 1.0
-
             ax.set_ylim(y_min - y_pad, y_max + y_pad)
 
             # ------------------------------------------------------------
@@ -1142,11 +1211,7 @@ def _(mdates, np, pd, plt):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    - do not show the single lines of the unguided ensemble
-    - show the unguided member instead of the mean, show the mean if flag true, same for guided_mean
-    - show also the guided ensemble shadow
-    - match color of unguided ensemble shadow (lighter color) and unguided member, same for guided
-    - remove all markers
+    - make checkbox for each component of the plot!
     """)
     return
 
@@ -1155,6 +1220,8 @@ def _(mo):
 def _(
     ground_truth_terms,
     guided_rollout_terms,
+    m,
+    n,
     planned_guidance,
     plot_guidance_tracking,
     selected_guided_terms,
@@ -1164,6 +1231,8 @@ def _(
 ):
     realized_guidance_plot = plot_guidance_tracking(
         timestamps=timestamps,
+        member_idx=m,
+        n=n,
         guided_member=selected_guided_terms,
         unguided_member=selected_unguided_terms,
         target_schedule=planned_guidance,
@@ -1352,7 +1421,6 @@ def _(
     guided_map,
     guided_time,
     guided_unguided_map,
-    level,
     level_slider,
     m_slider,
     mo,
@@ -1392,10 +1460,7 @@ def _(
             [
                 partition_dropdown,
                 var_dropdown,
-                mo.hstack(
-                    [level_slider, mo.md(f"{level}")],
-                    justify="start",
-                ),
+                level_slider
             ],
             justify="start",
         ),
@@ -1475,33 +1540,34 @@ def _(mo):
     ### Masks over N
 
     Per rollout step \(n = 1, \dots, N\), compare the selected guided and
-    unguided ensemble member against the ERA5 ground truth.
+    unguided ensemble member against the ERA5 ground truth and the current
+    state.
 
-    This version reads directly from:
+    This reproduces the old layout in the new NetCDF structure:
 
-    - `ground_truth.nc`
-    - `unguided.nc`
-    - `guided.nc`
+    **absolute**
+    - \(x_t\)
+    - \(x_{t+1}\)
+    - \(x_{t+1}^{gen}\)
+    - \(x_{t+1}^{guide}\)
 
-    No old `n/m.nc` rollout folders are used anymore.
+    **difference**
+    - unguided - gt
+    - guided - gt
+    - guided - unguided
+    - next - current
     """)
     return
 
 
 @app.cell
 def _(np, plt):
-    def mask_bbox_with_padding(mask_2d, padding=4):
+    def maskn_bbox_with_padding(mask_2d, padding=4):
         mask_np = np.asarray(mask_2d).astype(bool)
-
         rows, cols = np.where(mask_np)
 
-        if len(rows) == 0 or len(cols) == 0:
-            return (
-                0,
-                mask_np.shape[0],
-                0,
-                mask_np.shape[1],
-            )
+        if rows.size == 0 or cols.size == 0:
+            return 0, mask_np.shape[0], 0, mask_np.shape[1]
 
         row_min = max(int(rows.min()) - padding, 0)
         row_max = min(int(rows.max()) + padding + 1, mask_np.shape[0])
@@ -1511,17 +1577,17 @@ def _(np, plt):
         return row_min, row_max, col_min, col_max
 
 
-    def crop_array_to_bbox(arr, bbox):
+    def maskn_crop(arr, bbox):
         row_min, row_max, col_min, col_max = bbox
         return np.asarray(arr)[row_min:row_max, col_min:col_max]
 
 
-    def crop_mask_to_bbox(mask_2d, bbox):
+    def maskn_crop_mask(mask_2d, bbox):
         row_min, row_max, col_min, col_max = bbox
         return np.asarray(mask_2d).astype(bool)[row_min:row_max, col_min:col_max]
 
 
-    def safe_abs_limits_for_row(arrays):
+    def maskn_abs_limits(arrays):
         vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
         vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
 
@@ -1531,7 +1597,7 @@ def _(np, plt):
         return vmin, vmax
 
 
-    def safe_symmetric_limits_for_row(arrays):
+    def maskn_diff_limits(arrays):
         absmax = max(
             float(np.nanmax(np.abs(np.asarray(arr))))
             for arr in arrays
@@ -1543,18 +1609,19 @@ def _(np, plt):
         return -absmax, absmax
 
 
-    def draw_mask_outline(ax, mask_2d):
-        mask_np = np.asarray(mask_2d).astype(bool)
+    def maskn_draw_mask_outline(ax, mask_crop):
+        mask_crop = np.asarray(mask_crop).astype(bool)
 
-        if mask_np.any():
+        if mask_crop.any():
             ax.contour(
-                mask_np.astype(float),
+                mask_crop.astype(float),
                 levels=[0.5],
-                linewidths=1.0,
+                colors="red",
+                linewidths=1.2,
             )
 
 
-    def plot_states_over_n_from_xr(
+    def maskn_plot_states_over_n_old_style(
         *,
         ground_truth_xr,
         unguided_xr,
@@ -1568,7 +1635,7 @@ def _(np, plt):
         guided_member=None,
         analysis_type="absolute",
         padding=4,
-        figsize_per_row=(12, 2.5),
+        figsize_per_row=(13.5, 2.7),
         title=None,
         subtitle=None,
     ):
@@ -1584,24 +1651,24 @@ def _(np, plt):
         )
 
         if N_eff <= 0:
-            raise ValueError("No valid rollout steps found for plotting.")
+            raise ValueError("No valid rollout steps found for Masks over N.")
 
-        bbox = mask_bbox_with_padding(mask_2d, padding=padding)
-        mask_crop = crop_mask_to_bbox(mask_2d, bbox)
+        bbox = maskn_bbox_with_padding(mask_2d, padding=padding)
+        mask_crop = maskn_crop_mask(mask_2d, bbox)
 
         if analysis_type == "absolute":
             column_titles = [
-                "$x_t$",
-                "$x_{t+1}$",
-                "$x_{t+1}^{unguided}$",
-                "$x_{t+1}^{guided}$",
+                r"$x_t$",
+                r"$x_{t+1}$",
+                r"$x_{t+1}^{gen}$",
+                r"$x_{t+1}^{guide}$",
             ]
         else:
             column_titles = [
-                "$x_{t+1} - x_t$",
-                "$x_{t+1}^{unguided} - x_t$",
-                "$x_{t+1}^{guided} - x_t$",
-                "$x_{t+1}^{guided} - x_{t+1}^{unguided}$",
+                "unguided-gt",
+                "guided-gt",
+                "guided-unguided",
+                "next-current",
             ]
 
         fig, axes = plt.subplots(
@@ -1613,29 +1680,29 @@ def _(np, plt):
         )
 
         for step_idx in range(N_eff):
-            current_time_for_row = ground_truth_times[step_idx]
-            target_time_for_row = ground_truth_times[step_idx + 1]
-            unguided_time_for_row = unguided_times[step_idx]
-            guided_time_for_row = guided_times[step_idx]
+            current_time_row = ground_truth_times[step_idx]
+            next_time_row = ground_truth_times[step_idx + 1]
+            unguided_time_row = unguided_times[step_idx]
+            guided_time_row = guided_times[step_idx]
 
             current_arr = xr_field_to_array(
                 ground_truth_xr,
                 var=var,
-                timestamp=current_time_for_row,
+                timestamp=current_time_row,
                 level=level,
             )
 
-            target_arr = xr_field_to_array(
+            next_arr = xr_field_to_array(
                 ground_truth_xr,
                 var=var,
-                timestamp=target_time_for_row,
+                timestamp=next_time_row,
                 level=level,
             )
 
             unguided_arr = xr_field_to_array(
                 unguided_xr,
                 var=var,
-                timestamp=unguided_time_for_row,
+                timestamp=unguided_time_row,
                 level=level,
                 member=unguided_member,
             )
@@ -1643,7 +1710,7 @@ def _(np, plt):
             guided_arr = xr_field_to_array(
                 guided_xr,
                 var=var,
-                timestamp=guided_time_for_row,
+                timestamp=guided_time_row,
                 level=level,
                 member=guided_member,
             )
@@ -1651,34 +1718,36 @@ def _(np, plt):
             if analysis_type == "absolute":
                 row_arrays = [
                     current_arr,
-                    target_arr,
+                    next_arr,
                     unguided_arr,
                     guided_arr,
                 ]
-                vmin, vmax = safe_abs_limits_for_row(row_arrays)
-
+                vmin, vmax = maskn_abs_limits(row_arrays)
+                cmap = None
             else:
                 row_arrays = [
-                    target_arr - current_arr,
-                    unguided_arr - current_arr,
-                    guided_arr - current_arr,
+                    unguided_arr - next_arr,
+                    guided_arr - next_arr,
                     guided_arr - unguided_arr,
+                    next_arr - current_arr,
                 ]
-                vmin, vmax = safe_symmetric_limits_for_row(row_arrays)
+                vmin, vmax = maskn_diff_limits(row_arrays)
+                cmap = "RdBu_r"
 
             for col_idx, arr in enumerate(row_arrays):
                 ax = axes[step_idx, col_idx]
-                arr_crop = crop_array_to_bbox(arr, bbox)
+                arr_crop = maskn_crop(arr, bbox)
 
                 im = ax.imshow(
                     arr_crop,
                     vmin=vmin,
                     vmax=vmax,
+                    cmap=cmap,
                     origin="upper",
                     aspect="auto",
                 )
 
-                draw_mask_outline(ax, mask_crop)
+                maskn_draw_mask_outline(ax, mask_crop)
 
                 if step_idx == 0:
                     ax.set_title(column_titles[col_idx], fontsize=10)
@@ -1697,23 +1766,31 @@ def _(np, plt):
                 )
 
         if title:
-            fig.suptitle(title, fontsize=14, fontweight="bold", y=0.995)
+            fig.suptitle(
+                title,
+                fontsize=14,
+                fontweight="bold",
+                y=0.995,
+            )
 
         if subtitle:
             fig.text(
                 0.5,
-                0.975,
+                0.972,
                 subtitle,
                 ha="center",
                 va="top",
                 fontsize=9,
+                color="#555555",
             )
 
-        fig.tight_layout(rect=(0, 0, 1, 0.96 if title or subtitle else 1))
+        fig.tight_layout(
+            rect=(0, 0, 1, 0.955 if (title or subtitle) else 1)
+        )
 
         return fig
 
-    return (plot_states_over_n_from_xr,)
+    return (maskn_plot_states_over_n_old_style,)
 
 
 @app.cell
@@ -1726,13 +1803,13 @@ def _(
     level,
     m,
     mask,
-    plot_states_over_n_from_xr,
+    maskn_plot_states_over_n_old_style,
     unguided_member,
     unguided_xr,
     var,
     xr_field_to_array,
 ):
-    states_over_n_plot = plot_states_over_n_from_xr(
+    masks_over_n_plot_old_style = maskn_plot_states_over_n_old_style(
         ground_truth_xr=ground_truth_xr,
         unguided_xr=unguided_xr,
         guided_xr=guided_xr,
@@ -1748,15 +1825,17 @@ def _(
         title=f"States over N — {analysis_type}",
         subtitle=f"var={var} | level={level} | member={m}",
     )
-    return (states_over_n_plot,)
+    return (masks_over_n_plot_old_style,)
 
 
 @app.cell
-def _(m_slider, mo, states_over_n_plot):
-    mo.vstack([
-        m_slider,
-        states_over_n_plot
-    ])
+def _(m_slider, masks_over_n_plot_old_style, mo):
+    mo.vstack(
+        [
+            m_slider,
+            masks_over_n_plot_old_style,
+        ]
+    )
     return
 
 

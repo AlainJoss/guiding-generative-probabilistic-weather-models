@@ -12,6 +12,7 @@ Run analysis:
 ```bash
 # compare original vs. new implementation
 bash experiments/eval_pipeline.sh
+bash experiments/lambda_schedule_iterator.sh
 uv run -m src.run
 # run 
 python -m src.run_from_config --config-id "2026-05-05_17:37:52" --config-type unguided --test
@@ -26,6 +27,7 @@ uv run marimo run notebooks/rollout.py
 uv run marimo run notebooks/analyze.py
 uv run marimo edit notebooks/rollout.py --watch --no-token
 uv run marimo edit notebooks/guide.py --watch --no-token
+uv run marimo edit notebooks/analyze.py --watch --no-token
 uv run marimo edit notebooks/analyze_vibe.py --watch --no-token
 ```
 
