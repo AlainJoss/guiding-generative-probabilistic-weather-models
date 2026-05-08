@@ -2,7 +2,6 @@ from pathlib import Path
 
 import xarray as xr
 import torch
-from tensordict.tensordict import TensorDict
 
 from src.utils import (
     save_to_json,
@@ -14,9 +13,8 @@ from src.utils import (
     list_tens_to_floats,
 )
 from src.funcs import get_mask_tensordict
-from src.interaction import get_mask_from_corners
+from ui.interaction import get_mask_from_corners
 
-from geoarches.dataloaders.era5 import Era5Forecast
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 
 

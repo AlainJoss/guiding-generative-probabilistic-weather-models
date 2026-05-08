@@ -35,7 +35,7 @@ def _():
 
 @app.cell
 def _():
-    from src.interaction import (
+    from ui.interaction import (
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory,
         visualize_mask_terms_over_N
@@ -50,16 +50,16 @@ def _():
         get_x_cond
     )
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-    from src.interaction import visualize_map, get_mask_from_corners, get_mask_center
+    from ui.interaction import visualize_map, get_mask_from_corners, get_mask_center
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from src.funcs import avg_over_mask, get_guidance
-    from src.analysis_plots import extract_zoom_values
+    from ui.analysis.analysis_plots import extract_zoom_values
     from src.paths import ROLLOUTS
     from src.utils import get_dataset
-    from src.interaction import plot_rmse_over_n
-    from src.interaction import plot_variable_change_parallel
-    from src.interaction import plot_trajectory, plot_trajectories_over_n
-    from src.interaction import plot_states_over_n
+    from ui.interaction import plot_rmse_over_n
+    from ui.interaction import plot_variable_change_parallel
+    from ui.interaction import plot_trajectory, plot_trajectories_over_n
+    from ui.interaction import plot_states_over_n
 
     return (
         LEVELS_DICT,

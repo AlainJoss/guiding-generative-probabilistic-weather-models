@@ -131,8 +131,8 @@ class GuidedFlow(BaseLightningModule):
     ):
         realized_trajectory = []
         mask_terms = []
-        for n in range(1, N+1):
-            y_n = None if y is None else y[n]
+        for n in range(0, N):
+            y_n = None if y is None else y[n+1]
             x_hat, mask_term = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
@@ -146,7 +146,7 @@ class GuidedFlow(BaseLightningModule):
             mask_terms.append(mask_term)
             
             # after the last iteration no need to set this again
-            if n < N:
+            if n < N-1:
                 # in seconds
                 next_timestamp = x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600
                 x_cond = {
