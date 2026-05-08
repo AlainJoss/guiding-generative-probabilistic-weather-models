@@ -101,6 +101,9 @@ def main():
             w=args.w,
         )
 
+        # TODO: create all objects here?
+        # actung: overwriting objects dangerous
+
         rollout_dir = run_from_config(
             config,
             test=args.test,

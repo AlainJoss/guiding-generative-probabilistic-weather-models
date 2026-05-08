@@ -11,7 +11,7 @@ import geopandas as gpd
 import geodatasets
 from wigglystuff import ChartPuck
 
-plt.rcParams["font.family"] = "Menlo"
+plt.rcParams["font.family"] = "Menlo"    # INter
 
 def visualize_mask_terms_over_N(
     var: str,

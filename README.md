@@ -1,7 +1,12 @@
 # Guiding Generative Probabilistic Weather Models to Simulate Realistic Extreme Weather Events
 
+# change plots font to match marimo theme:
+A warm, paper-like theme with cream backgrounds, terracotta primary colors, and sage green accents. Uses Source Serif 4 for headings, Inter for body text, and IBM Plex Mono for code. Designed for comfortable reading during long sessions.
+
+
+
 Resources:
-- [Notes](/reporting/latex-notes/main.pdf)
+- [Notes](/resources/latex-notes/main.pdf)
 
 Run analysis:
 ```bash

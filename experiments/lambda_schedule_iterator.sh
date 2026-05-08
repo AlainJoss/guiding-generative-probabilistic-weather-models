@@ -12,8 +12,8 @@ GUIDANCE_MODES=(
 )
 
 # Only used for manual_trajectory
-ALPHAS=(1.0 2.0 3.0)
-WS=(1.0 2.0 3.0)
+ALPHAS=(2.0)
+WS=(5.0 10.0)
 
 for guidance_mode in "${GUIDANCE_MODES[@]}"; do
 

@@ -13,8 +13,9 @@ def _():
     import pandas as pd
     import matplotlib.pyplot as plt
     import xarray as xr
+    import matplotlib.dates as mdates
 
-    return mo, np, pd, plt, xr
+    return mdates, mo, np, pd, plt, xr
 
 
 @app.cell
@@ -51,7 +52,6 @@ def _():
         VARIABLES_DICT,
         get_dataset,
         get_experiment_ids,
-        get_guidance,
         get_mask_center,
         get_mask_from_corners,
         get_rollout_dir,
@@ -257,29 +257,7 @@ def _(np, pd):
     def member_rollout_terms(rollout_terms, member_index):
         return [float(row[member_index]) for row in rollout_terms]
 
-
-    def align_series_length(values, target_length, prepend_value=None):
-        if values is None:
-            return [float("nan")] * target_length
-
-        values = list(values)
-
-        if len(values) == target_length:
-            return values
-
-        if len(values) == target_length - 1 and prepend_value is not None:
-            return [prepend_value] + values
-
-        if len(values) > target_length:
-            return values[:target_length]
-
-        if len(values) < target_length:
-            pad_value = values[-1] if len(values) > 0 else float("nan")
-            return values + [pad_value] * (target_length - len(values))
-
-
     return (
-        align_series_length,
         build_mask_rollouts,
         format_time_value,
         get_member_values,
@@ -290,17 +268,39 @@ def _(np, pd):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
+def _(inspection_ui_checkbox, mo, realized_guidance_checkbox):
+    mo.md(f"""
     # PHASE 3 - results analysis
+
+    Select anylsis elements of interest: 
+    - {realized_guidance_checkbox}
+    - {inspection_ui_checkbox}
     """)
     return
 
 
 @app.cell
 def _(mo):
+    realized_guidance_checkbox = mo.ui.checkbox(label="Realized guidance")
+    inspection_ui_checkbox = mo.ui.checkbox(label="Inspection widget")
+    return inspection_ui_checkbox, realized_guidance_checkbox
+
+
+@app.cell
+def _(mo):
     mo.md(r"""
     ## Experiment
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - Need a panel with visualizations I'm interested in with checkboxes!
+    - make are for realized guidance and mean realized guidance.
+    - check that guidance seeds are the same as unguided
+    - plot corresponding m member of unguided.
     """)
     return
 
@@ -331,10 +331,10 @@ def _(get_experiment_ids, mo, refresh_button):
 
 
 @app.cell
-def _(get_rollout_dir, pick_unguided_rollout_dropdown, read_json):
+def _(get_rollout_dir, pick_unguided_rollout_dropdown):
     rollout_dir = get_rollout_dir(pick_unguided_rollout_dropdown.value)
-    config = read_json(rollout_dir, "config")
-    return config, rollout_dir
+    # config = read_json(rollout_dir, "config")
+    return (rollout_dir,)
 
 
 @app.cell
@@ -416,7 +416,13 @@ def _(alpha_slider, guidance_mode_dropdown, rollout_dir, w_slider, xr):
     from src.utils import make_hash
     guided_id = make_hash(params)
     guided_xr = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
-    return (guided_xr,)
+    return guided_id, guided_xr
+
+
+@app.cell
+def _(guided_id, read_json, rollout_dir):
+    config = read_json(rollout_dir / "guided" / guided_id, "config")
+    return (config,)
 
 
 @app.cell
@@ -607,9 +613,7 @@ def _(get_mask_center, mask):
 
 @app.cell
 def _(
-    align_series_length,
     build_mask_rollouts,
-    config,
     ground_truth_xr,
     guided_xr,
     level,
@@ -646,22 +650,23 @@ def _(
         unguided_rollout_terms,
         member_index,
     )
-
-    planned_guidance = config.get("y", config.get("planned_guidance", None))
-
-    planned_guidance = align_series_length(
-        planned_guidance,
-        target_length=len(timestamps),
-        prepend_value=ground_truth_terms[0],
-    )
     return (
         ground_truth_terms,
-        mean_unguided_rollout_terms,
-        planned_guidance,
+        guided_rollout_terms,
         selected_guided_terms,
+        selected_unguided_terms,
         timestamps,
         unguided_rollout_terms,
     )
+
+
+@app.cell
+def _(config, var):
+    if var == config["var"]:
+        planned_guidance = config.get("y", config.get("planned_guidance", None))
+    else:
+        planned_guidance=None
+    return (planned_guidance,)
 
 
 @app.cell
@@ -793,257 +798,389 @@ def _(mo):
 
 
 @app.cell
-def _(get_guidance, plt):
-    def realized_guidance_branches(
-        realized_terms: list[float],
-        planned_guidance: list[float],
-        mean_rollout: list[float],
-    ) -> list[float]:
-        if (
-            len(realized_terms) != len(planned_guidance)
-            or len(realized_terms) != len(mean_rollout)
-        ):
-            raise ValueError(
-                "realized_terms, planned_guidance, and mean_rollout must have the same length"
-            )
+def _(mdates, np, pd, plt):
 
-        branches = [realized_terms[0]]
-
-        for idx in range(1, len(realized_terms)):
-            mean_value = mean_rollout[idx]
-            abs_mean_value = abs(mean_value) if mean_value != 0 else 1.0
-            guidance_delta = (planned_guidance[idx] - mean_value) / abs_mean_value
-
-            branches.append(
-                get_guidance(
-                    guidance_delta,
-                    realized_terms[idx - 1],
-                )
-            )
-
-        return branches
-
-
-    def plot_guidance_branching(
+    def plot_guidance_tracking(
         timestamps: list[str],
-        realized_terms: list[float],
-        planned_guidance: list[float],
-        mean_rollout: list[float],
-        ground_truth: list[float] | None = None,
-        ensemble_rollout: list[list[float]] | None = None,
-        title: str | None = "Realized guidance",
+        guided_member: list[float],
+        unguided_member: list[float],
+        target_schedule: list[float] | None = None,
+        reference: list[float] | None = None,
+        unguided_ensemble: list[list[float]] | None = None,
+        guided_ensemble: list[list[float]] | None = None,
+        show_unguided_mean: bool = False,
+        show_guided_mean: bool = False,
+        title: str | None = "Guidance tracking",
         subtitle: str | None = None,
+        ylabel: str = "Mask-averaged value",
     ):
         num_steps = len(timestamps)
+        time_values = pd.to_datetime(timestamps)
 
-        if (
-            num_steps != len(realized_terms)
-            or len(realized_terms) != len(planned_guidance)
-        ):
-            raise ValueError(
-                "timestamps, realized_terms, and planned_guidance must have the same length"
-            )
+        guided_member = np.asarray(guided_member, dtype=float)
+        unguided_member = np.asarray(unguided_member, dtype=float)
 
-        x = list(range(num_steps))
+        if len(guided_member) != num_steps:
+            raise ValueError("guided_member must have the same length as timestamps")
 
-        branch_targets = realized_guidance_branches(
-            realized_terms=realized_terms,
-            planned_guidance=planned_guidance,
-            mean_rollout=mean_rollout,
-        )
+        if len(unguided_member) != num_steps:
+            raise ValueError("unguided_member must have the same length as timestamps")
+
+        if target_schedule is not None:
+            target_schedule = np.asarray(target_schedule, dtype=float)
+            if len(target_schedule) != num_steps:
+                raise ValueError("target_schedule must have the same length as timestamps")
+
+        if reference is not None:
+            reference = np.asarray(reference, dtype=float)
+            if len(reference) != num_steps:
+                raise ValueError("reference must have the same length as timestamps")
 
         colors = {
-            "realized": "#1f77b4",
-            "online": "#d62728",
-            "offline": "#ff7f0e",
-            "gt": "#2ca02c",
-            "mean": "#9467bd",
-            "ensemble": "#7f7f7f",
+            "guided": "#0072B2",
+            "unguided": "#6E6E6E",
+            "target": "#D55E00",
+            # "target": "#E69F00",  # older planned-guidance color
+            "reference": "#009E73",
+            "grid": "#D0D0D0",
+            "text": "#222222",
         }
 
-        fig, ax = plt.subplots(figsize=(10, 5), dpi=160)
+        with plt.rc_context(
+            {
+                "font.size": 10,
+                "axes.titlesize": 14,
+                "axes.labelsize": 10,
+                "xtick.labelsize": 9,
+                "ytick.labelsize": 9,
+                "legend.fontsize": 9,
+                "axes.linewidth": 0.8,
+            }
+        ):
+            fig, ax = plt.subplots(figsize=(17.5, 5.5), dpi=180)
 
-        if ensemble_rollout is not None:
-            num_members = len(ensemble_rollout[0])
+            y_values = [
+                guided_member,
+                unguided_member,
+            ]
 
-            for member_idx in range(num_members):
-                y = [
-                    ensemble_rollout[step_idx][member_idx]
-                    for step_idx in range(num_steps)
-                ]
+            # ------------------------------------------------------------
+            # Unguided ensemble shadow
+            # Shape: (num_steps, num_members)
+            # ------------------------------------------------------------
+            if unguided_ensemble is not None:
+                unguided_ensemble = np.asarray(unguided_ensemble, dtype=float)
 
-                ax.plot(
-                    x,
-                    y,
-                    "-",
-                    color=colors["ensemble"],
-                    linewidth=0.6,
-                    alpha=0.35,
+                if unguided_ensemble.ndim != 2:
+                    raise ValueError(
+                        f"unguided_ensemble must be 2D, got shape {unguided_ensemble.shape}"
+                    )
+
+                if unguided_ensemble.shape[0] != num_steps:
+                    raise ValueError(
+                        "unguided_ensemble must have shape (num_steps, num_members). "
+                        f"Got shape {unguided_ensemble.shape}, num_steps={num_steps}."
+                    )
+
+                num_unguided_members = unguided_ensemble.shape[1]
+
+                unguided_min = np.nanmin(unguided_ensemble, axis=1)
+                unguided_max = np.nanmax(unguided_ensemble, axis=1)
+                unguided_mean = np.nanmean(unguided_ensemble, axis=1)
+
+                if not np.all(
+                    (unguided_member >= unguided_min - 1e-10)
+                    & (unguided_member <= unguided_max + 1e-10)
+                ):
+                    raise ValueError(
+                        "unguided_member is outside the unguided ensemble range. "
+                        "Check that it comes from the same ensemble and timestamp alignment."
+                    )
+
+                ax.fill_between(
+                    time_values,
+                    unguided_min,
+                    unguided_max,
+                    color=colors["unguided"],
+                    alpha=0.13,
+                    linewidth=0,
+                    label=f"Unguided ensemble range, M={num_unguided_members}",
                     zorder=1,
                 )
 
-            lower = [min(row) for row in ensemble_rollout]
-            upper = [max(row) for row in ensemble_rollout]
+                y_values.append(unguided_ensemble.reshape(-1))
 
-            ax.fill_between(
-                x,
-                lower,
-                upper,
-                color=colors["ensemble"],
-                alpha=0.12,
-                label=f"Unguided ensemble range (M={num_members})",
-                zorder=1,
-            )
+                if show_unguided_mean:
+                    ax.plot(
+                        time_values,
+                        unguided_mean,
+                        linestyle="--",
+                        linewidth=1.7,
+                        color=colors["unguided"],
+                        alpha=0.85,
+                        label="Unguided ensemble mean",
+                        zorder=4,
+                    )
 
-        for step_idx in range(1, num_steps):
+
+            # ------------------------------------------------------------
+            # Guided ensemble shadow
+            # Shape: (num_steps, num_members)
+            # ------------------------------------------------------------
+            if guided_ensemble is not None:
+                guided_ensemble = np.asarray(guided_ensemble, dtype=float)
+
+                if guided_ensemble.ndim != 2:
+                    raise ValueError(
+                        f"guided_ensemble must be 2D, got shape {guided_ensemble.shape}"
+                    )
+
+                if guided_ensemble.shape[0] != num_steps:
+                    raise ValueError(
+                        "guided_ensemble must have shape (num_steps, num_members). "
+                        f"Got shape {guided_ensemble.shape}, num_steps={num_steps}."
+                    )
+
+                num_guided_members = guided_ensemble.shape[1]
+
+                guided_min = np.nanmin(guided_ensemble, axis=1)
+                guided_max = np.nanmax(guided_ensemble, axis=1)
+                guided_mean = np.nanmean(guided_ensemble, axis=1)
+
+                if not np.all(
+                    (guided_member >= guided_min - 1e-10)
+                    & (guided_member <= guided_max + 1e-10)
+                ):
+                    raise ValueError(
+                        "guided_member is outside the guided ensemble range. "
+                        "Check that it comes from the same ensemble and timestamp alignment."
+                    )
+
+                ax.fill_between(
+                    time_values,
+                    guided_min,
+                    guided_max,
+                    color=colors["guided"],
+                    alpha=0.14,
+                    linewidth=0,
+                    label=f"Guided ensemble range, M={num_guided_members}",
+                    zorder=2,
+                )
+
+                y_values.append(guided_ensemble.reshape(-1))
+
+                if show_guided_mean:
+                    ax.plot(
+                        time_values,
+                        guided_mean,
+                        linestyle="--",
+                        linewidth=1.8,
+                        color=colors["guided"],
+                        alpha=0.85,
+                        label="Guided ensemble mean",
+                        zorder=5,
+                    )
+
+            # ------------------------------------------------------------
+            # Target schedule
+            # ------------------------------------------------------------
+            if target_schedule is not None:
+                ax.plot(
+                    time_values,
+                    target_schedule,
+                    linestyle="-",
+                    linewidth=2.0,
+                    color=colors["target"],
+                    alpha=0.95,
+                    label="Planned guidance",
+                    zorder=6,
+                )
+
+                y_values.append(target_schedule)
+
+            # ------------------------------------------------------------
+            # Reference / ground truth
+            # ------------------------------------------------------------
+            if reference is not None:
+                ax.plot(
+                    time_values,
+                    reference,
+                    linestyle="-",
+                    linewidth=2.0,
+                    color=colors["reference"],
+                    alpha=0.95,
+                    label="Ground truth",
+                    zorder=7,
+                )
+
+                y_values.append(reference)
+
+            # ------------------------------------------------------------
+            # Selected unguided member
+            # ------------------------------------------------------------
             ax.plot(
-                [x[step_idx - 1], x[step_idx]],
-                [realized_terms[step_idx - 1], branch_targets[step_idx]],
-                linestyle="--",
-                marker="o",
-                markersize=3.5,
-                linewidth=1.2,
-                color=colors["online"],
-                alpha=0.85,
-                zorder=2,
-                label="Online planned" if step_idx == 1 else None,
-            )
-
-        ax.plot(
-            x,
-            planned_guidance,
-            "-",
-            marker="s",
-            markersize=3.5,
-            linewidth=1.6,
-            color=colors["offline"],
-            alpha=0.9,
-            label="Offline planned",
-            zorder=3,
-        )
-
-        ax.plot(
-            x,
-            mean_rollout,
-            "-",
-            marker="D",
-            markersize=3.5,
-            linewidth=1.6,
-            color=colors["mean"],
-            alpha=0.9,
-            label="Mean unguided rollout",
-            zorder=3,
-        )
-
-        if ground_truth is not None:
-            ax.plot(
-                x,
-                ground_truth,
-                "-",
-                marker="^",
-                markersize=4.5,
-                linewidth=1.8,
-                color=colors["gt"],
+                time_values,
+                unguided_member,
+                linestyle="-",
+                linewidth=2.0,
+                color=colors["unguided"],
                 alpha=0.95,
-                label="Ground truth",
-                zorder=4,
+                label="Unguided member",
+                zorder=8,
             )
 
-        ax.plot(
-            x,
-            realized_terms,
-            "-",
-            marker="o",
-            markersize=4.5,
-            linewidth=2.2,
-            color=colors["realized"],
-            label="Realized guided",
-            zorder=5,
-        )
-
-        tick_idx = [
-            idx for idx, ts in enumerate(timestamps) if ts.endswith("00:00:00")
-        ]
-
-        if 0 not in tick_idx:
-            tick_idx = [0] + tick_idx
-
-        if num_steps - 1 not in tick_idx:
-            tick_idx.append(num_steps - 1)
-
-        ax.set_xticks(tick_idx)
-        ax.set_xticklabels(
-            [timestamps[idx] for idx in tick_idx],
-            rotation=35,
-            ha="right",
-            fontsize=8,
-        )
-
-        ax.set_xlabel("Timestamp", fontsize=10)
-        ax.set_ylabel("Mask term", fontsize=10)
-        ax.grid(True, alpha=0.25, linestyle=":")
-
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-
-        ax.tick_params(axis="both", labelsize=9)
-
-        ax.legend(
-            loc="upper left",
-            bbox_to_anchor=(1.01, 1.0),
-            frameon=False,
-            fontsize=9,
-        )
-
-        if title:
-            fig.suptitle(title, fontsize=13, fontweight="bold", y=0.995)
-
-        if subtitle:
-            fig.text(
-                0.5,
-                0.955,
-                subtitle,
-                ha="center",
-                va="top",
-                fontsize=9,
-                color="#555",
+            # ------------------------------------------------------------
+            # Selected guided member
+            # ------------------------------------------------------------
+            ax.plot(
+                time_values,
+                guided_member,
+                linestyle="-",
+                linewidth=2.6,
+                color=colors["guided"],
+                alpha=0.98,
+                label="Guided member",
+                zorder=9,
             )
 
-        fig.tight_layout(
-            rect=(0.0, 0.0, 0.82, 0.93 if (title or subtitle) else 1.0)
-        )
+            # ------------------------------------------------------------
+            # Axis styling
+            # ------------------------------------------------------------
+            ax.set_xlabel("Forecast time")
+            ax.set_ylabel(ylabel)
+
+            locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
+            formatter = mdates.ConciseDateFormatter(locator)
+
+            ax.xaxis.set_major_locator(locator)
+            ax.xaxis.set_major_formatter(formatter)
+
+            ax.grid(
+                True,
+                which="major",
+                axis="both",
+                color=colors["grid"],
+                linewidth=0.7,
+                linestyle="-",
+                alpha=0.45,
+            )
+
+            ax.set_axisbelow(True)
+
+            for spine in ("top", "right"):
+                ax.spines[spine].set_visible(False)
+
+            ax.spines["left"].set_color("#BBBBBB")
+            ax.spines["bottom"].set_color("#BBBBBB")
+
+            ax.tick_params(
+                axis="both",
+                colors=colors["text"],
+                length=4,
+                width=0.8,
+            )
+
+            # ------------------------------------------------------------
+            # Y-limits with padding
+            # ------------------------------------------------------------
+            y_all = np.concatenate(y_values)
+            y_min, y_max = np.nanmin(y_all), np.nanmax(y_all)
+            y_pad = 0.08 * (y_max - y_min) if y_max > y_min else 1.0
+
+            ax.set_ylim(y_min - y_pad, y_max + y_pad)
+
+            # ------------------------------------------------------------
+            # Legend
+            # ------------------------------------------------------------
+            handles, labels = ax.get_legend_handles_labels()
+            unique = dict(zip(labels, handles))
+
+            ax.legend(
+                unique.values(),
+                unique.keys(),
+                loc="center left",
+                bbox_to_anchor=(1.015, 0.5),
+                frameon=False,
+                handlelength=2.4,
+                borderaxespad=0.0,
+            )
+
+            # ------------------------------------------------------------
+            # Titles
+            # ------------------------------------------------------------
+            if title:
+                fig.suptitle(
+                    title,
+                    x=0.06,
+                    y=0.98,
+                    ha="left",
+                    fontsize=15,
+                    fontweight="bold",
+                    color=colors["text"],
+                )
+
+            if subtitle:
+                fig.text(
+                    0.06,
+                    0.925,
+                    subtitle,
+                    ha="left",
+                    va="top",
+                    fontsize=9.5,
+                    color="#555555",
+                )
+
+            fig.tight_layout(
+                rect=(0.0, 0.0, 0.84, 0.90 if (title or subtitle) else 1.0)
+            )
 
         return fig
 
-    return (plot_guidance_branching,)
+    return (plot_guidance_tracking,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - do not show the single lines of the unguided ensemble
+    - show the unguided member instead of the mean, show the mean if flag true, same for guided_mean
+    - show also the guided ensemble shadow
+    - match color of unguided ensemble shadow (lighter color) and unguided member, same for guided
+    - remove all markers
+    """)
+    return
 
 
 @app.cell
 def _(
     ground_truth_terms,
-    mean_unguided_rollout_terms,
+    guided_rollout_terms,
     planned_guidance,
-    plot_guidance_branching,
+    plot_guidance_tracking,
     selected_guided_terms,
+    selected_unguided_terms,
     timestamps,
     unguided_rollout_terms,
 ):
-    realized_guidance_plot = plot_guidance_branching(
+    realized_guidance_plot = plot_guidance_tracking(
         timestamps=timestamps,
-        realized_terms=selected_guided_terms,
-        planned_guidance=planned_guidance,
-        mean_rollout=mean_unguided_rollout_terms,
-        ground_truth=ground_truth_terms,
-        ensemble_rollout=unguided_rollout_terms,
+        guided_member=selected_guided_terms,
+        unguided_member=selected_unguided_terms,
+        target_schedule=planned_guidance,
+        reference=ground_truth_terms,
+        unguided_ensemble=unguided_rollout_terms,
+        guided_ensemble=guided_rollout_terms,
+        show_unguided_mean=False,
+        show_guided_mean=False,
         title="Realized guidance analysis",
-        subtitle="mask term along the rollout",
+        subtitle="Mask terms along the rollout",
     )
     return (realized_guidance_plot,)
 
 
 @app.cell
-def _(realized_guidance_plot):
-    realized_guidance_plot
+def _(m_slider, mo, realized_guidance_plot):
+    mo.vstack([m_slider, realized_guidance_plot])
     return
 
 
@@ -1193,14 +1330,12 @@ def _(
         unguided_map = None
         guided_map = None
     return (
-        guided_current_map,
         guided_gt_map,
         guided_map,
         guided_unguided_map,
         next_current_map,
         next_map,
         state_map,
-        unguided_current_map,
         unguided_gt_map,
         unguided_map,
     )
@@ -1213,7 +1348,6 @@ def _(
     current_time,
     format_time_value,
     ground_truth_time,
-    guided_current_map,
     guided_gt_map,
     guided_map,
     guided_time,
@@ -1229,7 +1363,6 @@ def _(
     show_mask_switch,
     show_values_checkbox,
     state_map,
-    unguided_current_map,
     unguided_gt_map,
     unguided_map,
     unguided_time,
@@ -1276,9 +1409,9 @@ def _(
                 mo.hstack([show_mask_switch], justify="start"),
                 zoom_slider,
                 mo.md("Absolute states:"),
-                mo.hstack([state_map, next_map]),
-                mo.hstack([unguided_map, guided_map]),
-            ]
+                mo.hstack([state_map, next_map], justify="start"),
+                mo.hstack([unguided_map, guided_map], justify="start"),
+            ], justify="start",
         )
 
     else:
@@ -1295,10 +1428,10 @@ def _(
                 ),
                 zoom_slider,
                 mo.md("Difference over states:"),
-                mo.hstack([next_current_map, guided_unguided_map]),
-                mo.hstack([unguided_current_map, guided_current_map]),
-                mo.hstack([unguided_gt_map, guided_gt_map]),
-            ]
+                mo.hstack([next_current_map, guided_unguided_map], justify="start"),
+                # mo.hstack([unguided_current_map, guided_current_map], justify="start"),
+                mo.hstack([unguided_gt_map, guided_gt_map], justify="start"),
+            ], justify="start",
         )
 
     inspect_states_ui

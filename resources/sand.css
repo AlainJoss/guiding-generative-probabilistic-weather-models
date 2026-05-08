@@ -1,0 +1,68 @@
+/* "Parchment" — a warm, paper-like theme for marimo notebooks */
+/* Designed for readability during long data science sessions */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300..700&family=Source+Serif+4:ital,wght@0,300..900;1,300..900&family=Inter:wght@300..800&display=swap");
+
+/* Font and Radius Variables */
+:root {
+    --monospace-font: "IBM Plex Mono", monospace;
+    --text-font: "Inter", sans-serif;
+    --heading-font: "Source Serif 4", serif;
+    --radius: 6px;
+}
+
+/* Parchment Theme Colors */
+:root {
+    /* Backgrounds and Foregrounds */
+    --background: light-dark(#faf6f0, #1a1816);
+    --background-darker: light-dark(#f0ebe3, #141210);
+    --foreground: light-dark(#2c2825, #d4cfc8);
+    --muted: light-dark(#ede7dd, #252220);
+    --muted-foreground: light-dark(#7a746c, #9e9890);
+
+    /* UI Elements */
+    --card: light-dark(#fdfbf8, #201e1b);
+    --card-foreground: light-dark(#2c2825, #cdc7bf);
+    --popover: light-dark(#fdfbf8, #201e1b);
+    --popover-foreground: light-dark(#2c2825, #cdc7bf);
+    --border: light-dark(#e2dbd0, #332f2a);
+    --input: light-dark(#ede7dd, #2a2724);
+
+    /* Primary — a muted terracotta / warm rust */
+    --primary: light-dark(#b05c3a, #d4835e);
+    --primary-foreground: light-dark(#fdfbf8, #1a1816);
+
+    /* Secondary — warm stone */
+    --secondary: light-dark(#ede7dd, #2a2724);
+    --secondary-foreground: light-dark(#2c2825, #d4cfc8);
+
+    /* Accent — a dusty sage green */
+    --accent: light-dark(#e8efe4, #2a3328);
+    --accent-foreground: light-dark(#3d5a3a, #a8c4a0);
+
+    /* Semantic Colors */
+    --error: light-dark(#c44d4d, #e87070);
+    --error-foreground: #fdfbf8;
+    --success: light-dark(#4a8c5e, #6ab880);
+    --success-foreground: #fdfbf8;
+    --destructive: light-dark(#c44d4d, #e87070);
+    --destructive-foreground: #fdfbf8;
+    --action: light-dark(#d4a96a, #e0c088);
+    --action-hover: light-dark(#ddb87a, #e8cc9a);
+    --action-foreground: light-dark(#5a4020, #3d2a10);
+    --link: light-dark(#5a7ca0, #7aa4cc);
+    --link-visited: light-dark(#7a6a90, #a090b8);
+    --stale: hsl(38deg 50% 50% / 25%);
+    --ring: light-dark(#b8a898, #5a524a);
+
+    /* Shadows — warm-tinted and subtle */
+    --base-shadow: light-dark(
+        hsla(30, 20%, 50%, 20%),
+        hsla(30, 10%, 10%, 40%)
+    );
+    --base-shadow-darker: light-dark(
+        hsla(30, 20%, 40%, 30%),
+        hsla(30, 10%, 5%, 50%)
+    );
+    --base-shadow-opacity: 6%;
+}

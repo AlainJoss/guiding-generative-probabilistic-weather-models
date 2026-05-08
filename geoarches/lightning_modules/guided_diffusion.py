@@ -96,7 +96,7 @@ class GuidedFlow(BaseLightningModule):
             )
         )
         scaler["level"][-1] *= 3  # we don't care too much about vertical velocity
-        self.sigma = scaler / pangu_scaler  # inverse because we divide by state_scaler
+        self.residual_to_pangu_scale = scaler / pangu_scaler  # inverse because we divide by state_scaler
         # taken from era5.py
         self.data_mean = TensorDict(
             surface=pangu_stats["surface_mean"],
@@ -141,7 +141,7 @@ class GuidedFlow(BaseLightningModule):
                 seed=member + 1000 * n  # + batch_nb * 10**6
             )
             realized_trajectory.append(x_hat.cpu())
-            if self.device == torch.device("cuda"):
+            if torch.cuda.is_available() and self.device.type == "cuda":
                 torch.cuda.empty_cache()
             mask_terms.append(mask_term)
             
@@ -175,7 +175,7 @@ class GuidedFlow(BaseLightningModule):
             x_cond["pred_state"] = det_pred
             
             # TODO: should place where-else once I have the correct rollout func
-            self.sigma = self.sigma.to(self.device)
+            self.residual_to_pangu_scale = self.residual_to_pangu_scale.to(self.device)
             self.data_mean = self.data_mean.to(self.device)
             self.data_std = self.data_std.to(self.device)
         
@@ -185,7 +185,7 @@ class GuidedFlow(BaseLightningModule):
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
         z, mask_term = self.flow_step(x_cond, self.mu, y_n, mask, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
-        x_hat = self.mu + tensordict_apply(torch.mul, z, self.sigma)
+        x_hat = self.mu + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
         return x_hat, mask_term
     
     # TODO: do not use batch, separate object for clarity 
@@ -258,7 +258,10 @@ class GuidedFlow(BaseLightningModule):
         ##### compute final output #####
     
     def embedd_time(self, batch, t):
-        times = pd.to_datetime(batch["timestamp"].cpu().numpy() * 10**9).tz_localize(None)
+        times = pd.to_datetime(
+            batch["timestamp"].detach().cpu().numpy(),
+            unit="s",
+        ).tz_localize(None)
         month = torch.tensor(times.month).to(self.device)
         month_emb = self.month_embedder(month)
         hour = torch.tensor(times.hour).to(self.device)
@@ -295,7 +298,7 @@ class GuidedFlow(BaseLightningModule):
         return u_t
     
     def grad_loss(self, mask, mu, y_t, z_t):
-        sigma_z = tensordict_apply(torch.mul, z_t, self.sigma)
+        sigma_z = tensordict_apply(torch.mul, z_t, self.residual_to_pangu_scale)
         # x_hat_norm = tensordict_apply(torch.add, mu, sigma_z)
         x_hat_norm = mu + sigma_z
         x_hat = self.denormalize(x_hat_norm)
