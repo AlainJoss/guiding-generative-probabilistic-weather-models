@@ -13,7 +13,7 @@ from src.utils import (
     list_tens_to_floats,
 )
 from src.funcs import get_mask_tensordict
-from ui.interaction import get_mask_from_corners
+from src.ui.interaction import get_mask_from_corners
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 
