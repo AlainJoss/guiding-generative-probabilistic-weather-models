@@ -15,7 +15,7 @@ bash experiments/eval_pipeline.sh
 bash experiments/lambda_schedule_iterator.sh
 uv run -m src.run
 # run 
-python -m src.run_from_config --config-id "2026-05-08_17:44:07" --config-type unguided --test
+python -m src.run_from_config --config-id "2026-05-08_17:44:07" --config-type guided --test
 python -m src.run_all_configs --config-type guided --test
 uv run marimo edit notebooks/timestamp_discrepancy.py --watch --no-token
 ```

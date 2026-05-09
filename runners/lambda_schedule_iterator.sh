@@ -7,8 +7,11 @@ TEST_FLAG=""
 # Uncomment for test mode
 # TEST_FLAG="--test"
 
+# "manual_trajectory"
 GUIDANCE_MODES=(
-  "manual_trajectory"
+    "ground_truth"
+    "lower_boundary"
+    "upper_boundary"
 )
 
 # Only used for manual_trajectory

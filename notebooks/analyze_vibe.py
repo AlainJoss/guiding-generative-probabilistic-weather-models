@@ -186,12 +186,6 @@ def _(experiment_picker):
 
 
 @app.cell
-def _(experiment_params):
-    experiment_params
-    return
-
-
-@app.cell
 def _(mo, read_json, rollout_dir):
     experiment_params = read_json(rollout_dir, "experiment_params")
 
@@ -221,7 +215,7 @@ def _(mo, read_json, rollout_dir):
         alpha_slider,
         w_slider,
     ])
-    return alpha_slider, experiment_params, guidance_mode_dropdown, w_slider
+    return alpha_slider, guidance_mode_dropdown, w_slider
 
 
 @app.cell
