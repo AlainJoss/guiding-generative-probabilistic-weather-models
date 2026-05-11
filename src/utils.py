@@ -1,7 +1,7 @@
 import json
 import hashlib
-import logging
 import sys
+import logging
 
 from typing import Any
 from pathlib import Path 
@@ -27,13 +27,11 @@ def setup_logging(log_prefix: str = "run") -> None:
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[
-            logging.FileHandler(log_file, delay=False),
+            logging.FileHandler(log_file),
             logging.StreamHandler(sys.stdout),
         ],
         force=True,
     )
-
-    logging.info(f"Logging to: {log_file}")
 
 
 def make_hash(params):

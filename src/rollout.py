@@ -1,4 +1,6 @@
 from pathlib import Path
+import logging
+logger = logging.getLogger(__name__)
 
 import xarray as xr
 import torch
@@ -67,7 +69,7 @@ def rollout(
     M_mask_terms = {}
     member_datasets = []
     for m in range(M):
-        print(f"member={m}")
+        logger.info(f"sampling member={m}")
         if not test:
             sample_multistep, mask_terms = flow_model.sample_rollout(
                 N=N,
