@@ -27,12 +27,13 @@ def setup_logging(log_prefix: str = "run") -> None:
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[
-            logging.FileHandler(log_file),
+            logging.FileHandler(log_file, delay=False),
             logging.StreamHandler(sys.stdout),
         ],
         force=True,
     )
-    logging.FileHandler(log_file, delay=False)
+
+    logging.info(f"Logging to: {log_file}")
 
 
 def make_hash(params):
@@ -69,6 +70,7 @@ def get_x_cond(ds, timestamp):
     x_cond = ds[dataset_idx]
 
     return x_cond, dataset_idx
+
 
 def read_nc(rollout_dir: Path, type_: str):
     path = rollout_dir / f"{type_}.nc"
