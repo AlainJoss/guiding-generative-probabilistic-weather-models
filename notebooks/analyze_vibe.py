@@ -257,7 +257,7 @@ def _(LEVELS_DICT, mo, partition):
 
     level = mo.ui.slider(
         steps=LEVELS,
-        value=LEVELS[0], 
+        value=LEVELS[-1], 
         label="level: ",
         show_value=True,
         debounce=True,
