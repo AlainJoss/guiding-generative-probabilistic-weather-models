@@ -58,7 +58,6 @@ def _():
         LEVELS_DICT,
         PARTITIONS,
         VARIABLES_DICT,
-        get_dataset,
         get_experiment_ids,
         get_mask_center,
         get_mask_from_corners,
@@ -84,12 +83,6 @@ def _():
         plot_guidance_tracking,
         xr_field_to_array,
     )
-
-
-@app.cell
-def _(get_dataset):
-    ds = get_dataset()
-    return
 
 
 @app.cell
@@ -1310,38 +1303,38 @@ def _(xr):
     _L_STD = _PANGU_STATS["level_std"].squeeze().numpy()
 
 
-    def normalize_xr(ds):
+    def normalize_xr(xr_state):
         out = {}
         for i, v in enumerate(surface_variables):
-            if v in ds.data_vars:
-                out[v] = (ds[v] - _S_MEAN[i]) / _S_STD[i]
+            if v in xr_state.data_vars:
+                out[v] = (xr_state[v] - _S_MEAN[i]) / _S_STD[i]
         for i, v in enumerate(level_variables):
-            if v in ds.data_vars:
+            if v in xr_state.data_vars:
                 mean_da = xr.DataArray(
                     _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
                 )
                 std_da = xr.DataArray(
                     _L_STD[i], dims=["level"], coords={"level": pressure_levels}
                 )
-                out[v] = (ds[v] - mean_da) / std_da
-        return xr.Dataset(out, coords=ds.coords, attrs=ds.attrs)
+                out[v] = (xr_state[v] - mean_da) / std_da
+        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
 
 
-    def denormalize_xr(ds):
+    def denormalize_xr(xr_state):
         out = {}
         for i, v in enumerate(surface_variables):
-            if v in ds.data_vars:
-                out[v] = ds[v] * _S_STD[i] + _S_MEAN[i]
+            if v in xr_state.data_vars:
+                out[v] = xr_state[v] * _S_STD[i] + _S_MEAN[i]
         for i, v in enumerate(level_variables):
-            if v in ds.data_vars:
+            if v in xr_state.data_vars:
                 mean_da = xr.DataArray(
                     _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
                 )
                 std_da = xr.DataArray(
                     _L_STD[i], dims=["level"], coords={"level": pressure_levels}
                 )
-                out[v] = ds[v] * std_da + mean_da
-        return xr.Dataset(out, coords=ds.coords, attrs=ds.attrs)
+                out[v] = xr_state[v] * std_da + mean_da
+        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
 
     return (normalize_xr,)
 

@@ -18,28 +18,22 @@ from src.constants import GUIDANCE_PARAM_KEYS
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS, LOGS
 
 
-def setup_logging(
-    name: str = "experiment",
-    log_prefix: str = "run",
-) -> tuple[logging.Logger, Path]:
+def setup_logging(log_prefix: str = "run") -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
 
     log_file = LOGS / f"{log_prefix}_{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[
             logging.FileHandler(log_file),
             logging.StreamHandler(sys.stdout),
         ],
         force=True,
     )
+    logging.FileHandler(log_file, delay=False)
 
-    logger = logging.getLogger(name)
-    logger.info(f"Logging to: {log_file}")
-
-    return logger
 
 def make_hash(params):
     s = json.dumps(params, sort_keys=True)

@@ -1,25 +1,13 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="full")
+app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     # PHASE 1 - unguided rollout
-
-    The aim of this first phase is to rollout an ensemble of M unguided models,
-    producing a trajectory over N model steps.
-
-    Proceed as follows:
-    - Define parameters:
-        - N: number of rollout steps (6h freq)
-        - M: number of non-guided ensemble-members
-        - timestamp: start datetime of the experiment
-        - mask: region and variable of interest
-    - Wait for the experiment to end (~3min for each sampling procedure).
-    - Start the guide.py notebook and define the guidance experiment there.
     """)
     return
 
@@ -249,14 +237,14 @@ def _(TIMESTAMPS, day_slider, hour_slider, month_slider):
     return (timestamp,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(M_slider, N_slider):
     M = M_slider.value
     N = N_slider.value
     return M, N
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
     timestamps = TIMESTAMPS[
         timestamp_idx : timestamp_idx + STRIDE * N + 1 : STRIDE
@@ -278,7 +266,7 @@ def _(ds, level_idx, partition, timestamp_idx, var_idx):
     return (slice,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
     get_corners, set_corners = mo.state((-10.0, 2.0, 45.0, 35.0))
     return get_corners, set_corners
@@ -297,7 +285,8 @@ def _(get_corners, set_corners, slice, visualize_map):
         center=slice.mean(),
         rectangle_x=(lx0, lx1),
         rectangle_y=(ly0, ly1),
-        figsize=(56,38)
+        figsize=(12,5),
+        dpi=200
     )
     map_widget.widget.observe(
         lambda _c: set_corners(
@@ -313,6 +302,14 @@ def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
     mask_corners = get_mask_corners_from_widget(map_widget)
     mask = get_mask_from_corners(*mask_corners)
     return mask, mask_corners
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Configure rollout
+    """)
+    return
 
 
 @app.cell
@@ -339,7 +336,7 @@ def _(
 @app.cell
 def _(ground_truth, plot_dual_trajectory, timestamps, var):
     rollout_dist_plot = plot_dual_trajectory(
-        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(16, 2)
+        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(12, 2)
     )
     return (rollout_dist_plot,)
 
@@ -357,7 +354,6 @@ def _(
     day_slider,
     hour_slider,
     level_slider,
-    map_widget,
     mo,
     month_slider,
     partition_dropdown,
@@ -366,7 +362,7 @@ def _(
     var_dropdown,
 ):
     mo.vstack([
-        mo.md("Unguided rollout parameters:"),
+        mo.md("Define rollout parameters:"),
         mo.hstack([
             mo.vstack(
                 [
@@ -390,8 +386,15 @@ def _(
             ]),
         ]),
     rollout_dist_plot,
-    map_widget
     ])
+    return
+
+
+@app.cell
+def _(map_widget, mo):
+    mo.vstack(
+        [mo.md("Define mask region:"), map_widget],justify="start",
+    )
     return
 
 

@@ -1067,10 +1067,11 @@ def make_interactive_map(
             x=list(rectangle_x),
             y=list(rectangle_y),
             puck_color=["green", "red"],
-            figsize=(30, 20),
+            figsize=(10.31, 5),
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
-            throttle=1000
+            throttle=1000,
+            puck_radius=3,
         )
     )
 

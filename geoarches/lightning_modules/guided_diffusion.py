@@ -3,7 +3,6 @@ import torch
 
 from hydra.utils import instantiate
 from tensordict.tensordict import TensorDict
-import logging
 from pathlib import Path
 from tqdm.auto import tqdm
 
@@ -13,18 +12,6 @@ from geoarches.lightning_modules.base_module import AvgModule, load_module
 from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
 from geoarches.paths import STATS_PATH
-
-log_dir = Path("logs")
-log_dir.mkdir(exist_ok=True)
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-if not logger.handlers:
-    file_handler = logging.FileHandler(log_dir / "experiment.log")
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(file_handler)
 
 class GuidedFlow(BaseLightningModule):
     """
@@ -217,7 +204,6 @@ class GuidedFlow(BaseLightningModule):
         ).to(self.device)
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
-            logger.info(f"{i+1}")
 
             s_t = t / self.num_train_timesteps   
             if i < len(timesteps) - 1:
