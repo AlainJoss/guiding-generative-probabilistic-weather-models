@@ -73,16 +73,16 @@ def apply_overrides(
 
 
 def main() -> None:
-    setup_logging()
-    logger = logging.getLogger(__name__)
-
     args = parse_args()
-
+    device = get_device()    
+    print("Loading model")
+    flow_model = get_model(device)
+    setup_logging()
     logger.info("Starting experiment run")
     logger.info(f"rollout_type={args.rollout_type}, test={args.test}")
 
-    device = get_device()
-    flow_model = get_model(device)
+
+    logger = logging.getLogger(__name__)
 
     configs = load_configs(args.rollout_type)
     logger.info(f"Found {len(configs)} configs")

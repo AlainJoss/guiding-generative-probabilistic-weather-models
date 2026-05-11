@@ -4,14 +4,6 @@ __generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    - make checkbox for each component of the plot!
-    """)
-    return
-
-
 @app.cell
 def _():
     from pathlib import Path
