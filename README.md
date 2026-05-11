@@ -12,7 +12,7 @@ Run analysis:
 ```bash
 # compare original vs. new implementation
 bash experiments/eval_pipeline.sh
-bash experiments/lambda_schedule_iterator.sh
+bash runners/lambda_schedule_iterator.sh
 uv run -m src.run
 # run 
 python -m src.run_from_config --config-id "2026-05-08_17:44:07" --config-type guided --test

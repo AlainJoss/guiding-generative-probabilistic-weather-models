@@ -21,3 +21,12 @@ VARIABLES_DICT = {
         "vertical_velocity"
     ]
 }
+
+GUIDANCE_MODES = [
+    "manual_trajectory",
+    "ground_truth",
+    "lower_boundary",
+    "upper_boundary",
+]
+
+GUIDANCE_PARAM_KEYS = ["guidance_mode", "alpha", "w"]

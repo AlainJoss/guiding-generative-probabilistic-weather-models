@@ -350,6 +350,23 @@ def plot_guidance_tracking(
         )
 
         # ------------------------------------------------------------
+        # Vertical grid lines at every forecast step except current n
+        # ------------------------------------------------------------
+        for step_idx, step_time in enumerate(time_values):
+            if step_idx == n:
+                continue
+
+            ax.axvline(
+                step_time,
+                color=colors["grid_major"],
+                linestyle="-",
+                linewidth=0.65,
+                alpha=0.28,
+                label="_nolegend_",
+                zorder=0,
+            )
+
+        # ------------------------------------------------------------
         # Guidance step marker
         # ------------------------------------------------------------
         ax.axvline(
@@ -362,8 +379,9 @@ def plot_guidance_tracking(
             zorder=10,
         )
 
+        member_diff = guided_member - unguided_member
         ax.annotate(
-            f"n={n}",
+            f"n={n}\nΔ={member_diff[n]:.3f}",
             xy=(time_values[n], 1.0),
             xycoords=("data", "axes fraction"),
             xytext=(6, -8),
@@ -373,8 +391,8 @@ def plot_guidance_tracking(
             fontsize=9,
             color=colors["n_marker"],
             alpha=0.85,
+            zorder=12,
         )
-
         # ------------------------------------------------------------
         # Axis styling
         # ------------------------------------------------------------
@@ -408,15 +426,7 @@ def plot_guidance_tracking(
             alpha=0.45,
         )
 
-        ax.xaxis.grid(
-            True,
-            which="major",
-            color=colors["grid_major"],
-            linewidth=0.65,
-            linestyle="-",
-            alpha=0.28,
-        )
-
+        ax.xaxis.grid(False)
         ax.set_axisbelow(True)
 
         for spine in ("top", "right"):

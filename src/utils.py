@@ -1,6 +1,7 @@
 import json
 import hashlib
 
+from typing import Any
 from pathlib import Path 
 from datetime import datetime, timezone
 
@@ -11,6 +12,7 @@ import numpy as np
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
+from src.constants import GUIDANCE_PARAM_KEYS
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS
 
 def make_hash(params):
@@ -195,11 +197,6 @@ def batchify_and_move(sample, device):
 def read_state(path: Path):
     return xr.open_dataset(path, engine="netcdf4")
 
-# def read_states(rollout_dir: Path, state_type: str, n: int):
-#     paths = list((rollout_dir / f"{n}").glob(f"{state_type}_[0-9]*.nc"))    
-#     paths.sort(key=lambda p: int(p.stem.rsplit("_", 1)[-1]))
-#     return [read_state(p) for p in paths]
-
 def get_slice(state, partition, level, var, timestamp):
     if partition == "surface":
         return state[var].sel(time=timestamp, method='nearest')
@@ -218,3 +215,32 @@ def tensor_timestamp_to_string(
 ) -> str:
     ts = timestamp.item()
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(fmt)
+
+
+##### experiments utils
+
+def read_config(config_type: str, config_id: str) -> dict[str, Any]:
+    return read_json(CONFIGS / config_type, config_id)
+
+def update_experiment_params(
+    rollout_dir: Path,
+    config: dict[str, Any],
+) -> dict[str, list[Any]]:
+    try:
+        experiment_params = read_json(rollout_dir, "experiment_params")
+    except FileNotFoundError:
+        experiment_params = {k: [] for k in GUIDANCE_PARAM_KEYS}
+
+    for k in GUIDANCE_PARAM_KEYS:
+        experiment_params.setdefault(k, [])
+
+        value = config[k]
+        if value not in experiment_params[k]:
+            experiment_params[k].append(value)
+        experiment_params[k] = sorted(
+            experiment_params[k],
+            key=lambda x: (str(type(x)), x),
+        )
+
+    save_to_json(experiment_params, rollout_dir, "experiment_params")
+    return experiment_params

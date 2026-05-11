@@ -1,35 +1,18 @@
-"""
-python -m src.run_all_configs \
-  --config-type unguided 
-
-python -m src.run_all_configs \
-  --config-type guided
-
-# Achtung: this will just overwrite the previous results every time. Need to make subdirs (new timestamps for guided experiments)
-# unguided rollouts can stay as they are as can the ground truth --> impacts analysis notebook, need to write subfoldering logic with experiment type (like manual or other), and if manual slide experiment variables (w and alpha)
-python -m src.run_all_configs \
-  --config-type guided \
-  --guidance-mode manual_trajectory \
-  --alpha 1.0 \
-  --w 2.0
-"""
-
 import argparse
 from copy import deepcopy
 from typing import Any
 
 from src.paths import CONFIGS
-from src.utils import read_json, list_tens_to_floats
-from src.run_from_config import run_from_config
+from src.runners.run_from_config import rollout_from_config
 from src.funcs import T_schedule
-
-
-GUIDANCE_MODES = [
-    "manual_trajectory",
-    "ground_truth",
-    "lower_boundary",
-    "upper_boundary",
-]
+from src.constants import GUIDANCE_MODES
+from src.utils import (
+    get_model,
+    ensure_rollout_dir,
+    get_device,
+    update_experiment_params,
+    read_config, read_json, list_tens_to_floats
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,11 +56,6 @@ def apply_overrides(
         config["w"] = w
 
     if alpha is not None or w is not None:
-        if "alpha" not in config:
-            raise KeyError("Cannot recompute lambda_: config has no 'alpha'.")
-        if "w" not in config:
-            raise KeyError("Cannot recompute lambda_: config has no 'w'.")
-
         config["lambda_"] = list_tens_to_floats(
             T_schedule(config["alpha"], config["w"])
         )
@@ -86,6 +64,9 @@ def apply_overrides(
 
 
 def main():
+    device = get_device()
+    flow_model = get_model(device)
+
     args = parse_args()
 
     configs = load_configs(args.config_type)
@@ -94,17 +75,21 @@ def main():
     for idx, (config_id, config) in enumerate(configs, start=1):
         print(f"running config {idx}/{len(configs)}: {config_id}")
 
+        rollout_dir = ensure_rollout_dir(config["rollout_id"])
+    
         config = apply_overrides(
             config,
             guidance_mode=args.guidance_mode,
             alpha=args.alpha,
             w=args.w,
         )
+    
+        if config["guidance_flag"]:
+            update_experiment_params(rollout_dir, config)
 
-        # TODO: create all objects here?
-        # actung: overwriting objects dangerous
-
-        rollout_dir = run_from_config(
+        rollout_dir = rollout_from_config(
+            flow_model,
+            rollout_dir,
             config,
             test=args.test,
         )

@@ -4,6 +4,14 @@ __generated_with = "0.23.3"
 app = marimo.App(width="full")
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - make checkbox for each component of the plot!
+    """)
+    return
+
+
 @app.cell
 def _():
     from pathlib import Path
@@ -70,7 +78,6 @@ def _():
 
     return (
         build_mask_rollouts,
-        format_time_value,
         get_member_values,
         mean_rollout_terms,
         member_rollout_terms,
@@ -86,22 +93,26 @@ def _(get_dataset):
 
 
 @app.cell
-def _(inspection_ui_checkbox, mo, realized_guidance_checkbox):
+def _(mo):
     mo.md(f"""
     # PHASE 3 - results analysis
-
-    Select anylsis elements of interest: 
-    - {realized_guidance_checkbox}
-    - {inspection_ui_checkbox}
     """)
     return
 
 
 @app.cell
-def _(mo):
-    realized_guidance_checkbox = mo.ui.checkbox(label="Realized guidance")
-    inspection_ui_checkbox = mo.ui.checkbox(label="Inspection widget")
-    return inspection_ui_checkbox, realized_guidance_checkbox
+def _():
+    # Select anylsis elements of interest: 
+    # - {realized_guidance_checkbox}
+    # - {inspection_ui_checkbox}
+    return
+
+
+@app.cell
+def _():
+    # realized_guidance_checkbox = mo.ui.checkbox(label="Realized guidance")
+    # inspection_ui_checkbox = mo.ui.checkbox(label="Inspection widget")
+    return
 
 
 @app.cell
@@ -125,25 +136,17 @@ def _(get_experiment_ids, mo, refresh_button):
 
     unguided_rollouts = get_experiment_ids("unguided")
     print(unguided_rollouts)
-    pick_unguided_rollout_dropdown = mo.ui.dropdown(
-        label="Experiment: ", value=unguided_rollouts[0], options=unguided_rollouts
-    )
-
     pick_rollout_dropdown = mo.ui.dropdown(
         options=unguided_rollouts,
         value=unguided_rollouts[0],
-        label="Pick rollout: ",
+        label="Rollout: ",
     )
-    return (
-        pick_rollout_dropdown,
-        pick_unguided_rollout_dropdown,
-        unguided_rollouts,
-    )
+    return pick_rollout_dropdown, unguided_rollouts
 
 
 @app.cell
-def _(config, mo, pick_rollout_dropdown, refresh_button, unguided_rollouts):
-    selector = mo.hstack(
+def _(mo, pick_rollout_dropdown, refresh_button, unguided_rollouts):
+    experiment_selector = mo.hstack(
         [
             pick_rollout_dropdown,
             refresh_button,
@@ -151,24 +154,24 @@ def _(config, mo, pick_rollout_dropdown, refresh_button, unguided_rollouts):
         justify="start",
     ) if len(unguided_rollouts) > 0 else refresh_button
 
-    experiment_picker = mo.vstack(
-        [
-            selector,
-            mo.accordion(
-                {
-                    "Experiment params": mo.md(
-                        "<br>".join(f"{k}: {v}" for k, v in config.items())
-                    ),
-                }
-            ),
-        ]
-    )
-    return (experiment_picker,)
+    # experiment_selector = mo.vstack(
+    #     [
+    #         experiment_selector,
+    #         mo.accordion(
+    #             {
+    #                 "Experiment params": mo.md(
+    #                     "<br>".join(f"{k}: {v}" for k, v in config.items())
+    #                 ),
+    #             }
+    #         ),
+    #     ]
+    # )
+    return (experiment_selector,)
 
 
 @app.cell
-def _(get_rollout_dir, pick_unguided_rollout_dropdown):
-    rollout_dir = get_rollout_dir(pick_unguided_rollout_dropdown.value)
+def _(get_rollout_dir, pick_rollout_dropdown):
+    rollout_dir = get_rollout_dir(pick_rollout_dropdown.value)
     return (rollout_dir,)
 
 
@@ -180,8 +183,8 @@ def _(read_nc, rollout_dir):
 
 
 @app.cell
-def _(experiment_picker):
-    experiment_picker
+def _(experiment_selector):
+    experiment_selector
     return
 
 
@@ -199,18 +202,20 @@ def _(mo, read_json, rollout_dir):
         steps=experiment_params["alpha"],
         value=experiment_params["alpha"][0],
         label="alpha",
-        debounce=True
+        debounce=True,
+        show_value=True
     )
 
     w_slider = mo.ui.slider(
         steps=experiment_params["w"],
         value=experiment_params["w"][0],
         label="w",
-        debounce=True
+        debounce=True,
+        show_value=True
     )
 
     mo.vstack([
-        mo.md("Slide experiment by params:"),
+        mo.md("Select experiment: "),
         guidance_mode_dropdown,
         alpha_slider,
         w_slider,
@@ -227,11 +232,18 @@ def _(
     w_slider,
     xr,
 ):
-    hash_params = {
-        "guidance_mode": guidance_mode_dropdown.value,
-        "alpha": alpha_slider.value,
-        "w": w_slider.value,
-    }
+    if guidance_mode_dropdown.value == "manual_trajectory":
+        hash_params = {
+            "guidance_mode": guidance_mode_dropdown.value,
+            "alpha": alpha_slider.value,
+            "w": w_slider.value,
+        }
+    else: 
+        hash_params = {
+            "guidance_mode": guidance_mode_dropdown.value,
+            "alpha": 1.0,
+            "w": 1.0,
+        }
 
     guided_id = make_hash(hash_params)
     guided_xr = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
@@ -257,7 +269,14 @@ def _(PARTITIONS, mo):
 @app.cell
 def _(LEVELS_DICT, mo, partition):
     LEVELS = LEVELS_DICT[partition.value]
-    level = mo.ui.slider(steps=LEVELS, value=LEVELS[0], label="level  ", show_value=True, debounce=True)
+
+    level = mo.ui.slider(
+        steps=LEVELS,
+        value=LEVELS[0], 
+        label="level: ",
+        show_value=True,
+        debounce=True,
+    )
     return (level,)
 
 
@@ -268,7 +287,7 @@ def _(VARIABLES_DICT, mo, partition):
         variable_default = VARIABLES[2]
     else:
         variable_default = VARIABLES[3]
-    var = mo.ui.dropdown(VARIABLES, value=variable_default, label="variable : ")
+    var = mo.ui.dropdown(VARIABLES, value=variable_default, label="variable: ")
     return (var,)
 
 
@@ -335,7 +354,7 @@ def _(mo):
         stop=12,
         step=1,
         value=1,
-        label="Zoom",
+        label="zoom: ",
     )
     return (zoom_slider,)
 
@@ -402,6 +421,17 @@ def _(get_mask_center, mask):
 
 
 @app.cell
+def _(mo):
+    norm_modes = ["min_max", "same_scale"]
+    norm_mode = mo.ui.dropdown(
+        norm_modes,
+        value=norm_modes[0],
+        label="norm mode: ",
+    )
+    return (norm_mode,)
+
+
+@app.cell
 def _(
     build_mask_rollouts,
     ground_truth_xr,
@@ -451,8 +481,8 @@ def _(
 
 
 @app.cell
-def _(config, var):
-    if var.value == config["var"]:
+def _(config, guidance_mode_dropdown, var):
+    if var.value == config["var"] and guidance_mode_dropdown.value == "manual_trajectory":
         planned_guidance = config.get("y", config.get("planned_guidance", None))
     else:
         planned_guidance=None
@@ -491,21 +521,21 @@ def _(
         ground_truth_xr,
         var=var.value,
         timestamp=current_time,
-        level=level,
+        level=level.value,
     )
 
     next_slice = xr_field_to_array(
         ground_truth_xr,
         var=var.value,
         timestamp=ground_truth_time,
-        level=level,
+        level=level.value,
     )
 
     unguided_slice = xr_field_to_array(
         unguided_xr,
         var=var.value,
         timestamp=unguided_time,
-        level=level,
+        level=level.value,
         member=unguided_member,
     )
 
@@ -513,7 +543,7 @@ def _(
         guided_xr,
         var=var.value,
         timestamp=guided_time,
-        level=level,
+        level=level.value,
         member=guided_member,
     )
 
@@ -525,13 +555,11 @@ def _(
     unguided_current = unguided_slice - current_slice
     return (
         current_slice,
-        guided_current,
         guided_gt,
         guided_slice,
         guided_unguided,
         next_current,
         next_slice,
-        unguided_current,
         unguided_gt,
         unguided_slice,
     )
@@ -568,22 +596,7 @@ def _(guided_unguided, mo, np):
 def _(mo):
     mo.md(r"""
     ## Realized guidance
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Make a vline at the current timestep!
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    - make checkbox for each component of the plot!
+    Analyze all relevant weather states interactively.
     """)
     return
 
@@ -620,18 +633,8 @@ def _(
 
 
 @app.cell
-def _(m_slider, mo, realized_guidance_plot):
-    mo.vstack([m_slider, realized_guidance_plot])
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## Inspect states
-
-    Analyze all relevant weather states interactively.
-    """)
+def _(realized_guidance_plot):
+    realized_guidance_plot
     return
 
 
@@ -639,18 +642,17 @@ def _(mo):
 def _(
     analysis_type,
     current_slice,
-    guided_current,
     guided_gt,
     guided_slice,
     guided_unguided,
     mask,
     next_current,
     next_slice,
+    norm_mode,
     np,
     show_mask,
     show_values,
     text_thresh,
-    unguided_current,
     unguided_gt,
     unguided_slice,
     visualize_map,
@@ -718,8 +720,6 @@ def _(
         guided_map = absolute_maps["$x_{t+1}^{guided}$"]
 
         next_current_map = None
-        unguided_current_map = None
-        guided_current_map = None
         unguided_gt_map = None
         guided_gt_map = None
         guided_unguided_map = None
@@ -727,8 +727,6 @@ def _(
     else:
         difference_panels = [
             ("$x_{t+1} - x_t$", next_current),
-            ("$x_{t+1}^{unguided} - x_t$", unguided_current),
-            ("$x_{t+1}^{guided} - x_t$", guided_current),
             ("$x_{t+1}^{unguided} - x_{t+1}$", unguided_gt),
             ("$x_{t+1}^{guided} - x_{t+1}$", guided_gt),
             ("$x_{t+1}^{guided} - x_{t+1}^{unguided}$", guided_unguided),
@@ -741,25 +739,25 @@ def _(
         difference_maps = {}
 
         for label, arr in difference_panels:
+            is_guided_unguided = label == "$x_{t+1}^{guided} - x_{t+1}^{unguided}$"
+    
             difference_maps[label] = visualize_map(
                 arr,
                 mask_2d=mask_np,
                 title=label,
-                vmin=-diff_absmax,
-                vmax=diff_absmax,
+                vmin=arr.min() if norm_mode.value == "min_max" else -diff_absmax,
+                vmax=arr.max() if norm_mode.value == "min_max" else diff_absmax,
                 center=0.0,
                 show_mask=show_mask,
                 zoom=zoom_slider.value,
                 zoom_center_lon=zoom_centers[0],
                 zoom_center_lat=zoom_centers[1],
-                show_values=show_values,
-                value_threshold=text_thresh.value,
+                show_values=show_values if is_guided_unguided else False,
+                value_threshold=text_thresh.value if is_guided_unguided else None,
                 value_fontsize=5,
             )
 
         next_current_map = difference_maps["$x_{t+1} - x_t$"]
-        unguided_current_map = difference_maps["$x_{t+1}^{unguided} - x_t$"]
-        guided_current_map = difference_maps["$x_{t+1}^{guided} - x_t$"]
         unguided_gt_map = difference_maps["$x_{t+1}^{unguided} - x_{t+1}$"]
         guided_gt_map = difference_maps["$x_{t+1}^{guided} - x_{t+1}$"]
         guided_unguided_map = difference_maps[
@@ -786,12 +784,8 @@ def _(
 def _(
     analysis_type,
     analysis_type_dropdown,
-    current_time,
-    format_time_value,
-    ground_truth_time,
     guided_gt_map,
     guided_map,
-    guided_time,
     guided_unguided_map,
     level,
     m_slider,
@@ -799,6 +793,7 @@ def _(
     n_slider,
     next_current_map,
     next_map,
+    norm_mode,
     partition,
     show_mask_switch,
     show_values_checkbox,
@@ -806,25 +801,9 @@ def _(
     text_thresh,
     unguided_gt_map,
     unguided_map,
-    unguided_time,
     var,
     zoom_slider,
 ):
-    time_info = mo.accordion(
-        {
-            "Selected times": mo.md(
-                "<br>".join(
-                    [
-                        f"current / init: `{format_time_value(current_time)}`",
-                        f"ground truth target: `{format_time_value(ground_truth_time)}`",
-                        f"unguided forecast: `{format_time_value(unguided_time)}`",
-                        f"guided forecast: `{format_time_value(guided_time)}`",
-                    ]
-                )
-            )
-        }
-    )
-
     common_controls = [
         analysis_type_dropdown,
         mo.hstack([n_slider, m_slider], justify="start"),
@@ -836,7 +815,6 @@ def _(
             ],
             justify="start",
         ),
-        time_info,
     ]
 
     if analysis_type == "absolute":
@@ -857,13 +835,12 @@ def _(
                 *common_controls,
                 mo.hstack(
                     [
-                        show_mask_switch,
-                        show_values_checkbox,
-                        text_thresh,
+                        show_mask_switch, zoom_slider,
+
                     ],
                     justify="start",
                 ),
-                zoom_slider,
+                mo.hstack([norm_mode, show_values_checkbox, text_thresh], justify="start"),
                 mo.md("Difference over states:"),
                 mo.hstack([next_current_map, guided_unguided_map], justify="start"),
                 # mo.hstack([unguided_current_map, guided_current_map], justify="start"),
@@ -872,29 +849,6 @@ def _(
         )
 
     inspect_states_ui
-    return
-
-
-@app.cell
-def _(current_slice, guided_slice, next_slice, np, unguided_slice):
-    slice_shapes = {
-        "current_slice": np.asarray(current_slice).shape,
-        "next_slice": np.asarray(next_slice).shape,
-        "unguided_slice": np.asarray(unguided_slice).shape,
-        "guided_slice": np.asarray(guided_slice).shape,
-    }
-    return (slice_shapes,)
-
-
-@app.cell
-def _(mo, slice_shapes):
-    mo.accordion(
-        {
-            "Slice shapes": mo.md(
-                "<br>".join(f"{k}: `{v}`" for k, v in slice_shapes.items())
-            )
-        }
-    )
     return
 
 
@@ -1011,6 +965,7 @@ def _(mo):
         value=12,
         step=1,
         label="top-k channels",
+        debounce=True
     )
 
     rank_by_radio = mo.ui.radio(
@@ -1051,31 +1006,25 @@ def _(
 
 
 @app.cell
-def _(
-    aggregate_dicts,
-    minmax_analysis_list,
-    plot_variable_change_parallel,
-    rank_by_radio,
-    top_k_slider,
-):
-    aggregated_per_n = [
-        aggregate_dicts(dict_list, error="std")
-        for dict_list in minmax_analysis_list
-    ]
+def _():
+    # aggregated_per_n = [
+    #     aggregate_dicts(dict_list, error="std")
+    #     for dict_list in minmax_analysis_list
+    # ]
 
-    var_change_fig, _ = plot_variable_change_parallel(
-        aggregated_per_n,
-        top_k=top_k_slider.value,
-        rank_by=rank_by_radio.value,
-        title="Variable change across rollout steps",
-        subtitle="min-max normalized |guided - unguided| per variable-level; error bars = ensemble std",
-    )
-    return (var_change_fig,)
+    # var_change_fig, _ = plot_variable_change_parallel(
+    #     aggregated_per_n,
+    #     top_k=top_k_slider.value,
+    #     rank_by=rank_by_radio.value,
+    #     title="Variable change across rollout steps",
+    #     subtitle="min-max normalized |guided - unguided| per variable-level; error bars = ensemble std",
+    # )
+    return
 
 
 @app.cell
-def _(var_change_fig):
-    var_change_fig
+def _():
+    # var_change_fig
     return
 
 
@@ -1262,7 +1211,8 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Do not drop surface variables only!
+    - Do not drop surface variables only!
+    - Renormalize after sum!
     """)
     return
 
