@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.23.3"
-app = marimo.App(width="medium")
+app = marimo.App(width="full")
 
 
 @app.cell(hide_code=True)
@@ -49,7 +49,7 @@ def _():
         tensor_timestamp_to_string, get_now_timestamp
     )
 
-    return get_dataset, get_device, get_model, get_now_timestamp, save_to_json
+    return get_dataset, get_device, get_now_timestamp, save_to_json
 
 
 @app.cell
@@ -91,13 +91,12 @@ def _():
 @app.cell
 def _(get_device):
     device = get_device()
-    return (device,)
+    return
 
 
 @app.cell
-def _(device, get_dataset, get_model):
+def _(get_dataset):
     ds = get_dataset()
-    model = get_model(device)
     return (ds,)
 
 
@@ -298,6 +297,7 @@ def _(get_corners, set_corners, slice, visualize_map):
         center=slice.mean(),
         rectangle_x=(lx0, lx1),
         rectangle_y=(ly0, ly1),
+        figsize=(56,38)
     )
     map_widget.widget.observe(
         lambda _c: set_corners(
@@ -339,7 +339,7 @@ def _(
 @app.cell
 def _(ground_truth, plot_dual_trajectory, timestamps, var):
     rollout_dist_plot = plot_dual_trajectory(
-        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(12, 2)
+        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(16, 2)
     )
     return (rollout_dist_plot,)
 

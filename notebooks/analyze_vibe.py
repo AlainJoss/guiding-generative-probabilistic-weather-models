@@ -740,7 +740,7 @@ def _(
 
         for label, arr in difference_panels:
             is_guided_unguided = label == "$x_{t+1}^{guided} - x_{t+1}^{unguided}$"
-    
+
             difference_maps[label] = visualize_map(
                 arr,
                 mask_2d=mask_np,

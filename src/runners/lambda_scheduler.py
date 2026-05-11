@@ -14,7 +14,7 @@ def run_command(guidance_mode: str, alpha: float, w: float) -> None:
     cmd = [
         "python",
         "-m",
-        "src.run_all_configs",
+        "src.runners.run_all_configs",
         "--config-type",
         CONFIG_TYPE,
         "--guidance-mode",
