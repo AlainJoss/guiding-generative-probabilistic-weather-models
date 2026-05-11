@@ -11,6 +11,9 @@ if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
 print(f"DATA path: {DATA}")
 
+LOGS = DATA / "logs"
+LOGS.mkdir(exist_ok=True)
+
 CONFIGS = DATA / "configs"
 MODELSTORE = DATA / "modelstore"
 DET_MODEL_PATHS = [

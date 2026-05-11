@@ -3,7 +3,7 @@ from copy import deepcopy
 from itertools import product
 from typing import Any
 
-from src.paths import CONFIGS
+from src.paths import CONFIGS, LOGS
 from src.runners.run_from_config import rollout_from_config
 from src.funcs import T_schedule
 from src.constants import GUIDANCE_MODES
@@ -16,26 +16,10 @@ from src.utils import (
     list_tens_to_floats,
 )
 
-import logging
-import sys
-from datetime import datetime
-from pathlib import Path
 
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
-
-LOG_FILE = LOG_DIR / f"run_all_configs_{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
+from src.utils import setup_logging
 
 
-def setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(LOG_FILE),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
 
 
 ALPHAS = [2.0]
@@ -92,22 +76,21 @@ def apply_overrides(
 
 
 def main() -> None:
-    setup_logging()
+    logger = setup_logging()
 
     args = parse_args()
 
-    logging.info("Starting experiment run")
-    logging.info(f"Log file: {LOG_FILE}")
-    logging.info(f"rollout_type={args.rollout_type}, test={args.test}")
+    logger.info("Starting experiment run")
+    logger.info(f"rollout_type={args.rollout_type}, test={args.test}")
 
     device = get_device()
     flow_model = get_model(device)
 
     configs = load_configs(args.rollout_type)
-    logging.info(f"Found {len(configs)} configs")
+    logger.info(f"Found {len(configs)} configs")
 
     for idx, (config_id, config) in enumerate(configs, start=1):
-        logging.info(f"Running config {idx}/{len(configs)}: {config_id}")
+        logger.info(f"Running config {idx}/{len(configs)}: {config_id}")
 
         rollout_dir = ensure_rollout_dir(config["rollout_id"])
 
@@ -120,7 +103,7 @@ def main() -> None:
                     w=w,
                 )
 
-                logging.info(
+                logger.info(
                     f"Running guided rollout | "
                     f"config_id={config_id}, "
                     f"mode={guidance_mode}, alpha={alpha}, w={w}"
@@ -136,13 +119,13 @@ def main() -> None:
                         test=args.test,
                     )
 
-                    logging.info(
+                    logger.info(
                         f"Saved rollout to: {rollout_dir} | "
                         f"mode={guidance_mode}, alpha={alpha}, w={w}"
                     )
 
                 except Exception:
-                    logging.exception(
+                    logger.exception(
                         f"FAILED guided rollout | "
                         f"config_id={config_id}, "
                         f"mode={guidance_mode}, alpha={alpha}, w={w}"
@@ -150,7 +133,7 @@ def main() -> None:
                     raise
 
         else:
-            logging.info(f"Running unguided rollout | config_id={config_id}")
+            logger.info(f"Running unguided rollout | config_id={config_id}")
 
             try:
                 rollout_dir = rollout_from_config(
@@ -160,16 +143,16 @@ def main() -> None:
                     test=args.test,
                 )
 
-                logging.info(f"Saved rollout to: {rollout_dir}")
+                logger.info(f"Saved rollout to: {rollout_dir}")
 
             except Exception:
-                logging.exception(
+                logger.exception(
                     f"FAILED unguided rollout | config_id={config_id}"
                 )
                 raise
 
-    logging.info("Done. All experiments finished.")
+    logger.info("Done. All experiments finished.")
 
-    
+
 if __name__ == "__main__":
     main()
