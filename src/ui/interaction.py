@@ -663,8 +663,6 @@ def draw_base_map(
     ax.set_xlabel("Longitude", fontsize=10)
     ax.set_ylabel("Latitude", fontsize=10)
     ax.tick_params(axis="both", labelsize=9)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
 
     if title is not None:
         ax.set_title(title, fontsize=13)
@@ -762,6 +760,12 @@ def plot_map_static(
         center_lon=zoom_center_lon,
         center_lat=zoom_center_lat,
     )
+
+    for s in ax.spines.values():
+        s.set_visible(True)
+        s.set_color("black")
+        s.set_linewidth(1.2)
+        s.set_zorder(10)
 
     # plt.tight_layout()
 

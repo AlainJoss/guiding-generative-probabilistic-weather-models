@@ -152,18 +152,37 @@ def plot_dual_trajectory(
         # ------------------------------------------------------------
         # Planned guidance
         # ------------------------------------------------------------
+        planned_equals_ground_truth = (
+            planned_guidance is not None
+            and ground_truth is not None
+            and np.allclose(planned_guidance, ground_truth, equal_nan=True)
+        )
+
         if planned_guidance is not None:
             ax.plot(
                 time_values,
                 planned_guidance,
-                linestyle="-",
-                linewidth=2.0,
+                linestyle="--" if planned_equals_ground_truth else "-",
+                linewidth=2.4 if planned_equals_ground_truth else 2.0,
                 color=colors["target"],
-                alpha=0.95,
+                alpha=0.98,
                 label="Planned guidance",
-                zorder=5,
+                zorder=9 if planned_equals_ground_truth else 5,
+                path_effects=(
+                    [
+                        pe.Stroke(
+                            linewidth=4.2,
+                            foreground="white",
+                            alpha=0.9,
+                        ),
+                        pe.Normal(),
+                    ]
+                    if planned_equals_ground_truth
+                    else None
+                ),
             )
             y_values.append(planned_guidance)
+
 
         # ------------------------------------------------------------
         # Mean rollout
@@ -195,7 +214,7 @@ def plot_dual_trajectory(
                 linestyle="-",
                 linewidth=2.2,
                 color=colors["reference"],
-                alpha=0.95,
+                alpha=0.70 if planned_equals_ground_truth else 0.95,
                 label="Ground truth",
                 zorder=7,
             )

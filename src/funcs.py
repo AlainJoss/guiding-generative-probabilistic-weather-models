@@ -108,3 +108,28 @@ def compute_mean_rollout(rollout_trajectory: dict[str, list]) -> dict[str, float
         mean_trajectory.append(sum(values) / len(values))
 
     return mean_trajectory
+
+
+def safe_abs_limits(arrays):
+    vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
+    vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
+
+    if vmax <= vmin:
+        vmax = vmin + 1e-9
+
+    center = 0.5 * (vmin + vmax)
+    center = min(max(center, vmin + 1e-9), vmax - 1e-9)
+
+    return vmin, vmax, center
+
+
+def safe_diff_absmax(arrays):
+    absmax = max(
+        float(np.nanmax(np.abs(np.asarray(arr))))
+        for arr in arrays
+    )
+
+    if absmax <= 0:
+        absmax = 1e-8
+
+    return absmax

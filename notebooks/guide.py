@@ -53,7 +53,6 @@ def _():
         get_dataset,
         get_experiment_ids,
         get_guidance_trajectory,
-        get_inverse_guidance_trajectory,
         get_mask_from_corners,
         get_model,
         get_rollout_dir,
@@ -247,55 +246,65 @@ def _(mo):
 
 
 @app.cell
+def _(ground_truth, lower_boundary, mean_unguided_rollout, mo, upper_boundary):
+    reference_rollouts = {
+        "mean_unguided_rollout": mean_unguided_rollout,
+        "ground_truth": ground_truth,
+        "lower_boundary": lower_boundary,
+        "upper_boundary": upper_boundary
+    }
+    reference_rollout = mo.ui.dropdown(options=reference_rollouts.keys(), value=list(reference_rollouts.keys())[0], label="reference: ")
+    return reference_rollout, reference_rollouts
+
+
+@app.cell
+def _(reference_rollout, reference_rollouts):
+    reference = reference_rollouts[reference_rollout.value]
+    return (reference,)
+
+
+@app.cell
+def _(get_ensemble_upper_bound, unguided_rollout):
+    lower_boundary, upper_boundary = get_ensemble_upper_bound(unguided_rollout)
+    return lower_boundary, upper_boundary
+
+
+@app.cell
 def _(
     GUIDANCE_MODES,
     N,
     N_schedule,
     alpha,
     get_guidance_trajectory,
-    get_inverse_guidance_trajectory,
-    ground_truth,
     guidance_mode_dropdown,
-    mean_unguided_rollout,
     peak,
     peak_at_slider,
+    reference,
     shape_slider,
-    unguided_rollout,
 ):
-    lower_boundary, upper_boundary = get_ensemble_upper_bound(unguided_rollout)
+    planned_guidance = reference  # overwritten if manual_trajectory
+    y_trajectory = None
     if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
         y_trajectory = N_schedule(
             N, shape_slider.value, peak, alpha, peak_at_n=peak_at_slider.value
         )
         planned_guidance = get_guidance_trajectory(
-            y_trajectory, mean_unguided_rollout
+            y_trajectory, reference
         )
-    elif guidance_mode_dropdown.value == GUIDANCE_MODES[1]:
-        planned_guidance = ground_truth
-        y_trajectory = get_inverse_guidance_trajectory(
-            planned_guidance, mean_unguided_rollout
-        )
-    elif guidance_mode_dropdown.value == GUIDANCE_MODES[2]:
-        y_trajectory = get_inverse_guidance_trajectory(
-            planned_guidance, mean_unguided_rollout
-        )
-        planned_guidance = lower_boundary
-    else:
-        y_trajectory = get_inverse_guidance_trajectory(
-            planned_guidance, mean_unguided_rollout
-        )
-        planned_guidance = upper_boundary
-    return lower_boundary, planned_guidance, upper_boundary, y_trajectory
+    return planned_guidance, y_trajectory
 
 
-@app.function
-def get_ensemble_upper_bound(unguided_rollout):
-    rows = [[float(v) for v in row] for row in unguided_rollout]
-    M = min(len(row) for row in rows)
-    trimmed = [row[:M] for row in rows]
-    lower_boundary = [min(row) for row in trimmed]
-    upper_boundary = [max(row) for row in trimmed]
-    return lower_boundary, upper_boundary
+@app.cell
+def _(torch):
+    def get_ensemble_upper_bound(unguided_rollout):
+        rows = [[float(v) for v in row] for row in unguided_rollout]
+        M = min(len(row) for row in rows)
+        trimmed = [row[:M] for row in rows]
+        lower_boundary = [torch.tensor(min(row)) for row in trimmed]
+        upper_boundary = [torch.tensor(max(row)) for row in trimmed]
+        return lower_boundary, upper_boundary
+
+    return (get_ensemble_upper_bound,)
 
 
 @app.cell
@@ -586,6 +595,7 @@ def _(
     peak_at_slider,
     peak_granularity_slider,
     peak_slider,
+    reference_rollout,
     shape_slider,
     var_dropdown,
     y_trajectory_plot,
@@ -602,7 +612,7 @@ def _(
                     ],
                     justify="start",
                 ),
-                guidance_mode_dropdown,
+                mo.hstack([guidance_mode_dropdown, reference_rollout], justify="start"),
                 mo.hstack(
                     [alpha_slider, max_perc_granularity_slider, min_max_lambda_slider],
                     justify="start",
@@ -635,14 +645,6 @@ def _(
             ]
         )
     weather_time_vstack
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    grid is annoyingly over lines ...
-    """)
     return
 
 
@@ -724,6 +726,7 @@ def _(
     mean_unguided_rollout,
     partition,
     planned_guidance,
+    reference_rollout,
     timestamp,
     timestamp_idx,
     timestamps,
@@ -753,12 +756,13 @@ def _(
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
         "y": list_tens_to_floats(planned_guidance),
-        "lower_boundary": lower_boundary, 
-        "upper_boundary": upper_boundary,
+        "lower_boundary": list_tens_to_floats(lower_boundary), 
+        "upper_boundary": list_tens_to_floats(upper_boundary),
         "y_perc": alpha,
         "lambda_": list_tens_to_floats(lambda_),
         "alpha": lambda_shape_slider.value,
         "w": w_slider.value,
+        "reference": reference_rollout.value
     }
     return (new_config,)
 

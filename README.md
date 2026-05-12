@@ -13,7 +13,7 @@ Notebooks:
 ```bash
 uv run marimo edit notebooks/rollout.py --watch --no-token
 uv run marimo edit notebooks/guide.py --watch --no-token
-uv run marimo edit notebooks/analyze_vibe.py --watch --no-token
+uv run marimo edit notebooks/analyze.py --watch --no-token
 ```
 
 Setup:

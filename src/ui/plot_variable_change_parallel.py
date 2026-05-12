@@ -27,6 +27,7 @@ def plot_variable_change_parallel(
     jitter: float = 0.0,
     ylim: tuple[float, float] | None = (0, 1.05),
     ylabel: str = "min-max score",
+    show_unselected: bool = False,
 ):
     """Parallel-coordinates view of per-variable-level scores across N."""
 
@@ -114,6 +115,25 @@ def plot_variable_change_parallel(
                 label="_nolegend_",
                 zorder=0,
             )
+
+        # ------------------------------------------------------------
+        # Faded background — all unselected keys
+        # ------------------------------------------------------------
+        if show_unselected:
+            sel_set = set(order.tolist())
+            for j in range(K):
+                if j in sel_set:
+                    continue
+                ax.plot(
+                    x,
+                    means[:, j],
+                    "-",
+                    linewidth=0.6,
+                    color="#999999",
+                    alpha=0.18,
+                    label="_nolegend_",
+                    zorder=1,
+                )
 
         # ------------------------------------------------------------
         # Lines + error bars

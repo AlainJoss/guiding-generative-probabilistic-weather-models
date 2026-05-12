@@ -101,7 +101,7 @@ def main() -> None:
         rollout_dir = ensure_rollout_dir(config["rollout_id"])
 
         if args.rollout_type == "guided":
-            for guidance_mode, alpha, w in product(GUIDANCE_MODES[1:], ALPHAS, WS):
+            for guidance_mode, alpha, w in product(GUIDANCE_MODES, ALPHAS, WS):
                 config_ = apply_overrides(
                     config,
                     guidance_mode=guidance_mode,
