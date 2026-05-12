@@ -22,9 +22,11 @@ def _():
 def _():
     from src.ui.interaction import (
         visualize_map, get_mask_corners_from_widget, 
-        get_mask_from_corners, plot_trajectory, plot_dual_trajectory,
+        get_mask_from_corners,
         visualize_mask_terms_over_N
     )
+    from src.ui.plot_trajectory import plot_trajectory
+    from src.ui.plot_dual_trajectory import plot_dual_trajectory
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from src.rollout import rollout
     from src.utils import (
@@ -63,7 +65,6 @@ def _():
         read_nc,
         save_to_json,
         visualize_map,
-        visualize_mask_terms_over_N,
     )
 
 
@@ -114,7 +115,7 @@ def _(level_slider):
 def _(VARIABLES_DICT, config, mo, partition):
     VARIABLES = VARIABLES_DICT[partition]
     VARIABLE_DEFAULT = config["var"] if partition == config["partition"] else VARIABLES[0]
-    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="variable : ")
+    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="variable: ")
     return VARIABLES, var_dropdown
 
 
@@ -146,18 +147,86 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    max_perc_granularity_slider = mo.ui.slider(
+        steps=[0.1, 0.25, 0.5, 1, 2, 5],
+        value=1,
+        label="granularity (%): ",
+        show_value=True,
+    )
+    return (max_perc_granularity_slider,)
+
+
+@app.cell
+def _(mo):
+    peak_granularity_slider = mo.ui.slider(
+        steps=[0.1, 0.5, 1, 2, 5],
+        value=1,
+        label="granularity (%): ",
+        show_value=True,
+    )
+    return (peak_granularity_slider,)
+
+
+@app.cell
+def _(min_max_lambda, mo, peak_granularity_slider):
+    peak_slider = mo.ui.slider(
+        -min_max_lambda,
+        min_max_lambda,
+        value=0,
+        step=peak_granularity_slider.value,
+        label="peak (%): ",
+        show_value=True,
+    )
+    return (peak_slider,)
+
+
+@app.cell
+def _(peak_slider):
+    peak = peak_slider.value / 100
+    return (peak,)
+
+
+@app.cell
+def _(mo):
+    shape_slider = mo.ui.slider(
+        start=0.5,
+        stop=10.0,
+        step=0.5,
+        value=0.5,
+        label="shape: ",
+        show_value=True,
+    )
+    return (shape_slider,)
+
+
+@app.cell
+def _(N, mo):
+    peak_at_slider = mo.ui.slider(
+        start=1,
+        stop=max(N, 1),
+        step=1,
+        value=N // 2,
+        label="peak at n: ",
+        show_value=True,
+        debounce=True,
+    )
+    return (peak_at_slider,)
+
+
+@app.cell
 def _(min_max_lambda_slider):
     min_max_lambda = min_max_lambda_slider.value
     return (min_max_lambda,)
 
 
 @app.cell
-def _(min_max_lambda, mo):
+def _(max_perc_granularity_slider, min_max_lambda, mo):
     alpha_slider = mo.ui.slider(
         -min_max_lambda,
         min_max_lambda,
         value=0,
-        step=1,
+        step=max_perc_granularity_slider.value,
         label="max percentage change (%): ",
         show_value=True,
     )
@@ -188,10 +257,16 @@ def _(
     ground_truth,
     guidance_mode_dropdown,
     mean_unguided_rollout,
+    peak,
+    peak_at_slider,
+    shape_slider,
     unguided_rollout,
 ):
+    lower_boundary, upper_boundary = get_ensemble_upper_bound(unguided_rollout)
     if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
-        y_trajectory = N_schedule(N, 1.0, alpha)
+        y_trajectory = N_schedule(
+            N, shape_slider.value, peak, alpha, peak_at_n=peak_at_slider.value
+        )
         planned_guidance = get_guidance_trajectory(
             y_trajectory, mean_unguided_rollout
         )
@@ -201,16 +276,16 @@ def _(
             planned_guidance, mean_unguided_rollout
         )
     elif guidance_mode_dropdown.value == GUIDANCE_MODES[2]:
-        planned_guidance, _ = get_ensemble_upper_bound(unguided_rollout)
         y_trajectory = get_inverse_guidance_trajectory(
             planned_guidance, mean_unguided_rollout
         )
+        planned_guidance = lower_boundary
     else:
-        _, planned_guidance = get_ensemble_upper_bound(unguided_rollout)
         y_trajectory = get_inverse_guidance_trajectory(
             planned_guidance, mean_unguided_rollout
         )
-    return planned_guidance, y_trajectory
+        planned_guidance = upper_boundary
+    return lower_boundary, planned_guidance, upper_boundary, y_trajectory
 
 
 @app.function
@@ -218,9 +293,9 @@ def get_ensemble_upper_bound(unguided_rollout):
     rows = [[float(v) for v in row] for row in unguided_rollout]
     M = min(len(row) for row in rows)
     trimmed = [row[:M] for row in rows]
-    lower = [min(row) for row in trimmed]
-    upper = [max(row) for row in trimmed]
-    return lower, upper
+    lower_boundary = [min(row) for row in trimmed]
+    upper_boundary = [max(row) for row in trimmed]
+    return lower_boundary, upper_boundary
 
 
 @app.cell
@@ -412,28 +487,18 @@ def _(
         ensemble_rollout=unguided_rollout,
         ymin_left=None,
         ymax_left=None,
-        figsize=(10,3)
+        figsize=(17.5, 5.5),
+        title=f"{var} trajectory",
+        subtitle="Unguided rollout ensemble, planned guidance, ground truth, and percentage trajectory",
+        dpi=500
     )
     return (y_trajectory_plot,)
 
 
 @app.cell
-def _(
-    ground_truth,
-    mean_unguided_rollout,
-    timestamps,
-    unguided_rollout,
-    var,
-    visualize_mask_terms_over_N,
-):
-    ensemble_rollout_plot = visualize_mask_terms_over_N(
-        var,
-        timestamps,
-        mean_rollout=mean_unguided_rollout,
-        ensemble_rollout=unguided_rollout,
-        ground_truth=ground_truth,
-        # gen_det_rollout=det_rollout,
-    )
+def _():
+    from src.ui.analysis.analysis_plots import plot_guidance_tracking
+
     return
 
 
@@ -476,14 +541,6 @@ def _(mo):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Mask
-    """)
-    return
-
-
 @app.cell
 def _(mask, slice, visualize_map):
     map_widget = visualize_map(
@@ -495,23 +552,10 @@ def _(mask, slice, visualize_map):
         vmin=slice.min(),
         vmax=slice.max(),
         center=slice.mean(),
-        figsize=(24,5.15)
+        figsize=(39,5.24),
+        dpi=500
     )
     return (map_widget,)
-
-
-@app.cell
-def _(level_slider, map_widget, mo, partition_dropdown, var_dropdown):
-    mo.vstack([
-        mo.md("The mask specifies the variable, level, and region of interest. By default, these values are taken from the unguided rollout experiment's `config.json` file."),
-        mo.hstack([
-            partition_dropdown,
-            var_dropdown,
-            level_slider,
-        ], justify="start"),
-        map_widget
-    ])
-    return
 
 
 @app.cell(hide_code=True)
@@ -523,28 +567,82 @@ def _(mo):
 
 
 @app.cell
+def _(map_widget):
+    # mo.vstack([mo.md("Mask:"), map_widget])
+    map_widget
+    return
+
+
+@app.cell
 def _(
     GUIDANCE_MODES,
     alpha_slider,
     guidance_mode_dropdown,
+    level_slider,
+    max_perc_granularity_slider,
     min_max_lambda_slider,
     mo,
+    partition_dropdown,
+    peak_at_slider,
+    peak_granularity_slider,
+    peak_slider,
+    shape_slider,
+    var_dropdown,
     y_trajectory_plot,
 ):
     if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
         weather_time_vstack = mo.vstack(
             [
-                mo.md("The guidance trajectory is the sequence of target values (masked spatial average) that we use to steer the generative model over the $N$ weather steps."),
+                # mo.md("Note: selecting other variables will not affect the mask."),
+                mo.hstack(
+                    [
+                        partition_dropdown,
+                        var_dropdown,
+                        level_slider,
+                    ],
+                    justify="start",
+                ),
                 guidance_mode_dropdown,
-                mo.hstack([alpha_slider, min_max_lambda_slider], justify="start"),
+                mo.hstack(
+                    [alpha_slider, max_perc_granularity_slider, min_max_lambda_slider],
+                    justify="start",
+                ),
+                mo.hstack(
+                    [
+                        peak_slider,
+                        peak_granularity_slider,
+                        shape_slider,
+                        peak_at_slider,
+                    ],
+                    justify="start",
+                ),
                 y_trajectory_plot,
             ]
         )
     else:
         weather_time_vstack = mo.vstack(
-            [guidance_mode_dropdown, y_trajectory_plot]
+            [
+                mo.hstack(
+                    [
+                        partition_dropdown,
+                        var_dropdown,
+                        level_slider,
+                    ],
+                    justify="start",
+                ),
+                guidance_mode_dropdown,
+                y_trajectory_plot,
+            ]
         )
     weather_time_vstack
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    grid is annoyingly over lines ...
+    """)
     return
 
 
@@ -558,10 +656,18 @@ def _(mo):
 
 @app.cell
 def _(lambda_, plot_trajectory):
+    # lambda_trajectory_plot = plot_trajectory(
+    #     lambda_, "$\lambda_t$", ymax=3, ymin=0, 
+    #     title="Guidance strength-schedule $\{\lambda_t\}_{t=0}^{T-1}$",
+    #     figsize=(10.85, 2.5)
+    # )
     lambda_trajectory_plot = plot_trajectory(
-        lambda_, "$\lambda_t$", ymax=3, ymin=0, 
-        title="Guidance strength-schedule $\{\lambda_t\}_{t=0}^{T-1}$",
-        figsize=(10.85, 2.5)
+        lambda_,
+        r"$\lambda_t$",
+        ymin=0,
+        ymax=3,
+        title=r"Guidance strength schedule $\{\lambda_t\}_{t=0}^{T-1}$",
+        figsize=(17.5, 4.0),
     )
     return (lambda_trajectory_plot,)
 
@@ -613,6 +719,7 @@ def _(
     level,
     level_idx,
     list_tens_to_floats,
+    lower_boundary,
     mask_corners,
     mean_unguided_rollout,
     partition,
@@ -621,6 +728,7 @@ def _(
     timestamp_idx,
     timestamps,
     unguided_rollout,
+    upper_boundary,
     var,
     var_idx,
     w_slider,
@@ -645,6 +753,8 @@ def _(
         "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
         "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
         "y": list_tens_to_floats(planned_guidance),
+        "lower_boundary": lower_boundary, 
+        "upper_boundary": upper_boundary,
         "y_perc": alpha,
         "lambda_": list_tens_to_floats(lambda_),
         "alpha": lambda_shape_slider.value,
@@ -665,11 +775,6 @@ def _(CONFIGS, config, config_button, new_config, save_to_json):
     if config_button.value:
         config_dir = CONFIGS / "guided"
         save_to_json(new_config, config_dir, f"{config['rollout_id']}")
-    return
-
-
-@app.cell
-def _():
     return
 
 

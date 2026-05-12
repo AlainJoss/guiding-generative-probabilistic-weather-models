@@ -57,6 +57,16 @@ def apply_overrides(
 
     if guidance_mode is not None:
         config["guidance_mode"] = guidance_mode
+        if guidance_mode == "ground_truth":
+            config["y"] = config["ground_truth"]
+        elif guidance_mode == "lower_boundary":
+            config["y"] = config["lower_boundary"]
+        elif guidance_mode == "upper_boundary":
+            config["y"] = config["upper_boundary"]
+        elif guidance_mode == "manual_trajectory":
+            pass 
+        else:
+            raise ValueError(f"guidance mode {guidance_mode} not admissible")
 
     if alpha is not None:
         config["alpha"] = alpha

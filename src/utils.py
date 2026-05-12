@@ -1,5 +1,6 @@
 import json
 import hashlib
+import os
 import sys
 import logging
 
@@ -18,6 +19,15 @@ from src.constants import GUIDANCE_PARAM_KEYS
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS, LOGS
 
 
+class _FlushFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        try:
+            os.fsync(self.stream.fileno())
+        except (OSError, ValueError):
+            pass
+
+
 def setup_logging(log_prefix: str = "run") -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
 
@@ -27,7 +37,7 @@ def setup_logging(log_prefix: str = "run") -> None:
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[
-            logging.FileHandler(log_file),
+            _FlushFileHandler(log_file),
             logging.StreamHandler(sys.stdout),
         ],
         force=True,

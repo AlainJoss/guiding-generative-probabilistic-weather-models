@@ -24,11 +24,11 @@ def _():
         get_mask_from_corners,
         get_mask_center,
         plot_rmse_over_n,
-        plot_variable_change_parallel,
         plot_trajectory,
         plot_trajectories_over_n,
         plot_states_over_n,
     )
+    from src.ui.plot_variable_change_parallel import plot_variable_change_parallel
 
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
@@ -75,6 +75,61 @@ def _():
         plot_guidance_tracking,
         xr_field_to_array,
     )
+
+
+@app.cell
+def _(xr):
+    import torch
+    from geoarches.dataloaders.era5 import (
+        STATS_PATH,
+        pressure_levels,
+        surface_variables,
+        level_variables,
+    )
+
+    _PANGU_STATS = torch.load(
+        STATS_PATH / "pangu_norm_stats2_with_w.pt", weights_only=True
+    )
+    _S_MEAN = _PANGU_STATS["surface_mean"].squeeze().numpy()
+    _S_STD = _PANGU_STATS["surface_std"].squeeze().numpy()
+    _L_MEAN = _PANGU_STATS["level_mean"].squeeze().numpy()
+    _L_STD = _PANGU_STATS["level_std"].squeeze().numpy()
+
+
+    def normalize_xr(xr_state):
+        out = {}
+        for i, v in enumerate(surface_variables):
+            if v in xr_state.data_vars:
+                out[v] = (xr_state[v] - _S_MEAN[i]) / _S_STD[i]
+        for i, v in enumerate(level_variables):
+            if v in xr_state.data_vars:
+                mean_da = xr.DataArray(
+                    _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
+                )
+                std_da = xr.DataArray(
+                    _L_STD[i], dims=["level"], coords={"level": pressure_levels}
+                )
+                out[v] = (xr_state[v] - mean_da) / std_da
+        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
+
+
+    def denormalize_xr(xr_state):
+        out = {}
+        for i, v in enumerate(surface_variables):
+            if v in xr_state.data_vars:
+                out[v] = xr_state[v] * _S_STD[i] + _S_MEAN[i]
+        for i, v in enumerate(level_variables):
+            if v in xr_state.data_vars:
+                mean_da = xr.DataArray(
+                    _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
+                )
+                std_da = xr.DataArray(
+                    _L_STD[i], dims=["level"], coords={"level": pressure_levels}
+                )
+                out[v] = xr_state[v] * std_da + mean_da
+        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
+
+    return (normalize_xr,)
 
 
 @app.cell
@@ -217,18 +272,11 @@ def _(
     w_slider,
     xr,
 ):
-    if guidance_mode_dropdown.value == "manual_trajectory":
-        hash_params = {
-            "guidance_mode": guidance_mode_dropdown.value,
-            "alpha": alpha_slider.value,
-            "w": w_slider.value,
-        }
-    else: 
-        hash_params = {
-            "guidance_mode": guidance_mode_dropdown.value,
-            "alpha": 1.0,
-            "w": 1.0,
-        }
+    hash_params = {
+        "guidance_mode": guidance_mode_dropdown.value,
+        "alpha": alpha_slider.value,
+        "w": w_slider.value,
+    }
 
     guided_id = make_hash(hash_params)
     guided_xr = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
@@ -466,8 +514,8 @@ def _(
 
 
 @app.cell
-def _(config, guidance_mode_dropdown, var):
-    if var.value == config["var"] and guidance_mode_dropdown.value == "manual_trajectory":
+def _(config, var):
+    if var.value == config["var"]:
         planned_guidance = config.get("y", config.get("planned_guidance", None))
     else:
         planned_guidance=None
@@ -581,7 +629,6 @@ def _(guided_unguided, mo, np):
 def _(mo):
     mo.md(r"""
     ## Realized guidance
-    Analyze all relevant weather states interactively.
     """)
     return
 
@@ -627,6 +674,7 @@ def _(realized_guidance_plot):
 def _(
     analysis_type,
     current_slice,
+    dpi,
     guided_gt,
     guided_slice,
     guided_unguided,
@@ -697,6 +745,7 @@ def _(
                 zoom=zoom_slider.value,
                 zoom_center_lon=zoom_centers[0],
                 zoom_center_lat=zoom_centers[1],
+                dpi=dpi.value
             )
 
         state_map = absolute_maps["$x_t$"]
@@ -740,6 +789,7 @@ def _(
                 show_values=show_values if is_guided_unguided else False,
                 value_threshold=text_thresh.value if is_guided_unguided else None,
                 value_fontsize=5,
+                dpi=dpi.value
             )
 
         next_current_map = difference_maps["$x_{t+1} - x_t$"]
@@ -766,9 +816,16 @@ def _(
 
 
 @app.cell
+def _(mo):
+    dpi = mo.ui.slider(start=100, stop=500, step=25, debounce=False, show_value=True, label="dpi: ")
+    return (dpi,)
+
+
+@app.cell
 def _(
     analysis_type,
     analysis_type_dropdown,
+    dpi,
     guided_gt_map,
     guided_map,
     guided_unguided_map,
@@ -790,7 +847,7 @@ def _(
     zoom_slider,
 ):
     common_controls = [
-        analysis_type_dropdown,
+        mo.hstack([analysis_type_dropdown, dpi], justify="start"),
         mo.hstack([n_slider, m_slider], justify="start"),
         mo.hstack(
             [
@@ -806,8 +863,7 @@ def _(
         inspect_states_ui = mo.vstack(
             [
                 *common_controls,
-                mo.hstack([show_mask_switch], justify="start"),
-                zoom_slider,
+                mo.hstack([show_mask_switch, zoom_slider], justify="start"),
                 mo.md("Absolute states:"),
                 mo.hstack([state_map, next_map], justify="start"),
                 mo.hstack([unguided_map, guided_map], justify="start"),
@@ -842,13 +898,9 @@ def _(mo):
     mo.md(r"""
     ## State change analysis
 
-    For each rollout step \(n = 1, \dots, N\) we measure:
     \(
-    \sum_{i,j} |x^{guided}_{n,m,i,j} - x^{unguided}_{n,m,i,j}|
-    \).
-
-    Scores are min-max normalized within each member and rollout step, so
-    the strongest changed channels at each step sit near 1.
+    \text{norm}(\sum_{i,j} |x^{guided}_{n,m,i,j} - x^{unguided}_{n,m,i,j}|)
+    \)
     """)
     return
 
@@ -939,7 +991,7 @@ def _(np):
 
         return minmax_analysis_list
 
-    return aggregate_dicts, build_variable_change_scores_from_xr
+    return (build_variable_change_scores_from_xr,)
 
 
 @app.cell
@@ -987,7 +1039,7 @@ def _(
         N=N,
         M=M,
     )
-    return (minmax_analysis_list,)
+    return
 
 
 @app.cell
@@ -1130,6 +1182,8 @@ def _(np):
     return (
         aggregate_variable_change_dicts_over_members,
         build_rollout_normalized_variable_change_scores_from_xr,
+        normalize_scores_per_variable_over_rollout,
+        per_var_level_abs_sum_for_rollout_norm,
     )
 
 
@@ -1177,14 +1231,6 @@ def _(rollout_var_change_fig):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Need to change something here, the spike is just because we go from zero to that, but is not correct.
-    """)
-    return
-
-
 @app.cell
 def _(mo):
     mo.md(r"""
@@ -1193,56 +1239,91 @@ def _(mo):
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    - Do not drop surface variables only!
-    - Renormalize after sum!
-    """)
-    return
-
-
 @app.cell
-def _(aggregate_dicts, minmax_analysis_list, plot_variable_change_parallel):
-    def collapse_level_keys_to_vars(d):
+def _(
+    M,
+    N,
+    aggregate_variable_change_dicts_over_members,
+    guided_xr,
+    normalize_scores_per_variable_over_rollout,
+    normalize_xr,
+    per_var_level_abs_sum_for_rollout_norm,
+    unguided_xr,
+):
+    def collapse_level_keys_to_vars_sum(d):
         out = {}
 
         for key, val in d.items():
-            var_name, suffix = key.rsplit("-", 1)
-
-            if suffix == "surface":
-                continue
-
+            var_name, _ = key.rsplit("-", 1)
             out[var_name] = out.get(var_name, 0.0) + val
 
         return out
 
 
-    var_analysis_list = [
-        [collapse_level_keys_to_vars(d) for d in dict_list]
-        for dict_list in minmax_analysis_list
-    ]
+    def build_rollout_normalized_var_change_level_agg_from_xr(
+        *,
+        guided_xr,
+        unguided_xr,
+        N,
+        M,
+    ):
+        raw_analysis_list = []
 
-    aggregated_vars_per_n = [
-        aggregate_dicts(dict_list, error="std")
-        for dict_list in var_analysis_list
-    ]
+        for step_idx in range(int(N)):
+            per_member_scores = []
 
-    var_agg_fig, _ = plot_variable_change_parallel(
-        aggregated_vars_per_n,
-        top_k=None,
-        rank_by="max",
-        title="Variable change across rollout steps, level-aggregated",
-        subtitle="pressure-level keys summed per variable; error bars = ensemble std",
-        ylim=None,
-        ylabel="score, summed over levels",
+            for m in range(int(M)):
+                guided_step = guided_xr.isel(time=step_idx, member=m)
+                unguided_step = unguided_xr.isel(time=step_idx, member=m)
+
+                diff_step = guided_step - unguided_step
+
+                abs_sum_dict = per_var_level_abs_sum_for_rollout_norm(diff_step)
+                var_sum_dict = collapse_level_keys_to_vars_sum(abs_sum_dict)
+
+                per_member_scores.append(var_sum_dict)
+
+            raw_analysis_list.append(per_member_scores)
+
+        return normalize_scores_per_variable_over_rollout(raw_analysis_list)
+
+
+    var_level_agg_analysis_list = (
+        build_rollout_normalized_var_change_level_agg_from_xr(
+            guided_xr=normalize_xr(guided_xr),
+            unguided_xr=normalize_xr(unguided_xr),
+            N=N,
+            M=M,
+        )
     )
-    return (var_agg_fig,)
+
+    aggregated_var_level_agg_per_n = [
+        aggregate_variable_change_dicts_over_members(dict_list, error="std")
+        for dict_list in var_level_agg_analysis_list
+    ]
+    return (aggregated_var_level_agg_per_n,)
 
 
 @app.cell
-def _(var_agg_fig):
-    var_agg_fig
+def _(
+    aggregated_var_level_agg_per_n,
+    plot_variable_change_parallel,
+    rank_by_radio,
+    top_k_slider,
+):
+    var_change_fig, _ = plot_variable_change_parallel(
+        aggregated_var_level_agg_per_n,
+        top_k=top_k_slider.value,
+        rank_by=rank_by_radio.value,
+        title="Variable change across rollout steps",
+        subtitle="min-max normalized |guided - unguided| per variable-level; error bars = ensemble std",
+    )
+    return (var_change_fig,)
+
+
+@app.cell
+def _(var_change_fig):
+    var_change_fig
     return
 
 
@@ -1268,67 +1349,20 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### Paste after here:
+    ...
     """)
     return
 
 
-@app.cell
-def _(xr):
-    import torch
-    from geoarches.dataloaders.era5 import (
-        STATS_PATH,
-        pressure_levels,
-        surface_variables,
-        level_variables,
-    )
-
-    _PANGU_STATS = torch.load(
-        STATS_PATH / "pangu_norm_stats2_with_w.pt", weights_only=True
-    )
-    _S_MEAN = _PANGU_STATS["surface_mean"].squeeze().numpy()
-    _S_STD = _PANGU_STATS["surface_std"].squeeze().numpy()
-    _L_MEAN = _PANGU_STATS["level_mean"].squeeze().numpy()
-    _L_STD = _PANGU_STATS["level_std"].squeeze().numpy()
-
-
-    def normalize_xr(xr_state):
-        out = {}
-        for i, v in enumerate(surface_variables):
-            if v in xr_state.data_vars:
-                out[v] = (xr_state[v] - _S_MEAN[i]) / _S_STD[i]
-        for i, v in enumerate(level_variables):
-            if v in xr_state.data_vars:
-                mean_da = xr.DataArray(
-                    _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                std_da = xr.DataArray(
-                    _L_STD[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                out[v] = (xr_state[v] - mean_da) / std_da
-        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
-
-
-    def denormalize_xr(xr_state):
-        out = {}
-        for i, v in enumerate(surface_variables):
-            if v in xr_state.data_vars:
-                out[v] = xr_state[v] * _S_STD[i] + _S_MEAN[i]
-        for i, v in enumerate(level_variables):
-            if v in xr_state.data_vars:
-                mean_da = xr.DataArray(
-                    _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                std_da = xr.DataArray(
-                    _L_STD[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                out[v] = xr_state[v] * std_da + mean_da
-        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
-
-    return (normalize_xr,)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Gradient and vector field analysis
+    """)
+    return
 
 
 @app.cell

@@ -1,11 +1,15 @@
 import torch
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import marimo as mo
 from matplotlib.ticker import FormatStrFormatter
+import matplotlib.dates as mdates
+import matplotlib.patheffects as pe
+from matplotlib.ticker import AutoMinorLocator
 
 import geopandas as gpd
 import geodatasets
@@ -180,126 +184,6 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     mask = (lon_mask & lat_mask).astype(np.float32)
     return torch.as_tensor(mask)
 
-def plot_dual_trajectory(
-    timestamps: list[str],
-    var: str,
-    mean_rollout: list[float] | None = None,
-    planned_guidance: list[float] | None = None,
-    ground_truth: list[float] | None = None,
-    y_trajectory: list[float] | None = None,
-    ensemble_rollout: list[list[float]] | None = None,
-    ymin_left: float | None = None,
-    ymax_left: float | None = None,
-    right_axis: bool = True,
-    dpi: int = 100,
-    figsize: tuple = (12, 5)
-):
-    mr = [float(v) for v in mean_rollout] if mean_rollout is not None else None
-    pg = [float(v) for v in planned_guidance] if planned_guidance is not None else None
-    gt = [float(v) for v in ground_truth] if ground_truth is not None else None
-    y = (
-        np.asarray([float(v) * 100.0 for v in y_trajectory], dtype=float)
-        if y_trajectory is not None
-        else None
-    )
-
-    N = len(timestamps)
-    x = list(range(N))
-
-    C = {
-        "gt": "#2ca02c",
-        "mean": "#9467bd",
-        "ensemble": "#7f7f7f",
-        "offline": "#ff7f0e",
-        "y": "#9c27b0",
-    }
-
-    fig, ax1 = plt.subplots(figsize=figsize, dpi=dpi)
-
-    if ensemble_rollout is not None:
-        rows = [[float(v) for v in row] for row in ensemble_rollout]
-        M = min(len(row) for row in rows)
-        trimmed = [row[:M] for row in rows]
-        for i in range(M):
-            yi = [trimmed[n][i] for n in range(N)]
-            ax1.plot(x, yi, "-", color=C["ensemble"], linewidth=0.6, alpha=0.35, zorder=1)
-        lower = [min(row) for row in trimmed]
-        upper = [max(row) for row in trimmed]
-        ax1.fill_between(
-            x, lower, upper,
-            color=C["ensemble"], alpha=0.12,
-            label=f"Ensemble (M={M})", zorder=1,
-        )
-
-    if pg is not None:
-        ax1.plot(x, pg, "-", linewidth=1.6, color=C["offline"], alpha=0.9,
-                 label="Planned guidance", zorder=3)
-    if mr is not None:
-        ax1.plot(x, mr, "-", linewidth=1.6, color=C["mean"], alpha=0.9,
-                 label="Mean rollout", zorder=3)
-    if gt is not None:
-        ax1.plot(x, gt, "-", linewidth=1.8, color=C["gt"], alpha=0.95,
-                 label="Ground truth", zorder=4)
-
-    tick_idx = [i for i, ts in enumerate(timestamps) if str(ts).endswith("00:00:00")]
-    if 0 not in tick_idx:
-        tick_idx = [0] + tick_idx
-    if N - 1 not in tick_idx:
-        tick_idx.append(N - 1)
-    ax1.set_xticks(tick_idx)
-    ax1.set_xticklabels(
-        [timestamps[i] for i in tick_idx], rotation=35, ha="right", fontsize=6
-    )
-    ax1.set_xlabel("Timestamp", fontsize=10)
-    ax1.set_ylabel(var, fontsize=10)
-    ax1.grid(True, alpha=0.25, linestyle=":")
-    for spine in ("top",):
-        ax1.spines[spine].set_visible(False)
-    ax1.tick_params(axis="both", labelsize=9)
-
-    cur_ymin, cur_ymax = ax1.get_ylim()
-    left_min = ymin_left if ymin_left is not None else cur_ymin
-    left_max = ymax_left if ymax_left is not None else cur_ymax
-    if left_min == left_max:
-        left_min -= 1
-        left_max += 1
-    ax1.set_ylim(left_min, left_max)
-
-    if right_axis and y is not None:
-        ax2 = ax1.twinx()
-        ax2.plot(x, y, "-", linewidth=1.4, color=C["y"], alpha=0.4,
-                 label="Percentage change", zorder=2)
-        ax2.axhline(0, color="gray", linewidth=0.5)
-        ax2.set_ylabel("Percentage change (%)", fontsize=10)
-        ax2.spines["top"].set_visible(False)
-        ax2.tick_params(axis="both", labelsize=9)
-
-        l0, l1 = left_min, left_max
-        y0, y1 = float(np.nanmin(y)), float(np.nanmax(y))
-        if y0 == y1:
-            y0 -= 1
-            y1 += 1
-
-        def map_left_to_right(v):
-            return y0 + (v - l0) * (y1 - y0) / (l1 - l0)
-
-        ax2.set_ylim(map_left_to_right(l0), map_left_to_right(l1))
-
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(
-            lines1 + lines2, labels1 + labels2,
-            loc="best", frameon=True, framealpha=0.85,
-            edgecolor="none", fontsize=9,
-        )
-    else:
-        ax1.legend(
-            loc="best", frameon=True, framealpha=0.85,
-            edgecolor="none", fontsize=9,
-        )
-
-    fig.suptitle(f"{var} {N}-day trajectory", fontsize=13, fontweight="bold")
-    return fig
 
 
 def plot_trajectories_over_n(
@@ -459,122 +343,6 @@ def _place_axes_title(fig, ax, *, title=None, subtitle=None,
     else:
         fig.text(cx, top + dy_sub, subtitle, ha="center", va="bottom",
                  fontsize=subtitle_fontsize, color="#555")
-
-
-def plot_variable_change_parallel(
-    aggregated_per_n: list[dict],
-    top_k: int | None = 20,
-    bottom_k: int | None = None,
-    rank_by: str = "max",
-    figsize: tuple[float, float] = (12, 5),
-    dpi: int = 100,
-    title: str | None = None,
-    subtitle: str | None = None,
-    cmap: str = "viridis",
-    jitter: float = 0.0,
-    ylim: tuple[float, float] | None = (0, 1.05),
-    ylabel: str = "min-max score",
-):
-    """Parallel-coordinates view of per-variable-level min-max scores across N.
-
-    Each key (var-level) is a line across rollout steps n=1..N; markers at
-    each N show the ensemble mean, with vertical error bars (std or sem
-    depending on what was aggregated). Top-k ranks keys by the chosen
-    statistic across N ('max' or 'mean').
-    """
-    N = len(aggregated_per_n)
-    if N == 0:
-        raise ValueError("aggregated_per_n is empty")
-
-    keys = list(aggregated_per_n[0]["keys"])
-    K = len(keys)
-    means = np.full((N, K), np.nan)
-    errs = np.full((N, K), np.nan)
-    for n, agg in enumerate(aggregated_per_n):
-        agg_keys = list(agg["keys"])
-        idx = {k: j for j, k in enumerate(agg_keys)}
-        for j, k in enumerate(keys):
-            if k in idx:
-                means[n, j] = agg["mean"][idx[k]]
-                errs[n, j] = agg["err"][idx[k]]
-
-    if rank_by == "max":
-        score = np.nanmax(means, axis=0)
-    elif rank_by == "mean":
-        score = np.nanmean(means, axis=0)
-    else:
-        raise ValueError(f"rank_by must be 'max' or 'mean', got {rank_by!r}")
-
-    order = np.argsort(-score)
-    sel = []
-    if top_k is not None:
-        sel.extend(order[:top_k].tolist())
-    else:
-        sel.extend(order.tolist())
-    if bottom_k is not None:
-        for j in order[::-1][:bottom_k].tolist():
-            if j not in sel:
-                sel.append(j)
-    order = np.array(sel, dtype=int)
-
-    sel_keys = [keys[j] for j in order]
-    sel_means = means[:, order]
-    sel_errs = errs[:, order]
-
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-    x = np.arange(1, N + 1)
-    cmap_ = plt.get_cmap(cmap)
-    K_sel = len(sel_keys)
-    colors = [cmap_(i / max(K_sel - 1, 1)) for i in range(K_sel)]
-
-    for j, key in enumerate(sel_keys):
-        x_j = x + (j - K_sel / 2) * jitter / max(K_sel, 1) if jitter else x
-        ax.errorbar(
-            x_j,
-            sel_means[:, j],
-            yerr=sel_errs[:, j],
-            fmt="-o",
-            markersize=4,
-            linewidth=1.3,
-            capsize=2.5,
-            capthick=0.8,
-            elinewidth=0.8,
-            color=colors[j],
-            alpha=0.85,
-            label=key,
-        )
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"N={n}" for n in x], fontsize=9)
-    ax.set_xlim(0.5, N + 0.5)
-    if ylim is not None:
-        ax.set_ylim(*ylim)
-    ax.set_ylabel(ylabel, fontsize=10)
-    ax.grid(True, axis="y", alpha=0.25, linestyle=":")
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    ax.tick_params(axis="both", labelsize=9)
-
-    ncol = 1 if K_sel <= 20 else 2
-    ax.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.01, 1.0),
-        frameon=False,
-        fontsize=8,
-        ncol=ncol,
-        title=(
-            f"top {top_k or '∞'} + bottom {bottom_k or 0} by {rank_by}"
-            if bottom_k
-            else f"top {K_sel} by {rank_by}"
-        ),
-        title_fontsize=9,
-    )
-
-    right = 0.78 if ncol == 1 else 0.70
-    # fig.tight_layout()
-    _place_axes_title(fig, ax, title=title, subtitle=subtitle)
-    return fig, ax
 
 
 def plot_trajectory(

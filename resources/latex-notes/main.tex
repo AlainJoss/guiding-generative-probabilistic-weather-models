@@ -314,18 +314,21 @@ In the previous section we took the guidance term $y_n$ at time $n$ as a given.
 We now want to answer the question of how to specify a trajectory $\{y_n\}_{n=1}^N$.
 
 \subsection{M-Rollout trajectory}
-One feature we were interested in is that the sampled weather states are phisically realistic although extreme.
+A key feature we were interested in is that the both the single sampled weather states and the weather trajectory are phisically plausible although extreme.
 
-A simple heuristic to define a guidance trajectory is to rollout $M$ unguided models for $N$ steps, and capture the distribution of $m(\hat{x}_n^m)$ over time, and define an extremified trajectory over a trajectory that can be visualized as in \ref{distributions_over_time}.
+A simple heuristic to produce an unguided rollout ensemble with $M$ models over $N$ steps, and capture the distribution of $m(\hat{x}_n^m)$ over time. We can then define a target trajectory of scalar guidance terms,
+and steer the $M$ models towards it in a guided rollout. 
 
-\label{distributions_over_time}
-\includegraphics{../figures/distributions_over_time.png}
+Out of the box we can define 3 guidance modes, where we respectively guide towards:
+\begin{itemize}[noitemsep]
+    \item a percentage change from the mean
+    \item lower bound
+    \item upper bound
+\end{itemize}
+of the unguided rollout.
 
-This way the velocity of the flow would be more likely aligned with the gradient of the loss, compared to if we didn't considered the natural evolution of weather according to our models.
-
-\subsection{Arbitrary trajectories}
-We could theoretically define arbitrary trajectories.
-What is immediately visible is that the realized guidance will probably be much lower, because the model will kind of overwrite the gradient direction.
+To test what guidance is doing in the first place we could also guide towards the ground truth trajectory,
+and assess where and how different the guided trajectories are wrt to the ground truth.
 
 \subsection{Experimental setting}
 \subsection{Summary of hyperparameters}
@@ -349,6 +352,20 @@ In addition, we want to track the development of other variables. This can inclu
 
 A plausible method of evaluation is to guide sampling towards the ground truth and evaluate whether it improves the accuracy of other variables (not the guided one).
 This might gives an idea whether the produced states are simply some adversarial noise, or the gradient direction is qualitatively good.
+
+
+
+\clearpage
+\section{Results}
+\subsection{Mask driven guidance}
+\begin{itemize}
+    \item The difference across
+\end{itemize}
+
+
+
+
+
 
 \clearpage
 \section{Old notes - Generating weather trajectories}

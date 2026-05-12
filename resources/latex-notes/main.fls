@@ -1,8 +1,8 @@
-PWD /Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/reporting/latex-notes
+PWD /Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/resources/latex-notes
 INPUT /usr/local/texlive/2023/texmf.cnf
 INPUT /usr/local/texlive/2023/texmf-dist/web2c/texmf.cnf
 INPUT /usr/local/texlive/2023/texmf-var/web2c/pdftex/pdflatex.fmt
-INPUT /Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/reporting/latex-notes/main.tex
+INPUT /Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/resources/latex-notes/main.tex
 OUTPUT main.log
 INPUT /usr/local/texlive/2023/texmf-dist/tex/latex/base/article.cls
 INPUT /usr/local/texlive/2023/texmf-dist/tex/latex/base/article.cls
@@ -1036,11 +1036,6 @@ INPUT /usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc
 INPUT /usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-mathsy.enc
 INPUT /usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-rm.enc
 INPUT /usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc
-INPUT ../figures/distributions_over_time.png
-INPUT ../figures/distributions_over_time.png
-INPUT ../figures/distributions_over_time.png
-INPUT ../figures/distributions_over_time.png
-INPUT ../figures/distributions_over_time.png
 INPUT /usr/local/texlive/2023/texmf-dist/fonts/tfm/public/lm/ec-lmr10.tfm
 INPUT /usr/local/texlive/2023/texmf-dist/fonts/tfm/public/lm/rm-lmr10.tfm
 INPUT /usr/local/texlive/2023/texmf-dist/fonts/tfm/public/lm/lmmi10.tfm

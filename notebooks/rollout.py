@@ -65,8 +65,9 @@ def _():
 def _():
     from src.ui.interaction import (
         visualize_map, get_mask_corners_from_widget, 
-        get_mask_from_corners, plot_trajectory, plot_dual_trajectory
+        get_mask_from_corners, plot_trajectory
     )
+    from src.ui.plot_dual_trajectory import plot_dual_trajectory
 
     return (
         get_mask_corners_from_widget,
@@ -112,7 +113,7 @@ def _(STRIDE, ds, mo):
     return TIMESTAMPS, get_day, get_month, hour_slider, set_day, set_month
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(N_slider, STRIDE, TIMESTAMPS, get_month, mo, set_month):
     _max_valid_idx = len(TIMESTAMPS) - 1 - STRIDE * N_slider.value
     _valid_months = sorted(
@@ -133,7 +134,7 @@ def _(N_slider, STRIDE, TIMESTAMPS, get_month, mo, set_month):
     return (month_slider,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(N_slider, STRIDE, TIMESTAMPS, get_day, mo, month_slider, set_day):
     import calendar
 
@@ -336,7 +337,7 @@ def _(
 @app.cell
 def _(ground_truth, plot_dual_trajectory, timestamps, var):
     rollout_dist_plot = plot_dual_trajectory(
-        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(12, 2)
+        timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(12.4, 4), dpi=200
     )
     return (rollout_dist_plot,)
 
