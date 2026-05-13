@@ -25,9 +25,9 @@ def _():
 
 @app.cell
 def _():
-    from src.paths import ROLLOUTS, CONFIGS
+    from src.paths import ROLLOUTS, RUN_CONFIGS
 
-    return (CONFIGS,)
+    return
 
 
 @app.cell
@@ -42,7 +42,7 @@ def _():
 
 @app.cell
 def _():
-    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
 
@@ -302,7 +302,7 @@ def _(get_corners, set_corners, slice, visualize_map):
 def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
     mask_corners = get_mask_corners_from_widget(map_widget)
     mask = get_mask_from_corners(*mask_corners)
-    return mask, mask_corners
+    return (mask,)
 
 
 @app.cell(hide_code=True)
@@ -409,33 +409,15 @@ def _(mo):
 
 
 @app.cell
-def _(
-    M,
-    N,
-    level,
-    level_idx,
-    mask_corners,
-    partition,
-    timestamp,
-    timestamp_idx,
-    var,
-    var_idx,
-):
+def _(M, N, level_idx, partition, timestamp, var_idx):
     config = {
         "guidance_flag": False,
         "M": M,
         "N": N,
         "timestamp": str(timestamp),
-        "timestamp_idx": timestamp_idx,
-        "level": level,
         "level_idx": level_idx,
         "partition": partition,
-        "var": var,
         "var_idx": var_idx,
-        "mask_corners": mask_corners,
-        "init_mask_term": None,
-        "y": None,
-        "lambda_": None,
     }
     return (config,)
 

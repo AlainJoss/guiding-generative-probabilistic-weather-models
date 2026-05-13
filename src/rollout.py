@@ -12,46 +12,37 @@ from src.utils import (
     get_dataset,
     get_x_cond,
     make_hash,
-    list_tens_to_floats,
+    list_floats_to_tensors,
+    update_experiment_params,
+    ensure_rollout_dir
 )
-from src.funcs import get_mask_tensordict
-from src.ui.interaction import get_mask_from_corners
+from src.config import GUIDANCE_PARAMS
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
+from tensordict.tensordict import TensorDict
 
 
 def rollout(
-        guidance_flag: bool,  # either guiding or not the sampling
-        rollout_dir: Path, 
-        flow_model: GuidedFlow, 
-        timestamp: str,
-        mask_corners: list[float], 
-        init_mask_term: float = None,  # same as ground truth, for visualization purposes
-        y: list[torch.Tensor] = None, 
-        lambda_: list[torch.Tensor] = None,
-        N: int = 1,
-        partition: str = None, 
-        level_idx: int = None, 
-        var_idx: int = None, 
-        M: int = 1,
-        test: bool = False,
-        config: dict = None
-    ):
+    config: dict,
+    flow_model: GuidedFlow | None = None,
+    y: list[TensorDict] | None = None,
+    test: bool = False,
+):
+    rollout_dir = ensure_rollout_dir(config.rollout_id)
+    if config.guidance_flag:
+        update_experiment_params(rollout_dir, config, GUIDANCE_PARAMS)
 
-    ds = get_dataset(multistep=N)
-    x_cond, timestamp_idx = get_x_cond(ds, timestamp)
+    ds = get_dataset(multistep=config.N)
+    x_cond, _ = get_x_cond(ds, config.timestamp)
 
     device = flow_model.device
     x_cond = batchify_and_move(x_cond, device)
     lead_time_hours = int(x_cond["lead_time_hours"].cpu().flatten()[0].item())
 
-    if guidance_flag:
-        y = [torch.tensor(y[n]).to(device) for n in range(0, N + 1)]  # 0 because I need all ys
-        lambda_ = [torch.tensor(lambda_[t]).to(device) for t in range(25)]
-        mask = get_mask_from_corners(*mask_corners)
-        mask = mask.to(device)
-        mask = get_mask_tensordict(x_cond["state"][0], partition, var_idx, level_idx, mask)
-    if not guidance_flag or test:
+    if config.guidance_flag:
+        lambda_ = list_floats_to_tensors(config.lambda_, device)
+
+    if not config.guidance_flag or test:
         ground_truth = torch.cat(
             [x_cond["state"].unsqueeze(1), x_cond["future_states"]],
             dim=1,
@@ -64,25 +55,19 @@ def rollout(
             lead_time_hours=lead_time_hours,
             include_init=True,
         )
-        mask = None
+        y = None
 
-    M_mask_terms = {}
     member_datasets = []
-    for m in range(M):
+    for m in range(config.M):
         logger.info(f"sampling member={m}")
         if not test:
-            sample_multistep, mask_terms = flow_model.sample_rollout(
-                N=N,
-                member=m, 
+            sample_multistep = flow_model.sample_rollout(
+                N=config.N,
+                m=m, 
                 x_cond=x_cond,
                 y=y,
-                mask=mask,
                 lambda_=lambda_
             )
-            M_mask_terms[f"{m}"] = [init_mask_term] + [
-                list_tens_to_floats(inner) if isinstance(inner[0], torch.Tensor) else inner
-                for inner in mask_terms
-            ]
         else: 
             sample_multistep = x_cond["future_states"]
 
@@ -97,11 +82,11 @@ def rollout(
 
     xr_pred = xr.concat(member_datasets, dim="member")
 
-    if guidance_flag:
+    if config.guidance_flag:
         params = {
-            "guidance_mode": config["guidance_mode"],
-            "alpha": config["alpha"],
-            "w": config["w"],
+            "guidance_mode": config.guidance_mode,
+            "alpha": config.alpha,
+            "w": config.w,
         }
 
         guided_id = make_hash(params)
@@ -110,7 +95,6 @@ def rollout(
 
         xr_pred.to_netcdf(guided_path / "guided.nc")
         save_to_json(config, guided_path, "config")
-        save_to_json(M_mask_terms, guided_path, "mask_terms")
     else:
         save_to_json(config, rollout_dir, "config")
         xr_pred.to_netcdf(rollout_dir / "unguided.nc")

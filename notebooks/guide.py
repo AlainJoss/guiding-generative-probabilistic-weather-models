@@ -6,14 +6,8 @@ app = marimo.App(width="full", css_file="")
 
 @app.cell
 def _():
-    from pathlib import Path 
-    from datetime import datetime, timedelta
-
     import marimo as mo
-    import numpy as np
     import torch
-
-    import matplotlib.pyplot as plt
 
     return mo, torch
 
@@ -21,28 +15,25 @@ def _():
 @app.cell
 def _():
     from src.ui.interaction import (
-        visualize_map, get_mask_corners_from_widget, 
+        visualize_map, 
         get_mask_from_corners,
-        visualize_mask_terms_over_N
     )
     from src.ui.plot_trajectory import plot_trajectory
     from src.ui.plot_dual_trajectory import plot_dual_trajectory
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
-    from src.rollout import rollout
     from src.utils import (
         read_nc,
-        get_dataset, get_model, batchify_and_move,
-        get_slice, save_to_json, read_json,
-        xr_to_torch, list_tens_to_floats, get_now_timestamp,
-        get_x_cond
+        get_dataset, get_model,
+        save_to_json, read_json,
+        get_x_cond,
+        get_device,
+        list_tensors_to_floats
     )
-    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-    from src.funcs import get_inverse_guidance_trajectory
-    from src.paths import ROLLOUTS, CONFIGS
+    from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT, GUIDANCE_MODES
     from src.utils import get_rollout_dir, get_experiment_ids
 
     return (
-        CONFIGS,
+        GUIDANCE_MODES,
         LEVELS_DICT,
         N_schedule,
         PARTITIONS,
@@ -51,13 +42,14 @@ def _():
         avg_over_mask,
         compute_mean_rollout,
         get_dataset,
+        get_device,
         get_experiment_ids,
         get_guidance_trajectory,
         get_mask_from_corners,
         get_model,
         get_rollout_dir,
         get_x_cond,
-        list_tens_to_floats,
+        list_tensors_to_floats,
         plot_dual_trajectory,
         plot_trajectory,
         read_json,
@@ -68,21 +60,11 @@ def _():
 
 
 @app.cell
-def _(device, get_dataset, get_model):
+def _(get_dataset, get_device, get_model):
+    device = get_device()
     ds = get_dataset()
     model = get_model(device)
     return (ds,)
-
-
-@app.cell
-def _():
-    device = "mps"
-
-    MAX_PERC_DELTA = 100/100
-
-    VMIN = None
-    VMAX = None
-    return (device,)
 
 
 @app.cell
@@ -239,10 +221,9 @@ def _(alpha_slider):
 
 
 @app.cell
-def _(mo):
-    GUIDANCE_MODES = ["manual_trajectory", "ground_truth", "lower_boundary", "upper_boundary"]
+def _(GUIDANCE_MODES, mo):
     guidance_mode_dropdown = mo.ui.dropdown(GUIDANCE_MODES, value=GUIDANCE_MODES[0], label="guidance mode: ")
-    return GUIDANCE_MODES, guidance_mode_dropdown
+    return (guidance_mode_dropdown,)
 
 
 @app.cell
@@ -282,7 +263,7 @@ def _(
     reference,
     shape_slider,
 ):
-    planned_guidance = reference  # overwritten if manual_trajectory
+    planned_guidance = reference  # overwritten if planned_trajectory
     y_trajectory = None
     if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
         y_trajectory = N_schedule(
@@ -720,7 +701,7 @@ def _(
     lambda_shape_slider,
     level,
     level_idx,
-    list_tens_to_floats,
+    list_tensors_to_floats,
     lower_boundary,
     mask_corners,
     mean_unguided_rollout,
@@ -752,14 +733,14 @@ def _(
         "var_idx": int(var_idx),
         "timestamps": [str(ts) for ts in timestamps],
         "init_mask_term": float(mean_unguided_rollout[0]),
-        "ground_truth": list_tens_to_floats(ground_truth),
-        "unguided_rollout": [list_tens_to_floats(list_) for list_ in unguided_rollout],
-        "mean_rollout": list_tens_to_floats(mean_unguided_rollout),
-        "y": list_tens_to_floats(planned_guidance),
-        "lower_boundary": list_tens_to_floats(lower_boundary), 
-        "upper_boundary": list_tens_to_floats(upper_boundary),
+        "ground_truth": list_tensors_to_floats(ground_truth),
+        "unguided_rollout": [list_tensors_to_floats(list_) for list_ in unguided_rollout],
+        "mean_rollout": list_tensors_to_floats(mean_unguided_rollout),
+        "y": list_tensors_to_floats(planned_guidance),
+        "lower_boundary": list_tensors_to_floats(lower_boundary), 
+        "upper_boundary": list_tensors_to_floats(upper_boundary),
         "y_perc": alpha,
-        "lambda_": list_tens_to_floats(lambda_),
+        "lambda_": list_tensors_to_floats(lambda_),
         "alpha": lambda_shape_slider.value,
         "w": w_slider.value,
         "reference": reference_rollout.value

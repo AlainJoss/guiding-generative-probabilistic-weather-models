@@ -48,7 +48,7 @@ def _():
         ensure_rollout_dir,
         get_dataset, get_model, batchify_and_move,
         read_state, get_slice, save_to_json, read_json,
-        read_states, xr_to_torch, list_tens_to_floats
+        read_states, xr_to_torch, list_tensors_to_floats
     )
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from src.visualization import visualize_mask_terms_over_N

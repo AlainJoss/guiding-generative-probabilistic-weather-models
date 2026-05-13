@@ -3,7 +3,6 @@ import torch
 
 from hydra.utils import instantiate
 from tensordict.tensordict import TensorDict
-from pathlib import Path
 from tqdm.auto import tqdm
 
 from geoarches.backbones.dit import TimestepEmbedder
@@ -12,6 +11,7 @@ from geoarches.lightning_modules.base_module import AvgModule, load_module
 from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
 from geoarches.paths import STATS_PATH
+
 
 class GuidedFlow(BaseLightningModule):
     """
@@ -95,7 +95,6 @@ class GuidedFlow(BaseLightningModule):
         )
 
     def denormalize(self, batch):
-        # TODO: have to change this to work with "no-key" state 
         means = self.data_mean #.to(self.device)
         stds = self.data_std #.to(self.device)
         # TODO: not sure why the presence of surface should enable this 
@@ -106,31 +105,26 @@ class GuidedFlow(BaseLightningModule):
         out = {k: (v * stds + means if "state" in k else v) for k, v in batch.items()}
         return out
 
-    # NOTE: may be useful later on
     def sample_rollout(
         self, 
         N, 
-        member: int,
+        m: int,
         x_cond,  # TODO: need a better name
         y: list[torch.Tensor] | None = None, # shape: 
-        mask: torch.Tensor | None = None,  # shape: 
         lambda_: list[torch.Tensor] | None = None
     ):
-        realized_trajectory = []
-        mask_terms = []
+        guided_trajectory = []
         for n in range(0, N):
             y_n = None if y is None else y[n+1]
-            x_hat, mask_term = self.sample(
+            x_hat = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
-                mask=mask,
                 lambda_=lambda_,
-                seed=member + 1000 * n  # + batch_nb * 10**6
+                seed=m + 1000 * n  # + batch_nb * 10**6
             )
-            realized_trajectory.append(x_hat.cpu())
+            guided_trajectory.append(x_hat.cpu())
             if torch.cuda.is_available() and self.device.type == "cuda":
                 torch.cuda.empty_cache()
-            mask_terms.append(mask_term)
             
             # after the last iteration no need to set this again
             if n < N-1:
@@ -143,16 +137,14 @@ class GuidedFlow(BaseLightningModule):
                     "lead_time_hours": x_cond["lead_time_hours"],
                 }
 
-        realized_trajectory = torch.stack(realized_trajectory, dim=1)
-        return realized_trajectory, mask_terms
+        return torch.stack(guided_trajectory, dim=1)
     
     def get_det_pred(self, x_cond):
         return self.det_model(x_cond)
 
     def sample(self,
-        x_cond,  # TODO: need a better name
-        y_n: list[torch.Tensor] | None = None, # shape: 
-        mask: torch.Tensor | None = None,  # shape: 
+        x_cond: dict,  # timestamp, TensorDict for "state", "prev", etc.
+        y_n: TensorDict | None = None, # shape: 
         lambda_: list[torch.Tensor] | None = None,
         seed: int | None = None
     ):  
@@ -161,27 +153,21 @@ class GuidedFlow(BaseLightningModule):
             det_pred = self.det_model(x_cond)
             x_cond["pred_state"] = det_pred
             
-            # TODO: should place where-else once I have the correct rollout func
             self.residual_to_pangu_scale = self.residual_to_pangu_scale.to(self.device)
             self.data_mean = self.data_mean.to(self.device)
             self.data_std = self.data_std.to(self.device)
         
-        # TODO: might remove this (it's redundant for now)
-        self.mu = x_cond["pred_state"]
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z, mask_term = self.flow_step(x_cond, self.mu, y_n, mask, lambda_, seed)
+        z = self.flow_step(x_cond, det_pred, y_n, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
-        x_hat = self.mu + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
-        return x_hat, mask_term
+        x_hat = det_pred + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
+        return x_hat
     
-    # TODO: do not use batch, separate object for clarity 
-    #       also the name is utter bs
     def flow_step(self,
         x_cond, 
-        mu,
+        det_pred,
         y_n: list[torch.Tensor] | None = None, # shape: 
-        mask: torch.Tensor | None = None,  # shape: 
         lambda_: list[torch.Tensor] | None = None,
         seed: int | None = None
     ):
@@ -198,10 +184,7 @@ class GuidedFlow(BaseLightningModule):
         z_t = z * self.scale_input_noise
     
         ##### sample #####
-        mask_terms = []
-        timesteps = torch.linspace(
-            self.num_train_timesteps, 1, self.T
-        ).to(self.device)
+        timesteps = torch.linspace(self.num_train_timesteps, 1, self.T).to(self.device)
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
 
@@ -224,24 +207,23 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
 
-            mask_term = 0.0
             if y_n is not None:
                 with torch.enable_grad():
-                    grad_l, mask_term = self.grad_loss(mask, mu, y_n, z_t)
+                    sigma_z_t = tensordict_apply(torch.mul, z_t, self.residual_to_pangu_scale)
+                    x_hat_norm_t = det_pred + sigma_z_t
+                    x_hat_t = self.denormalize(x_hat_norm_t)
+                    grad_l = self.grad_loss(x_hat_t, y_n, z_t)
 
                 u_t = tensordict_apply(
                     lambda u, g: u - (lambda_[i]) * g,
                     u_t,
                     grad_l,
                 )
-            mask_terms.append(mask_term)
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
         
-        return z_t, mask_terms
-
-        ##### compute final output #####
+        return z_t
     
     def embedd_time(self, batch, t):
         times = pd.to_datetime(
@@ -253,66 +235,55 @@ class GuidedFlow(BaseLightningModule):
         hour = torch.tensor(times.hour).to(self.device)
         hour_emb = self.hour_embedder(hour)
         timestep_emb = self.timestep_embedder(torch.tensor([t]).to(self.device))
-        # print(f"embedding time for gen model - month:{int(month)}, hour:{int(hour)}")
+        print(f"embedding time for gen model - month:{int(month)}, hour:{int(hour)}")
 
         time_embedding = month_emb + hour_emb + timestep_emb
         return time_embedding
     
     def get_velocity_input_state(self, z, batch):
-        input_state = z  # only init of concat (we need z later as is)
+        # only init of concat (we need z later as is)
         assert "pred_state" in batch
         pred_state = batch["pred_state"]
         prev_state = batch["prev_state"]
-        input_state = tensordict_cat([prev_state, input_state], dim=1)
-        input_state = tensordict_cat([pred_state, input_state], dim=1)
-        return input_state
+        z = tensordict_cat([prev_state, z], dim=1)
+        z = tensordict_cat([pred_state, z], dim=1)
+        return z
 
-    def velocity(self, batch, time_embedding, input_state, z, s_t):
-
+    def velocity(self, batch, time_embedding, input_state, z_t, s_t):
         ##### compute residual #####
 
-        # TODO: can I put this into a torch pipeline object?
-        #       may need to compute the grad through this object
         # here we embedd prev_state (input_state[0]), current_state (batch["state"]), noisy_state (input_state[1])
         x = self.embedder.encode(batch["state"], input_state)
         x = self.backbone(x, time_embedding)
         r_t = self.embedder.decode(x)  # we get tdict
 
         ##### compute velocity from residual
-        #     u_t = r_t - eps_t := (r_t - z_t) / s_t
-        u_t = (r_t - z).apply(lambda x: x / s_t)
+        # u_t = r_t - eps_t := (r_t - z_t) / s_t
+        u_t = (r_t - z_t).apply(lambda x: x / s_t)
         return u_t
     
-    def grad_loss(self, mask, mu, y_t, z_t):
-        sigma_z = tensordict_apply(torch.mul, z_t, self.residual_to_pangu_scale)
-        # x_hat_norm = tensordict_apply(torch.add, mu, sigma_z)
-        x_hat_norm = mu + sigma_z
-        x_hat = self.denormalize(x_hat_norm)
-        x_hat_masked = tensordict_apply(torch.mul, mask, x_hat) 
+    def grad_loss(self, x_hat_t, y_n, z_t):
+        # in this block the shape is always "state" and type tensor_dict
+        diff = x_hat_t - y_n
 
-        mask_term = (
-            sum(v.sum() for v in x_hat_masked.values())
-            / sum(v.sum() for v in mask.values())
-        )
+        # l2norm
+        loss_ = torch.sum(diff ** 2)
 
-        loss_ = torch.square(y_t - mask_term)
-
+        # grad for each tensor in tensor dict
         keys = list(z_t.keys())
         tensors = [z_t[k] for k in keys]
-
         grads = torch.autograd.grad(
             loss_,
             tensors,
             retain_graph=False,
             create_graph=False,
         )
-
         grad_l = z_t.__class__(
             {k: g for k, g in zip(keys, grads)},
             batch_size=z_t.batch_size,
             device=z_t.device,
         )
-        return grad_l, mask_term.detach()
+        return grad_l
     
     def euler_step(self, z_t, u_t, dt):
         # z_new = z_t + h * u_t, where h = dt

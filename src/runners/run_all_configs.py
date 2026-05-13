@@ -1,22 +1,21 @@
 import argparse
-from copy import deepcopy
+import logging
+from copy import deepcopy 
 from itertools import product
 from typing import Any
-import logging
 
-from src.paths import CONFIGS
-from src.runners.run_from_config import rollout_from_config
+from src.paths import RUN_CONFIGS
 from src.funcs import T_schedule
-from src.constants import GUIDANCE_MODES
 from src.utils import (
     get_model,
     ensure_rollout_dir,
     get_device,
-    update_experiment_params,
     read_json,
-    list_tens_to_floats,
+    list_tensors_to_floats,
     setup_logging
 )
+from src.rollout import rollout 
+from src.config import UnguidedConfig, GUIDANCE_MODES
 
 
 ALPHAS = [2.0]
@@ -35,7 +34,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_configs(config_type: str) -> list[tuple[str, dict[str, Any]]]:
-    config_dir = CONFIGS / config_type
+    config_dir = RUN_CONFIGS / config_type
     config_paths = sorted(config_dir.glob("*.json"))
 
     configs = []
@@ -47,46 +46,30 @@ def load_configs(config_type: str) -> list[tuple[str, dict[str, Any]]]:
     return configs
 
 
-def apply_overrides(
-    config: dict[str, Any],
-    guidance_mode: str | None = None,
-    alpha: float | None = None,
-    w: float | None = None,
-) -> dict[str, Any]:
-    config = deepcopy(config)
-
-    if guidance_mode is not None:
-        config["guidance_mode"] = guidance_mode
-        if guidance_mode == "ground_truth":
-            config["y"] = config["ground_truth"]
-        elif guidance_mode == "lower_boundary":
-            config["y"] = config["lower_boundary"]
-        elif guidance_mode == "upper_boundary":
-            config["y"] = config["upper_boundary"]
-        elif guidance_mode == "manual_trajectory":
-            pass 
-        else:
-            raise ValueError(f"guidance mode {guidance_mode} not admissible")
-
-    if alpha is not None:
-        config["alpha"] = alpha
-
-    if w is not None:
-        config["w"] = w
-
-    if alpha is not None or w is not None:
-        config["lambda_"] = list_tens_to_floats(
-            T_schedule(config["alpha"], config["w"])
-        )
-
-    return config
+def apply_guidance_overrides(
+    config: UnguidedConfig,
+    guidance_mode: str,
+    alpha: float,
+    w: float,
+) -> UnguidedConfig:
+    config_ = deepcopy(config)
+    config_.guidance_mode = guidance_mode
+    config_.alpha = alpha
+    config_.w = w
+    config_.lambda_ = list_tensors_to_floats(T_schedule(alpha, w))
+    return config_
 
 
 def main() -> None:
     args = parse_args()
-    device = get_device()    
+
     print("Loading model")
-    flow_model = get_model(device)
+    if args.test:
+        flow_model = None 
+    else:
+        device = get_device()    
+        flow_model = get_model(device)
+
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Starting experiment run")
@@ -102,7 +85,7 @@ def main() -> None:
 
         if args.rollout_type == "guided":
             for guidance_mode, alpha, w in product(GUIDANCE_MODES, ALPHAS, WS):
-                config_ = apply_overrides(
+                config_ = apply_guidance_overrides(
                     config,
                     guidance_mode=guidance_mode,
                     alpha=alpha,
@@ -116,12 +99,13 @@ def main() -> None:
                 )
 
                 try:
-                    update_experiment_params(rollout_dir, config_)
+                    # TODO: build y here
+                    y = ...
 
-                    rollout_dir = rollout_from_config(
-                        flow_model,
-                        rollout_dir,
+                    rollout_dir = rollout(
                         config_,
+                        flow_model,
+                        y,
                         test=args.test,
                     )
 
@@ -139,13 +123,13 @@ def main() -> None:
                     raise
 
         else:
+        
             logger.info(f"Running unguided rollout | config_id={config_id}")
-
             try:
-                rollout_dir = rollout_from_config(
-                    flow_model,
-                    rollout_dir,
+                rollout_dir = rollout(
                     config,
+                    flow_model,
+                    None,
                     test=args.test,
                 )
 

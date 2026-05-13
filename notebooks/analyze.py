@@ -18,6 +18,17 @@ def _():
 
 @app.cell
 def _():
+    from src.paths import ROLLOUTS
+    from src.utils import (
+        read_nc,
+        read_json,
+        get_dataset,
+        get_slice,
+        get_rollout_dir,
+        get_experiment_ids,
+        make_hash
+    )
+    from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from src.ui.interaction import (
         visualize_map,
         get_mask_from_corners,
@@ -28,22 +39,6 @@ def _():
         plot_states_over_n,
     )
     from src.ui.plot_variable_change_parallel import plot_variable_change_parallel
-
-    from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-
-    from src.funcs import get_guidance
-
-    from src.utils import (
-        read_nc,
-        read_json,
-        get_dataset,
-        get_slice,
-        get_rollout_dir,
-        get_experiment_ids,
-        make_hash
-    )
-
-    from src.paths import ROLLOUTS
 
     return (
         LEVELS_DICT,

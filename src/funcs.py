@@ -2,7 +2,6 @@ import math
 
 import torch
 import numpy as np
-import xarray as xr
 
 from tensordict.tensordict import TensorDict
 from geoarches.utils.tensordict_utils import tensordict_apply
@@ -19,36 +18,13 @@ def get_mask_tensordict(example_tdict: TensorDict, partition: str, var_idx: int,
     return mask
 
 
-def get_guidance(y_n: float, mask_avg: float):
-    return mask_avg + y_n * np.abs(mask_avg)
-
-
 def get_guidance_trajectory(y: list[float], mean_rollout: list[float]):
+    def get_guidance(y_n: float, mask_avg: float):
+        return mask_avg + y_n * np.abs(mask_avg)
+    
     return [get_guidance(y[idx], mean_rollout[idx])
         for idx, _ in enumerate(mean_rollout)
     ]
-
-
-def get_inverse_guidance(guidance: float, mask_avg: float, eps: float = 1e-12):
-    denom = np.abs(mask_avg)
-    if denom < eps:
-        raise ValueError(
-            "Cannot invert guidance when mask_avg is zero or very close to zero."
-        )
-
-    return (guidance - mask_avg) / denom
-
-
-def get_inverse_guidance_trajectory(
-    planned_guidance: list[float],
-    mean_rollout: list[float],
-    eps: float = 1e-12,
-):
-    return [
-        get_inverse_guidance(planned_guidance[idx], mean_rollout[idx], eps=eps)
-        for idx, _ in enumerate(mean_rollout)
-    ]
-
 
 
 def N_schedule(

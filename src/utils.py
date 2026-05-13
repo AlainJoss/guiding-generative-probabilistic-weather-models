@@ -1,6 +1,5 @@
 import json
 import hashlib
-import os
 import sys
 import logging
 
@@ -15,34 +14,22 @@ import numpy as np
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
-from src.constants import GUIDANCE_PARAM_KEYS
-from src.paths import ERA5, MODELSTORE, ROLLOUTS, CONFIGS, LOGS
-
-
-class _FlushFileHandler(logging.FileHandler):
-    def emit(self, record):
-        super().emit(record)
-        try:
-            os.fsync(self.stream.fileno())
-        except (OSError, ValueError):
-            pass
+from src.paths import ERA5, MODELSTORE, ROLLOUTS, RUN_CONFIGS, LOGS
 
 
 def setup_logging(log_prefix: str = "run") -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
-
     log_file = LOGS / f"{log_prefix}_{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
-
     logging.basicConfig(
+        filename=log_file,
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[
-            _FlushFileHandler(log_file),
+            logging.FileHandler(),
             logging.StreamHandler(sys.stdout),
         ],
         force=True,
     )
-
 
 def make_hash(params):
     s = json.dumps(params, sort_keys=True)
@@ -201,7 +188,7 @@ def get_now_timestamp():
 
 def ensure_new_config_dir_path(sub_dir: str):
     experiment_id = get_now_timestamp()
-    config_dir = Path(CONFIGS, sub_dir, f"{experiment_id}")
+    config_dir = Path(RUN_CONFIGS, sub_dir, f"{experiment_id}")
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
@@ -236,8 +223,12 @@ def get_slice(state, partition, level, var, timestamp):
 def xr_to_torch(slice_: xr.DataArray):
     return torch.tensor(slice_.to_numpy())
 
-def list_tens_to_floats(list_):
+def list_tensors_to_floats(list_):
     return [tensor.item() for tensor in list_]
+
+def list_floats_to_tensors(list_):
+    device = get_device()
+    return [torch.tensor(float_).to(device) for float_ in list_]
 
 def tensor_timestamp_to_string(
     timestamp: torch.Tensor,
@@ -249,19 +240,25 @@ def tensor_timestamp_to_string(
 
 ##### experiments utils
 
-def read_config(config_type: str, config_id: str) -> dict[str, Any]:
-    return read_json(CONFIGS / config_type, config_id)
+from src.config import UnguidedConfig
+
+def get_config(config_type: str, config_id: str) -> dict[str, Any]:
+    path = RUN_CONFIGS / config_type
+    config_dict = read_json(path, config_id)
+    return UnguidedConfig.from_dict(config_dict)
+
 
 def update_experiment_params(
     rollout_dir: Path,
     config: dict[str, Any],
+    params: list["str"]
 ) -> dict[str, list[Any]]:
     try:
         experiment_params = read_json(rollout_dir, "experiment_params")
     except FileNotFoundError:
-        experiment_params = {k: [] for k in GUIDANCE_PARAM_KEYS}
+        experiment_params = {k: [] for k in params}
 
-    for k in GUIDANCE_PARAM_KEYS:
+    for k in params:
         experiment_params.setdefault(k, [])
 
         value = config[k]

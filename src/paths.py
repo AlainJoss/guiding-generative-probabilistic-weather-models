@@ -12,7 +12,7 @@ if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
 print(f"DATA path: {DATA}")
 
 LOGS = DATA / "logs"
-CONFIGS = DATA / "configs"
+RUN_CONFIGS = DATA / "configs"
 MODELSTORE = DATA / "modelstore"
 DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-seed0",
