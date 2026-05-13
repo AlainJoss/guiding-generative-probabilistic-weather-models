@@ -99,13 +99,9 @@ def main() -> None:
                 )
 
                 try:
-                    # TODO: build y here
-                    y = ...
-
                     rollout_dir = rollout(
                         config_,
                         flow_model,
-                        y,
                         test=args.test,
                     )
 

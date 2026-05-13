@@ -7,6 +7,13 @@ from tensordict.tensordict import TensorDict
 from geoarches.utils.tensordict_utils import tensordict_apply
 
 
+def minmax_slice(slice_: torch.Tensor):
+    max_ = slice_.max()
+    min_ = slice_.min()
+    assert max_ != min_
+    return (slice_ -  min_) / (max_ - min_)
+
+
 def avg_over_mask(slice_, mask):
     avg = torch.sum(mask * slice_) / torch.sum(mask)
     return avg

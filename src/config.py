@@ -32,10 +32,11 @@ VARIABLES_DICT = {
 ROLLOUT_TYPES = ["unguided", "guided"]
 
 GUIDANCE_MODES = [
-    "planned_trajectory",
+    "planned_trajectory",  # now entire states with slices +x%
     "ground_truth",
     "lower_boundary",
     "upper_boundary",
+    "sampled_trajectory"
 ]
 
 GUIDANCE_PARAMS = ["guidance_mode", "alpha", "w"]
@@ -43,7 +44,6 @@ GUIDANCE_PARAMS = ["guidance_mode", "alpha", "w"]
 
 @dataclass
 class UnguidedConfig:
-    rollout_id: str
     guidance_flag: bool
     M: int
     N: int
@@ -51,19 +51,20 @@ class UnguidedConfig:
     partition: str
     level_idx: int
     var_idx: int
+    rollout_id: str
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "UnguidedConfig":
         # TODO: make all assertions with value in ...
         return cls(
-            rollout_id=config["rollout_id"],
+            guidance_flag=config["guidance_flag"],
+            M=config["M"],
+            N=config["N"],
             timestamp=config["timestamp"],
             partition=config["partition"],
             level_idx=config["level_idx"],
             var_idx=config["var_idx"],
-            guidance_flag=config["guidance_flag"],
-            N=config["N"],
-            M=config["M"],
+            rollout_id=config["rollout_id"]
         )
     
 @dataclass
@@ -76,20 +77,22 @@ class GuidedConfig:
     guidance_flag: bool
     N: int
     M: int
-    ...
+    rollout_id: str
+    # the others!
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "UnguidedConfig":
         # TODO: make all assertions with value in ...
         return cls(
+            guidance_flag=config["guidance_flag"],
+            M=config["M"],
+            N=config["N"],
             timestamp=config["timestamp"],
             partition=config["partition"],
             level_idx=config["level_idx"],
             var_idx=config["var_idx"],
+            rollout_id=config["rollout_id"],
             lambda_=list_floats_to_tensors(config["lambda_"]),
-            guidance_flag=config["guidance_flag"],
-            N=config["N"],
-            M=config["M"],
         )
     
 # usage: 

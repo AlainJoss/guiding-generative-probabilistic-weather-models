@@ -94,6 +94,11 @@ def get_experiment_ids(type_: str):
 def get_rollout_dir(id_: str):
     return ROLLOUTS / id_
 
+def get_rollout(type_: str, rollout_id: str):
+    """works only for unguided and ground_truth"""
+    rollout_dir = get_rollout_dir(rollout_id)
+    rollout = read_nc(rollout_dir, type_)
+
 def rollout_to_xarray(
     ds,
     sample_multistep,

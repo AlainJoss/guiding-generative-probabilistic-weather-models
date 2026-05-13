@@ -25,4 +25,7 @@ Guidance:
 What we do not do:
 - experiment with multiple variables (and masks correspondingly)
 
-Done:
+## THOUGHTS
+
+- What about realism? What does this tell us about the model's learned weather dynamics in the first place? -> some distributional and magnitudal test?
+- The gradient is not a reliable source of information. We can improve it by sampling multiple ones with different noises at each t. However, local dynamics will anyway not comply with the global real weather dynamics. It's like inpainting what we want. Defining global dynamics is feasible only by providing sampled states, but then what's the use of guidance?

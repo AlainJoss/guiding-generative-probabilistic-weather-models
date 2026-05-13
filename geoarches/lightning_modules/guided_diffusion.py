@@ -107,19 +107,21 @@ class GuidedFlow(BaseLightningModule):
 
     def sample_rollout(
         self, 
-        N, 
+        config,
         m: int,
-        x_cond,  # TODO: need a better name
-        y: list[torch.Tensor] | None = None, # shape: 
-        lambda_: list[torch.Tensor] | None = None
+        x_cond: dict, 
+        y: list[TensorDict] | None = None,
+        masks: list[TensorDict] | None = None
     ):
         guided_trajectory = []
-        for n in range(0, N):
-            y_n = None if y is None else y[n+1]
+        for n in range(0, config.N):
+            y_n = None if y is None else y[n]  # TODO: check the index of the guidance
+            mask_n = None if masks is None else masks[n]
             x_hat = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
-                lambda_=lambda_,
+                mask=mask_n,
+                lambda_=config.lambda_,
                 seed=m + 1000 * n  # + batch_nb * 10**6
             )
             guided_trajectory.append(x_hat.cpu())
@@ -144,7 +146,8 @@ class GuidedFlow(BaseLightningModule):
 
     def sample(self,
         x_cond: dict,  # timestamp, TensorDict for "state", "prev", etc.
-        y_n: TensorDict | None = None, # shape: 
+        y_n: TensorDict | None = None, 
+        mask: TensorDict | None = None, 
         lambda_: list[torch.Tensor] | None = None,
         seed: int | None = None
     ):  
@@ -159,15 +162,16 @@ class GuidedFlow(BaseLightningModule):
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.flow_step(x_cond, det_pred, y_n, lambda_, seed)
+        z = self.flow_step(x_cond, det_pred, y_n, mask, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = det_pred + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
         return x_hat
     
     def flow_step(self,
         x_cond, 
-        det_pred,
-        y_n: list[torch.Tensor] | None = None, # shape: 
+        det_pred: TensorDict,
+        y_n: TensorDict | None = None, 
+        mask: TensorDict | None = None, 
         lambda_: list[torch.Tensor] | None = None,
         seed: int | None = None
     ):
@@ -212,7 +216,7 @@ class GuidedFlow(BaseLightningModule):
                     sigma_z_t = tensordict_apply(torch.mul, z_t, self.residual_to_pangu_scale)
                     x_hat_norm_t = det_pred + sigma_z_t
                     x_hat_t = self.denormalize(x_hat_norm_t)
-                    grad_l = self.grad_loss(x_hat_t, y_n, z_t)
+                    grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
                 u_t = tensordict_apply(
                     lambda u, g: u - (lambda_[i]) * g,
@@ -262,12 +266,13 @@ class GuidedFlow(BaseLightningModule):
         u_t = (r_t - z_t).apply(lambda x: x / s_t)
         return u_t
     
-    def grad_loss(self, x_hat_t, y_n, z_t):
+    def grad_loss(self, x_hat_t, y_n, mask, z_t):
         # in this block the shape is always "state" and type tensor_dict
         diff = x_hat_t - y_n
+        masked_diff = torch.mul(mask, diff)
 
         # l2norm
-        loss_ = torch.sum(diff ** 2)
+        loss_ = torch.sum(masked_diff ** 2)
 
         # grad for each tensor in tensor dict
         keys = list(z_t.keys())

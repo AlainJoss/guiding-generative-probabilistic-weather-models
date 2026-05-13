@@ -1,4 +1,3 @@
-from pathlib import Path
 import logging
 logger = logging.getLogger(__name__)
 
@@ -12,11 +11,11 @@ from src.utils import (
     get_dataset,
     get_x_cond,
     make_hash,
-    list_floats_to_tensors,
     update_experiment_params,
     ensure_rollout_dir
 )
 from src.config import GUIDANCE_PARAMS
+from src.target import get_reference_trajectory, get_target_trajectory, get_mask
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
@@ -25,7 +24,6 @@ from tensordict.tensordict import TensorDict
 def rollout(
     config: dict,
     flow_model: GuidedFlow | None = None,
-    y: list[TensorDict] | None = None,
     test: bool = False,
 ):
     rollout_dir = ensure_rollout_dir(config.rollout_id)
@@ -38,9 +36,6 @@ def rollout(
     device = flow_model.device
     x_cond = batchify_and_move(x_cond, device)
     lead_time_hours = int(x_cond["lead_time_hours"].cpu().flatten()[0].item())
-
-    if config.guidance_flag:
-        lambda_ = list_floats_to_tensors(config.lambda_, device)
 
     if not config.guidance_flag or test:
         ground_truth = torch.cat(
@@ -55,18 +50,22 @@ def rollout(
             lead_time_hours=lead_time_hours,
             include_init=True,
         )
-        y = None
+        target_trajectory = None
 
     member_datasets = []
     for m in range(config.M):
         logger.info(f"sampling member={m}")
         if not test:
+            target_trajectory = get_reference_trajectory(config, m)  
+            target_trajectory = get_target_trajectory(config, target_trajectory)
+            masks = [get_mask(config, y_n) for y_n in target_trajectory]
+            # TODO: save both target_trajectory and masks
             sample_multistep = flow_model.sample_rollout(
-                N=config.N,
-                m=m, 
+                config,
+                m=m,
                 x_cond=x_cond,
-                y=y,
-                lambda_=lambda_
+                y=target_trajectory, 
+                masks=masks
             )
         else: 
             sample_multistep = x_cond["future_states"]
