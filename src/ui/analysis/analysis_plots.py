@@ -57,6 +57,7 @@ def plot_guidance_tracking(
     title: str | None = "Guidance tracking",
     subtitle: str | None = None,
     ylabel: str = "Mask-averaged value",
+    figsize: tuple[int, int] = (12, 5)
 ):
     num_steps = len(timestamps)
     time_values = pd.to_datetime(timestamps)
@@ -106,7 +107,7 @@ def plot_guidance_tracking(
             "axes.linewidth": 0.8,
         }
     ):
-        fig, ax = plt.subplots(figsize=(17.5, 5.5), dpi=180)
+        fig, ax = plt.subplots(figsize=figsize, dpi=180)
 
         y_values = [
             guided_member,

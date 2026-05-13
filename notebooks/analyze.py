@@ -687,6 +687,7 @@ def _(
         show_guided_mean=False,
         title="Realized guidance analysis",
         subtitle="Mask terms along the rollout",
+        figsize=(22, 6)
     )
     return (realized_guidance_plot,)
 
@@ -952,14 +953,11 @@ def _(mo):
     \(
     \text{norm}(\sum_{i,j} |x^{guided}_{n,m,i,j} - x^{unguided}_{n,m,i,j}|)
     \)
-    """)
-    return
 
+    Mean |guided − unguided| per cell in z-score state space, across the rollout:
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Per variable-level change
+    - **per variable-level** — 82 channels (4 surface + 6 × 13 pressure levels), reveals which exact channel guidance hits hardest
+    - **level-aggregated** — 10 variables (level-means), reveals which physical variable absorbs most of the guidance
     """)
     return
 
@@ -979,6 +977,7 @@ def _(mo):
         options=["max", "mean"],
         value="max",
         label="rank by",
+        inline=True
     )
 
     variable_change_controls = mo.hstack(
@@ -986,14 +985,6 @@ def _(mo):
         justify="start",
     )
     return rank_by_radio, top_k_slider, variable_change_controls
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    Add aggregate levels as checkbox
-    """)
-    return
 
 
 @app.cell
@@ -1112,20 +1103,6 @@ def _(
 
 
 @app.cell
-def _(rollout_var_change_fig):
-    rollout_var_change_fig
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ### Per variable change (level-aggregated)
-    """)
-    return
-
-
-@app.cell
 def _(
     M,
     N,
@@ -1212,38 +1189,8 @@ def _(
 
 
 @app.cell
-def _(var_change_fig):
-    var_change_fig
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ### Whole state change
-    """)
-    return
-
-
-@app.cell
-def _():
-    ...
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Metric change analysis
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ...
-    """)
+def _(mo, rollout_var_change_fig, var_change_fig):
+    mo.hstack([rollout_var_change_fig, var_change_fig], justify="start")
     return
 
 
