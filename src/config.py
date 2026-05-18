@@ -1,99 +1,81 @@
 from dataclasses import dataclass
 from typing import Any
 
-from src.utils import (
-    list_floats_to_tensors
-)
+import torch
 
-PARTITIONS = ["surface", "level"]
+from src.utils.converters import list_floats_to_tensors
 
-LEVELS_DICT = {
-    "surface": [0],
-    "level": [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
-}
 
-VARIABLES_DICT = {
-    "surface": [
-        "10m_u_component_of_wind",
-        "10m_v_component_of_wind",
-        "2m_temperature",
-        "mean_sea_level_pressure"
-    ],
-    "level": [
-        "geopotential",
-        "u_component_of_wind",
-        "v_component_of_wind",
-        "temperature",
-        "specific_humidity",
-        "vertical_velocity"
-    ]
-}
+##### guidance #####
 
 ROLLOUT_TYPES = ["unguided", "guided"]
 
-GUIDANCE_MODES = [
-    "planned_trajectory",  # now entire states with slices +x%
+GUIDANCE_REFERENCES = [
+    "unguided_members",
     "ground_truth",
     "lower_boundary",
     "upper_boundary",
-    "sampled_trajectory"
 ]
 
 GUIDANCE_PARAMS = ["guidance_mode", "alpha", "w"]
 
+MASK_MODES = ["bbox", "normal", "normal_minmax"]
 
+##### config class #####
+
+# TODO: should I actually implement Enums instead of lists?
 @dataclass
-class UnguidedConfig:
-    guidance_flag: bool
-    M: int
-    N: int
-    timestamp: str
-    partition: str
-    level_idx: int
-    var_idx: int
-    rollout_id: str
+class RolloutConfig:
+    rollout_id: str | None = None
+    guidance_flag: bool | None = None
+
+    M: int | None = None
+    N: int | None = None
+    timestamp: str | None = None
+
+    partition: str | None = None
+    level: int | None = None
+    var: str | None = None
+
+    mask_mode: str | None = None
+    mask_params: Any | None = None
+
+    guidance_reference: str | None = None
+    delta_trajectory: list[torch.Tensor] | None = None
+
+    alpha: float | None = None
+    w: float | None = None
+    lambda_schedule: list[torch.Tensor] | None = None
 
     @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> "UnguidedConfig":
-        # TODO: make all assertions with value in ...
+    def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
         return cls(
-            guidance_flag=config["guidance_flag"],
-            M=config["M"],
-            N=config["N"],
-            timestamp=config["timestamp"],
-            partition=config["partition"],
-            level_idx=config["level_idx"],
-            var_idx=config["var_idx"],
-            rollout_id=config["rollout_id"]
-        )
-    
-@dataclass
-class GuidedConfig:
-    timestamp: str
-    partition: str
-    level_idx: int
-    var_idx: int
-    lambda_: list[float] | float
-    guidance_flag: bool
-    N: int
-    M: int
-    rollout_id: str
-    # the others!
+            rollout_id=config.get("rollout_id"),
+            guidance_flag=config.get("guidance_flag"),
 
-    @classmethod
-    def from_dict(cls, config: dict[str, Any]) -> "UnguidedConfig":
-        # TODO: make all assertions with value in ...
-        return cls(
-            guidance_flag=config["guidance_flag"],
-            M=config["M"],
-            N=config["N"],
-            timestamp=config["timestamp"],
-            partition=config["partition"],
-            level_idx=config["level_idx"],
-            var_idx=config["var_idx"],
-            rollout_id=config["rollout_id"],
-            lambda_=list_floats_to_tensors(config["lambda_"]),
+            M=config.get("M"),
+            N=config.get("N"),
+            timestamp=config.get("timestamp"),
+
+            partition=config.get("partition"),
+            level=config.get("level"),
+            var=config.get("var"),
+
+            mask_mode=config.get("mask_mode"),
+            mask_params=config.get("mask_params"),
+
+            guidance_reference=config.get("guidance_reference"),
+            delta_trajectory=(
+                None
+                if config.get("delta_trajectory") is None
+                else list_floats_to_tensors(config["delta_trajectory"])
+            ),
+
+            alpha=config.get("alpha"),
+            w=config.get("w"),
+            lambda_schedule=(
+                None
+                if config.get("lambda_schedule") is None
+                else list_floats_to_tensors(config["lambda_schedule"])
+            ),
         )
-    
-# usage: 
-# cfg = RolloutConfig.from_dict(config)

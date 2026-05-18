@@ -161,6 +161,8 @@ We are then interested in the gradient $\nabla_{z_t}\mathcal{L}$, which we compu
 \section{Guidance methods}
 \subsection{Classifier guidance}
 
+\textcolor{red}{My definition has changed}
+
 The conditional vector field can be written in terms of the conditional score as
 \begin{align*}
      u_t(z_t \mid y) = u_t(z_t) + \alpha_t \nabla_{z_t} \log p_t(y \mid z_t),
@@ -207,7 +209,7 @@ or even with a time-dependent weight,
 \end{align*}
 These variants are heuristic and do not follow directly from a probabilistic derivation.
 
-
+\textcolor{red}{The guidance strength schedule \(\{\lambda_t\}_{t=0}^{T-1}\) determines the weight of the guidance vector in the modified guidance vector at time t with which the guidance vector impacts the vector field \(u_t^{\\theta}\) @ flow step \(t\)."}
 
 \subsection{Monte Carlo classifier guidance}
 

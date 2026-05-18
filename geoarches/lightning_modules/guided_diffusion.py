@@ -129,7 +129,7 @@ class GuidedFlow(BaseLightningModule):
                 torch.cuda.empty_cache()
             
             # after the last iteration no need to set this again
-            if n < N-1:
+            if n < config.N-1:
                 # in seconds
                 next_timestamp = x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600
                 x_cond = {
@@ -138,7 +138,7 @@ class GuidedFlow(BaseLightningModule):
                     "timestamp": next_timestamp,
                     "lead_time_hours": x_cond["lead_time_hours"],
                 }
-
+        # TODO: what is this format???
         return torch.stack(guided_trajectory, dim=1)
     
     def get_det_pred(self, x_cond):

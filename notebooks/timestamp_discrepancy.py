@@ -36,7 +36,7 @@ def _():
 
 @app.cell
 def _():
-    from src.utils import get_dataset
+    from src.utils.read_write import get_dataset
 
     return (get_dataset,)
 

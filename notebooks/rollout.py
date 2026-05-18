@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.3"
+__generated_with = "0.23.6"
 app = marimo.App(width="full")
 
 
@@ -32,37 +32,32 @@ def _():
 
 @app.cell
 def _():
-    from src.utils import (
-        get_dataset, get_model, ensure_rollout_dir, save_to_json, batchify_and_move, get_device, get_slice,
-        tensor_timestamp_to_string, get_now_timestamp
+    from src.utils.setup import get_now_timestamp, get_device
+    from src.utils.read_write import (
+        get_dataset,
+        get_model,
+        save_to_json,
     )
-
-    return get_dataset, get_device, get_now_timestamp, save_to_json
-
-
-@app.cell
-def _():
-    from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-
-    return LEVELS_DICT, PARTITIONS, VARIABLES_DICT
-
-
-@app.cell
-def _():
+    from src.ui.interaction import (
+        visualize_map, 
+        get_mask_from_corners,
+    )
+    from src.ui.plot_trajectory import plot_trajectory
+    from src.ui.plot_dual_trajectory import plot_dual_trajectory
+    from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
+    from src.utils.read_write import (
+        get_dataset, get_model,
+        save_to_json, read_json, get_rollout_ids, get_rollout_xr,
+        get_rollout_config
+    )
+    from src.utils.dataset_utils import get_x_cond_from_ts
+    from src.utils.setup import get_device
+    from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
+    from src.config import GUIDANCE_REFERENCES
+    from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.config import MASK_MODES
     from src.rollout import rollout
-
-    return
-
-
-@app.cell
-def _():
     from src.funcs import avg_over_mask
-
-    return (avg_over_mask,)
-
-
-@app.cell
-def _():
     from src.ui.interaction import (
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory
@@ -70,9 +65,16 @@ def _():
     from src.ui.plot_dual_trajectory import plot_dual_trajectory
 
     return (
-        get_mask_corners_from_widget,
-        get_mask_from_corners,
+        LEVELS_DICT,
+        PARTITIONS,
+        VARIABLES_DICT,
+        avg_over_mask,
+        get_dataset,
+        get_device,
+        get_now_timestamp,
+        get_x_cond_from_ts,
         plot_dual_trajectory,
+        save_to_json,
         visualize_map,
     )
 
@@ -254,23 +256,30 @@ def _(N, STRIDE, TIMESTAMPS, timestamp_idx):
 
 
 @app.cell
-def _(ds, timestamp):
-    from src.utils import get_x_cond
-    x_cond, timestamp_idx = get_x_cond(ds, timestamp)
-    return (timestamp_idx,)
-
-
-@app.cell
-def _(ds, level_idx, partition, timestamp_idx, var_idx):
-    x_start = ds[timestamp_idx]
-    slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
+def _(ds, get_x_cond_from_ts, level_idx, partition, timestamp, var_idx):
+    x_cond = get_x_cond_from_ts(ds, timestamp)
+    slice = ds.denormalize(x_cond["state"])[partition][var_idx, level_idx]
     return (slice,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
-    get_corners, set_corners = mo.state((-10.0, 2.0, 45.0, 35.0))
-    return get_corners, set_corners
+    mo.md(r"""
+    - need new mask mode and save params and mode to config
+    - use get mask using mask mode
+    - need to change interaction plot
+    - finally separate plots in different files
+    - need to read xarray and disable first timestamps
+    - need to visualize historical patterns so I can find a good input state for a real extreme trajectory.
+    """)
+    return
+
+
+@app.cell
+def _():
+    # TODO: still need this with also the other modes
+    # get_corners, set_corners = mo.state((-10.0, 2.0, 45.0, 35.0))
+    return
 
 
 @app.cell
@@ -298,17 +307,18 @@ def _(get_corners, set_corners, slice, visualize_map):
     return (map_widget,)
 
 
-@app.cell
-def _(get_mask_corners_from_widget, get_mask_from_corners, map_widget):
-    mask_corners = get_mask_corners_from_widget(map_widget)
-    mask = get_mask_from_corners(*mask_corners)
-    return (mask,)
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Configure rollout
+    """)
+    return
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Configure rollout
+    - Write a getter for the following thing, also use in guide.py --> get_slice_average(mask, slice)  # numpy not torch
     """)
     return
 
@@ -340,12 +350,6 @@ def _(ground_truth, plot_dual_trajectory, timestamps, var):
         timestamps, var, ground_truth=ground_truth, right_axis=False, figsize=(12.4, 4), dpi=200
     )
     return (rollout_dist_plot,)
-
-
-@app.cell
-def _(mo):
-    test_flag_checkbox = mo.ui.checkbox(value=False, label="test")
-    return
 
 
 @app.cell
@@ -403,20 +407,21 @@ def _(map_widget, mo):
 def _(mo):
     mo.md(r"""
     ## Save config
-    Run from terminal.
     """)
     return
 
 
 @app.cell
-def _(M, N, level_idx, partition, timestamp, var_idx):
+def _(M, N, level, level_idx, partition, timestamp, var, var_idx):
     config = {
         "guidance_flag": False,
         "M": M,
         "N": N,
         "timestamp": str(timestamp),
+        "level": level,
         "level_idx": level_idx,
         "partition": partition,
+        "var": var, 
         "var_idx": var_idx,
     }
     return (config,)

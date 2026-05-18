@@ -5,17 +5,21 @@ from itertools import product
 from typing import Any
 
 from src.paths import RUN_CONFIGS
-from src.funcs import T_schedule
-from src.utils import (
+from funcs import T_schedule
+from src.utils.read_write import (
     get_model,
+    read_json,
+)
+from src.utils.setup import (
     ensure_rollout_dir,
     get_device,
-    read_json,
+    setup_logging,
+)
+from src.utils.converters import (
     list_tensors_to_floats,
-    setup_logging
 )
 from src.rollout import rollout 
-from src.config import UnguidedConfig, GUIDANCE_MODES
+from src.config import UnguidedConfig, GUIDANCE_REFERENCES
 
 
 ALPHAS = [2.0]
@@ -84,7 +88,7 @@ def main() -> None:
         rollout_dir = ensure_rollout_dir(config["rollout_id"])
 
         if args.rollout_type == "guided":
-            for guidance_mode, alpha, w in product(GUIDANCE_MODES, ALPHAS, WS):
+            for guidance_mode, alpha, w in product(GUIDANCE_REFERENCES, ALPHAS, WS):
                 config_ = apply_guidance_overrides(
                     config,
                     guidance_mode=guidance_mode,

@@ -1,28 +1,31 @@
 import math
+import json
+import hashlib
 
 import torch
 import numpy as np
 
-from tensordict.tensordict import TensorDict
-from geoarches.utils.tensordict_utils import tensordict_apply
 
-
-def minmax_slice(slice_: torch.Tensor):
-    max_ = slice_.max()
-    min_ = slice_.min()
-    assert max_ != min_
-    return (slice_ -  min_) / (max_ - min_)
+def make_hash(params):
+    s = json.dumps(params, sort_keys=True)
+    return hashlib.sha1(s.encode()).hexdigest()[:10]
 
 
 def avg_over_mask(slice_, mask):
     avg = torch.sum(mask * slice_) / torch.sum(mask)
     return avg
 
+def avg_xr_over_mask(xr_ds, var, timestamp, mask, level=None, member=None):
+    da = xr_ds[var].sel(time=timestamp)
 
-def get_mask_tensordict(example_tdict: TensorDict, partition: str, var_idx: int, level_idx: int, mask_2d: torch.Tensor):
-    mask = tensordict_apply(lambda x: torch.zeros_like(x), example_tdict)
-    mask[partition][var_idx, level_idx] = mask_2d
-    return mask
+    if member is not None and "member" in da.dims:
+        da = da.sel(member=member)
+
+    if "level" in da.dims and level is not None:
+        da = da.sel(level=int(level))
+
+    x = torch.tensor(da.values, dtype=mask.dtype)
+    return avg_over_mask(x, mask)
 
 
 def get_guidance_trajectory(y: list[float], mean_rollout: list[float]):

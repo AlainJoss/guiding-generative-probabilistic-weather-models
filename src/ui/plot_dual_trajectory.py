@@ -2,18 +2,19 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import marimo as mo
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.dates as mdates
 import matplotlib.patheffects as pe
 from matplotlib.ticker import AutoMinorLocator
+
+
 def plot_dual_trajectory(
     timestamps: list[str],
     var: str,
+    m: int, 
     mean_rollout: list[float] | None = None,
+    reference_trajectory: list[float] | None = None,
+    unguided_member: list[float] | None = None,
     planned_guidance: list[float] | None = None,
     ground_truth: list[float] | None = None,
     y_trajectory: list[float] | None = None,
@@ -39,6 +40,11 @@ def plot_dual_trajectory(
         if mean_rollout is not None
         else None
     )
+    unguided_member = (
+        np.asarray(unguided_member, dtype=float)
+        if unguided_member is not None
+        else None
+    )
     planned_guidance = (
         np.asarray(planned_guidance, dtype=float)
         if planned_guidance is not None
@@ -49,6 +55,11 @@ def plot_dual_trajectory(
         if ground_truth is not None
         else None
     )
+    reference_trajectory = (
+        np.asarray(reference_trajectory, dtype=float)
+        if reference_trajectory is not None
+        else None
+    )
     y_trajectory = (
         np.asarray(y_trajectory, dtype=float) * 100.0
         if y_trajectory is not None
@@ -56,9 +67,11 @@ def plot_dual_trajectory(
     )
 
     for name, values in {
+        "unguided_member": unguided_member,
         "mean_rollout": mean_rollout,
         "planned_guidance": planned_guidance,
         "ground_truth": ground_truth,
+        "reference_trajectory": reference_trajectory,
         "y_trajectory": y_trajectory,
     }.items():
         if values is not None and len(values) != num_steps:
@@ -69,6 +82,7 @@ def plot_dual_trajectory(
         "ensemble": "#6E6E6E",
         "target": "#D55E00",
         "reference": "#009E73",
+        "reference_trajectory": "#E6B800",
         "y": "#7B2CBF",
         "grid_major": "#D7D7D7",
         "grid_minor": "#EAEAEA",
@@ -192,18 +206,35 @@ def plot_dual_trajectory(
                 time_values,
                 mean_rollout,
                 linestyle="-",
-                linewidth=2.4,
+                linewidth=0,
                 color=colors["mean"],
-                alpha=0.98,
+                alpha=0.16,
                 label="Mean rollout",
                 zorder=6,
                 path_effects=[
-                    pe.Stroke(linewidth=4.2, alpha=0.9),
+                    pe.Stroke(linewidth=1, alpha=0.16),
                     pe.Normal(),
                 ],
             )
             y_values.append(mean_rollout)
 
+
+        if unguided_member is not None:
+            ax.plot(
+                time_values,
+                unguided_member,
+                linestyle="-",
+                linewidth=2.4,
+                color=colors["mean"],
+                alpha=0.98,
+                label=f"Unguided member {m}",
+                zorder=6,
+                path_effects=[
+                    pe.Stroke(linewidth=2.2, alpha=0.9),
+                    pe.Normal(),
+                ],
+            )
+            y_values.append(unguided_member)
         # ------------------------------------------------------------
         # Ground truth
         # ------------------------------------------------------------
@@ -219,6 +250,22 @@ def plot_dual_trajectory(
                 zorder=7,
             )
             y_values.append(ground_truth)
+
+        # ------------------------------------------------------------
+        # Reference trajectory
+        # ------------------------------------------------------------
+        if reference_trajectory is not None:
+            ax.plot(
+                time_values,
+                reference_trajectory,
+                linestyle="--",
+                linewidth=2.0,
+                color=colors["reference_trajectory"],
+                alpha=0.95,
+                label="Reference trajectory",
+                zorder=8,
+            )
+            y_values.append(reference_trajectory)
 
         # ------------------------------------------------------------
         # Vertical grid lines at every forecast step

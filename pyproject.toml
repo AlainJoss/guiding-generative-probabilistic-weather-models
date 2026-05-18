@@ -115,4 +115,4 @@ geoarches-eval = 'geoarches.evaluation.eval_multistep:main'
 # pythonpath = [".."]
 
 [tool.marimo.display]
-custom_css = ["resources/sand.css"]
+custom_css = ["src/ui/sand.css"]

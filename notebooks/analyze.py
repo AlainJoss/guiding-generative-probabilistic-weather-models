@@ -19,24 +19,19 @@ def _():
 @app.cell
 def _():
     from src.paths import ROLLOUTS
-    from src.utils import (
-        read_nc,
+    from src.utils.read_write import (
         read_json,
         get_dataset,
-        get_slice,
-        get_rollout_dir,
-        get_experiment_ids,
-        make_hash
+        get_xr_slice,
+        _get_rollout_dir_path,
+        get_rollout_ids,
     )
+    from src.funcs import make_hash, safe_abs_limits
     from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from src.ui.interaction import (
         visualize_map,
         get_mask_from_corners,
         get_mask_center,
-        plot_rmse_over_n,
-        plot_trajectory,
-        plot_trajectories_over_n,
-        plot_states_over_n,
     )
     from src.ui.plot_variable_change_parallel import plot_variable_change_parallel
 
@@ -44,23 +39,16 @@ def _():
         LEVELS_DICT,
         PARTITIONS,
         VARIABLES_DICT,
-        get_experiment_ids,
         get_mask_center,
         get_mask_from_corners,
-        get_rollout_dir,
+        _get_rollout_dir_path,
+        get_rollout_ids,
         make_hash,
         plot_variable_change_parallel,
         read_json,
-        read_nc,
+        safe_abs_limits,
         visualize_map,
     )
-
-
-@app.cell
-def _():
-    from src.funcs import safe_abs_limits
-
-    return (safe_abs_limits,)
 
 
 @app.cell
@@ -170,11 +158,11 @@ def _(mo):
 
 
 @app.cell
-def _(get_experiment_ids, mo, refresh_button):
+def _(get_rollout_ids, mo, refresh_button):
     if refresh_button.value:
         pass
 
-    unguided_rollouts = get_experiment_ids("unguided")
+    unguided_rollouts = get_rollout_ids("unguided")
     print(unguided_rollouts)
     pick_rollout_dropdown = mo.ui.dropdown(
         options=unguided_rollouts,
@@ -210,15 +198,22 @@ def _(mo, pick_rollout_dropdown, refresh_button, unguided_rollouts):
 
 
 @app.cell
-def _(get_rollout_dir, pick_rollout_dropdown):
-    rollout_dir = get_rollout_dir(pick_rollout_dropdown.value)
+def _(get_rollout_dir_path, pick_rollout_dropdown):
+    rollout_dir = get_rollout_dir_path(pick_rollout_dropdown.value)
     return (rollout_dir,)
 
 
 @app.cell
-def _(read_nc, rollout_dir):
-    unguided_xr = read_nc(rollout_dir, "unguided")
-    ground_truth_xr = read_nc(rollout_dir, "ground_truth")
+def _():
+    from src.utils.read_write import get_rollout_xr
+
+    return (get_rollout_xr,)
+
+
+@app.cell
+def _(config, get_rollout_xr):
+    unguided_xr = get_rollout_xr(config["rollout_id"], "unguided")
+    ground_truth_xr = get_rollout_xr(config["rollout_id"], "ground_truth")
     return ground_truth_xr, unguided_xr
 
 
@@ -229,8 +224,8 @@ def _(experiment_selector):
 
 
 @app.cell
-def _(mo, read_json, rollout_dir):
-    experiment_params = read_json(rollout_dir, "experiment_params")
+def _(mo, pick_rollout_dropdown, read_json):
+    experiment_params = read_json(pick_rollout_dropdown.value, "experiment_params")
 
     guidance_mode_dropdown = mo.ui.dropdown(
         options=experiment_params["guidance_mode"],
@@ -657,6 +652,7 @@ def _(mo):
 
 @app.cell
 def _(
+    dpi,
     ground_truth_terms,
     guided_rollout_terms,
     m,
@@ -682,7 +678,8 @@ def _(
         show_guided_mean=False,
         title="Realized guidance analysis",
         subtitle="Mask terms along the rollout",
-        figsize=(22, 6)
+        figsize=(22, 6),
+        dpi=dpi.value
     )
     return (realized_guidance_plot,)
 
@@ -852,7 +849,7 @@ def _(
 
 @app.cell
 def _(mo):
-    dpi = mo.ui.slider(start=100, stop=500, step=25, debounce=False, show_value=True, label="dpi: ")
+    dpi = mo.ui.slider(start=50, stop=500, step=50, value=100, debounce=False, show_value=True, label="dpi: ")
     return (dpi,)
 
 
@@ -944,15 +941,12 @@ def _(
 def _(mo):
     mo.md(r"""
     ## State change analysis
+    Mean |guided − unguided| per cell in z-score space, across the rollout:
 
-    \(
-    \text{norm}(\sum_{i,j} |x^{guided}_{n,m,i,j} - x^{unguided}_{n,m,i,j}|)
-    \)
+    - **per variable-level** — 82 channels (4 surface + 6 × 13 pressure levels)
+    - **level-aggregated** — 10 variables (level-means)
 
-    Mean |guided − unguided| per cell in z-score state space, across the rollout:
-
-    - **per variable-level** — 82 channels (4 surface + 6 × 13 pressure levels), reveals which exact channel guidance hits hardest
-    - **level-aggregated** — 10 variables (level-means), reveals which physical variable absorbs most of the guidance
+    Note: the change is also (mostly) due to accumulation of divergence between input of unguided and guided models.
     """)
     return
 
@@ -961,25 +955,27 @@ def _(mo):
 def _(mo):
     top_k_slider = mo.ui.slider(
         start=1,
-        stop=4+13*6,
+        stop=4 + 13 * 6,
         value=12,
         step=1,
         label="top-k channels",
-        debounce=True
+        debounce=True,
     )
-
     rank_by_radio = mo.ui.radio(
-        options=["max", "mean"],
-        value="max",
-        label="rank by",
-        inline=True
+        options=["max", "mean"], value="max", label="rank by", inline=True
     )
+    log_y_checkbox = mo.ui.checkbox(label="log y")
 
-    variable_change_controls = mo.hstack(
-        [top_k_slider, rank_by_radio],
+    variable_change_controls = mo.vstack(
+        [top_k_slider, rank_by_radio, log_y_checkbox],
         justify="start",
     )
-    return rank_by_radio, top_k_slider, variable_change_controls
+    return (
+        log_y_checkbox,
+        rank_by_radio,
+        top_k_slider,
+        variable_change_controls,
+    )
 
 
 @app.cell
@@ -990,202 +986,130 @@ def _(variable_change_controls):
 
 @app.cell
 def _(np):
-    def per_var_level_mean_abs_from_xr_diff(diff_xr):
+    def per_var_level_mean_abs(diff):
         out = {}
-
-        for var_name, da in diff_xr.data_vars.items():
-            da_abs = abs(da)
-
-            if "level" in da_abs.dims:
-                for level_value in da_abs.level.values:
-                    out[f"{var_name}-{int(level_value)}"] = float(
-                        da_abs.sel(level=level_value).mean(skipna=True).item()
+        for v, da in diff.data_vars.items():
+            a = abs(da)
+            if "level" in a.dims:
+                for lv in a.level.values:
+                    out[f"{v}-{int(lv)}"] = float(
+                        a.sel(level=lv).mean(skipna=True).item()
                     )
             else:
-                out[f"{var_name}-surface"] = float(da_abs.mean(skipna=True).item())
-
+                out[f"{v}-surface"] = float(a.mean(skipna=True).item())
         return out
 
 
-    def aggregate_variable_change_dicts_over_members(dict_list, error="std"):
-        keys = list(dict_list[0].keys())
-        arr = np.array([[d[k] for k in keys] for d in dict_list], dtype=float)
+    def collapse_levels(d):
+        s, c = {}, {}
+        for k, v in d.items():
+            var, _ = k.rsplit("-", 1)
+            s[var] = s.get(var, 0.0) + v
+            c[var] = c.get(var, 0) + 1
+        return {k: s[k] / c[k] for k in s}
 
-        mean = arr.mean(axis=0)
-        std = arr.std(axis=0)
-        sem = std / np.sqrt(arr.shape[0])
 
+    def aggregate_members(dicts):
+        keys = list(dicts[0].keys())
+        arr = np.array([[d[k] for k in keys] for d in dicts], dtype=float)
         return {
             "keys": keys,
-            "mean": mean,
-            "err": std if error == "std" else sem,
+            "mean": arr.mean(0),
+            "err": arr.std(0),
             "values": arr,
         }
 
 
-    def build_raw_zdiff_scores_from_xr(
-        *,
-        guided_xr,
-        unguided_xr,
-        N,
-        M,
-    ):
-        analysis_list = []
-
-        for step_idx in range(int(N)):
-            per_member_scores = []
-
-            for m in range(int(M)):
-                guided_step = guided_xr.isel(time=step_idx, member=m)
-                unguided_step = unguided_xr.isel(time=step_idx, member=m)
-
-                diff_step = guided_step - unguided_step
-
-                per_member_scores.append(
-                    per_var_level_mean_abs_from_xr_diff(diff_step)
+    def zdiff_per_n(guided_z, unguided_z, N, M, transform=lambda d: d):
+        return [
+            [
+                transform(
+                    per_var_level_mean_abs(
+                        guided_z.isel(time=n, member=m)
+                        - unguided_z.isel(time=n, member=m)
+                    )
                 )
+                for m in range(int(M))
+            ]
+            for n in range(int(N))
+        ]
 
-            analysis_list.append(per_member_scores)
-
-        return analysis_list
-
-    return (
-        aggregate_variable_change_dicts_over_members,
-        build_raw_zdiff_scores_from_xr,
-        per_var_level_mean_abs_from_xr_diff,
-    )
+    return aggregate_members, collapse_levels, zdiff_per_n
 
 
 @app.cell
 def _(
     M,
     N,
-    aggregate_variable_change_dicts_over_members,
-    build_raw_zdiff_scores_from_xr,
+    aggregate_members,
+    collapse_levels,
     guided_xr,
     normalize_xr,
-    plot_variable_change_parallel,
-    rank_by_radio,
-    top_k_slider,
     unguided_xr,
+    zdiff_per_n,
 ):
-    raw_zdiff_analysis_list = build_raw_zdiff_scores_from_xr(
-        guided_xr=normalize_xr(guided_xr),
-        unguided_xr=normalize_xr(unguided_xr),
-        N=N,
-        M=M,
-    )
+    guided_z = normalize_xr(guided_xr)
+    unguided_z = normalize_xr(unguided_xr)
 
-    aggregated_raw_zdiff_per_n = [
-        aggregate_variable_change_dicts_over_members(dict_list, error="std")
-        for dict_list in raw_zdiff_analysis_list
+    per_channel_agg = [
+        aggregate_members(d) for d in zdiff_per_n(guided_z, unguided_z, N, M)
     ]
-
-    rollout_var_change_fig, _ = plot_variable_change_parallel(
-        aggregated_raw_zdiff_per_n,
-        top_k=top_k_slider.value,
-        rank_by=rank_by_radio.value,
-        title="Variable change across rollout steps",
-        subtitle=(
-            "mean |guided - unguided| per cell in z-score state space; "
-            "all 82 channels shown faded, top-k highlighted; error bars = ensemble std"
-        ),
-        ylim=None,
-        ylabel="mean |z-diff| per cell",
-        show_unselected=True,
-    )
-    return (rollout_var_change_fig,)
+    per_var_agg = [
+        aggregate_members(d)
+        for d in zdiff_per_n(guided_z, unguided_z, N, M, collapse_levels)
+    ]
+    return per_channel_agg, per_var_agg
 
 
 @app.cell
 def _(
-    M,
-    N,
-    aggregate_variable_change_dicts_over_members,
-    guided_xr,
-    normalize_xr,
-    per_var_level_mean_abs_from_xr_diff,
-    unguided_xr,
-):
-    def collapse_level_keys_to_vars_mean(d):
-        sums = {}
-        counts = {}
-
-        for key, val in d.items():
-            var_name, _ = key.rsplit("-", 1)
-            sums[var_name] = sums.get(var_name, 0.0) + val
-            counts[var_name] = counts.get(var_name, 0) + 1
-
-        return {k: sums[k] / counts[k] for k in sums}
-
-
-    def build_raw_zdiff_scores_level_agg_from_xr(
-        *,
-        guided_xr,
-        unguided_xr,
-        N,
-        M,
-    ):
-        analysis_list = []
-
-        for step_idx in range(int(N)):
-            per_member_scores = []
-
-            for m in range(int(M)):
-                diff_step = guided_xr.isel(
-                    time=step_idx, member=m
-                ) - unguided_xr.isel(time=step_idx, member=m)
-
-                raw_dict = per_var_level_mean_abs_from_xr_diff(diff_step)
-                per_member_scores.append(
-                    collapse_level_keys_to_vars_mean(raw_dict)
-                )
-
-            analysis_list.append(per_member_scores)
-
-        return analysis_list
-
-
-    raw_zdiff_level_agg_list = build_raw_zdiff_scores_level_agg_from_xr(
-        guided_xr=normalize_xr(guided_xr),
-        unguided_xr=normalize_xr(unguided_xr),
-        N=N,
-        M=M,
-    )
-
-    aggregated_raw_zdiff_level_agg_per_n = [
-        aggregate_variable_change_dicts_over_members(dict_list, error="std")
-        for dict_list in raw_zdiff_level_agg_list
-    ]
-    return (aggregated_raw_zdiff_level_agg_per_n,)
-
-
-@app.cell
-def _(
-    aggregated_raw_zdiff_level_agg_per_n,
+    log_y_checkbox,
+    per_channel_agg,
     plot_variable_change_parallel,
     rank_by_radio,
     top_k_slider,
 ):
-    var_change_fig, _ = plot_variable_change_parallel(
-        aggregated_raw_zdiff_level_agg_per_n,
+    yscale = "log" if log_y_checkbox.value else "linear"
+
+    var_change_plot, _ = plot_variable_change_parallel(
+        per_channel_agg,
         top_k=top_k_slider.value,
         rank_by=rank_by_radio.value,
-        title="Variable change across rollout steps (level-aggregated)",
-        subtitle=(
-            "mean |guided - unguided| per cell in z-score state space, "
-            "averaged over levels; error bars = ensemble std"
-        ),
+        yscale=yscale,
+        title="Variable change",
+        subtitle="all variables",
         ylim=None,
-        ylabel="mean |z-diff| per cell",
+        ylabel="mean |z-diff|",
         show_unselected=True,
     )
-    return (var_change_fig,)
+    return var_change_plot, yscale
 
 
 @app.cell
-def _(mo, rollout_var_change_fig, var_change_fig):
-    mo.hstack([rollout_var_change_fig, var_change_fig], justify="start")
+def _(
+    per_var_agg,
+    plot_variable_change_parallel,
+    rank_by_radio,
+    top_k_slider,
+    yscale,
+):
+    var_agg_change_plot, _ = plot_variable_change_parallel(
+        per_var_agg,
+        top_k=top_k_slider.value,
+        rank_by=rank_by_radio.value,
+        yscale=yscale,
+        title="Variable change",
+        subtitle="levels aggregated",
+        ylim=None,
+        ylabel="mean |z-diff|",
+        show_unselected=True,
+    )
+    return (var_agg_change_plot,)
+
+
+@app.cell
+def _(mo, var_agg_change_plot, var_change_plot):
+    mo.hstack([var_change_plot, var_agg_change_plot], justify="start")
     return
 
 
@@ -1193,6 +1117,14 @@ def _(mo, rollout_var_change_fig, var_change_fig):
 def _(mo):
     mo.md(r"""
     ## Gradient and vector field analysis
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ...
     """)
     return
 

@@ -42,13 +42,16 @@ def _():
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
-    from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
+    from funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from old_rollout import rollout
-    from src.utils import (
-        ensure_rollout_dir,
-        get_dataset, get_model, batchify_and_move,
-        read_state, get_slice, save_to_json, read_json,
-        read_states, xr_to_torch, list_tensors_to_floats
+    from src.utils.read_write import (
+        get_dataset, get_model,
+        read_state, get_xr_slice, save_to_json, read_json,
+        read_states,
+    )
+    from src.utils.setup import ensure_rollout_dir
+    from src.utils.converters import (
+        batchify_and_move, xr_to_torch, list_tensors_to_floats,
     )
     from src.constants import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from src.visualization import visualize_mask_terms_over_N
@@ -58,7 +61,7 @@ def _():
         PARTITIONS,
         VARIABLES_DICT,
         get_dataset,
-        get_slice,
+        get_xr_slice,
         read_json,
         read_state,
         visualize_map,

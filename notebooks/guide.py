@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.3"
+__generated_with = "0.23.6"
 app = marimo.App(width="full", css_file="")
 
 
@@ -21,88 +21,102 @@ def _():
     from src.ui.plot_trajectory import plot_trajectory
     from src.ui.plot_dual_trajectory import plot_dual_trajectory
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
-    from src.utils import (
-        read_nc,
-        get_dataset, get_model,
-        save_to_json, read_json,
-        get_x_cond,
-        get_device,
-        list_tensors_to_floats
+    from src.utils.read_write import (
+        get_dataset, 
+        save_to_json, read_json, get_rollout_ids, get_rollout_xr,
+        get_rollout_config
     )
-    from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT, GUIDANCE_MODES
-    from src.utils import get_rollout_dir, get_experiment_ids
+    from src.utils.dataset_utils import get_x_cond_from_ts
+    from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
+    from src.config import GUIDANCE_REFERENCES
+    from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.config import MASK_MODES
 
     return (
-        GUIDANCE_MODES,
+        GUIDANCE_REFERENCES,
         LEVELS_DICT,
+        MASK_MODES,
         N_schedule,
         PARTITIONS,
         T_schedule,
         VARIABLES_DICT,
-        avg_over_mask,
         compute_mean_rollout,
         get_dataset,
-        get_device,
-        get_experiment_ids,
         get_guidance_trajectory,
+        get_level_idx,
         get_mask_from_corners,
-        get_model,
-        get_rollout_dir,
-        get_x_cond,
+        get_rollout_config,
+        get_rollout_ids,
+        get_rollout_xr,
+        get_var_idx,
+        get_x_cond_from_ts,
         list_tensors_to_floats,
         plot_dual_trajectory,
         plot_trajectory,
-        read_json,
-        read_nc,
         save_to_json,
         visualize_map,
     )
 
 
 @app.cell
-def _(get_dataset, get_device, get_model):
-    device = get_device()
+def _():
+    from src.ui.analysis.analysis_plots import plot_guidance_tracking
+
+    return
+
+
+@app.cell
+def _():
+    from src.utils.converters import xr_slice_to_torch
+    from src.funcs import avg_xr_over_mask
+
+    return (avg_xr_over_mask,)
+
+
+@app.cell
+def _(get_dataset):
     ds = get_dataset()
-    model = get_model(device)
     return (ds,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - Move ui elements to getters in python to reuse them throughout the 3 notebooks.
+    - Rename variables, some are really shit.
+    - The lower bound and upper bound thing shouldn't have a function in here.
+    - The part where I compute the mask average should be a really simple function with N, M, and any list I can possibly pass and return the value in a dict.
+    - Write a getter for the timestamps from the xarray object, also format them correctly.
+    - The experiment iterator file run all configs should be renamed, but is really good in principle.
+    - Here I should define the delta_trajectory using the notion of tail or quantile.
+    """)
+    return
 
 
 @app.cell
 def _(PARTITIONS, config, mo):
-    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=config["partition"], label="partition: ")
-    return (partition_dropdown,)
-
-
-@app.cell
-def _(partition_dropdown):
-    partition = partition_dropdown.value
+    partition = mo.ui.dropdown(PARTITIONS, value=config.partition, label="partition: ")
     return (partition,)
 
 
 @app.cell
 def _(LEVELS_DICT, config, mo, partition):
-    LEVELS = LEVELS_DICT[partition]
-    level_slider = mo.ui.slider(steps=LEVELS, value=config["level"], label="level: ", show_value=True, debounce=True)
-    return LEVELS, level_slider
-
-
-@app.cell
-def _(level_slider):
-    level = level_slider.value
+    LEVELS = LEVELS_DICT[partition.value]
+    level = mo.ui.slider(
+        steps=LEVELS,
+        value=config.level,
+        label="level: ",
+        show_value=True,
+        debounce=True,
+    )
     return (level,)
 
 
 @app.cell
 def _(VARIABLES_DICT, config, mo, partition):
-    VARIABLES = VARIABLES_DICT[partition]
-    VARIABLE_DEFAULT = config["var"] if partition == config["partition"] else VARIABLES[0]
-    var_dropdown = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="variable: ")
-    return VARIABLES, var_dropdown
-
-
-@app.cell
-def _(var_dropdown):
-    var = var_dropdown.value
+    VARIABLES = VARIABLES_DICT[partition.value]
+    VARIABLE_DEFAULT = config.var if partition.value == config.partition else VARIABLES[0]
+    var = mo.ui.dropdown(VARIABLES, value=VARIABLE_DEFAULT, label="var: ")
     return (var,)
 
 
@@ -188,7 +202,7 @@ def _(N, mo):
         stop=max(N, 1),
         step=1,
         value=N // 2,
-        label="peak at n: ",
+        label="peak @ n: ",
         show_value=True,
         debounce=True,
     )
@@ -221,27 +235,38 @@ def _(alpha_slider):
 
 
 @app.cell
-def _(GUIDANCE_MODES, mo):
-    guidance_mode_dropdown = mo.ui.dropdown(GUIDANCE_MODES, value=GUIDANCE_MODES[0], label="guidance mode: ")
-    return (guidance_mode_dropdown,)
+def _(GUIDANCE_REFERENCES, mo):
+    guidance_references = mo.ui.dropdown(GUIDANCE_REFERENCES, value=GUIDANCE_REFERENCES[0], label="guidance reference: ")
+    return (guidance_references,)
 
 
 @app.cell
-def _(ground_truth, lower_boundary, mean_unguided_rollout, mo, upper_boundary):
+def _(MASK_MODES, mo):
+    mask_mode = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0])
+    return (mask_mode,)
+
+
+@app.cell
+def _(ground_truth, lower_boundary, unguided_member, upper_boundary):
     reference_rollouts = {
-        "mean_unguided_rollout": mean_unguided_rollout,
+        "unguided_members": unguided_member,
         "ground_truth": ground_truth,
         "lower_boundary": lower_boundary,
         "upper_boundary": upper_boundary
     }
-    reference_rollout = mo.ui.dropdown(options=reference_rollouts.keys(), value=list(reference_rollouts.keys())[0], label="reference: ")
-    return reference_rollout, reference_rollouts
+    return (reference_rollouts,)
 
 
 @app.cell
-def _(reference_rollout, reference_rollouts):
-    reference = reference_rollouts[reference_rollout.value]
-    return (reference,)
+def _(m, unguided_rollout):
+    unguided_member = [unguided_rollout[i][m.value] for i in range(len(unguided_rollout))]
+    return (unguided_member,)
+
+
+@app.cell
+def _(guidance_references, reference_rollouts):
+    reference_trajectory = reference_rollouts[guidance_references.value]
+    return (reference_trajectory,)
 
 
 @app.cell
@@ -252,27 +277,23 @@ def _(get_ensemble_upper_bound, unguided_rollout):
 
 @app.cell
 def _(
-    GUIDANCE_MODES,
     N,
     N_schedule,
     alpha,
     get_guidance_trajectory,
-    guidance_mode_dropdown,
     peak,
     peak_at_slider,
-    reference,
+    reference_trajectory,
     shape_slider,
 ):
-    planned_guidance = reference  # overwritten if planned_trajectory
-    y_trajectory = None
-    if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
-        y_trajectory = N_schedule(
-            N, shape_slider.value, peak, alpha, peak_at_n=peak_at_slider.value
-        )
-        planned_guidance = get_guidance_trajectory(
-            y_trajectory, reference
-        )
-    return planned_guidance, y_trajectory
+    planned_guidance = reference_trajectory  # overwritten if planned_trajectory
+    delta_trajectory = N_schedule(
+        N, shape_slider.value, peak, alpha, peak_at_n=peak_at_slider.value
+    )
+    planned_guidance = get_guidance_trajectory(
+        delta_trajectory, reference_trajectory
+    )
+    return delta_trajectory, planned_guidance
 
 
 @app.cell
@@ -290,30 +311,32 @@ def _(torch):
 
 @app.cell
 def _(config):
-    timestamp = config["timestamp"]
-    M = config["M"]
-    N = config["N"]
+    timestamp = config.timestamp
+    M = config.M
+    N = config.N
     return M, N, timestamp
 
 
 @app.cell
-def _(LEVELS, VARIABLES, ds, get_x_cond, level, timestamp, var):
-    var_idx = VARIABLES.index(var)
-    level_idx = LEVELS.index(level)
-    x_start, timestamp_idx = get_x_cond(ds, timestamp)
-    return level_idx, timestamp_idx, var_idx, x_start
-
-
-@app.cell
-def _(config, get_mask_from_corners):
-    mask_corners = tuple(config["mask_corners"])
-    mask = get_mask_from_corners(*mask_corners)
-    return mask, mask_corners
+def _(
+    ds,
+    get_level_idx,
+    get_var_idx,
+    get_x_cond_from_ts,
+    level,
+    partition,
+    timestamp,
+    var,
+):
+    var_idx = get_var_idx(partition.value, var.value)
+    level_idx = get_level_idx(partition.value, level.value)
+    x_start = get_x_cond_from_ts(ds, timestamp)
+    return level_idx, var_idx, x_start
 
 
 @app.cell
 def _(ds, level_idx, partition, var_idx, x_start):
-    slice = ds.denormalize(x_start["state"])[partition][var_idx, level_idx]
+    slice = ds.denormalize(x_start["state"])[partition.value][var_idx, level_idx]
     return (slice,)
 
 
@@ -324,87 +347,44 @@ def _(mo):
 
 
 @app.cell
-def _(get_experiment_ids, mo, refresh_button):
+def _(get_rollout_ids, mo, refresh_button):
     if refresh_button.value:
         pass
 
-    unguided_rollouts = get_experiment_ids("unguided")
+    unguided_rollouts = get_rollout_ids("unguided")
     pick_unguided_rollout_dropdown = mo.ui.dropdown(
-        label="Experiment: ", value=unguided_rollouts[0], options=unguided_rollouts
+        label="Rollout: ", value=unguided_rollouts[0], options=unguided_rollouts
     )
     return (pick_unguided_rollout_dropdown,)
 
 
 @app.cell
-def _(get_rollout_dir, pick_unguided_rollout_dropdown, read_json):
-    rollout_dir = get_rollout_dir(pick_unguided_rollout_dropdown.value)
-    config = read_json(rollout_dir, "config")
-    return config, rollout_dir
+def _(get_rollout_config, pick_unguided_rollout_dropdown):
+    config = get_rollout_config("unguided", pick_unguided_rollout_dropdown.value)
+    return (config,)
 
 
 @app.cell
-def _(read_nc, rollout_dir):
-    ground_truth_xr = read_nc(rollout_dir, "ground_truth")
-    unguided_xr = read_nc(rollout_dir ,"unguided")
+def _(config, get_rollout_xr):
+    ground_truth_xr = get_rollout_xr(config.rollout_id, "ground_truth")
+    unguided_xr = get_rollout_xr(config.rollout_id,"unguided")
     return ground_truth_xr, unguided_xr
 
 
 @app.cell
-def _(config, mo, pick_unguided_rollout_dropdown):
-    experiment_dropdown = mo.vstack([
-        mo.md("Pick unguided rollout experiment."),
-        mo.hstack([
-            pick_unguided_rollout_dropdown
-        ], justify="start"),
-        mo.accordion(
-            {
-                "Experiment params": mo.md("<br>".join(f"{k}: {v}" for k, v in config.items()))
-            }
-        )
-    ])
-    return (experiment_dropdown,)
-
-
-@app.cell
 def _(
-    avg_over_mask,
+    avg_xr_over_mask,
     compute_mean_rollout,
     ground_truth_xr,
     level,
     mask,
-    torch,
     unguided_xr,
     var,
 ):
-    def xr_slice_to_torch(xr_ds, var, timestamp, level=None):
-        da = xr_ds[var].sel(time=timestamp)
-
-        if "level" in da.dims and level is not None:
-            da = da.sel(level=int(level))
-
-        return torch.tensor(da.values)
-
-
-    def avg_xr_over_mask(xr_ds, var, timestamp, mask, level=None, member=None):
-        da = xr_ds[var].sel(time=timestamp)
-
-        if member is not None and "member" in da.dims:
-            da = da.sel(member=member)
-
-        if "level" in da.dims and level is not None:
-            da = da.sel(level=int(level))
-
-        x = torch.tensor(da.values, dtype=mask.dtype)
-        return avg_over_mask(x, mask)
-
-
     # timestamps to compare:
     # ground_truth has init + N future times
     # unguided has only N future times
-    # timestamps to compare:
-    # ground_truth has init + N future times
-    # unguided has only N future times
-    members = list(unguided_xr.member.values)
+    members = [int(val) for val in list(unguided_xr.member.values)]
 
     ground_truth = []
     unguided_rollout = []
@@ -418,10 +398,10 @@ def _(
     # step 0: only ground truth exists
     init_avg = avg_xr_over_mask(
         ground_truth_xr,
-        var=var,
+        var=var.value,
         timestamp=init_timestamp,
         mask=mask,
-        level=level,
+        level=level.value,
     )
 
     ground_truth.append(init_avg)
@@ -431,20 +411,20 @@ def _(
     for timestamp_n in future_timestamps:
         gt_avg = avg_xr_over_mask(
             ground_truth_xr,
-            var=var,
+            var=var.value,
             timestamp=timestamp_n,
             mask=mask,
-            level=level,
+            level=level.value,
         )
         ground_truth.append(gt_avg)
 
         unguided_avgs = [
             avg_xr_over_mask(
                 unguided_xr,
-                var=var,
+                var=var.value,
                 timestamp=timestamp_n,
                 mask=mask,
-                level=level,
+                level=level.value,
                 member=m,
             )
             for m in members
@@ -453,43 +433,48 @@ def _(
         unguided_rollout.append(unguided_avgs)
 
     mean_unguided_rollout = compute_mean_rollout(unguided_rollout)
-    return ground_truth, mean_unguided_rollout, timestamps, unguided_rollout
+    return (
+        ground_truth,
+        mean_unguided_rollout,
+        members,
+        timestamps,
+        unguided_rollout,
+    )
 
 
 @app.cell
 def _(
+    delta_trajectory,
     ground_truth,
+    m,
     mean_unguided_rollout,
     planned_guidance,
     plot_dual_trajectory,
+    reference_trajectory,
     timestamps,
+    unguided_member,
     unguided_rollout,
     var,
-    y_trajectory,
 ):
-    y_trajectory_plot = plot_dual_trajectory(
+    guidance_plot = plot_dual_trajectory(
         timestamps=timestamps,
+        unguided_member=unguided_member,
+        reference_trajectory=reference_trajectory,
+        m=m.value,
         mean_rollout=mean_unguided_rollout,
         ground_truth=ground_truth,
         planned_guidance=planned_guidance,
-        y_trajectory=y_trajectory,
-        var=var,
+        y_trajectory=delta_trajectory,
+        var=var.value,
         ensemble_rollout=unguided_rollout,
         ymin_left=None,
         ymax_left=None,
         figsize=(17.5, 5.5),
-        title=f"{var} trajectory",
+        title=f"{var.value} trajectory",
         subtitle="Unguided rollout ensemble, planned guidance, ground truth, and percentage trajectory",
         dpi=500
     )
-    return (y_trajectory_plot,)
-
-
-@app.cell
-def _():
-    from src.ui.analysis.analysis_plots import plot_guidance_tracking
-
-    return
+    return (guidance_plot,)
 
 
 @app.cell(hide_code=True)
@@ -509,17 +494,11 @@ def _(mo):
 
 
 @app.cell
-def _(mo, refresh_button):
-    mo.vstack([
-        mo.md("Reload whole page if something fails."),
-        refresh_button
-    ])
-    return
-
-
-@app.cell
-def _(experiment_dropdown):
-    experiment_dropdown
+def _(mo, pick_unguided_rollout_dropdown, refresh_button):
+    mo.hstack(
+        [pick_unguided_rollout_dropdown, refresh_button],
+        justify="start",
+    )
     return
 
 
@@ -532,17 +511,24 @@ def _(mo):
 
 
 @app.cell
+def _(config, get_mask_from_corners):
+    mask_corners = tuple(config.mask_params)
+    mask = get_mask_from_corners(*mask_corners)
+    return mask, mask_corners
+
+
+@app.cell
 def _(mask, slice, visualize_map):
     map_widget = visualize_map(
         slice,
         title="Mask region",
-        interactive=False,
+        interactive=True,
         mask_2d=mask,
         show_mask=True,
         vmin=slice.min(),
         vmax=slice.max(),
         center=slice.mean(),
-        figsize=(39,5.24),
+        figsize=(45,25.24),
         dpi=500
     )
     return (map_widget,)
@@ -557,75 +543,62 @@ def _(mo):
 
 
 @app.cell
-def _(map_widget):
-    # mo.vstack([mo.md("Mask:"), map_widget])
-    map_widget
+def _(map_widget, mask_mode, mo):
+    mo.vstack([mask_mode, map_widget])
     return
 
 
 @app.cell
+def _(members, mo):
+    m = mo.ui.slider(steps=members, label="m: ", show_value=True, debounce=True)
+    return (m,)
+
+
+@app.cell
 def _(
-    GUIDANCE_MODES,
     alpha_slider,
-    guidance_mode_dropdown,
-    level_slider,
+    guidance_plot,
+    guidance_references,
+    level,
+    m,
     max_perc_granularity_slider,
     min_max_lambda_slider,
     mo,
-    partition_dropdown,
+    partition,
     peak_at_slider,
     peak_granularity_slider,
     peak_slider,
-    reference_rollout,
     shape_slider,
-    var_dropdown,
-    y_trajectory_plot,
+    var,
 ):
-    if guidance_mode_dropdown.value == GUIDANCE_MODES[0]:
-        weather_time_vstack = mo.vstack(
-            [
-                # mo.md("Note: selecting other variables will not affect the mask."),
-                mo.hstack(
-                    [
-                        partition_dropdown,
-                        var_dropdown,
-                        level_slider,
-                    ],
-                    justify="start",
-                ),
-                mo.hstack([guidance_mode_dropdown, reference_rollout], justify="start"),
-                mo.hstack(
-                    [alpha_slider, max_perc_granularity_slider, min_max_lambda_slider],
-                    justify="start",
-                ),
-                mo.hstack(
-                    [
-                        peak_slider,
-                        peak_granularity_slider,
-                        shape_slider,
-                        peak_at_slider,
-                    ],
-                    justify="start",
-                ),
-                y_trajectory_plot,
-            ]
-        )
-    else:
-        weather_time_vstack = mo.vstack(
-            [
-                mo.hstack(
-                    [
-                        partition_dropdown,
-                        var_dropdown,
-                        level_slider,
-                    ],
-                    justify="start",
-                ),
-                guidance_mode_dropdown,
-                y_trajectory_plot,
-            ]
-        )
-    weather_time_vstack
+    mo.vstack(
+        [
+            guidance_references,
+            m,
+            mo.hstack(
+                [
+                    partition,
+                    var,
+                    level,
+                ],
+                justify="start",
+            ),
+            mo.hstack(
+                [alpha_slider, max_perc_granularity_slider, min_max_lambda_slider],
+                justify="start",
+            ),
+            mo.hstack(
+                [
+                    peak_slider,
+                    peak_granularity_slider,
+                    shape_slider,
+                    peak_at_slider,
+                ],
+                justify="start",
+            ),
+            guidance_plot,
+        ]
+    )
     return
 
 
@@ -639,11 +612,6 @@ def _(mo):
 
 @app.cell
 def _(lambda_, plot_trajectory):
-    # lambda_trajectory_plot = plot_trajectory(
-    #     lambda_, "$\lambda_t$", ymax=3, ymin=0, 
-    #     title="Guidance strength-schedule $\{\lambda_t\}_{t=0}^{T-1}$",
-    #     figsize=(10.85, 2.5)
-    # )
     lambda_trajectory_plot = plot_trajectory(
         lambda_,
         r"$\lambda_t$",
@@ -658,16 +626,12 @@ def _(lambda_, plot_trajectory):
 @app.cell
 def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
     mo.vstack([
-        mo.md("The guidance strength schedule \(\{\lambda_t\}_{t=0}^{T-1}\) determines the strength with which the guidance vector modifies the vector field \(u_t^{\\theta}\) at diffusion timestep \(t\)."),
+        mo.md(r"""
+            \( \lambda_t = w \left(\sin\left(\frac{\pi t}{T-1}\right)\right)^\alpha, \quad t = 0, \dots, T-1 \).
+        """),
         mo.vstack([
-            mo.hstack([
-                lambda_shape_slider,
-                mo.md("controls the schedule's shape")
-            ], justify="start"),
-            mo.hstack([
-                w_slider,
-                mo.md("controls the max value of lambda_t (always @ step 12)")
-            ], justify="start"),
+            lambda_shape_slider,
+            w_slider,
             lambda_trajectory_plot,
         ])
     ])
@@ -678,14 +642,7 @@ def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
 def _(mo):
     mo.md(r"""
     ## Save config
-    Run from terminal.
     """)
-    return
-
-
-@app.cell
-def _(mo):
-    test_flag_checkbox = mo.ui.checkbox(value=False, label="test")
     return
 
 
@@ -693,57 +650,37 @@ def _(mo):
 def _(
     M,
     N,
-    alpha,
     config,
-    ground_truth,
-    guidance_mode_dropdown,
+    delta_trajectory,
+    guidance_references,
     lambda_,
     lambda_shape_slider,
     level,
-    level_idx,
     list_tensors_to_floats,
-    lower_boundary,
     mask_corners,
+    mask_mode,
     mean_unguided_rollout,
     partition,
-    planned_guidance,
-    reference_rollout,
-    timestamp,
-    timestamp_idx,
-    timestamps,
-    unguided_rollout,
-    upper_boundary,
     var,
-    var_idx,
     w_slider,
 ):
     new_config = {
+        "rollout_id": config.rollout_id,
         "guidance_flag": True,
-        "guidance_mode": guidance_mode_dropdown.value, 
-        "rollout_id": config["rollout_id"],
         "N": N,
         "M": M,
-        "mask_corners": mask_corners,
-        "timestamp": str(timestamp),
-        "timestamp_idx": int(timestamp_idx),
-        "partition": partition,
-        "level": None if level is None else str(level),
-        "level_idx": None if level_idx is None else int(level_idx),
-        "var": var,
-        "var_idx": int(var_idx),
-        "timestamps": [str(ts) for ts in timestamps],
+        "timestamp": config.timestamp,
+        "partition": partition.value,
+        "level": level.value,
+        "var": var.value,
+        "mask_mode": mask_mode.value,
+        "mask_params": mask_corners,
         "init_mask_term": float(mean_unguided_rollout[0]),
-        "ground_truth": list_tensors_to_floats(ground_truth),
-        "unguided_rollout": [list_tensors_to_floats(list_) for list_ in unguided_rollout],
-        "mean_rollout": list_tensors_to_floats(mean_unguided_rollout),
-        "y": list_tensors_to_floats(planned_guidance),
-        "lower_boundary": list_tensors_to_floats(lower_boundary), 
-        "upper_boundary": list_tensors_to_floats(upper_boundary),
-        "y_perc": alpha,
-        "lambda_": list_tensors_to_floats(lambda_),
+        "guidance_reference": guidance_references.value,
+        "delta_trajectory": list_tensors_to_floats(delta_trajectory),
         "alpha": lambda_shape_slider.value,
         "w": w_slider.value,
-        "reference": reference_rollout.value
+        "lambda_": list_tensors_to_floats(lambda_),
     }
     return (new_config,)
 

@@ -28,6 +28,7 @@ def plot_variable_change_parallel(
     ylim: tuple[float, float] | None = (0, 1.05),
     ylabel: str = "min-max score",
     show_unselected: bool = False,
+    yscale: str = "linear",
 ):
     """Parallel-coordinates view of per-variable-level scores across N."""
 
@@ -172,6 +173,7 @@ def plot_variable_change_parallel(
             ax.set_ylim(*ylim)
 
         ax.set_ylabel(ylabel)
+        ax.set_yscale(yscale)
 
         ax.yaxis.set_minor_locator(AutoMinorLocator(2))
 

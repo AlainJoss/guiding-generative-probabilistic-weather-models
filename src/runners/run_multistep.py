@@ -6,7 +6,8 @@ import torch
 import xarray as xr
 
 from src.paths import ERA5, DET_MODEL_PATHS, GEN_MODEL_PATH
-from src.utils import get_device, tensor_timestamp_to_string, batchify_and_move, rollout_to_xarray
+from src.utils.setup import get_device
+from src.utils.converters import tensor_timestamp_to_string, batchify_and_move, rollout_to_xarray
 
 from geoarches.dataloaders.era5 import Era5Forecast
 from geoarches.lightning_modules import load_module

@@ -1,10 +1,10 @@
 import argparse
 
-from src.utils import (
+from src.utils.read_write import (
     get_model,
-    get_device,
-    get_config
+    get_run_config,
 )
+from src.utils.setup import get_device
 from src.rollout import rollout
 
 
@@ -25,7 +25,7 @@ def main():
         device = get_device()
         flow_model = get_model(device)
 
-    config = get_config(args.config_type, args.config_id)
+    config = get_run_config(args.config_type, args.config_id)
     rollout(
         flow_model,
         config,
