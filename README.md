@@ -5,8 +5,8 @@ Resources:
 
 Run analysis:
 ```bash
-python -m src.runners.run_all_configs --rollout-type unguided
-python -m src.runners.run_from_config --config-id "2026-05-08_17:44:07" --rollout-type guided --test
+python -m src.runners.run_all_configs --rollout_type unguided
+python -m src.runners.run_from_config --rollout_id "2026-05-19_15:55:28" --rollout_type unguided --test
 ```
 
 Notebooks:

@@ -10,8 +10,8 @@ from src.rollout import rollout
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-id", type=str, required=True)
-    parser.add_argument("--config-type", choices=["guided", "unguided"], required=True)
+    parser.add_argument("--rollout_id", type=str, required=True)
+    parser.add_argument("--rollout_type", choices=["guided", "unguided"], required=True)
     parser.add_argument("--test", action="store_true")
     return parser.parse_args()
 
@@ -25,10 +25,10 @@ def main():
         device = get_device()
         flow_model = get_model(device)
 
-    config = get_run_config(args.config_type, args.config_id)
+    config = get_run_config(args.rollout_type, args.rollout_id)
     rollout(
-        flow_model,
         config,
+        flow_model,
         test=args.test,
     )
 

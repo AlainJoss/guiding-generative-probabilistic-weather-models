@@ -7,6 +7,8 @@ from tensordict.tensordict import TensorDict
 
 from src.utils.setup import get_device
 from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS
+from src.constants import DATETIME_STR_FORMAT
+
 
 # TODO: bs
 def xr_slice_to_torch(xr_ds, var, timestamp, level=None):
@@ -53,7 +55,7 @@ def xr_rollout_slice_to_tdict(xr_slice: xr.Dataset) -> TensorDict:
     already in model orientation, so skip the Europe-roll / lat-flip that
     Era5Forecast.convert_to_tensordict would apply.
     """
-    from src.config import VARIABLES_DICT
+    from rollout_config import VARIABLES_DICT
 
     xr_slice = xr_slice.transpose(..., "level", "latitude", "longitude")
     arrays = {
@@ -128,3 +130,10 @@ def tensor_timestamp_to_string(
     ts = timestamp.item()
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(fmt)
 
+
+def datetime_to_string(timestamp: datetime):
+    return datetime.strftime(timestamp, DATETIME_STR_FORMAT)
+
+
+def string_to_datetime(timestamp: str):
+    return datetime.strptime(timestamp, DATETIME_STR_FORMAT)

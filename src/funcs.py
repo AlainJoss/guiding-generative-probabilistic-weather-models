@@ -43,7 +43,7 @@ def N_schedule(
     peak: float,
     alpha: float = 0.0,
     peak_at_n: int | None = None,
-) -> list[torch.Tensor]:
+) -> list[float]:
     if N < 1:
         raise ValueError("N must be >= 1")
 
@@ -77,14 +77,14 @@ def N_schedule(
             bump = 0.5 * (1.0 + math.cos(math.pi * x))
             value = (alpha + peak) * (bump ** flatness)
 
-        values.append(torch.tensor(value, dtype=torch.float32))
+        values.append(value)
 
     return values
 
 
 def T_schedule(alpha: float, w: float): 
     T=25
-    return [torch.tensor( w * (math.sin(math.pi * t / (T - 1)) ** alpha), dtype=torch.float32, ) for t in range(T)] 
+    return [w * (math.sin(math.pi * t / (T - 1)) ** alpha) for t in range(T)] 
 
 
 # def compute_mean_rollout(rollout_trajectory: dict[str, list]) -> dict[str, float]:

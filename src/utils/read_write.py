@@ -10,30 +10,13 @@ from geoarches.dataloaders.era5 import Era5Forecast
 
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, RUN_CONFIGS
 from src.dimensions import VARIABLES_DICT
-from src.config import RolloutConfig
-from src.utils.converters import tensor_timestamp_to_string
+from src.rollout_config import RolloutConfig
 
 
 ##### data and model #####
 
-def get_x_cond(ds, timestamp):
-    timestamp = np.datetime64(timestamp, "ns")
 
-    ds_timestamps = [
-        np.datetime64(ts[2], "ns")
-        for ts in ds.timestamps
-    ]
-
-    idx = ds_timestamps.index(timestamp) - 4  # everything is shifted because we have a "prev_state"
-    x_cond = ds[idx]
-
-    ts = tensor_timestamp_to_string(x_cond["timestamp"])
-    print(f"get x_cond with timestamp {ts}")
-
-    return x_cond
-
-
-def get_arches_era5():
+def get_xr_dataset():
     from src.paths import ERA5
     path = ERA5 / "arches_era5.nc"
     ds = xr.open_dataset(path)
@@ -52,7 +35,7 @@ def get_td_dataset(multistep:int=1):
     )
 
 
-def get_xr_dataset():
+def get_raw_xr_dataset():
     """
     Reads 2020 files, combines them, removes unused variables, shifts data as they do in era5.py, transposes lat-lon.
     Used in the script to build and save the arches_era5.nc dataset, kept only for consistency.
@@ -99,7 +82,7 @@ def _get_dict_from_json(rollout_dir: Path, name:str):
     return dict_
 
 
-def get_rollout_config(rollout_type: str, rollout_id: str) -> dict[str, Any]:
+def get_rollout_config(rollout_type: str, rollout_id: str) -> RolloutConfig:
     match rollout_type:
         case "guided":
             rollout_dir = _get_rollout_dir_path(rollout_id) / rollout_type
@@ -112,7 +95,7 @@ def get_rollout_config(rollout_type: str, rollout_id: str) -> dict[str, Any]:
     return RolloutConfig.from_dict(config_dict)
 
 
-def get_run_config(config_type: str, config_id: str) -> dict[str, Any]:
+def get_run_config(config_type: str, config_id: str) -> RolloutConfig:
     path = RUN_CONFIGS / config_type
     config_dict = _get_dict_from_json(path, config_id)
     return RolloutConfig.from_dict(config_dict)

@@ -3,10 +3,12 @@ from typing import Any
 
 import torch
 
-from src.utils.converters import list_floats_to_tensors
+from src.utils.converters import (
+    list_floats_to_tensors, list_tensors_to_floats, 
+    datetime_to_string, string_to_datetime
+)
 
-
-##### guidance #####
+##### guidance constants #####
 
 ROLLOUT_TYPES = ["unguided", "guided"]
 
@@ -55,7 +57,7 @@ class RolloutConfig:
 
             M=config.get("M"),
             N=config.get("N"),
-            timestamp=config.get("timestamp"),
+            timestamp=string_to_datetime(config.get("timestamp")),
 
             partition=config.get("partition"),
             level=config.get("level"),
@@ -79,3 +81,35 @@ class RolloutConfig:
                 else list_floats_to_tensors(config["lambda_schedule"])
             ),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rollout_id": self.rollout_id,
+            "guidance_flag": self.guidance_flag,
+
+            "M": self.M,
+            "N": self.N,
+            "timestamp": datetime_to_string(self.timestamp),
+
+            "partition": self.partition,
+            "level": self.level,
+            "var": self.var,
+
+            "mask_mode": self.mask_mode,
+            "mask_params": self.mask_params,
+
+            "guidance_reference": self.guidance_reference,
+            "delta_trajectory": (
+                None
+                if self.delta_trajectory is None
+                else list_tensors_to_floats(self.delta_trajectory)
+            ),
+
+            "alpha": self.alpha,
+            "w": self.w,
+            "lambda_schedule": (
+                None
+                if self.lambda_schedule is None
+                else list_tensors_to_floats(self.lambda_schedule)
+            ),
+        }

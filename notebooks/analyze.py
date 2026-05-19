@@ -27,7 +27,7 @@ def _():
         get_rollout_ids,
     )
     from src.funcs import make_hash, safe_abs_limits
-    from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from rollout_config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
     from ui.map import (
         visualize_map,
         get_mask_from_corners,

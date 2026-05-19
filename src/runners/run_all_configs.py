@@ -19,7 +19,7 @@ from src.utils.converters import (
     list_tensors_to_floats,
 )
 from src.rollout import rollout 
-from src.config import UnguidedConfig, GUIDANCE_REFERENCES
+from rollout_config import UnguidedConfig, GUIDANCE_REFERENCES
 
 
 ALPHAS = [2.0]

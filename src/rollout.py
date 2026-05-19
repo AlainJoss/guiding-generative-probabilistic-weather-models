@@ -1,5 +1,4 @@
 import logging
-from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
 
@@ -11,16 +10,15 @@ from src.utils.read_write import (
     get_td_dataset,
     update_experiment_params,
 )
-from src.utils.read_write import get_x_cond
+from src.utils.dataset_utils import get_x_cond
 from src.utils.converters import (
     rollout_to_xarray,
     batchify_and_move,
-    list_tensors_to_floats,
     xr_rollout_slice_to_tdict,
 )
 from src.utils.setup import ensure_rollout_dir, get_device
 from src.funcs import make_hash
-from src.config import GUIDANCE_PARAMS
+from src.rollout_config import GUIDANCE_PARAMS, RolloutConfig
 from src.target import get_reference_trajectory, get_target_trajectory
 from src.mask import get_mask_tdict
 
@@ -28,27 +26,17 @@ from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
 
 
-def _config_to_serializable(config) -> dict:
-    d = asdict(config)
-    lam = d.get("lambda_")
-    if isinstance(lam, list) and lam and hasattr(lam[0], "item"):
-        d["lambda_"] = list_tensors_to_floats(lam)
-    return d
-
-
 def rollout(
-    config,
+    config: RolloutConfig,
     flow_model: GuidedFlow | None = None,
     test: bool = False,
-):
+):  
     rollout_dir = ensure_rollout_dir(config.rollout_id)
     if config.guidance_flag:
         update_experiment_params(rollout_dir, config, GUIDANCE_PARAMS)
-    
-    assert type(config.timestamp) == str
 
     ds = get_td_dataset(multistep=config.N)
-    x_cond, _ = get_x_cond(ds, config.timestamp)
+    x_cond = get_x_cond(ds, config.timestamp)
 
     device = get_device()
     x_cond = batchify_and_move(x_cond, device)
@@ -98,6 +86,11 @@ def rollout(
             )
         else:
             sample_multistep = x_cond["future_states"]
+        
+        sample_multistep = torch.cat(
+            [x_cond["state"].unsqueeze(1), sample_multistep],  # unsqueeze adds batch dim
+            dim=1,
+        )
 
         xr_member = rollout_to_xarray(
             ds=ds,
@@ -110,11 +103,11 @@ def rollout(
 
     xr_pred = xr.concat(member_datasets, dim="member")
 
-    config_dict = _config_to_serializable(config)
+    config_dict = config.to_dict()
 
     if config.guidance_flag:
         params = {
-            "guidance_mode": config.guidance_mode,
+            "guidance_reference": config.guidance_reference,
             "alpha": config.alpha,
             "w": config.w,
         }

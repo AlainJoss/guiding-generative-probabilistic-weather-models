@@ -110,7 +110,7 @@ def plot_dual_trajectory(
         # Expected shape: (num_steps, num_members)
         # ------------------------------------------------------------
         if ensemble_rollout is not None:
-            ensemble_rollout = np.asarray(ensemble_rollout, dtype=float)
+            ensemble_rollout = ensemble_rollout.T
 
             if ensemble_rollout.ndim != 2:
                 raise ValueError(

@@ -6,48 +6,55 @@ from src.utils.read_write import (
 from src.dimensions import LEVELS_DICT, VARIABLES_DICT
 
 def get_target_trajectory(
-    config,
+    partition,
+    var_idx,
+    level_idx,
+    delta_trajectory,
     reference_trajectory: xr.Dataset,
-):
-    target = reference_trajectory.copy(deep=True)
-    var_name = VARIABLES_DICT[config.partition][config.var_idx]
+):  
+    # TODO: do I really need this?
+    target = reference_trajectory.copy()
+    var_name = VARIABLES_DICT[partition][var_idx]
 
-    for n, delta_n in enumerate(config.delta_trajectory):
-        if config.partition == "surface":
+    for n, delta_n in enumerate(delta_trajectory):
+        if partition == "surface":
             target[var_name].isel(time=n).values[:] *= 1.0 + delta_n
         else:
-            level_val = LEVELS_DICT["level"][config.level_idx]
+            level_val = LEVELS_DICT["level"][level_idx]
             target[var_name].sel(level=level_val).isel(time=n).values[:] *= 1.0 + delta_n
 
     return target
 
 
 def get_reference_trajectory(
-    config,
+    guidance_reference: str,
+    rollout_id: str,
     m: int | None = None,
 ):
-    match config.reference:
+    match guidance_reference:
         case "ground_truth":
-            rollout = get_rollout_xr(config.rollout_id, "ground_truth")
+            rollout = get_rollout_xr(rollout_id, "ground_truth")
             reference_trajectory = rollout
 
-        case "unguided_m":
-            rollout = get_rollout_xr(config.rollout_id, "unguided")
+        case "unguided_members":
+            rollout = get_rollout_xr(rollout_id, "unguided")
             reference_trajectory = rollout.sel(member=m)
 
-        case "lower_boundary":
-            rollout = get_rollout_xr(config.rollout_id, "unguided")
-            reference_trajectory = rollout.min(dim="member")
+        # TODO: need to move this to get trajectory or move everything together, 
+        #       --> because I need to know the mask for this
+        # case "lower_boundary":
+        #     rollout = get_rollout_xr(rollout_id, "unguided")
+        #     reference_trajectory = rollout.min(dim="member")
 
-        case "upper_boundary":
-            rollout = get_rollout_xr(config.rollout_id, "unguided")
-            reference_trajectory = rollout.max(dim="member")
+        # case "upper_boundary":
+        #     rollout = get_rollout_xr(rollout_id, "unguided")
+        #     reference_trajectory = rollout.max(dim="member")
 
         case "sampled_trajectory":
             reference_trajectory = None
 
         case _:
-            raise ValueError(f"Invalid reference {config.reference}")
+            raise ValueError(f"Invalid reference {guidance_reference}")
 
     return reference_trajectory
 
