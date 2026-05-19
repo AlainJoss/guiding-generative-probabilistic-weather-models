@@ -14,7 +14,7 @@ def _():
 
 @app.cell
 def _():
-    from src.ui.interaction import (
+    from ui.map import (
         visualize_map, 
         get_mask_from_corners,
     )
@@ -22,7 +22,7 @@ def _():
     from src.ui.plot_dual_trajectory import plot_dual_trajectory
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from src.utils.read_write import (
-        get_dataset, 
+        get_td_ds, 
         save_to_json, read_json, get_rollout_ids, get_rollout_xr,
         get_rollout_config
     )
@@ -41,7 +41,7 @@ def _():
         T_schedule,
         VARIABLES_DICT,
         compute_mean_rollout,
-        get_dataset,
+        get_td_ds,
         get_guidance_trajectory,
         get_level_idx,
         get_mask_from_corners,

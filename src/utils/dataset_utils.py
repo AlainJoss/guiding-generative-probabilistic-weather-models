@@ -1,3 +1,6 @@
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+
 import xarray as xr
 import numpy as np
 
@@ -25,23 +28,40 @@ def get_td_slice(
 
     return state["level"][..., var_idx, level_idx, :, :]
 
+def get_timestamps(ds: xr.Dataset):
+    timestamps = []
+    for i in range(len(ds.time)):
+        ns_ts = ds.time[i].item()
+        dt_utc = datetime.fromtimestamp(ns_ts / 10**9, tz=timezone.utc)
+        dt_display = dt_utc.replace(tzinfo=None)
+        dt = str(dt_display)
+        timestamps.append(dt)
 
-def get_xr_ds():
-    timesteps = ["00", "06", "12", "18"]
-    datasets = [
-        xr.open_dataset(f"{ERA5}/{ts}h.nc", engine="netcdf4")
-        for ts in timesteps
-    ]
-    return xr.concat(
-        datasets,
-        dim="time",
-        data_vars="minimal",
-        coords="minimal",
-        compat="override",
-        join="exact",
-    ).sortby("time")
+    return timestamps
 
+def get_N_timestamps(timestamp: str, N: int) -> list[datetime]:
+    return [timestamp + timedelta(days=n) for n in range(N)]
 
+def get_N_states(ds: xr.Dataset, N: int, timestamp: datetime):
+    assert timestamp.tzinfo is None 
+    # alternatively
+    # timestamp = timestamp.replace(tzinfo=None)
+    timestamps = get_N_timestamps(timestamp, N)
+    return ds.sel(time=timestamps)
+
+def get_slices(states: xr.Dataset, partition: str, var: str, level: str):
+    slices = states[var]
+    if partition == "level":
+        slices = slices.sel(level=level)
+    slices = slices.to_numpy()
+    return slices
+
+def get_N_slices(ds: xr.Dataset, N: int, timestamp: datetime, partition: str, var: str, level: str):
+    N_states = get_N_states(ds, N, timestamp)
+    N_slices = get_slices(N_states, partition, var, level)
+    return N_slices
+
+# TODO: CLEAN BS
 def get_x_cond_from_ts(ds, timestamp):
     """
     TODO: clean up this bs

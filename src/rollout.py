@@ -8,7 +8,7 @@ import torch
 
 from src.utils.read_write import (
     save_to_json,
-    get_dataset,
+    get_td_ds,
     update_experiment_params,
 )
 from src.utils.dataset_utils import get_x_cond_from_ts
@@ -22,7 +22,7 @@ from src.utils.setup import ensure_rollout_dir, get_device
 from src.funcs import make_hash
 from src.config import GUIDANCE_PARAMS
 from src.target import get_reference_trajectory, get_target_trajectory
-from src.mask import get_mask
+from src.mask import get_mask_tdict
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
@@ -45,7 +45,7 @@ def rollout(
     if config.guidance_flag:
         update_experiment_params(rollout_dir, config, GUIDANCE_PARAMS)
 
-    ds = get_dataset(multistep=config.N)
+    ds = get_td_ds(multistep=config.N)
     x_cond, _ = get_x_cond_from_ts(ds, config.timestamp)
 
     device = flow_model.device if flow_model is not None else get_device()
@@ -79,7 +79,7 @@ def rollout(
                 for n in range(config.N)
             ]
             masks = [
-                get_mask(config, target_trajectory.isel(time=n), x_cond["state"])
+                get_mask_tdict(config, target_trajectory.isel(time=n), x_cond["state"])
                 for n in range(config.N)
             ]
         else:

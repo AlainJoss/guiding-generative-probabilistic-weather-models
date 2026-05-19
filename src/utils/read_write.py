@@ -8,21 +8,59 @@ from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, RUN_CONFIGS
+from src.dimensions import VARIABLES_DICT
 from src.config import RolloutConfig
 
 
 ##### data and model #####
 
-def get_dataset(multistep:int=1):
+def get_td_ds(multistep:int=1):
     return Era5Forecast(
         path=ERA5,  # default path
-        domain="all",  # all files under ERA5; year-slicing happens on the time coord
+        domain="test",  # all files under ERA5; year-slicing happens on the time coord
         load_prev=True,  # whether to load previous state
         norm_scheme="pangu",  # default normalization scheme
         lead_time_hours=24,
         timedelta_hours=6,
         multistep=multistep
     )
+
+def get_arches_era5():
+    from src.paths import ERA5
+    path = ERA5 / "arches_era5.nc"
+    ds = xr.open_dataset(path)
+    return ds
+
+
+def get_xr_ds():
+    """
+    Reads 2020 files, combines them, removes unused variables, shifts data as they do in era5.py, transposes lat-lon.
+    Used in the script to build and save the arches_era5.nc dataset, kept only for consistency.
+    """
+    timesteps = ["0", "6", "12", "18"]
+    filepath = "era5_240_2020_{}h.nc"
+
+    ds = xr.concat(
+        [xr.open_dataset(Path(ERA5, filepath.format(t)), engine="netcdf4") for t in timesteps],
+        dim="time",
+        data_vars="minimal",
+        coords="minimal",
+        compat="override",
+        join="exact",
+    )
+
+    all_vars = VARIABLES_DICT["surface"] + VARIABLES_DICT["level"]
+    ds = ds[[v for v in ds.data_vars if v in all_vars]]
+
+    ds = ds.sortby("time")
+
+    if ds.latitude[0] < ds.latitude[-1]:
+        ds = ds.reindex(latitude=ds.latitude[::-1])
+
+    ds = ds.roll(longitude=ds.sizes["longitude"] // 2, roll_coords=False)
+
+    return ds.transpose(..., "level", "latitude", "longitude")
+
 
 def get_model(device):
     gen_model, _ = load_module(  # _ := gen_config

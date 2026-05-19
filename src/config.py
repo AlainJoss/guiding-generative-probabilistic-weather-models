@@ -19,7 +19,7 @@ GUIDANCE_REFERENCES = [
 
 GUIDANCE_PARAMS = ["guidance_mode", "alpha", "w"]
 
-MASK_MODES = ["bbox", "normal", "normal_minmax"]
+MASK_MODES = ["bbox", "normal"]
 
 ##### config class #####
 

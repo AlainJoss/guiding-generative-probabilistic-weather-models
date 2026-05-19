@@ -11,30 +11,30 @@ def make_hash(params):
     return hashlib.sha1(s.encode()).hexdigest()[:10]
 
 
-def avg_over_mask(slice_, mask):
-    avg = torch.sum(mask * slice_) / torch.sum(mask)
-    return avg
+# def avg_over_mask(slice_, mask):
+#     avg = torch.sum(mask * slice_) / torch.sum(mask)
+#     return avg
 
-def avg_xr_over_mask(xr_ds, var, timestamp, mask, level=None, member=None):
-    da = xr_ds[var].sel(time=timestamp)
+# def avg_xr_over_mask(xr_ds, var, timestamp, mask, level=None, member=None):
+#     da = xr_ds[var].sel(time=timestamp)
 
-    if member is not None and "member" in da.dims:
-        da = da.sel(member=member)
+#     if member is not None and "member" in da.dims:
+#         da = da.sel(member=member)
 
-    if "level" in da.dims and level is not None:
-        da = da.sel(level=int(level))
+#     if "level" in da.dims and level is not None:
+#         da = da.sel(level=int(level))
 
-    x = torch.tensor(da.values, dtype=mask.dtype)
-    return avg_over_mask(x, mask)
+#     x = torch.tensor(da.values, dtype=mask.dtype)
+#     return avg_over_mask(x, mask)
 
 
-def get_guidance_trajectory(y: list[float], mean_rollout: list[float]):
-    def get_guidance(y_n: float, mask_avg: float):
-        return mask_avg + y_n * np.abs(mask_avg)
+# def get_guidance_trajectory(y: list[float], mean_rollout: list[float]):
+#     def get_guidance(y_n: float, mask_avg: float):
+#         return mask_avg + y_n * np.abs(mask_avg)
     
-    return [get_guidance(y[idx], mean_rollout[idx])
-        for idx, _ in enumerate(mean_rollout)
-    ]
+#     return [get_guidance(y[idx], mean_rollout[idx])
+#         for idx, _ in enumerate(mean_rollout)
+#     ]
 
 
 def N_schedule(
@@ -87,35 +87,35 @@ def T_schedule(alpha: float, w: float):
     return [torch.tensor( w * (math.sin(math.pi * t / (T - 1)) ** alpha), dtype=torch.float32, ) for t in range(T)] 
 
 
-def compute_mean_rollout(rollout_trajectory: dict[str, list]) -> dict[str, float]:
-    mean_trajectory = []
+# def compute_mean_rollout(rollout_trajectory: dict[str, list]) -> dict[str, float]:
+#     mean_trajectory = []
 
-    for values in rollout_trajectory:
-        mean_trajectory.append(sum(values) / len(values))
+#     for values in rollout_trajectory:
+#         mean_trajectory.append(sum(values) / len(values))
 
-    return mean_trajectory
-
-
-def safe_abs_limits(arrays):
-    vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
-    vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
-
-    if vmax <= vmin:
-        vmax = vmin + 1e-9
-
-    center = 0.5 * (vmin + vmax)
-    center = min(max(center, vmin + 1e-9), vmax - 1e-9)
-
-    return vmin, vmax, center
+#     return mean_trajectory
 
 
-def safe_diff_absmax(arrays):
-    absmax = max(
-        float(np.nanmax(np.abs(np.asarray(arr))))
-        for arr in arrays
-    )
+# def safe_abs_limits(arrays):
+#     vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
+#     vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
 
-    if absmax <= 0:
-        absmax = 1e-8
+#     if vmax <= vmin:
+#         vmax = vmin + 1e-9
 
-    return absmax
+#     center = 0.5 * (vmin + vmax)
+#     center = min(max(center, vmin + 1e-9), vmax - 1e-9)
+
+#     return vmin, vmax, center
+
+
+# def safe_diff_absmax(arrays):
+#     absmax = max(
+#         float(np.nanmax(np.abs(np.asarray(arr))))
+#         for arr in arrays
+#     )
+
+#     if absmax <= 0:
+#         absmax = 1e-8
+
+#     return absmax

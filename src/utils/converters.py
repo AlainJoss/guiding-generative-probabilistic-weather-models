@@ -8,7 +8,7 @@ from tensordict.tensordict import TensorDict
 from src.utils.setup import get_device
 from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS
 
-
+# TODO: bs
 def xr_slice_to_torch(xr_ds, var, timestamp, level=None):
     da = xr_ds[var].sel(time=timestamp)
 
@@ -45,7 +45,7 @@ def get_level_idx(partition: str, level: int) -> int:
             )
     return levels.index(level)
 
-
+# TODO: bs
 def xr_rollout_slice_to_tdict(xr_slice: xr.Dataset) -> TensorDict:
     """
     Convert a single-time xr slice from a saved rollout netcdf into a

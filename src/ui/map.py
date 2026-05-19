@@ -7,156 +7,12 @@ import matplotlib.patches as mpatches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import marimo as mo
 from matplotlib.ticker import FormatStrFormatter
-import matplotlib.dates as mdates
-import matplotlib.patheffects as pe
-from matplotlib.ticker import AutoMinorLocator
 
 import geopandas as gpd
 import geodatasets
 from wigglystuff import ChartPuck
 
 plt.rcParams["font.family"] = "Menlo"    # INter
-
-def visualize_mask_terms_over_N(
-    var: str,
-    timestamps: list[str],
-    ensemble_rollout: list[list[float]] | None = None,
-    mean_rollout: list[float] | None = None,
-    ground_truth: list[float] | None = None,
-    planned_guidance: list[float] | None = None,
-    title: str | None = None,
-    subtitle: str | None = None,
-    dpi: int = 100,
-):
-    def _to_float_list(xs):
-        if xs is None:
-            return None
-        return [float(v) for v in xs]
-
-    if (
-        ensemble_rollout is None
-        and mean_rollout is None
-        and ground_truth is None
-        and planned_guidance is None
-    ):
-        raise ValueError("At least one rollout must be provided")
-
-    N = len(timestamps)
-    x = list(range(N))
-
-    mean_rollout = _to_float_list(mean_rollout)
-    ground_truth = _to_float_list(ground_truth)
-    planned_guidance = _to_float_list(planned_guidance)
-
-    colors = {
-        "ground_truth": "#2ca02c",
-        "mean": "#9467bd",
-        "ensemble": "#7f7f7f",
-        "guidance": "#ff7f0e",
-    }
-
-    fig, ax = plt.subplots(figsize=(12, 5), dpi=dpi)
-
-    if ensemble_rollout is not None:
-        rows = [[float(v) for v in row] for row in ensemble_rollout]
-        M = min(len(row) for row in rows)
-        rows = [row[:M] for row in rows]
-
-        for m in range(M):
-            values_m = [rows[n][m] for n in range(N)]
-            ax.plot(
-                x,
-                values_m,
-                color=colors["ensemble"],
-                linewidth=0.6,
-                alpha=0.35,
-            )
-
-        lower = [min(row) for row in rows]
-        upper = [max(row) for row in rows]
-
-        ax.fill_between(
-            x,
-            lower,
-            upper,
-            color=colors["ensemble"],
-            alpha=0.12,
-            label=f"Ensemble range (M={M})",
-        )
-
-    if planned_guidance is not None:
-        ax.plot(
-            x,
-            planned_guidance,
-            linewidth=1.6,
-            color=colors["guidance"],
-            label="Planned guidance",
-        )
-
-    if mean_rollout is not None:
-        ax.plot(
-            x,
-            mean_rollout,
-            linewidth=1.6,
-            color=colors["mean"],
-            label="Mean rollout",
-        )
-
-    if ground_truth is not None:
-        ax.plot(
-            x,
-            ground_truth,
-            linewidth=1.8,
-            color=colors["ground_truth"],
-            label="Ground truth",
-        )
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(timestamps, rotation=35, ha="right", fontsize=8)
-
-    ax.set_xlabel("Timestamp", fontsize=10)
-    ax.set_ylabel(var, fontsize=10)
-    ax.grid(True, alpha=0.25, linestyle=":")
-
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-
-    ax.tick_params(axis="both", labelsize=9)
-
-    # Always format left y-axis with 2 decimals
-    ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
-
-    # If a right y-axis exists, format it too.
-    # This catches axes created elsewhere with twinx().
-    for other_ax in fig.axes:
-        other_ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
-
-    ax.legend(
-        loc="upper right",
-        frameon=False,
-        fontsize=9,
-    )
-
-    fig.suptitle(
-        title or f"Rollout distribution {var}",
-        fontsize=13,
-        fontweight="bold",
-        x=0.41,
-        y=0.995,
-    )
-
-    if subtitle:
-        fig.text(
-            0.41,
-            0.955,
-            subtitle,
-            ha="center",
-            va="top",
-            fontsize=9,
-            color="#555",
-        )
-
-    return fig
 
 
 def get_mask_corners_from_widget(map_widget):
@@ -168,215 +24,6 @@ def get_mask_corners_from_widget(map_widget):
 
     return lon_left, lon_right, lat_bottom, lat_top
 
-
-def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
-    lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
-    lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
-
-    lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-    lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
-
-    lon_grid, lat_grid = np.meshgrid(lon_c, lat_c)
-
-    lon_mask = (lon_grid >= lon_left) & (lon_grid <= lon_right)
-    lat_mask = (lat_grid >= lat_bottom) & (lat_grid <= lat_top)
-
-    mask = (lon_mask & lat_mask).astype(np.float32)
-    return torch.as_tensor(mask)
-
-
-
-def plot_trajectories_over_n(
-    trajectories: list[list[np.float64]],
-    var: str = "mask term",
-    ymin: float | None = None,
-    ymax: float | None = None,
-    title: str | None = None,
-    subtitle: str | None = None,
-    figsize_per_row: tuple[float, float] = (7.0, 1.8),
-    dpi: int = 100,
-    shared_y: bool = True,
-):
-    N = len(trajectories)
-    fig, axes = plt.subplots(
-        N,
-        1,
-        figsize=(figsize_per_row[0], N * figsize_per_row[1]),
-        dpi=dpi,
-        squeeze=False,
-        sharex=False,
-        sharey=shared_y,
-    )
-
-    if shared_y:
-        flat = [v for traj in trajectories for v in traj]
-        g_min = float(np.nanmin(flat))
-        g_max = float(np.nanmax(flat))
-        pad = 0.05 * (g_max - g_min if g_max > g_min else 1.0)
-        y_lo = ymin if ymin is not None else g_min - pad
-        y_hi = ymax if ymax is not None else g_max + pad
-    else:
-        y_lo, y_hi = ymin, ymax
-
-    line_color = "#1f77b4"
-    marker_color = "#9c27b0"
-
-    for i, traj in enumerate(trajectories):
-        ax = axes[i, 0]
-        x = np.arange(len(traj))
-        ax.plot(x, traj, "-", color=line_color, linewidth=1.6, alpha=0.9)
-        # ax.plot(x, traj, "o", color=marker_color, markersize=3.5, zorder=3)
-        ax.axhline(0, color="gray", linewidth=0.6, alpha=0.7)
-        ax.grid(True, alpha=0.25, linestyle=":")
-        ax.set_xlim(0, max(len(traj) - 1, 1))
-        ax.set_ylabel(f"N={i + 1}", rotation=0, ha="right", va="center", labelpad=18)
-        ax.tick_params(axis="both", labelsize=8)
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-        if y_lo is not None and y_hi is not None:
-            ax.set_ylim(y_lo, y_hi)
-        if i < N - 1:
-            ax.set_xticklabels([])
-        else:
-            ax.set_xlabel("diffusion step")
-
-    fig.supylabel(var, fontsize=10)
-
-    if title:
-        fig.suptitle(title, fontsize=13, fontweight="bold", y=0.995)
-    if subtitle:
-        fig.text(0.5, 0.975, subtitle, ha="center", va="top", fontsize=9, color="#555")
-
-    # fig.tight_layout()
-    return fig, axes
-
-
-def plot_rmse_over_n(
-    rmse_guided: np.ndarray,
-    rmse_unguided: np.ndarray,
-    err_guided: np.ndarray | None = None,
-    err_unguided: np.ndarray | None = None,
-    title: str | None = None,
-    subtitle: str | None = None,
-    figsize: tuple[float, float] = (12, 5),
-    dpi: int = 100,
-    ylabel: str = "normalized RMSE (mask)",
-    highlight_n: int | None = None,
-):
-    """Two lines of N points each: RMSE guided vs unguided across rollout steps."""
-    rmse_guided = np.asarray(rmse_guided)
-    rmse_unguided = np.asarray(rmse_unguided)
-    N = len(rmse_guided)
-    x = np.arange(1, N + 1)
-
-    C = {"guided": "#1f77b4", "unguided": "#d62728"}
-
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-    def _draw(y, err, color, marker, label):
-        if err is not None:
-            err = np.asarray(err)
-            ax.fill_between(x, y - err, y + err, color=color, alpha=0.15, zorder=1)
-            ax.errorbar(
-                x, y, yerr=err,
-                fmt="-" + marker, linewidth=1.8, markersize=5,
-                capsize=3, capthick=0.8, elinewidth=0.8,
-                color=color, alpha=0.95, label=label, zorder=3,
-            )
-        else:
-            ax.plot(x, y, "-" + marker, color=color, linewidth=1.8,
-                    markersize=5, alpha=0.95, label=label, zorder=3)
-
-    _draw(rmse_unguided, err_unguided, C["unguided"], "s", "unguided")
-    _draw(rmse_guided, err_guided, C["guided"], "o", "guided")
-
-    ax.set_xticks(x)
-    ax.set_xticklabels([f"N={n}" for n in x], fontsize=9)
-    ax.set_xlim(0.5, N + 0.5)
-    ax.set_ylabel(ylabel, fontsize=10)
-    ax.set_xlabel("rollout step", fontsize=10)
-    ax.grid(True, alpha=0.25, linestyle=":")
-    ax.axhline(0, color="gray", linewidth=0.5, alpha=0.6)
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    ax.tick_params(axis="both", labelsize=9)
-    ax.legend(loc="best", frameon=False, fontsize=9)
-
-    if highlight_n is not None and 1 <= highlight_n <= N:
-        ax.axvline(highlight_n, color="black", linewidth=1.2, alpha=0.7, zorder=2)
-        ax.scatter(
-            [highlight_n], [rmse_guided[highlight_n - 1]],
-            s=70, facecolor="white", edgecolor=C["guided"],
-            linewidth=1.8, zorder=4,
-        )
-        ax.scatter(
-            [highlight_n], [rmse_unguided[highlight_n - 1]],
-            s=70, facecolor="white", edgecolor=C["unguided"],
-            linewidth=1.8, zorder=4,
-        )
-
-    # fig.tight_layout()
-    _place_axes_title(fig, ax, title=title, subtitle=subtitle)
-    return fig, ax
-
-
-def _place_axes_title(fig, ax, *, title=None, subtitle=None,
-                      title_fontsize=13, subtitle_fontsize=9):
-    if not (title or subtitle):
-        return
-    bbox = ax.get_position()
-    cx = (bbox.x0 + bbox.x1) / 2
-    top = bbox.y1
-    fig_h = fig.get_figheight()
-    dy_title = 0.35 / fig_h
-    dy_sub = 0.20 / fig_h
-    if title and subtitle:
-        fig.text(cx, top + dy_title + dy_sub, title,
-                 ha="center", va="bottom",
-                 fontsize=title_fontsize, fontweight="bold")
-        fig.text(cx, top + dy_sub * 0.6, subtitle,
-                 ha="center", va="bottom",
-                 fontsize=subtitle_fontsize, color="#555")
-    elif title:
-        fig.text(cx, top + dy_sub, title, ha="center", va="bottom",
-                 fontsize=title_fontsize, fontweight="bold")
-    else:
-        fig.text(cx, top + dy_sub, subtitle, ha="center", va="bottom",
-                 fontsize=subtitle_fontsize, color="#555")
-
-
-def plot_trajectory(
-    trajectory: list[np.float64],
-    var: str,
-    ymin: float | None = None,
-    ymax: float | None = None,
-    title: str | None = "Trajectory",
-    dpi: int = 100,
-    figsize: tuple =(12,5)
-):
-    plt.rcParams["font.family"] = "Menlo"
-    x = np.arange(len(trajectory))
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-    ax.plot(x, trajectory, "-", linewidth=1.6, color="#9467bd", alpha=0.9)
-    ax.plot(x, trajectory, "o", color="#9c27b0", markersize=4, zorder=3)
-    ax.set_xlim(0, max(len(trajectory) - 1, 1))
-    ax.set_xticks(np.arange(len(trajectory)))
-    ax.set_xlabel("$t$", fontsize=10)
-    ax.set_ylabel(f"{var}", fontsize=10, labelpad=15)
-    ax.grid(True, alpha=0.25, linestyle=":")
-    ax.axhline(0, color="gray", linewidth=0.5)
-    ax.spines["top"].set_visible(False)
-    ax.tick_params(axis="both", labelsize=9)
-
-    current_ymin, current_ymax = ax.get_ylim()
-    final_ymin = ymin if ymin is not None else current_ymin
-    final_ymax = ymax if ymax is not None else current_ymax
-    ax.set_ylim(final_ymin, final_ymax)
-
-    if title:
-        fig.suptitle(title, fontsize=13, y=0.995)
-    # fig.tight_layout()
-    return fig
 
 
 # ------------------------------------------------------------
@@ -704,6 +351,10 @@ def plot_map_static(
     value_lon_max=None,
     value_lat_min=None,
     value_lat_max=None,
+    contour_2d=None,
+    contour_levels=8,
+    contour_color="red",
+    contour_linewidth=0.8,
 ):
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
@@ -742,6 +393,17 @@ def plot_map_static(
         value_color=value_color,
         value_threshold=value_threshold,
     )
+
+    if contour_2d is not None:
+        ax.contour(
+            grid["lon_c_plot"],
+            grid["lat_c"],
+            np.asarray(contour_2d),
+            levels=contour_levels,
+            colors=contour_color,
+            linewidths=contour_linewidth,
+            zorder=6,
+        )
 
     if mask_2d is not None and show_mask:
         draw_mask_outline(
@@ -874,6 +536,10 @@ def visualize_map(
     value_threshold=None,
     rectangle_x=(-10.0, 2.0),
     rectangle_y=(45.0, 35.0),
+    contour_2d=None,
+    contour_levels=8,
+    contour_color="red",
+    contour_linewidth=0.8,
 ):
     if interactive:
         return make_interactive_map(
@@ -907,6 +573,10 @@ def visualize_map(
         value_fontsize=value_fontsize,
         value_color=value_color,
         value_threshold=value_threshold,
+        contour_2d=contour_2d,
+        contour_levels=contour_levels,
+        contour_color=contour_color,
+        contour_linewidth=contour_linewidth,
     )
 
 

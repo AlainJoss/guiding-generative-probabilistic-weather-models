@@ -38,14 +38,14 @@ def _():
 
 @app.cell
 def _():
-    from ui.interaction import (
+    from ui.map import (
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
     from funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from old_rollout import rollout
     from src.utils.read_write import (
-        get_dataset, get_model,
+        get_td_ds, get_model,
         read_state, get_xr_slice, save_to_json, read_json,
         read_states,
     )
@@ -60,7 +60,7 @@ def _():
         LEVELS_DICT,
         PARTITIONS,
         VARIABLES_DICT,
-        get_dataset,
+        get_td_ds,
         get_xr_slice,
         read_json,
         read_state,

@@ -21,14 +21,14 @@ def _():
     from src.paths import ROLLOUTS
     from src.utils.read_write import (
         read_json,
-        get_dataset,
+        get_td_ds,
         get_xr_slice,
         _get_rollout_dir_path,
         get_rollout_ids,
     )
     from src.funcs import make_hash, safe_abs_limits
     from src.config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-    from src.ui.interaction import (
+    from ui.map import (
         visualize_map,
         get_mask_from_corners,
         get_mask_center,

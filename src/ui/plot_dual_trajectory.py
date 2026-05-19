@@ -479,7 +479,7 @@ def plot_dual_trajectory(
         if subtitle:
             fig.text(
                 0.06,
-                0.925,
+                0.9,
                 subtitle,
                 ha="left",
                 va="top",
