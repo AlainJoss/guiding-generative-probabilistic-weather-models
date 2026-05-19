@@ -36,9 +36,9 @@ def _():
 
 @app.cell
 def _():
-    from src.utils.read_write import get_td_ds
+    from src.utils.read_write import get_td_dataset
 
-    return (get_td_ds,)
+    return (get_td_dataset,)
 
 
 @app.cell

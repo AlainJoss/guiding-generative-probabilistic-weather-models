@@ -45,7 +45,7 @@ def _():
     from funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from old_rollout import rollout
     from src.utils.read_write import (
-        get_td_ds, get_model,
+        get_td_dataset, get_model,
         read_state, get_xr_slice, save_to_json, read_json,
         read_states,
     )
@@ -60,7 +60,7 @@ def _():
         LEVELS_DICT,
         PARTITIONS,
         VARIABLES_DICT,
-        get_td_ds,
+        get_td_dataset,
         get_xr_slice,
         read_json,
         read_state,

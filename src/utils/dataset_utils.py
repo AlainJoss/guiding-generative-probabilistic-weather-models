@@ -60,37 +60,3 @@ def get_N_slices(ds: xr.Dataset, N: int, timestamp: datetime, partition: str, va
     N_states = get_N_states(ds, N, timestamp)
     N_slices = get_slices(N_states, partition, var, level)
     return N_slices
-
-# TODO: CLEAN BS
-def get_x_cond_from_ts(ds, timestamp):
-    """
-    TODO: clean up this bs
-    """
-    target = np.datetime64(timestamp, "ns")
-
-    offset = int(ds.load_prev) * int(ds.lead_time_hours) // int(ds.timedelta)
-
-    ds_timestamps = [
-        np.datetime64(ts[2], "ns")
-        for ts in ds.timestamps
-    ]
-
-    if target not in ds_timestamps:
-        raise ValueError(
-            f"{target} not found in dataset timestamps. "
-            f"First: {ds_timestamps[0]}, last: {ds_timestamps[-1]}"
-        )
-
-    raw_idx = ds_timestamps.index(target)
-    dataset_idx = raw_idx - offset
-
-    if dataset_idx < 0:
-        raise ValueError(
-            f"{target} exists at raw_idx={raw_idx}, "
-            f"but ds[{dataset_idx}] would be needed because __getitem__ applies offset={offset}. "
-            f"Pick a later timestamp."
-        )
-
-    x_cond = ds[dataset_idx]
-
-    return x_cond

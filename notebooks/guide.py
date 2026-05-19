@@ -22,7 +22,7 @@ def _():
     from src.ui.plot_dual_trajectory import plot_dual_trajectory
     from src.funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from src.utils.read_write import (
-        get_td_ds, 
+        get_td_dataset, 
         save_to_json, read_json, get_rollout_ids, get_rollout_xr,
         get_rollout_config
     )
@@ -41,7 +41,7 @@ def _():
         T_schedule,
         VARIABLES_DICT,
         compute_mean_rollout,
-        get_td_ds,
+        get_td_dataset,
         get_guidance_trajectory,
         get_level_idx,
         get_mask_from_corners,

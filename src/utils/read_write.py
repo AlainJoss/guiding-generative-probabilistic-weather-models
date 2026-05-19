@@ -3,6 +3,7 @@ from typing import Any
 from pathlib import Path 
 
 import xarray as xr
+import numpy as np
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
@@ -10,11 +11,36 @@ from geoarches.dataloaders.era5 import Era5Forecast
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, RUN_CONFIGS
 from src.dimensions import VARIABLES_DICT
 from src.config import RolloutConfig
+from src.utils.converters import tensor_timestamp_to_string
 
 
 ##### data and model #####
 
-def get_td_ds(multistep:int=1):
+def get_x_cond(ds, timestamp):
+    timestamp = np.datetime64(timestamp, "ns")
+
+    ds_timestamps = [
+        np.datetime64(ts[2], "ns")
+        for ts in ds.timestamps
+    ]
+
+    idx = ds_timestamps.index(timestamp) - 4  # everything is shifted because we have a "prev_state"
+    x_cond = ds[idx]
+
+    ts = tensor_timestamp_to_string(x_cond["timestamp"])
+    print(f"get x_cond with timestamp {ts}")
+
+    return x_cond
+
+
+def get_arches_era5():
+    from src.paths import ERA5
+    path = ERA5 / "arches_era5.nc"
+    ds = xr.open_dataset(path)
+    return ds
+
+
+def get_td_dataset(multistep:int=1):
     return Era5Forecast(
         path=ERA5,  # default path
         domain="test",  # all files under ERA5; year-slicing happens on the time coord
@@ -25,14 +51,8 @@ def get_td_ds(multistep:int=1):
         multistep=multistep
     )
 
-def get_arches_era5():
-    from src.paths import ERA5
-    path = ERA5 / "arches_era5.nc"
-    ds = xr.open_dataset(path)
-    return ds
 
-
-def get_xr_ds():
+def get_xr_dataset():
     """
     Reads 2020 files, combines them, removes unused variables, shifts data as they do in era5.py, transposes lat-lon.
     Used in the script to build and save the arches_era5.nc dataset, kept only for consistency.
@@ -142,6 +162,7 @@ def save_to_json(dict_: dict, rollout_dir: Path, name:str):
     with open(path, "w") as f:
         json.dump(dict_, f, indent=2)
 
+# TODO: pass dict instead of conf
 def update_experiment_params(
     rollout_dir: Path,
     config: dict[str, Any],
@@ -152,14 +173,14 @@ def update_experiment_params(
     except FileNotFoundError:
         experiment_params = {k: [] for k in params}
 
-    for k in params:
-        experiment_params.setdefault(k, [])
+    for param_key in params:
+        experiment_params.setdefault(param_key, [])
 
-        value = config[k]
-        if value not in experiment_params[k]:
-            experiment_params[k].append(value)
-        experiment_params[k] = sorted(
-            experiment_params[k],
+        value = config[param_key]
+        if value not in experiment_params[param_key]:
+            experiment_params[param_key].append(value)
+        experiment_params[param_key] = sorted(
+            experiment_params[param_key],
             key=lambda x: (str(type(x)), x),
         )
 

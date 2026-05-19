@@ -8,10 +8,10 @@ import torch
 
 from src.utils.read_write import (
     save_to_json,
-    get_td_ds,
+    get_td_dataset,
     update_experiment_params,
 )
-from src.utils.dataset_utils import get_x_cond_from_ts
+from src.utils.read_write import get_x_cond
 from src.utils.converters import (
     rollout_to_xarray,
     batchify_and_move,
@@ -44,18 +44,20 @@ def rollout(
     rollout_dir = ensure_rollout_dir(config.rollout_id)
     if config.guidance_flag:
         update_experiment_params(rollout_dir, config, GUIDANCE_PARAMS)
+    
+    assert type(config.timestamp) == str
 
-    ds = get_td_ds(multistep=config.N)
-    x_cond, _ = get_x_cond_from_ts(ds, config.timestamp)
+    ds = get_td_dataset(multistep=config.N)
+    x_cond, _ = get_x_cond(ds, config.timestamp)
 
-    device = flow_model.device if flow_model is not None else get_device()
+    device = get_device()
     x_cond = batchify_and_move(x_cond, device)
+    # TODO: clean this bs
     lead_time_hours = int(x_cond["lead_time_hours"].cpu().flatten()[0].item())
 
-    build_ground_truth = (not config.guidance_flag) or test
-    if build_ground_truth:
+    if (not config.guidance_flag) or test:
         ground_truth = torch.cat(
-            [x_cond["state"].unsqueeze(1), x_cond["future_states"]],
+            [x_cond["state"].unsqueeze(1), x_cond["future_states"]],  # unsqueeze adds batch dim
             dim=1,
         )
         ground_truth = rollout_to_xarray(

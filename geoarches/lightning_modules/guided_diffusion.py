@@ -162,15 +162,15 @@ class GuidedFlow(BaseLightningModule):
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.flow_step(x_cond, det_pred, y_n, mask, lambda_, seed)
+        z = self.flow(x_cond, det_pred, y_n, mask, lambda_, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = det_pred + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
         return x_hat
     
-    def flow_step(self,
+    def flow(self,
         x_cond, 
         det_pred: TensorDict,
-        y_n: TensorDict | None = None, 
+        y_n: TensorDict | None = None,  # used as guidance flag (None== no guidance)
         mask: TensorDict | None = None, 
         lambda_: list[torch.Tensor] | None = None,
         seed: int | None = None
@@ -182,17 +182,17 @@ class GuidedFlow(BaseLightningModule):
             print(f"set seed: {seed}")
             generator.manual_seed(seed)
             
-        z = x_cond["state"].apply(
+        z_t = x_cond["state"].apply(
             lambda x: torch.empty_like(x).normal_(generator=generator)
         )
-        z_t = z * self.scale_input_noise
+        z_t = z_t * self.scale_input_noise
     
         ##### sample #####
         timesteps = torch.linspace(self.num_train_timesteps, 1, self.T).to(self.device)
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
 
-            s_t = t / self.num_train_timesteps   
+            s_t = t / self.num_train_timesteps  # integration factor
             if i < len(timesteps) - 1:
                 t_next = timesteps[i + 1]
                 s_next = t_next / self.num_train_timesteps

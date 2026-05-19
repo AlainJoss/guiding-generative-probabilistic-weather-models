@@ -73,7 +73,7 @@ def batchify_and_move(sample, device):
         for k, v in sample.items()
     }
 
-
+# TODO: clean this complete bs
 def rollout_to_xarray(
     ds,
     sample_multistep,

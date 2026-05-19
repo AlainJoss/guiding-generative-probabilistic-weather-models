@@ -21,7 +21,7 @@ def _():
     from src.paths import ROLLOUTS
     from src.utils.read_write import (
         read_json,
-        get_td_ds,
+        get_td_dataset,
         get_xr_slice,
         _get_rollout_dir_path,
         get_rollout_ids,

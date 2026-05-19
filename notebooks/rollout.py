@@ -29,7 +29,7 @@ def _():
     from src.paths import ROLLOUTS, RUN_CONFIGS
     from src.utils.setup import get_now_timestamp
     from src.utils.read_write import (
-        get_td_ds,
+        get_td_dataset,
         get_model,
         save_to_json,
         get_arches_era5
@@ -41,7 +41,7 @@ def _():
     from src.ui.plot_dual_trajectory import plot_dual_trajectory
     from src.funcs import N_schedule, T_schedule
     from src.utils.read_write import (
-        get_td_ds, get_model,
+        get_td_dataset, get_model,
         save_to_json, read_json, get_rollout_ids, get_rollout_xr,
         get_rollout_config
     )
@@ -352,19 +352,19 @@ def _(N_slices, get_corners, np, set_corners, slice, visualize_map):
 def _(lat_bottom, lat_top, lon_left, lon_right):
     def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
         H, W = 121, 240
-    
+
         mu_lon = (lon_left + lon_right) / 2
         mu_lat = (lat_bottom + lat_top) / 2
-    
+
         sigma_lon = lon_right - lon_left
         sigma_lat = lat_top - lat_bottom
-    
+
         mu_row = (90.0 - mu_lat) / 180.0 * H
         mu_col = (mu_lon + 180.0) / 360.0 * W
-    
+
         sigma_row = sigma_lat / 180.0 * H
         sigma_col = sigma_lon / 360.0 * W
-    
+
         mu = (mu_row, mu_col)
         sigma = (sigma_row, sigma_col)
         return mu, sigma
