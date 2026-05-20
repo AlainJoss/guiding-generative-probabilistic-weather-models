@@ -8,12 +8,8 @@ app = marimo.App(width="full", css_file="")
 def _():
     import marimo as mo
     import torch
+    import numpy as np
 
-    return mo, torch
-
-
-@app.cell
-def _():
     from src.paths import ROLLOUTS, RUN_CONFIGS
     from src.rollout_config import GUIDANCE_REFERENCES, MASK_MODES
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
@@ -29,13 +25,12 @@ def _():
     from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices
     from src.utils.read_write import (
         get_xr_dataset,
-        save_to_json, read_json, get_rollout_ids, get_rollout_xr,
-        get_rollout_config
+        save_to_json, get_dict_from_json, get_rollout_ids, get_rollout_files
     )
 
     from src.funcs import N_schedule, T_schedule
 
-    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners
+    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
     from src.target import get_target_trajectory, get_reference_trajectory
 
     return (
@@ -44,20 +39,23 @@ def _():
         MASK_MODES,
         N_schedule,
         PARTITIONS,
+        RUN_CONFIGS,
         T_schedule,
         VARIABLES_DICT,
         get_N_timestamps,
         get_level_idx,
         get_mask_2d,
         get_masked_mean,
+        get_mu_sigma,
         get_reference_trajectory,
-        get_rollout_config,
+        get_rollout_files,
         get_rollout_ids,
-        get_rollout_xr,
         get_slices,
         get_target_trajectory,
         get_var_idx,
         get_xr_dataset,
+        mo,
+        np,
         plot_dual_trajectory,
         plot_trajectory,
         save_to_json,
@@ -148,17 +146,6 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    max_perc_granularity_slider = mo.ui.slider(
-        steps=[0.1, 0.25, 0.5, 1, 2, 5],
-        value=1,
-        label="granularity (%): ",
-        show_value=True,
-    )
-    return (max_perc_granularity_slider,)
-
-
-@app.cell
-def _(mo):
     peak_granularity_slider = mo.ui.slider(
         steps=[0.1, 0.5, 1, 2, 5],
         value=1,
@@ -169,10 +156,10 @@ def _(mo):
 
 
 @app.cell
-def _(min_max_lambda, mo, peak_granularity_slider):
+def _(min_max_lambda_slider, mo, peak_granularity_slider):
     peak_slider = mo.ui.slider(
-        -min_max_lambda,
-        min_max_lambda,
+        -min_max_lambda_slider.value,
+        min_max_lambda_slider.value,
         value=0,
         step=peak_granularity_slider.value,
         label="peak (%): ",
@@ -215,39 +202,14 @@ def _(config, mo):
 
 
 @app.cell
-def _(min_max_lambda_slider):
-    min_max_lambda = min_max_lambda_slider.value
-    return (min_max_lambda,)
-
-
-@app.cell
-def _(max_perc_granularity_slider, min_max_lambda, mo):
-    alpha_slider = mo.ui.slider(
-        -min_max_lambda,
-        min_max_lambda,
-        value=0,
-        step=max_perc_granularity_slider.value,
-        label="max percentage change (%): ",
-        show_value=True,
-    )
-    return (alpha_slider,)
-
-
-@app.cell
-def _(alpha_slider):
-    delta_alpha = alpha_slider.value / 100
-    return (delta_alpha,)
-
-
-@app.cell
 def _(GUIDANCE_REFERENCES, mo):
     guidance_reference = mo.ui.dropdown(GUIDANCE_REFERENCES, value=GUIDANCE_REFERENCES[0], label="guidance reference: ")
     return (guidance_reference,)
 
 
 @app.cell
-def _(MASK_MODES, mo):
-    mask_mode = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0])
+def _(MASK_MODES, config, mo):
+    mask_mode = mo.ui.dropdown(options=MASK_MODES, value=config.mask_mode, label="mask_mode: ")
     return (mask_mode,)
 
 
@@ -263,6 +225,18 @@ def _(N_masked_means_gt, lower_boundary, unguided_member, upper_boundary):
 
 
 @app.cell
+def _(unguided_xr):
+    members = [int(val) for val in list(unguided_xr.member.values)]
+    return (members,)
+
+
+@app.cell
+def _(members, mo):
+    m = mo.ui.slider(steps=members, label="m: ", show_value=True, debounce=True)
+    return (m,)
+
+
+@app.cell
 def _(M_N_masked_means_ung, m):
     unguided_member = M_N_masked_means_ung[m.value]
     return (unguided_member,)
@@ -275,9 +249,9 @@ def _(M_N_masked_means_ung):
 
 
 @app.cell
-def _(N_schedule, config, delta_alpha, peak, peak_at_slider, shape_slider):
+def _(N_schedule, config, peak, peak_at_slider, shape_slider):
     delta_trajectory = N_schedule(
-        config.N, shape_slider.value, peak, delta_alpha, peak_at_n=peak_at_slider.value
+        config.N, shape_slider.value, peak, peak_at_n=peak_at_slider.value
     )
     return (delta_trajectory,)
 
@@ -289,48 +263,30 @@ def _(guidance_reference, reference_rollouts):
 
 
 @app.cell
-def _(config, get_reference_trajectory, guidance_reference, m):
-    reference_rollout = get_reference_trajectory(guidance_reference.value, config.rollout_id, m=m.value)
-    return (reference_rollout,)
-
-
-@app.cell
 def _(
+    config,
     delta_trajectory,
+    get_masked_mean,
+    get_reference_trajectory,
     get_slices,
     get_target_trajectory,
+    guidance_reference,
     level,
     level_idx,
+    m,
+    mask,
     partition,
-    reference_rollout,
     var,
     var_idx,
 ):
+    reference_rollout = get_reference_trajectory(guidance_reference.value, config.rollout_id, m=m.value)
     planned_guidance = get_target_trajectory(
         partition.value, var_idx, level_idx,
         delta_trajectory, reference_rollout
     )
     N_slices_planned_guidance = get_slices(planned_guidance, partition.value, var.value, level.value)
-    return (N_slices_planned_guidance,)
-
-
-@app.cell
-def _(N_slices_planned_guidance, get_masked_mean, mask):
     planned_trajectory = get_masked_mean(N_slices_planned_guidance, mask)
     return (planned_trajectory,)
-
-
-@app.cell
-def _(torch):
-    def get_ensemble_upper_bound(unguided_rollout):
-        rows = [[float(v) for v in row] for row in unguided_rollout]
-        M = min(len(row) for row in rows)
-        trimmed = [row[:M] for row in rows]
-        lower_boundary = [torch.tensor(min(row)) for row in trimmed]
-        upper_boundary = [torch.tensor(max(row)) for row in trimmed]
-        return lower_boundary, upper_boundary
-
-    return
 
 
 @app.cell
@@ -372,16 +328,15 @@ def _(get_rollout_ids, mo, refresh_button):
 
 
 @app.cell
-def _(get_rollout_config, pick_unguided_rollout_dropdown):
-    config = get_rollout_config("unguided", pick_unguided_rollout_dropdown.value)
-    return (config,)
+def _(get_rollout_files, pick_unguided_rollout_dropdown):
+    unguided_xr, config = get_rollout_files("unguided", pick_unguided_rollout_dropdown.value)
+    return config, unguided_xr
 
 
 @app.cell
-def _(config, get_rollout_xr):
-    ground_truth_xr = get_rollout_xr(config.rollout_id, "ground_truth")
-    unguided_xr = get_rollout_xr(config.rollout_id,"unguided")
-    return ground_truth_xr, unguided_xr
+def _(config, get_rollout_files):
+    ground_truth_xr, _ = get_rollout_files("ground_truth", config.rollout_id)
+    return (ground_truth_xr,)
 
 
 @app.cell
@@ -399,21 +354,9 @@ def _(N_slices_gt, N_slices_ung, get_masked_mean, mask):
 
 
 @app.cell
-def _(unguided_xr):
-    members = [int(val) for val in list(unguided_xr.member.values)]
-    return (members,)
-
-
-@app.cell
 def _(M_N_masked_means_ung):
     mean_unguided_rollout = M_N_masked_means_ung.mean(axis=0)
     return (mean_unguided_rollout,)
-
-
-@app.cell
-def _(timestamps, unguided_member):
-    len(unguided_member), len(timestamps)
-    return
 
 
 @app.cell
@@ -485,26 +428,75 @@ def _(mo):
 
 
 @app.cell
-def _(config, get_mask_2d):
-    mask = get_mask_2d(config.mask_mode, config.mask_params)
-    return (mask,)
+def _(
+    get_mask_2d,
+    get_mu_sigma,
+    lat_bottom,
+    lat_top,
+    lon_left,
+    lon_right,
+    mask_mode,
+):
+    mask_params = None
+    mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
+    match mask_mode.value:
+        case "bbox":
+            mask_params = [lon_left, lon_right, lat_bottom, lat_top]
+        case "normal":
+            mask_params = [mu, sigma]
+        case _:
+            pass
+
+    mask = get_mask_2d(mask_mode.value, mask_params)
+    return mask, mask_params
 
 
 @app.cell
-def _(mask, slice, visualize_map):
-    map_widget = visualize_map(
+def _(mo):
+    get_corners, set_corners = mo.state((-10.0, 2.0, 35.0, 45.0))
+    return get_corners, set_corners
+
+
+@app.cell
+def _(N_slices_gt, get_corners, np, set_corners, slice, visualize_map):
+    lon_left, lon_right, lat_bottom, lat_top = get_corners()
+    weather_map = visualize_map(
         slice,
         title="Mask region",
         interactive=True,
-        mask_2d=mask,
-        show_mask=True,
-        vmin=slice.min(),
-        vmax=slice.max(),
-        center=slice.mean(),
-        figsize=(45,25.24),
-        dpi=500
+        # mask_2d=mask,
+        vmin=np.min(N_slices_gt),
+        vmax=np.max(N_slices_gt),
+        center=np.mean(N_slices_gt),
+        rectangle_x=(lon_left, lon_right),
+        rectangle_y=(lat_bottom, lat_top),
+        figsize=(12, 5),
+        dpi=200,
     )
-    return (map_widget,)
+    weather_map.widget.observe(
+        lambda _c: set_corners(
+            (*sorted(weather_map.widget.x), *sorted(weather_map.widget.y))
+        ),
+        names=["x", "y"],
+    )
+    return lat_bottom, lat_top, lon_left, lon_right, weather_map
+
+
+@app.cell
+def _(lat_bottom, lat_top, lon_left, lon_right, mask, np, visualize_map):
+    mask_map = visualize_map(
+        mask,
+        title="Mask",
+        interactive=False,
+        vmin=np.min(mask),
+        vmax=np.max(mask),
+        center=np.mean(mask),
+        rectangle_x=(lon_left, lon_right),
+        rectangle_y=(lat_bottom, lat_top),
+        figsize=(12, 5),
+        dpi=200,
+    )
+    return (mask_map,)
 
 
 @app.cell(hide_code=True)
@@ -515,59 +507,66 @@ def _(mo):
     return
 
 
-@app.cell
-def _(map_widget, mask_mode, mo):
-    mo.vstack([mask_mode, map_widget])
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    $$
+    \delta_n = \Delta \cdot
+    \begin{cases}
+    \sin^\gamma\left(\frac{\pi}{2}\frac{n}{\tau}\right),
+    & 0 \le n \le \tau \\[6pt]
+    \sin^\gamma\left(\frac{\pi}{2}\frac{N-n}{N-\tau}\right),
+    & \tau < n \le N
+    \end{cases}
+    $$
+    """)
     return
 
 
 @app.cell
-def _(members, mo):
-    m = mo.ui.slider(steps=members, label="m: ", show_value=True, debounce=True)
-    return (m,)
-
-
-@app.cell
-def _(
-    alpha_slider,
-    guidance_plot,
-    guidance_reference,
-    level,
-    m,
-    max_perc_granularity_slider,
-    min_max_lambda_slider,
-    mo,
-    partition,
-    peak_at_slider,
-    peak_granularity_slider,
-    peak_slider,
-    shape_slider,
-    var,
-):
-    mo.vstack(
-        [
-            guidance_reference,
-            m,
-            mo.hstack(
+def _(level, mask_map, mask_mode, mo, partition, var, weather_map):
+    mo.vstack([
+        mask_mode, 
+        mo.hstack(
                 [
                     partition,
                     var,
                     level,
-                ],
-                justify="start",
-            ),
+                ], justify="start",
+        ),
+        mo.hstack([weather_map, mask_map], justify="start")
+    ])
+    return
+
+
+@app.cell
+def _(
+    guidance_plot,
+    guidance_reference,
+    m,
+    min_max_lambda_slider,
+    mo,
+    peak_at_slider,
+    peak_granularity_slider,
+    peak_slider,
+    shape_slider,
+):
+    mo.vstack(
+        [
             mo.hstack(
-                [alpha_slider, max_perc_granularity_slider, min_max_lambda_slider],
-                justify="start",
+                [
+                    guidance_reference,
+                    m,
+                ], justify="start"
             ),
             mo.hstack(
                 [
                     peak_slider,
                     peak_granularity_slider,
+                    min_max_lambda_slider,
                     shape_slider,
                     peak_at_slider,
-                ],
-                justify="start",
+                ], justify="start"
             ),
             guidance_plot,
         ]
@@ -628,30 +627,30 @@ def _(
     lambda_shape_slider,
     level,
     mask_mode,
-    mean_unguided_rollout,
+    mask_params,
     partition,
     var,
     w_slider,
 ):
-    new_config = {
-        "rollout_id": config.rollout_id,
-        "guidance_flag": True,
-        "N": config.N,
-        "M": config.M,
-        "timestamp": config.timestamp,
-        "partition": partition.value,
-        "level": level.value,
-        "var": var.value,
-        "mask_mode": mask_mode.value,
-        "mask_params": config.mask_params,
-        "init_mask_term": float(mean_unguided_rollout[0]),
-        "guidance_reference": guidance_reference.value,
-        "delta_trajectory": delta_trajectory,
-        "alpha": lambda_shape_slider.value,
-        "w": w_slider.value,
-        "lambda_": lambda_
-    }
-    return (new_config,)
+    from src.rollout_config import RolloutConfig
+    guided_config = RolloutConfig(
+        rollout_id=config.rollout_id,
+        guidance_flag=True,
+        M=config.M,
+        N=config.N,
+        timestamp=config.timestamp,
+        partition=partition.value,
+        var=var.value,
+        level=level.value,
+        mask_mode=mask_mode.value,
+        mask_params=mask_params,
+        guidance_reference=guidance_reference.value,
+        delta_trajectory=delta_trajectory,
+        alpha=lambda_shape_slider.value,
+        w=w_slider.value,
+        lambda_schedule=lambda_
+    )
+    return (guided_config,)
 
 
 @app.cell
@@ -662,10 +661,15 @@ def _(mo):
 
 
 @app.cell
-def _(CONFIGS, config, config_button, new_config, save_to_json):
+def _(RUN_CONFIGS, config, config_button, guided_config, save_to_json):
     if config_button.value:
-        config_dir = CONFIGS / "guided"
-        save_to_json(new_config, config_dir, f"{config['rollout_id']}")
+        run_dir = RUN_CONFIGS / "guided"
+        save_to_json(guided_config.to_dict(), run_dir, f"{config.rollout_id}")
+    return
+
+
+@app.cell
+def _():
     return
 
 

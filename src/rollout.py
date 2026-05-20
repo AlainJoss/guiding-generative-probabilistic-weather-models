@@ -33,7 +33,7 @@ def rollout(
 ):  
     rollout_dir = ensure_rollout_dir(config.rollout_id)
     if config.guidance_flag:
-        update_experiment_params(rollout_dir, config, GUIDANCE_PARAMS)
+        update_experiment_params(rollout_dir, config.to_dict(), GUIDANCE_PARAMS)
 
     ds = get_td_dataset(multistep=config.N)
     x_cond = get_x_cond(ds, config.timestamp)

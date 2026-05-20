@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.3"
+__generated_with = "0.23.6"
 app = marimo.App(width="full")
 
 
@@ -13,111 +13,75 @@ def _():
     import matplotlib.pyplot as plt
     import xarray as xr
 
-    return mo, np, xr
+    return Path, mo, np
 
 
 @app.cell
 def _():
     from src.paths import ROLLOUTS
-    from src.utils.read_write import (
-        read_json,
-        get_td_dataset,
-        get_xr_slice,
-        _get_rollout_dir_path,
-        get_rollout_ids,
-    )
+    from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+
     from src.funcs import make_hash, safe_abs_limits
-    from rollout_config import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
-    from ui.map import (
+
+    from src.ui.map import (
         visualize_map,
-        get_mask_from_corners,
         get_mask_center,
     )
     from src.ui.plot_variable_change_parallel import plot_variable_change_parallel
+    from src.ui.analysis.analysis_plots import plot_guidance_tracking
+    from src.ui.analysis.helpers import format_time_value, get_time_values, clean_coord_value, get_member_values, member_label, as_numpy_2d, select_xr_field, xr_field_to_array, build_mask_rollouts, mean_rollout_terms, member_rollout_terms
+
+    #####
+    from src.paths import ROLLOUTS, RUN_CONFIGS
+    from src.rollout_config import GUIDANCE_REFERENCES, MASK_MODES
+    from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+
+    from src.ui.analysis.analysis_plots import plot_guidance_tracking
+    from src.ui.map import visualize_map
+    from src.ui.plot_trajectory import plot_trajectory
+    from src.ui.plot_dual_trajectory import plot_dual_trajectory
+
+    from src.utils.dataset_utils import get_x_cond
+    from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
+    from src.utils.setup import get_now_timestamp
+    from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices
+    from src.utils.read_write import (
+        get_xr_dataset,
+        save_to_json, get_rollout_ids, 
+        get_rollout_files,
+        get_dict_from_json
+    )
+
+    from src.funcs import N_schedule, T_schedule
+
+    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
+    from src.target import get_target_trajectory, get_reference_trajectory
 
     return (
         LEVELS_DICT,
         PARTITIONS,
+        ROLLOUTS,
         VARIABLES_DICT,
-        get_mask_center,
-        get_mask_from_corners,
-        _get_rollout_dir_path,
-        get_rollout_ids,
-        make_hash,
-        plot_variable_change_parallel,
-        read_json,
-        safe_abs_limits,
-        visualize_map,
-    )
-
-
-@app.cell
-def _():
-    from src.ui.analysis.analysis_plots import plot_guidance_tracking
-    from src.ui.analysis.helpers import format_time_value, get_time_values, clean_coord_value, get_member_values, member_label, as_numpy_2d, select_xr_field, xr_field_to_array, build_mask_rollouts, mean_rollout_terms, member_rollout_terms
-
-    return (
         build_mask_rollouts,
+        get_dict_from_json,
+        get_level_idx,
+        get_mask_2d,
+        get_mask_center,
+        get_masked_mean,
         get_member_values,
+        get_reference_trajectory,
+        get_rollout_files,
+        get_rollout_ids,
+        get_slices,
+        get_target_trajectory,
+        get_var_idx,
+        make_hash,
         member_rollout_terms,
         plot_guidance_tracking,
+        safe_abs_limits,
+        visualize_map,
         xr_field_to_array,
     )
-
-
-@app.cell
-def _(xr):
-    import torch
-    from geoarches.dataloaders.era5 import (
-        STATS_PATH,
-        pressure_levels,
-        surface_variables,
-        level_variables,
-    )
-
-    _PANGU_STATS = torch.load(
-        STATS_PATH / "pangu_norm_stats2_with_w.pt", weights_only=True
-    )
-    _S_MEAN = _PANGU_STATS["surface_mean"].squeeze().numpy()
-    _S_STD = _PANGU_STATS["surface_std"].squeeze().numpy()
-    _L_MEAN = _PANGU_STATS["level_mean"].squeeze().numpy()
-    _L_STD = _PANGU_STATS["level_std"].squeeze().numpy()
-
-
-    def normalize_xr(xr_state):
-        out = {}
-        for i, v in enumerate(surface_variables):
-            if v in xr_state.data_vars:
-                out[v] = (xr_state[v] - _S_MEAN[i]) / _S_STD[i]
-        for i, v in enumerate(level_variables):
-            if v in xr_state.data_vars:
-                mean_da = xr.DataArray(
-                    _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                std_da = xr.DataArray(
-                    _L_STD[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                out[v] = (xr_state[v] - mean_da) / std_da
-        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
-
-
-    def denormalize_xr(xr_state):
-        out = {}
-        for i, v in enumerate(surface_variables):
-            if v in xr_state.data_vars:
-                out[v] = xr_state[v] * _S_STD[i] + _S_MEAN[i]
-        for i, v in enumerate(level_variables):
-            if v in xr_state.data_vars:
-                mean_da = xr.DataArray(
-                    _L_MEAN[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                std_da = xr.DataArray(
-                    _L_STD[i], dims=["level"], coords={"level": pressure_levels}
-                )
-                out[v] = xr_state[v] * std_da + mean_da
-        return xr.Dataset(out, coords=xr_state.coords, attrs=xr_state.attrs)
-
-    return (normalize_xr,)
 
 
 @app.cell
@@ -164,57 +128,29 @@ def _(get_rollout_ids, mo, refresh_button):
 
     unguided_rollouts = get_rollout_ids("unguided")
     print(unguided_rollouts)
-    pick_rollout_dropdown = mo.ui.dropdown(
-        options=unguided_rollouts,
-        value=unguided_rollouts[0],
-        label="Rollout: ",
+    pick_unguided_rollout_dropdown = mo.ui.dropdown(
+        label="Rollout: ", value=unguided_rollouts[0], options=unguided_rollouts
     )
-    return pick_rollout_dropdown, unguided_rollouts
+    return pick_unguided_rollout_dropdown, unguided_rollouts
 
 
 @app.cell
-def _(mo, pick_rollout_dropdown, refresh_button, unguided_rollouts):
+def _(mo, pick_unguided_rollout_dropdown, refresh_button, unguided_rollouts):
     experiment_selector = mo.hstack(
         [
-            pick_rollout_dropdown,
+            pick_unguided_rollout_dropdown,
             refresh_button,
         ],
         justify="start",
     ) if len(unguided_rollouts) > 0 else refresh_button
-
-    # experiment_selector = mo.vstack(
-    #     [
-    #         experiment_selector,
-    #         mo.accordion(
-    #             {
-    #                 "Experiment params": mo.md(
-    #                     "<br>".join(f"{k}: {v}" for k, v in config.items())
-    #                 ),
-    #             }
-    #         ),
-    #     ]
-    # )
     return (experiment_selector,)
 
 
 @app.cell
-def _(get_rollout_dir_path, pick_rollout_dropdown):
-    rollout_dir = get_rollout_dir_path(pick_rollout_dropdown.value)
-    return (rollout_dir,)
-
-
-@app.cell
-def _():
-    from src.utils.read_write import get_rollout_xr
-
-    return (get_rollout_xr,)
-
-
-@app.cell
-def _(config, get_rollout_xr):
-    unguided_xr = get_rollout_xr(config["rollout_id"], "unguided")
-    ground_truth_xr = get_rollout_xr(config["rollout_id"], "ground_truth")
-    return ground_truth_xr, unguided_xr
+def _(get_rollout_files, pick_unguided_rollout_dropdown):
+    unguided_xr, config_unguided = get_rollout_files("unguided", pick_unguided_rollout_dropdown.value)
+    ground_truth_xr, config_unguided = get_rollout_files("ground_truth", pick_unguided_rollout_dropdown.value)
+    return config_unguided, ground_truth_xr, unguided_xr
 
 
 @app.cell
@@ -224,13 +160,13 @@ def _(experiment_selector):
 
 
 @app.cell
-def _(mo, pick_rollout_dropdown, read_json):
-    experiment_params = read_json(pick_rollout_dropdown.value, "experiment_params")
+def _(Path, ROLLOUTS, get_dict_from_json, mo, pick_unguided_rollout_dropdown):
+    experiment_params = get_dict_from_json(Path(ROLLOUTS, pick_unguided_rollout_dropdown.value, "experiment_params.json"))
 
-    guidance_mode_dropdown = mo.ui.dropdown(
-        options=experiment_params["guidance_mode"],
-        value=experiment_params["guidance_mode"][0],
-        label="guidance mode",
+    guidance_reference_dropdown = mo.ui.dropdown(
+        options=experiment_params["guidance_reference"],
+        value=experiment_params["guidance_reference"][0],
+        label="guidance reference",
     )
 
     alpha_slider = mo.ui.slider(
@@ -251,37 +187,31 @@ def _(mo, pick_rollout_dropdown, read_json):
 
     mo.vstack([
         mo.md("Select experiment: "),
-        guidance_mode_dropdown,
+        guidance_reference_dropdown,
         alpha_slider,
         w_slider,
     ])
-    return alpha_slider, guidance_mode_dropdown, w_slider
+    return alpha_slider, guidance_reference_dropdown, w_slider
 
 
 @app.cell
 def _(
     alpha_slider,
-    guidance_mode_dropdown,
+    config_unguided,
+    get_rollout_files,
+    guidance_reference_dropdown,
     make_hash,
-    rollout_dir,
     w_slider,
-    xr,
 ):
     hash_params = {
-        "guidance_mode": guidance_mode_dropdown.value,
+        "guidance_reference": guidance_reference_dropdown.value,
         "alpha": alpha_slider.value,
         "w": w_slider.value,
     }
 
     guided_id = make_hash(hash_params)
-    guided_xr = xr.open_dataset(rollout_dir / "guided" / guided_id / "guided.nc")
-    return guided_id, guided_xr
-
-
-@app.cell
-def _(guided_id, read_json, rollout_dir):
-    config = read_json(rollout_dir / "guided" / guided_id, "config")
-    return (config,)
+    guided_xr, config_guided = get_rollout_files("guided", config_unguided.rollout_id, guided_id)
+    return config_guided, guided_xr
 
 
 @app.cell
@@ -320,8 +250,8 @@ def _(VARIABLES_DICT, mo, partition):
 
 
 @app.cell
-def _(config, mo):
-    N = config["N"]
+def _(config_unguided, mo):
+    N = config_unguided.N
     n_slider = mo.ui.slider(
         steps=range(1, N + 1),
         value=1,
@@ -329,7 +259,7 @@ def _(config, mo):
         show_value=True,
         debounce=True,
     )
-    return N, n_slider
+    return (n_slider,)
 
 
 @app.cell
@@ -339,8 +269,8 @@ def _(n_slider):
 
 
 @app.cell
-def _(config, get_member_values, guided_xr, mo, unguided_xr):
-    M = config["M"]
+def _(config_unguided, get_member_values, guided_xr, mo, unguided_xr):
+    M = config_unguided.M
     member_values = get_member_values(unguided_xr)
     guided_member_values = get_member_values(guided_xr)
 
@@ -351,7 +281,7 @@ def _(config, get_member_values, guided_xr, mo, unguided_xr):
         show_value=True,
         debounce=True,
     )
-    return M, guided_member_values, m_slider, member_values
+    return guided_member_values, m_slider, member_values
 
 
 @app.cell
@@ -436,9 +366,8 @@ def _(show_values_checkbox):
 
 
 @app.cell
-def _(config, get_mask_from_corners):
-    mask_corners = tuple(config["mask_corners"])
-    mask = get_mask_from_corners(*mask_corners)
+def _(config_unguided, get_mask_2d):
+    mask = get_mask_2d(config_unguided.mask_mode, config_unguided.mask_params)
     return (mask,)
 
 
@@ -495,15 +424,6 @@ def _(
         timestamps,
         unguided_rollout_terms,
     )
-
-
-@app.cell
-def _(config, var):
-    if var.value == config["var"]:
-        planned_guidance = config.get("y", config.get("planned_guidance", None))
-    else:
-        planned_guidance=None
-    return (planned_guidance,)
 
 
 @app.cell
@@ -651,13 +571,45 @@ def _(mo):
 
 
 @app.cell
+def _(get_level_idx, get_var_idx, level, partition, var):
+    var_idx = get_var_idx(partition.value, var.value)
+    level_idx = get_level_idx(partition.value, level.value)
+    return level_idx, var_idx
+
+
+@app.cell
+def _(
+    config_guided,
+    get_masked_mean,
+    get_reference_trajectory,
+    get_slices,
+    get_target_trajectory,
+    level,
+    level_idx,
+    m,
+    mask,
+    partition,
+    var,
+    var_idx,
+):
+    reference_rollout = get_reference_trajectory(config_guided.guidance_reference, config_guided.rollout_id, m=m)
+    planned_guidance = get_target_trajectory(
+        partition.value, var_idx, level_idx,
+        config_guided.delta_trajectory, reference_rollout
+    )
+    N_slices_planned_guidance = get_slices(planned_guidance, partition.value, var.value, level.value)
+    planned_trajectory = get_masked_mean(N_slices_planned_guidance, mask)
+    return (planned_trajectory,)
+
+
+@app.cell
 def _(
     dpi,
     ground_truth_terms,
     guided_rollout_terms,
     m,
     n,
-    planned_guidance,
+    planned_trajectory,
     plot_guidance_tracking,
     selected_guided_terms,
     selected_unguided_terms,
@@ -670,7 +622,7 @@ def _(
         n=n,
         guided_member=selected_guided_terms,
         unguided_member=selected_unguided_terms,
-        target_schedule=planned_guidance,
+        target_schedule=planned_trajectory,
         reference=ground_truth_terms,
         unguided_ensemble=unguided_rollout_terms,
         guided_ensemble=guided_rollout_terms,
@@ -970,12 +922,7 @@ def _(mo):
         [top_k_slider, rank_by_radio, log_y_checkbox],
         justify="start",
     )
-    return (
-        log_y_checkbox,
-        rank_by_radio,
-        top_k_slider,
-        variable_change_controls,
-    )
+    return (variable_change_controls,)
 
 
 @app.cell
@@ -985,131 +932,27 @@ def _(variable_change_controls):
 
 
 @app.cell
-def _(np):
-    def per_var_level_mean_abs(diff):
-        out = {}
-        for v, da in diff.data_vars.items():
-            a = abs(da)
-            if "level" in a.dims:
-                for lv in a.level.values:
-                    out[f"{v}-{int(lv)}"] = float(
-                        a.sel(level=lv).mean(skipna=True).item()
-                    )
-            else:
-                out[f"{v}-surface"] = float(a.mean(skipna=True).item())
-        return out
-
-
-    def collapse_levels(d):
-        s, c = {}, {}
-        for k, v in d.items():
-            var, _ = k.rsplit("-", 1)
-            s[var] = s.get(var, 0.0) + v
-            c[var] = c.get(var, 0) + 1
-        return {k: s[k] / c[k] for k in s}
-
-
-    def aggregate_members(dicts):
-        keys = list(dicts[0].keys())
-        arr = np.array([[d[k] for k in keys] for d in dicts], dtype=float)
-        return {
-            "keys": keys,
-            "mean": arr.mean(0),
-            "err": arr.std(0),
-            "values": arr,
-        }
-
-
-    def zdiff_per_n(guided_z, unguided_z, N, M, transform=lambda d: d):
-        return [
-            [
-                transform(
-                    per_var_level_mean_abs(
-                        guided_z.isel(time=n, member=m)
-                        - unguided_z.isel(time=n, member=m)
-                    )
-                )
-                for m in range(int(M))
-            ]
-            for n in range(int(N))
-        ]
-
-    return aggregate_members, collapse_levels, zdiff_per_n
+def _():
+    return
 
 
 @app.cell
-def _(
-    M,
-    N,
-    aggregate_members,
-    collapse_levels,
-    guided_xr,
-    normalize_xr,
-    unguided_xr,
-    zdiff_per_n,
-):
-    guided_z = normalize_xr(guided_xr)
-    unguided_z = normalize_xr(unguided_xr)
-
-    per_channel_agg = [
-        aggregate_members(d) for d in zdiff_per_n(guided_z, unguided_z, N, M)
-    ]
-    per_var_agg = [
-        aggregate_members(d)
-        for d in zdiff_per_n(guided_z, unguided_z, N, M, collapse_levels)
-    ]
-    return per_channel_agg, per_var_agg
+def _():
+    return
 
 
 @app.cell
-def _(
-    log_y_checkbox,
-    per_channel_agg,
-    plot_variable_change_parallel,
-    rank_by_radio,
-    top_k_slider,
-):
-    yscale = "log" if log_y_checkbox.value else "linear"
-
-    var_change_plot, _ = plot_variable_change_parallel(
-        per_channel_agg,
-        top_k=top_k_slider.value,
-        rank_by=rank_by_radio.value,
-        yscale=yscale,
-        title="Variable change",
-        subtitle="all variables",
-        ylim=None,
-        ylabel="mean |z-diff|",
-        show_unselected=True,
-    )
-    return var_change_plot, yscale
+def _():
+    return
 
 
 @app.cell
-def _(
-    per_var_agg,
-    plot_variable_change_parallel,
-    rank_by_radio,
-    top_k_slider,
-    yscale,
-):
-    var_agg_change_plot, _ = plot_variable_change_parallel(
-        per_var_agg,
-        top_k=top_k_slider.value,
-        rank_by=rank_by_radio.value,
-        yscale=yscale,
-        title="Variable change",
-        subtitle="levels aggregated",
-        ylim=None,
-        ylabel="mean |z-diff|",
-        show_unselected=True,
-    )
-    return (var_agg_change_plot,)
+def _():
+    return
 
 
 @app.cell
-def _(mo, var_agg_change_plot, var_change_plot):
-    mo.hstack([var_change_plot, var_agg_change_plot], justify="start")
+def _():
     return
 
 

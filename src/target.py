@@ -1,27 +1,33 @@
 import xarray as xr
 
 from src.utils.read_write import (
-    get_rollout_xr,
+    get_rollout_files,
 )
 from src.dimensions import LEVELS_DICT, VARIABLES_DICT
+
 
 def get_target_trajectory(
     partition,
     var_idx,
     level_idx,
     delta_trajectory,
-    reference_trajectory: xr.Dataset,
-):  
-    # TODO: do I really need this?
-    target = reference_trajectory.copy()
-    var_name = VARIABLES_DICT[partition][var_idx]
+    reference_trajectory,
+):
+    target = reference_trajectory.copy(deep=True)
 
-    for n, delta_n in enumerate(delta_trajectory):
-        if partition == "surface":
-            target[var_name].isel(time=n).values[:] *= 1.0 + delta_n
-        else:
-            level_val = LEVELS_DICT["level"][level_idx]
-            target[var_name].sel(level=level_val).isel(time=n).values[:] *= 1.0 + delta_n
+    var_name = VARIABLES_DICT[partition][var_idx]
+    target[var_name].load()
+    arr = target[var_name].values
+
+    if partition == "surface":
+        for n, d in enumerate(delta_trajectory):
+            arr[n] += float(d) * abs(arr[n])
+    else:
+        level_val = LEVELS_DICT["level"][level_idx]
+        li = list(target.level.values).index(level_val)
+
+        for n, d in enumerate(delta_trajectory):
+            arr[n, li] += float(d) * abs(arr[n, li])
 
     return target
 
@@ -33,11 +39,11 @@ def get_reference_trajectory(
 ):
     match guidance_reference:
         case "ground_truth":
-            rollout = get_rollout_xr(rollout_id, "ground_truth")
+            rollout, _ = get_rollout_files("ground_truth", rollout_id)
             reference_trajectory = rollout
 
         case "unguided_members":
-            rollout = get_rollout_xr(rollout_id, "unguided")
+            rollout, _ = get_rollout_files("unguided", rollout_id)
             reference_trajectory = rollout.sel(member=m)
 
         # TODO: need to move this to get trajectory or move everything together, 

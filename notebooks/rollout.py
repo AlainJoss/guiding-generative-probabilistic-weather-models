@@ -36,16 +36,15 @@ def _():
 
     from src.utils.setup import get_now_timestamp
     from src.utils.read_write import (
-        get_xr_dataset, 
-        save_to_json, read_json, get_rollout_ids, get_rollout_xr,
-        get_rollout_config
+        get_xr_dataset,
+        save_to_json, get_dict_from_json, get_rollout_ids, get_rollout_files
     )
     from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
     from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices
 
     from src.funcs import N_schedule, T_schedule
 
-    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners
+    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
 
     return (
         LEVELS_DICT,
@@ -59,6 +58,7 @@ def _():
         get_mask_2d,
         get_masked_mean,
         get_masked_slices,
+        get_mu_sigma,
         get_now_timestamp,
         get_timestamps,
         get_var_idx,
@@ -290,42 +290,17 @@ def _(N_slices, get_corners, np, set_corners, slice, visualize_map):
 
 
 @app.cell
-def _(lat_bottom, lat_top, lon_left, lon_right):
-    def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
-        H, W = 121, 240
-
-        mu_lon = (lon_left + lon_right) / 2
-        mu_lat = (lat_bottom + lat_top) / 2
-
-        sigma_lon = lon_right - lon_left
-        sigma_lat = lat_top - lat_bottom
-
-        mu_row = (90.0 - mu_lat) / 180.0 * H
-        mu_col = (mu_lon + 180.0) / 360.0 * W
-
-        sigma_row = sigma_lat / 180.0 * H
-        sigma_col = sigma_lon / 360.0 * W
-
-        mu = (mu_row, mu_col)
-        sigma = (sigma_row, sigma_col)
-        return mu, sigma
-
-    mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
-    return mu, sigma
-
-
-@app.cell
 def _(
     get_mask_2d,
+    get_mu_sigma,
     lat_bottom,
     lat_top,
     lon_left,
     lon_right,
     mask_mode,
-    mu,
-    sigma,
 ):
     mask_params = None
+    mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
     match mask_mode.value:
         case "bbox":
             mask_params = [lon_left, lon_right, lat_bottom, lat_top]
@@ -416,16 +391,6 @@ def _(RUN_CONFIGS, config, config_button, get_now_timestamp, save_to_json):
         config.rollout_id=rollout_id
         run_dir = RUN_CONFIGS / "unguided"
         save_to_json(config.to_dict(), run_dir, f"{rollout_id}")
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
     return
 
 

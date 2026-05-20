@@ -15,11 +15,11 @@ ROLLOUT_TYPES = ["unguided", "guided"]
 GUIDANCE_REFERENCES = [
     "unguided_members",
     "ground_truth",
-    "lower_boundary",
-    "upper_boundary",
+    # "lower_boundary",
+    # "upper_boundary",
 ]
 
-GUIDANCE_PARAMS = ["guidance_mode", "alpha", "w"]
+GUIDANCE_PARAMS = ["guidance_reference", "alpha", "w"]
 
 MASK_MODES = ["bbox", "normal"]
 
@@ -67,19 +67,10 @@ class RolloutConfig:
             mask_params=config.get("mask_params"),
 
             guidance_reference=config.get("guidance_reference"),
-            delta_trajectory=(
-                None
-                if config.get("delta_trajectory") is None
-                else list_floats_to_tensors(config["delta_trajectory"])
-            ),
-
+            delta_trajectory=config.get("delta_trajectory"),
             alpha=config.get("alpha"),
             w=config.get("w"),
-            lambda_schedule=(
-                None
-                if config.get("lambda_schedule") is None
-                else list_floats_to_tensors(config["lambda_schedule"])
-            ),
+            lambda_schedule=config.get("lambda_schedule")
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,17 +90,9 @@ class RolloutConfig:
             "mask_params": self.mask_params,
 
             "guidance_reference": self.guidance_reference,
-            "delta_trajectory": (
-                None
-                if self.delta_trajectory is None
-                else list_tensors_to_floats(self.delta_trajectory)
-            ),
+            "delta_trajectory": self.delta_trajectory,
 
             "alpha": self.alpha,
             "w": self.w,
-            "lambda_schedule": (
-                None
-                if self.lambda_schedule is None
-                else list_tensors_to_floats(self.lambda_schedule)
-            ),
+            "lambda_schedule": self.lambda_schedule
         }

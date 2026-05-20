@@ -9,6 +9,26 @@ from src.dimensions import LEVELS_DICT, VARIABLES_DICT
 from src.rollout_config import RolloutConfig
 
 
+def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
+    H, W = 121, 240
+
+    mu_lon = (lon_left + lon_right) / 2
+    mu_lat = (lat_bottom + lat_top) / 2
+
+    sigma_lon = lon_right - lon_left
+    sigma_lat = lat_top - lat_bottom
+
+    mu_row = (90.0 - mu_lat) / 180.0 * H
+    mu_col = (mu_lon + 180.0) / 360.0 * W
+
+    sigma_row = sigma_lat / 180.0 * H
+    sigma_col = sigma_lon / 360.0 * W
+
+    mu = (mu_row, mu_col)
+    sigma = (sigma_row, sigma_col)
+    return mu, sigma
+
+
 def get_masked_mean(N_slices: np.ndarray, mask: np.ndarray):
     """
     mask == normal: weights sum to 1.

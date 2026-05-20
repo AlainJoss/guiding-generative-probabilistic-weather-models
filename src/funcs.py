@@ -40,13 +40,11 @@ def make_hash(params):
 def N_schedule(
     N: int,
     flatness: float,
-    peak: float,
-    alpha: float = 0.0,
+    peak_magnitude: float,
     peak_at_n: int | None = None,
 ) -> list[float]:
     if N < 1:
         raise ValueError("N must be >= 1")
-
     if flatness <= 0:
         raise ValueError("flatness must be > 0")
 
@@ -54,33 +52,21 @@ def N_schedule(
         peak_at_n = N // 2
 
     if not (1 <= peak_at_n <= N):
-        raise ValueError(
-            f"For N >= 1, peak_at_n must be in [1, {N}], got {peak_at_n}"
-        )
+        raise ValueError(f"peak_at_n must be in [1, {N}], got {peak_at_n}")
 
     values = []
 
     for n in range(N + 1):
-        if n == 0:
-            value = 0.0
-
-        elif n <= peak_at_n:
-            # Smooth rise from 0 at index 0 to 1 at index peak_at_n
+        if n <= peak_at_n:
             x = n / peak_at_n
-            bump = 0.5 * (1.0 - math.cos(math.pi * x))
-            value = (alpha + peak) * (bump ** flatness)
-
+            s = math.sin(0.5 * math.pi * x)
         else:
-            # Smooth fall from 1 at index peak_at_n to 0 at index N
-            # Only reached when peak_at_n < N
-            x = (n - peak_at_n) / (N - peak_at_n)
-            bump = 0.5 * (1.0 + math.cos(math.pi * x))
-            value = (alpha + peak) * (bump ** flatness)
+            x = (N - n) / (N - peak_at_n)
+            s = math.sin(0.5 * math.pi * x)
 
-        values.append(value)
+        values.append(peak_magnitude * s**flatness)
 
     return values
-
 
 def T_schedule(alpha: float, w: float): 
     T=25
@@ -96,26 +82,26 @@ def T_schedule(alpha: float, w: float):
 #     return mean_trajectory
 
 
-# def safe_abs_limits(arrays):
-#     vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
-#     vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
+def safe_abs_limits(arrays):
+    vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
+    vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
 
-#     if vmax <= vmin:
-#         vmax = vmin + 1e-9
+    if vmax <= vmin:
+        vmax = vmin + 1e-9
 
-#     center = 0.5 * (vmin + vmax)
-#     center = min(max(center, vmin + 1e-9), vmax - 1e-9)
+    center = 0.5 * (vmin + vmax)
+    center = min(max(center, vmin + 1e-9), vmax - 1e-9)
 
-#     return vmin, vmax, center
+    return vmin, vmax, center
 
 
-# def safe_diff_absmax(arrays):
-#     absmax = max(
-#         float(np.nanmax(np.abs(np.asarray(arr))))
-#         for arr in arrays
-#     )
+def safe_diff_absmax(arrays):
+    absmax = max(
+        float(np.nanmax(np.abs(np.asarray(arr))))
+        for arr in arrays
+    )
 
-#     if absmax <= 0:
-#         absmax = 1e-8
+    if absmax <= 0:
+        absmax = 1e-8
 
-#     return absmax
+    return absmax
