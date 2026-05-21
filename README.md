@@ -6,11 +6,15 @@ Resources:
 Run analysis:
 ```bash
 python -m src.runners.run_all_configs --rollout_type unguided
-python -m src.runners.run_from_config --rollout_id "2026-05-19_15:55:28" --rollout_type unguided --test
+python -m src.runners.run_from_config --rollout_id "2026-05-21_16:45:02" --rollout_type unguided --test
 ```
 
 Notebooks:
 ```bash
+# new one all in once
+uv run marimo edit notebooks/guidance.py --watch --no-token
+
+# old separate ones kept for consistency
 uv run marimo edit notebooks/rollout.py --watch --no-token
 uv run marimo edit notebooks/guide.py --watch --no-token
 uv run marimo edit notebooks/analyze.py --watch --no-token

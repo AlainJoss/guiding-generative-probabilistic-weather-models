@@ -9,10 +9,16 @@ Rollouts:
 - implement hydra experiment for automatic logging instead of bash script?
 
 Analysis:
-- reimplement puckchart option
+- visualize unguided from guided at n so we can always know what the guidance is producing compared to the unguided model
 - explainers for all variables
+- new analysis over T:
+    - realized vs. planned guidance
+    - gradients
+    - vector fields
 
 Guidance:
+- sweep var to test how model function reacts: see whether guided percentage corresponds in untargeted guided version. 
+For instance t2m-mslp and mslp-t2m
 - define masks with physical priors
 - define masks dynamically in N
 - define weighted average Gaussian Kernel or future difference around region in loss function. Refine latex-notes with new definition of mask.

@@ -34,7 +34,8 @@ def get_masked_mean(N_slices: np.ndarray, mask: np.ndarray):
     mask == normal: weights sum to 1.
     mask == bbox: weights sum to count(mask!=0)
     """
-    return N_slices.sum(axis=(-1,-2)) / mask.sum()
+    masked_slices = get_masked_slices(N_slices, mask)
+    return masked_slices.sum(axis=(-1,-2))
 
 
 def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):

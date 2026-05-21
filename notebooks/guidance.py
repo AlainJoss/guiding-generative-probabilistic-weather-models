@@ -86,6 +86,8 @@ def _(get_xr_dataset):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    - shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
+    - Use daterange calendar for presentation -> use in guided and analysis modes
     - I'm hiding the lambda_schedule from the ui for now to simplify things.
     """)
     return
@@ -94,7 +96,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Guidance experiments
+    # Guiding Generative Probabilistic Weather Models
     """)
     return
 
@@ -102,22 +104,23 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Setup
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    - shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
-    - Use daterange calendar for presentation -> use in guided and analysis modes
+    ## Experiment
     """)
     return
 
 
 @app.cell
 def _(mo):
+    refresh_button = mo.ui.run_button(label="refresh")
+    refresh_button
+    return (refresh_button,)
+
+
+@app.cell
+def _(mo, refresh_button):
+    if refresh_button.value:
+        pass
+    
     NOTEBOOK_MODES = ["unguided_rollout", "guided_rollout", "analyze_rollout"]
     notebook_mode_dropdown = mo.ui.dropdown(
         options=NOTEBOOK_MODES,
@@ -131,9 +134,7 @@ def _(mo):
 def _(get_rollout_ids, mo, notebook_mode_dropdown):
     notebook_mode = notebook_mode_dropdown.value
 
-    save_config_button = mo.ui.button(
-        label="save config"
-    )
+    save_config_button = mo.ui.run_button(label="save config")
     match notebook_mode:
         case "unguided_rollout":
             ROLLOUT_IDS=[]
@@ -164,7 +165,6 @@ def _(
     N,
     RUN_CONFIGS,
     RolloutConfig,
-    alpha,
     delta_trajectory,
     guidance_flag,
     guidance_reference,
@@ -178,27 +178,25 @@ def _(
     save_to_json,
     timestamp,
     var,
-    w,
 ):
-    if save_config_button.value and notebook_mode!="analyze_rollout":
-        save_config = RolloutConfig(
-            rollout_id=rollout_id,
-            guidance_flag=guidance_flag,
-            M=M,
-            N=N,
-            timestamp=timestamp,  
-            level=level,
-            partition=partition,
-            var=var,
-            mask_mode=mask_mode,
-            mask_corners=mask_corners,
-            guidance_reference=guidance_reference,
-            delta_trajectory=delta_trajectory,
-            alpha=alpha,
-            w=w
-        )
-        run_dir = RUN_CONFIGS / "unguided"
-        save_to_json(save_config.to_dict(), run_dir, f"{rollout_id}")
+    if save_config_button is not None:
+        if save_config_button.value and notebook_mode!="analyze_rollout":
+            save_config = RolloutConfig(
+                rollout_id=rollout_id,
+                guidance_flag=guidance_flag,
+                M=M,
+                N=N,
+                timestamp=timestamp,  
+                level=level,
+                partition=partition,
+                var=var,
+                mask_mode=mask_mode,
+                mask_corners=mask_corners,
+                guidance_reference=guidance_reference,
+                delta_trajectory=delta_trajectory,
+            )
+            run_dir = RUN_CONFIGS / "unguided"
+            save_to_json(save_config.to_dict(), run_dir, f"{rollout_id}")
     return
 
 
@@ -218,32 +216,31 @@ def _(
             sweep_params_widget = None
         case "analyze_rollout":
             experiment_params = get_dict_from_json(Path(ROLLOUTS, rollout_id, "experiment_params.json"))
-                
+
             # TODO: decide between the two depending on notebook mode
             guidance_reference_dropdown = mo.ui.dropdown(
                 options=experiment_params["guidance_reference"],
                 value=experiment_params["guidance_reference"][0],
                 label="guidance reference",
             )
-        
+
             alpha_slider = mo.ui.slider(
                 steps=experiment_params["alpha"],
                 value=experiment_params["alpha"][0],
-                label="alpha",
+                label="alpha: ",
                 debounce=True,
                 show_value=True
             )
-        
+
             w_slider = mo.ui.slider(
                 steps=experiment_params["w"],
                 value=experiment_params["w"][0],
-                label="w",
+                label="w: ",
                 debounce=True,
                 show_value=True
             )
-        
+
             sweep_params_widget = mo.vstack([
-                mo.md("Select experiment: "),
                 guidance_reference_dropdown,
                 alpha_slider,
                 w_slider,
@@ -323,6 +320,7 @@ def _(
     # conf params 
     match notebook_mode:
         case "unguided_rollout":
+            guidance_flag=False
             M=M_slider.value
             N=N_slider.value
             month=month_slider.value
@@ -331,6 +329,7 @@ def _(
             timestamp = get_timestamp_from_sliders(month, day, hour)
             map_interactive = True
         case "guided_rollout":
+            guidance_flag=True
             M=config.M
             N=config.N
             month=None
@@ -339,6 +338,7 @@ def _(
             timestamp=config.timestamp
             map_interactive = True
         case "analyze_rollout":
+            guidance_flag=None
             M=config.M
             N=config.N
             month=None
@@ -350,7 +350,7 @@ def _(
             pass
 
     timestamps=get_N_timestamps(timestamp, N+1)
-    return M, N, map_interactive, timestamp, timestamps
+    return M, N, guidance_flag, map_interactive, timestamp, timestamps
 
 
 @app.cell
@@ -421,12 +421,20 @@ def _(
             # TODO: check whether always M -> think not
             target_slices = get_slices(target_rollout, partition, var, level)
             target_trajectory = get_masked_mean(target_slices, mask)
-        
         case "analyze_rollout":        
             mask_corners=config.mask_corners # should be a sweep param mask_corners_dropdown.value
             mu, sigma = get_mu_sigma(*mask_corners)
             mask=get_mask_2d(mask_mode, mask_corners)
-            delta_trajectory=None #delta_trajectory_dropdown.value
+            delta_trajectory=config.delta_trajectory
+            reference_rollout = get_reference_rollout(guidance_reference, rollout_id, m=m)
+            # TODO: not sure if this good
+            target_rollout = get_target_rollout(
+                partition, var_idx, level_idx,
+                delta_trajectory, reference_rollout
+            )
+            # TODO: check whether always M -> think not
+            target_slices = get_slices(target_rollout, partition, var, level)
+            target_trajectory = get_masked_mean(target_slices, mask)
         case _:
             pass
     return delta_trajectory, mask, mask_corners, target_trajectory
@@ -485,7 +493,7 @@ def _(
             ung_M_N_trajectories = get_masked_mean(ung_M_N_slices, mask)
             ung_mean_trajectory = ung_M_N_trajectories.mean(axis=0)
             ung_m_trajectory = ung_M_N_trajectories[m]
-            ung_lb_trajectory,  ung_M_N_trajectories.min(axis=0)
+            ung_lb_trajectory = ung_M_N_trajectories.min(axis=0)
             ung_ub_trajectory = ung_M_N_trajectories.max(axis=0)
 
             gui_M_N_slices = get_slices(unguided_xr, partition, var, level)
@@ -665,7 +673,7 @@ def _(N, delta_bounds_slider, delta_granularity_slider, mo):
         start=1,
         stop=N,
         step=1,
-        value=N // 2,
+        value=N // 2 if N >1 else 1,
         label="delta_peak @ n: ",
         show_value=True,
         debounce=True,
@@ -688,14 +696,15 @@ def _(delta_peak_slider):
 
 
 @app.cell
-def _():
-    return
-
-
-@app.cell
 def _(guidance_reference_dropdown):
     guidance_reference = guidance_reference_dropdown.value
     return (guidance_reference,)
+
+
+@app.cell
+def _():
+    # presentation widgets
+    return
 
 
 @app.cell
@@ -723,8 +732,6 @@ def _(
     var_dropdown,
     weather_map,
 ):
-    # presentation level widgets
-
     timestamp_widget=mo.hstack([month_slider, day_slider, hour_slider], justify="start")
     M_N_widget = mo.hstack([M_slider, N_slider], justify="start")
     m_n_widget = mo.hstack([m_slider, n_slider], justify="start")
@@ -756,8 +763,8 @@ def _(
             mask_widget=mask_widget
         case "guided_rollout":
             trajectory_widget=mo.vstack([
-                m_n_widget,
                 guidance_reference_dropdown,
+                m_n_widget,
                 delta_widget,
                 trajectories_plot
             ])
@@ -770,33 +777,20 @@ def _(
             mask_widget=None
         case _:
             pass
-
     return mask_widget, trajectory_widget
 
 
-@app.cell
-def _(sweep_params_widget):
-    sweep_params_widget
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Trajectories
+    """)
     return
 
 
 @app.cell
 def _(trajectory_widget):
     trajectory_widget
-    return
-
-
-@app.cell
-def _(mask_widget):
-    mask_widget
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Trajectories analysis
-    """)
     return
 
 
@@ -852,8 +846,14 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## Rollout analysis
+    ## Mask
     """)
+    return
+
+
+@app.cell
+def _(mask_widget):
+    mask_widget
     return
 
 
@@ -886,12 +886,13 @@ def _(
         figsize=(12, 5),
         dpi=200,
     )
-    weather_map.widget.observe(
-        lambda _c: set_corners(
-            (*sorted(weather_map.widget.x), *sorted(weather_map.widget.y))
-        ),
-        names=["x", "y"],
-    )
+    if map_interactive:
+        weather_map.widget.observe(
+            lambda _c: set_corners(
+                (*sorted(weather_map.widget.x), *sorted(weather_map.widget.y))
+            ),
+            names=["x", "y"],
+        )
     return (weather_map,)
 
 
@@ -913,8 +914,23 @@ def _(mask, mask_corners, np, visualize_map):
 
 
 @app.cell
+def _(mo):
+    mo.md(r"""
+    ## Flow
+    """)
+    return
+
+
+@app.cell
 def _():
-    rollout_analysis_widget = ...
+    return
+
+
+@app.cell
+def _(alpha_slider, mo):
+    mo.hstack([
+        alpha_slider, 
+    ])
     return
 
 
