@@ -19,7 +19,7 @@ from src.utils.converters import (
 from src.utils.setup import ensure_rollout_dir, get_device
 from src.funcs import make_hash
 from src.rollout_config import GUIDANCE_PARAMS, RolloutConfig
-from src.target import get_reference_trajectory, get_target_trajectory
+from src.target import get_reference_rollout, get_target_rollout
 from src.mask import get_mask_tdict
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
@@ -43,27 +43,13 @@ def rollout(
     # TODO: clean this bs
     lead_time_hours = int(x_cond["lead_time_hours"].cpu().flatten()[0].item())
 
-    if (not config.guidance_flag) or test:
-        ground_truth = torch.cat(
-            [x_cond["state"].unsqueeze(1), x_cond["future_states"]],  # unsqueeze adds batch dim
-            dim=1,
-        )
-        ground_truth = rollout_to_xarray(
-            ds=ds,
-            sample_multistep=ground_truth,
-            init_timestamp=x_cond["timestamp"],
-            member=-1,
-            lead_time_hours=lead_time_hours,
-            include_init=True,
-        )
-
     member_datasets = []
     for m in range(config.M):
         logger.info(f"sampling member={m}")
 
         if config.guidance_flag and not test and config.reference != "sampled_trajectory":
-            reference_trajectory = get_reference_trajectory(config, m)
-            target_trajectory = get_target_trajectory(config, reference_trajectory)
+            reference_trajectory = get_reference_rollout(config, m)
+            target_trajectory = get_target_rollout(config, reference_trajectory)
             target_tdicts = [
                 xr_rollout_slice_to_tdict(target_trajectory.isel(time=n))[None].to(device)
                 for n in range(config.N)
@@ -121,4 +107,3 @@ def rollout(
     else:
         save_to_json(config_dict, rollout_dir, "config")
         xr_pred.to_netcdf(rollout_dir / "unguided.nc")
-        ground_truth.to_netcdf(rollout_dir / "ground_truth.nc")

@@ -28,6 +28,9 @@ MASK_MODES = ["bbox", "normal"]
 # TODO: should I actually implement Enums instead of lists?
 @dataclass
 class RolloutConfig:
+
+    ### fixed params
+
     rollout_id: str | None = None
     guidance_flag: bool | None = None
 
@@ -39,15 +42,16 @@ class RolloutConfig:
     level: int | None = None
     var: str | None = None
 
+    ### sweep params -> save them in config to use in rollout, but not extracted 
+
     mask_mode: str | None = None
-    mask_params: Any | None = None
+    mask_corners: Any | None = None
 
     guidance_reference: str | None = None
     delta_trajectory: list[torch.Tensor] | None = None
 
     alpha: float | None = None
     w: float | None = None
-    lambda_schedule: list[torch.Tensor] | None = None
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
@@ -64,13 +68,12 @@ class RolloutConfig:
             var=config.get("var"),
 
             mask_mode=config.get("mask_mode"),
-            mask_params=config.get("mask_params"),
+            mask_corners=config.get("mask_corners"),
 
             guidance_reference=config.get("guidance_reference"),
             delta_trajectory=config.get("delta_trajectory"),
             alpha=config.get("alpha"),
             w=config.get("w"),
-            lambda_schedule=config.get("lambda_schedule")
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -87,12 +90,11 @@ class RolloutConfig:
             "var": self.var,
 
             "mask_mode": self.mask_mode,
-            "mask_params": self.mask_params,
+            "mask_corners": self.mask_corners,
 
             "guidance_reference": self.guidance_reference,
             "delta_trajectory": self.delta_trajectory,
 
             "alpha": self.alpha,
             "w": self.w,
-            "lambda_schedule": self.lambda_schedule
         }

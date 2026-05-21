@@ -55,7 +55,7 @@ def _():
     from src.funcs import N_schedule, T_schedule
 
     from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
-    from src.target import get_target_trajectory, get_reference_trajectory
+    from src.target import get_target_rollout, get_reference_rollout
 
     return (
         LEVELS_DICT,
@@ -69,11 +69,9 @@ def _():
         get_mask_center,
         get_masked_mean,
         get_member_values,
-        get_reference_trajectory,
         get_rollout_files,
         get_rollout_ids,
         get_slices,
-        get_target_trajectory,
         get_var_idx,
         make_hash,
         member_rollout_terms,
@@ -366,8 +364,15 @@ def _(show_values_checkbox):
 
 
 @app.cell
-def _(config_unguided, get_mask_2d):
-    mask = get_mask_2d(config_unguided.mask_mode, config_unguided.mask_params)
+def _(config_unguided):
+    corners = config_unguided.mask_params 
+    corners = corners[0] + corners[1]
+    return (corners,)
+
+
+@app.cell
+def _(config_unguided, corners, get_mask_2d):
+    mask = get_mask_2d(config_unguided.mask_mode, corners)
     return (mask,)
 
 

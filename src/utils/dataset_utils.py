@@ -68,7 +68,6 @@ def get_N_states(ds: xr.Dataset, N: int, timestamp: datetime):
     # alternatively
     # timestamp = timestamp.replace(tzinfo=None)
     timestamps = get_N_timestamps(timestamp, N)
-    print(len(timestamps))
     return ds.sel(time=timestamps)
 
 

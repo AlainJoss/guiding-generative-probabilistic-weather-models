@@ -31,7 +31,7 @@ def _():
     from src.funcs import N_schedule, T_schedule
 
     from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
-    from src.target import get_target_trajectory, get_reference_trajectory
+    from src.target import get_target_rollout, get_reference_rollout
 
     return (
         GUIDANCE_REFERENCES,
@@ -47,11 +47,9 @@ def _():
         get_mask_2d,
         get_masked_mean,
         get_mu_sigma,
-        get_reference_trajectory,
         get_rollout_files,
         get_rollout_ids,
         get_slices,
-        get_target_trajectory,
         get_var_idx,
         get_xr_dataset,
         mo,
@@ -125,58 +123,58 @@ def _(get_level_idx, get_var_idx, level, partition, var):
 
 @app.cell
 def _(mo):
-    w_slider = mo.ui.slider(1, 3, value=1.0, label="w: ", step=1, show_value=True, debounce=True)
+    lambda_w_slider = mo.ui.slider(1, 3, value=1.0, label="w: ", step=1, show_value=True, debounce=True)
     lambda_shape_slider = mo.ui.slider(1.0, 3.0, step=1, value=1.0, label="$\\alpha$: ", show_value=True, debounce=True)
-    return lambda_shape_slider, w_slider
+    return lambda_shape_slider, lambda_w_slider
 
 
 @app.cell
-def _(T_schedule, lambda_shape_slider, w_slider):
-    lambda_ = T_schedule(lambda_shape_slider.value, w_slider.value) 
-    return (lambda_,)
+def _(T_schedule, lambda_shape_slider, lambda_w_slider):
+    lambda_schedule = T_schedule(lambda_shape_slider.value, lambda_w_slider.value) 
+    return (lambda_schedule,)
 
 
 @app.cell
 def _(mo):
-    min_max_lambda_slider = mo.ui.slider(
+    delta_bounds_slider = mo.ui.slider(
         steps=[5, 10, 25, 50, 100], value=10, label="bounds (%): ", show_value=True
     )
-    return (min_max_lambda_slider,)
+    return (delta_bounds_slider,)
 
 
 @app.cell
 def _(mo):
-    peak_granularity_slider = mo.ui.slider(
+    delta_granularity_slider = mo.ui.slider(
         steps=[0.1, 0.5, 1, 2, 5],
         value=1,
         label="granularity (%): ",
         show_value=True,
     )
-    return (peak_granularity_slider,)
+    return (delta_granularity_slider,)
 
 
 @app.cell
-def _(min_max_lambda_slider, mo, peak_granularity_slider):
-    peak_slider = mo.ui.slider(
-        -min_max_lambda_slider.value,
-        min_max_lambda_slider.value,
+def _(delta_bounds_slider, delta_granularity_slider, mo):
+    delta_peak_slider = mo.ui.slider(
+        -delta_bounds_slider.value,
+        delta_bounds_slider.value,
         value=0,
-        step=peak_granularity_slider.value,
-        label="peak (%): ",
+        step=delta_granularity_slider.value,
+        label="delta_peak (%): ",
         show_value=True,
     )
-    return (peak_slider,)
+    return (delta_peak_slider,)
 
 
 @app.cell
-def _(peak_slider):
-    peak = peak_slider.value / 100
-    return (peak,)
+def _(delta_peak_slider):
+    delta_peak = delta_peak_slider.value / 100
+    return (delta_peak,)
 
 
 @app.cell
 def _(mo):
-    shape_slider = mo.ui.slider(
+    delta_shape_slider = mo.ui.slider(
         start=0.5,
         stop=10.0,
         step=0.5,
@@ -184,21 +182,21 @@ def _(mo):
         label="shape: ",
         show_value=True,
     )
-    return (shape_slider,)
+    return (delta_shape_slider,)
 
 
 @app.cell
 def _(config, mo):
-    peak_at_slider = mo.ui.slider(
+    delta_peak_at_slider = mo.ui.slider(
         start=1,
         stop=config.N,
         step=1,
         value=config.N // 2,
-        label="peak @ n: ",
+        label="delta_peak @ n: ",
         show_value=True,
         debounce=True,
     )
-    return (peak_at_slider,)
+    return (delta_peak_at_slider,)
 
 
 @app.cell
@@ -249,9 +247,15 @@ def _(M_N_masked_means_ung):
 
 
 @app.cell
-def _(N_schedule, config, peak, peak_at_slider, shape_slider):
+def _(
+    N_schedule,
+    config,
+    delta_peak,
+    delta_peak_at_slider,
+    delta_shape_slider,
+):
     delta_trajectory = N_schedule(
-        config.N, shape_slider.value, peak, peak_at_n=peak_at_slider.value
+        config.N, delta_shape_slider.value, delta_peak, peak_at_n=delta_peak_at_slider.value
     )
     return (delta_trajectory,)
 
@@ -355,8 +359,8 @@ def _(N_slices_gt, N_slices_ung, get_masked_mean, mask):
 
 @app.cell
 def _(M_N_masked_means_ung):
-    mean_unguided_rollout = M_N_masked_means_ung.mean(axis=0)
-    return (mean_unguided_rollout,)
+    mean_rollout_ung = M_N_masked_means_ung.mean(axis=0)
+    return (mean_rollout_ung,)
 
 
 @app.cell
@@ -365,7 +369,7 @@ def _(
     N_masked_means_gt,
     delta_trajectory,
     m,
-    mean_unguided_rollout,
+    mean_rollout_ung,
     planned_trajectory,
     plot_dual_trajectory,
     reference_trajectory,
@@ -378,7 +382,7 @@ def _(
         unguided_member=unguided_member,
         reference_trajectory=reference_trajectory,
         m=m.value,
-        mean_rollout=mean_unguided_rollout,
+        mean_rollout=mean_rollout_ung,
         ground_truth=N_masked_means_gt,
         planned_guidance=planned_trajectory,
         y_trajectory=delta_trajectory,
@@ -428,27 +432,10 @@ def _(mo):
 
 
 @app.cell
-def _(
-    get_mask_2d,
-    get_mu_sigma,
-    lat_bottom,
-    lat_top,
-    lon_left,
-    lon_right,
-    mask_mode,
-):
-    mask_params = None
-    mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
-    match mask_mode.value:
-        case "bbox":
-            mask_params = [lon_left, lon_right, lat_bottom, lat_top]
-        case "normal":
-            mask_params = [mu, sigma]
-        case _:
-            pass
-
-    mask = get_mask_2d(mask_mode.value, mask_params)
-    return mask, mask_params
+def _(get_mask_2d, get_mu_sigma, mask_corners, mask_mode):
+    mu, sigma = get_mu_sigma(*mask_corners)
+    mask = get_mask_2d(mask_mode.value, mask_corners)
+    return (mask,)
 
 
 @app.cell
@@ -459,7 +446,8 @@ def _(mo):
 
 @app.cell
 def _(N_slices_gt, get_corners, np, set_corners, slice, visualize_map):
-    lon_left, lon_right, lat_bottom, lat_top = get_corners()
+    mask_corners = get_corners()
+    lon_left, lon_right, lat_bottom, lat_top = mask_corners
     weather_map = visualize_map(
         slice,
         title="Mask region",
@@ -479,7 +467,7 @@ def _(N_slices_gt, get_corners, np, set_corners, slice, visualize_map):
         ),
         names=["x", "y"],
     )
-    return lat_bottom, lat_top, lon_left, lon_right, weather_map
+    return lat_bottom, lat_top, lon_left, lon_right, mask_corners, weather_map
 
 
 @app.cell
@@ -541,31 +529,25 @@ def _(level, mask_map, mask_mode, mo, partition, var, weather_map):
 
 @app.cell
 def _(
+    delta_bounds_slider,
+    delta_granularity_slider,
+    delta_peak_at_slider,
+    delta_peak_slider,
+    delta_shape_slider,
     guidance_plot,
     guidance_reference,
-    m,
-    min_max_lambda_slider,
     mo,
-    peak_at_slider,
-    peak_granularity_slider,
-    peak_slider,
-    shape_slider,
 ):
     mo.vstack(
         [
+            guidance_reference,
             mo.hstack(
                 [
-                    guidance_reference,
-                    m,
-                ], justify="start"
-            ),
-            mo.hstack(
-                [
-                    peak_slider,
-                    peak_granularity_slider,
-                    min_max_lambda_slider,
-                    shape_slider,
-                    peak_at_slider,
+                    delta_peak_slider,
+                    delta_granularity_slider,
+                    delta_bounds_slider,
+                    delta_shape_slider,
+                    delta_peak_at_slider,
                 ], justify="start"
             ),
             guidance_plot,
@@ -583,9 +565,9 @@ def _(mo):
 
 
 @app.cell
-def _(lambda_, plot_trajectory):
+def _(lambda_schedule, plot_trajectory):
     lambda_trajectory_plot = plot_trajectory(
-        lambda_,
+        lambda_schedule,
         r"$\lambda_t$",
         ymin=0,
         ymax=3,
@@ -596,14 +578,14 @@ def _(lambda_, plot_trajectory):
 
 
 @app.cell
-def _(lambda_shape_slider, lambda_trajectory_plot, mo, w_slider):
+def _(lambda_shape_slider, lambda_trajectory_plot, lambda_w_slider, mo):
     mo.vstack([
         mo.md(r"""
             \( \lambda_t = w \left(\sin\left(\frac{\pi t}{T-1}\right)\right)^\alpha, \quad t = 0, \dots, T-1 \).
         """),
         mo.vstack([
             lambda_shape_slider,
-            w_slider,
+            lambda_w_slider,
             lambda_trajectory_plot,
         ])
     ])
@@ -623,14 +605,13 @@ def _(
     config,
     delta_trajectory,
     guidance_reference,
-    lambda_,
     lambda_shape_slider,
+    lambda_w_slider,
     level,
+    mask_corners,
     mask_mode,
-    mask_params,
     partition,
     var,
-    w_slider,
 ):
     from src.rollout_config import RolloutConfig
     guided_config = RolloutConfig(
@@ -643,12 +624,11 @@ def _(
         var=var.value,
         level=level.value,
         mask_mode=mask_mode.value,
-        mask_params=mask_params,
+        mask_corners=mask_corners,
         guidance_reference=guidance_reference.value,
         delta_trajectory=delta_trajectory,
         alpha=lambda_shape_slider.value,
-        w=w_slider.value,
-        lambda_schedule=lambda_
+        w=lambda_w_slider.value,
     )
     return (guided_config,)
 

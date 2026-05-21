@@ -60,7 +60,6 @@ def _():
         get_masked_slices,
         get_mu_sigma,
         get_now_timestamp,
-        get_timestamps,
         get_var_idx,
         get_xr_dataset,
         plot_dual_trajectory,
@@ -70,30 +69,39 @@ def _():
 
 
 @app.cell
-def _(get_timestamps, get_xr_dataset):
+def _(get_xr_dataset):
     ds = get_xr_dataset()
-    era5_timestamps = get_timestamps(ds)
     return (ds,)
 
 
 @app.cell
 def _(N, date, mo):
     datetime_dropdown = mo.ui.date(start=date(2020, 1, 2), stop=date(2020, 12, 31-N.value))
+    datetime_dropdown
     return (datetime_dropdown,)
+
+
+@app.cell
+def _(datetime_dropdown):
+    month = datetime_dropdown.value.month
+    day = datetime_dropdown.value.day
+    return day, month
 
 
 @app.cell
 def _(mo):
     hour_slider = mo.ui.slider(0, 18, value=0, step=6, label="hour: ", show_value=True, debounce=True)
+    hour_slider
     return (hour_slider,)
 
 
 @app.cell
-def _(datetime, datetime_dropdown, hour_slider, time):
-    def get_timestamp_from_sliders(date, hour):
-        return datetime.combine(date, time(hour=hour))
+def _(date, datetime, day, hour_slider, month, time):
+    def get_timestamp_from_sliders(month, day, hour):
+        date_ = date(2020, month, day)
+        return datetime.combine(date_, time(hour=hour))
 
-    timestamp = get_timestamp_from_sliders(datetime_dropdown.value, hour_slider.value)
+    timestamp = get_timestamp_from_sliders(month, day, hour_slider.value)
     return (timestamp,)
 
 
@@ -301,15 +309,8 @@ def _(
 ):
     mask_params = None
     mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
-    match mask_mode.value:
-        case "bbox":
-            mask_params = [lon_left, lon_right, lat_bottom, lat_top]
-        case "normal":
-            mask_params = [mu, sigma]
-        case _:
-            pass
-
-    mask = get_mask_2d(mask_mode.value, mask_params)
+    mask_corners = [lon_left, lon_right, lat_bottom, lat_top]
+    mask = get_mask_2d(mask_mode.value, mask_corners)
     return mask, mask_params
 
 
@@ -372,7 +373,7 @@ def _(
         partition=partition.value,
         var=var.value,
         mask_mode=mask_mode.value,
-        mask_params=mask_params,
+        mask_corners=mask_params,  # probably wrong at this point
     )
     return (config,)
 

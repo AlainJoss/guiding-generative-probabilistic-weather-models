@@ -90,7 +90,7 @@ def get_normal_mask(mu, sigma, shape=(121, 240)):
 
 def get_mask_2d(
     mask_mode: str,
-    mask_params: any
+    mask_corners: any
 ):  
     """
     examples:
@@ -106,13 +106,12 @@ def get_mask_2d(
     """
     match mask_mode:
         case "bbox":
-            mask_2d = get_mask_from_corners(*mask_params)
+            mask_2d = get_mask_from_corners(*mask_corners)
         case "normal":
-            mu = mask_params[0]
-            sigma = mask_params[1]
+            mu, sigma = get_mu_sigma(*mask_corners)
             mask_2d = get_normal_mask(mu, sigma)
         case _:
-            raise ValueError(f"Invalid mask_params {mask_params}")
+            raise ValueError(f"Invalid mask_params {mask_corners}")
     return mask_2d
 
 

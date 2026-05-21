@@ -6,7 +6,7 @@ from src.utils.read_write import (
 from src.dimensions import LEVELS_DICT, VARIABLES_DICT
 
 
-def get_target_trajectory(
+def get_target_rollout(
     partition,
     var_idx,
     level_idx,
@@ -32,7 +32,7 @@ def get_target_trajectory(
     return target
 
 
-def get_reference_trajectory(
+def get_reference_rollout(
     guidance_reference: str,
     rollout_id: str,
     m: int | None = None,
