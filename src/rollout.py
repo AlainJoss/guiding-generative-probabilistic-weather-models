@@ -19,6 +19,7 @@ from src.utils.converters import (
     list_tensors_to_floats, 
     get_var_idx, get_level_idx,
 )
+from src.paths import ROLLOUTS
 from src.utils.setup import ensure_rollout_dir, get_device
 from src.funcs import make_hash, T_schedule
 from src.rollout_config import GUIDANCE_PARAMS, RolloutConfig
@@ -51,16 +52,26 @@ def rollout(
         logger.info(f"sampling member={m}")
 
         if config.guidance_flag and not test and config.guidance_reference != "sampled_trajectory":
-            reference_rollout = get_reference_rollout(config.guidance_reference, m)
+            reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m)
             target_rollout = get_target_rollout(config.guidance_reference, reference_rollout)
             target_tdicts = [
                 xr_rollout_slice_to_tdict(target_rollout.isel(time=n)).unsqueeze(0).to(device)
                 for n in range(config.N)
             ]
             masks_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
+            
+            sweep_params = {
+                "guidance_reference": config.guidance_reference,
+                "alpha": config.alpha,
+                "w": config.w,
+            }
+            guided_id = make_hash(sweep_params)
+            sampling_trace_path = ROLLOUTS / config.rollout_id / "guided_rollout" / guided_id
+            sampling_trace_path=None
         else:
             target_tdicts = None
             masks_tdict = None
+            sampling_trace_path=None
 
         current_timestamp = x_cond["timestamp"]
         if not test:
@@ -71,6 +82,7 @@ def rollout(
                 x_cond=x_cond,
                 y=target_tdicts,
                 mask=masks_tdict,
+                sampling_trace_path=sampling_trace_path
             )
         else:
             sample_multistep = x_cond["future_states"]
@@ -92,13 +104,6 @@ def rollout(
     config_dict = config.to_dict()
 
     if config.guidance_flag:
-        params = {
-            "guidance_reference": config.guidance_reference,
-            "alpha": config.alpha,
-            "w": config.w,
-        }
-
-        guided_id = make_hash(params)
         guided_path = rollout_dir / "guided_rollout" / guided_id
         guided_path.mkdir(parents=True, exist_ok=True)
 

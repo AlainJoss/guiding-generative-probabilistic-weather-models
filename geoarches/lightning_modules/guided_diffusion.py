@@ -114,7 +114,8 @@ class GuidedFlow(BaseLightningModule):
         m: int,
         x_cond: dict, 
         y: list[TensorDict] | None = None,
-        mask: list[TensorDict] | None = None
+        mask: list[TensorDict] | None = None,
+        sampling_trace_path: str = None
     ):
         guided_trajectory = []
         for n in range(0, N):
@@ -129,22 +130,29 @@ class GuidedFlow(BaseLightningModule):
             guided_trajectory.append(x_hat.cpu())
             if torch.cuda.is_available() and self.device.type == "cuda":
                 torch.cuda.empty_cache()
+
+
+            ### NOTE: start new implemented part
             
             # save sampling trace
-            # for k, v in sampling_trace.items():
-            #     xr_member = rollout_to_xarray(
-            #         sample_multistep=v,
-            #         start_timestamp=x_cond["timestamp"]-24*3600,
-            #         member=m,
-            #         n=n
-            #     )
-            #     import xarray as xr
-            #     path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id / f"{k}.nc"
-            #     old_xr = xr.open_dataset()
-            #     xr_member.to_netcdf()
+            if sampling_trace_path is not None:
+                for k, v in sampling_trace.items():
+                    xr_m_n = rollout_to_xarray(
+                        sample_multistep=v,
+                        start_timestamp=x_cond["timestamp"]-24*3600,
+                        member=m
+                    )
+                    import xarray as xr
+                    from pathlib import Path
+                    path = Path(sampling_trace_path, f"{k}.nc")
+                    if Path(path).exists():
+                        full_xr = xr.open_dataset(path)
+                        full_xr = xr.concat([full_xr, xr_m_n], dim="member")
+                        full_xr.to_netcdf(path)
+                    else:
+                        xr_m_n.to_netcdf(path)
 
-            #     xr_pred = xr.concat(member_datasets, dim="member")
-            #     xr_member.to_netcdf()
+            ### NOTE: end new implemented part
 
             # after the last iteration no need to set this again
             if n < N-1:
@@ -230,7 +238,6 @@ class GuidedFlow(BaseLightningModule):
             # vector field 
             with torch.no_grad():
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                vfs.append(u_t.cpu())
 
             if y_n is not None:
                 with torch.enable_grad():
@@ -239,25 +246,33 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_t = self.denormalize(x_hat_norm_t)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
-                    clean_preds.append(x_hat_t.cpu())
-                    grads.append(grad_l.cpu())
+                if sampling_trace is not None:
+                    vfs.append(u_t.cpu())
 
                 u_t = tensordict_apply(
                     lambda u, g: u - (lambda_schedule[i]) * g,
                     u_t,
                     grad_l,
                 )
-                guided_vfs.append(u_t.cpu())
+
+                if sampling_trace is not None:
+                    clean_preds.append(x_hat_t.cpu())
+                    grads.append(grad_l.cpu())
+                    guided_vfs.append(u_t.cpu())
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
 
-        sampling_trace = {
-            "grads": grads,
-            "vfs": vfs,
-            "guided_vfs": vfs,
-            "clean_preds": clean_preds
-        }
+        if sampling_trace is not None:
+            sampling_trace = {
+                "grads": grads,
+                "vfs": vfs,
+                "guided_vfs": guided_vfs,
+                "clean_preds": clean_preds
+            }
+        else:
+            sampling_trace=None
+
         return z_t, sampling_trace
     
     

@@ -31,6 +31,7 @@ Analysis:
     - realized vs. planned guidance
     - gradients
     - vector fields
+- make checkboxes for things to plot or not in analyze part
 
 Guidance:
 - sweep var to test how model function reacts: see whether guided percentage corresponds in untargeted guided version. 
