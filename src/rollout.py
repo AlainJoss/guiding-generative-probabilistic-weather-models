@@ -11,12 +11,10 @@ from src.utils.read_write import (
     update_sweep_params,
 )
 from src.utils.dataset_utils import get_x_cond
-from src.utils.converters import tensor_timestamp_to_string
 from src.utils.converters import (
     rollout_to_xarray,
     batchify_and_move,
     xr_rollout_slice_to_tdict,
-    list_tensors_to_floats, 
     get_var_idx, get_level_idx,
 )
 from src.paths import ROLLOUTS
@@ -53,7 +51,13 @@ def rollout(
 
         if config.guidance_flag and not test and config.guidance_reference != "sampled_trajectory":
             reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m)
-            target_rollout = get_target_rollout(config.guidance_reference, reference_rollout)
+            target_rollout = get_target_rollout(
+                config.partition, 
+                var_idx,
+                level_idx,
+                config.delta_trajectory,
+                reference_rollout
+            )
             target_tdicts = [
                 xr_rollout_slice_to_tdict(target_rollout.isel(time=n)).unsqueeze(0).to(device)
                 for n in range(config.N)

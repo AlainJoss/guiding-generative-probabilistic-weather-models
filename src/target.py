@@ -12,9 +12,9 @@ def get_target_rollout(
     var_idx,
     level_idx,
     delta_trajectory,
-    reference_trajectory,
+    reference_rollout,
 ):
-    target = reference_trajectory.copy(deep=True)
+    target = reference_rollout.copy(deep=True)
 
     var_name = VARIABLES_DICT[partition][var_idx]
     target[var_name].load()

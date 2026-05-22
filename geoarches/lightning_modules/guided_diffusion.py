@@ -133,22 +133,22 @@ class GuidedFlow(BaseLightningModule):
 
 
             ### NOTE: start new implemented part
-            
+
             # save sampling trace
             if sampling_trace_path is not None:
+                import xarray as xr
+                from pathlib import Path
+                from src.utils.converters import sampling_trace_to_xarray
                 for k, v in sampling_trace.items():
-                    xr_m_n = rollout_to_xarray(
-                        sample_multistep=v,
-                        start_timestamp=x_cond["timestamp"]-24*3600,
-                        member=m
-                    )
-                    import xarray as xr
-                    from pathlib import Path
+                    if not v:
+                        continue
+                    xr_m_n = sampling_trace_to_xarray(v, m=m, n=n)
                     path = Path(sampling_trace_path, f"{k}.nc")
-                    if Path(path).exists():
-                        full_xr = xr.open_dataset(path)
-                        full_xr = xr.concat([full_xr, xr_m_n], dim="member")
-                        full_xr.to_netcdf(path)
+                    if path.exists():
+                        with xr.open_dataset(path) as ds:
+                            full = ds.load()
+                        concat_dim = "member" if n == 0 else "n"
+                        xr.concat([full, xr_m_n], dim=concat_dim).to_netcdf(path)
                     else:
                         xr_m_n.to_netcdf(path)
 

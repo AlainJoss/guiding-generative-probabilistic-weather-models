@@ -67,6 +67,20 @@ def batchify_and_move(sample, device):
     }
 
 from geoarches.dataloaders.era5 import convert_to_xarray
+
+
+def sampling_trace_to_xarray(trace: list[TensorDict], m, n):
+    T = len(trace)
+    dummy_ts = torch.tensor(0)
+    xr_steps = [convert_to_xarray(s.unsqueeze(0), dummy_ts) for s in trace]
+    xr_v = xr.concat(xr_steps, dim="time")
+    xr_v = xr_v.rename({"time": "diffusion_step"}).assign_coords(
+        diffusion_step=list(range(T))
+    )
+    xr_v = xr_v.expand_dims(member=[m], n=[n])
+    return xr_v
+
+
 def rollout_to_xarray(
     sample_multistep,
     start_timestamp,

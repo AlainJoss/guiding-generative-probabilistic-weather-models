@@ -39,14 +39,17 @@ For instance t2m-mslp and mslp-t2m
 - define masks with physical priors
 - define masks dynamically in N
 - define weighted average Gaussian Kernel or future difference around region in loss function. Refine latex-notes with new definition of mask.
+- Localize gradients by masking them or applying a penalty outside of the mask
 - Try out regularization term ztKz or just ztIz=||z||2
 - Guide using the ground truth and see whether the accuracy of other variables improves.
 - Define an ensemble of G guided models.
 - as baseline run the same eval_pipeline on guided and unguided ensembles in ground truth version and different experimental settings
 - swap rollout_dist_plot with newer version present in analyze.py
+- implement sampling algorithms (AI+RES and FK+S)
 
 What we do not do:
 - experiment with multiple variables (and masks correspondingly)
+- extremes that are not smooth, over localized areas, and not medium range -> explain type in report
 
 ## THOUGHTS
 
