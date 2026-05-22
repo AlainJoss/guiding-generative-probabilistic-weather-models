@@ -71,7 +71,7 @@ def rollout(
             }
             guided_id = make_hash(sweep_params)
             sampling_trace_path = ROLLOUTS / config.rollout_id / "guided_rollout" / guided_id
-            # sampling_trace_path=None
+            sampling_trace_path=None
         else:
             target_tdicts = None
             masks_tdict = None
