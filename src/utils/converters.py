@@ -47,17 +47,8 @@ def get_level_idx(partition: str, level: int) -> int:
             )
     return levels.index(level)
 
-# TODO: bs
-def xr_rollout_slice_to_tdict(xr_slice: xr.Dataset) -> TensorDict:
-    """
-    Convert a single-time xr slice from a saved rollout netcdf into a
-    TensorDict matching the layout of x_cond["state"]. Saved rollouts are
-    already in model orientation, so skip the Europe-roll / lat-flip that
-    Era5Forecast.convert_to_tensordict would apply.
-    """
-    from rollout_config import VARIABLES_DICT
 
-    xr_slice = xr_slice.transpose(..., "level", "latitude", "longitude")
+def xr_rollout_slice_to_tdict(xr_slice: xr.Dataset) -> TensorDict:
     arrays = {
         key: xr_slice[list(vars_)].to_array().to_numpy()
         for key, vars_ in VARIABLES_DICT.items()
@@ -79,39 +70,18 @@ def batchify_and_move(sample, device):
 def rollout_to_xarray(
     ds,
     sample_multistep,
-    init_timestamp,
+    start_timestamp,
     member,
-    lead_time_hours=24,
-    include_init=False,
 ):
-    sample_multistep = ds.denormalize(sample_multistep).detach().cpu()
+    sample_multistep = ds.denormalize(sample_multistep)
+    xr_rollout = []
+    for i, sample in enumerate(sample_multistep):
+        xr_sample = ds.convert_to_xarray(sample.unsqueeze(0), start_timestamp+i*24*3600)
+        xr_rollout.append(xr_sample)
 
-    init_seconds = int(init_timestamp.detach().cpu().flatten()[0].item())
-    step_iterations = sample_multistep.shape[1]
-
-    xr_steps = []
-
-    for i in range(step_iterations):
-        offset = i if include_init else i + 1
-        valid_seconds = init_seconds + lead_time_hours * 3600 * offset
-
-        xr_step = ds.convert_to_xarray(
-            sample_multistep[:, i],
-            timestamp=torch.tensor([valid_seconds]),
-        )
-
-        xr_steps.append(xr_step)
-
-    xr_rollout = xr.concat(xr_steps, dim="time")
-
-    if member == -1:
-        return xr_rollout
+    xr_rollout = xr.concat(xr_rollout, dim="time")
 
     return xr_rollout.expand_dims(member=[member])
-
-
-def xr_to_torch(slice_: xr.DataArray):
-    return torch.tensor(slice_.to_numpy())
 
 
 def list_tensors_to_floats(list_):

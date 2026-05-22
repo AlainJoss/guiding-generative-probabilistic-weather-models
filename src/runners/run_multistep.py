@@ -119,7 +119,7 @@ def main():
                 xr_member = rollout_to_xarray(
                     ds=ds,
                     sample_multistep=sample_multistep,
-                    init_timestamp=batch["timestamp"],
+                    start_timestamp=batch["timestamp"],
                     member=member,
                 )
 

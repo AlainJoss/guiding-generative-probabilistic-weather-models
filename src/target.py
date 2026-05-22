@@ -1,8 +1,9 @@
+from datetime import datetime
+
 import xarray as xr
 
-from src.utils.read_write import (
-    get_rollout_files,
-)
+from src.utils.read_write import get_rollout_files
+from src.utils.dataset_utils import get_gt_rollout
 from src.dimensions import LEVELS_DICT, VARIABLES_DICT
 
 
@@ -36,14 +37,15 @@ def get_reference_rollout(
     guidance_reference: str,
     rollout_id: str,
     m: int | None = None,
+    N: int | None = None,
+    timestamp: datetime | None = None
 ):
     match guidance_reference:
         case "ground_truth":
-            rollout, _ = get_rollout_files("ground_truth", rollout_id)
-            reference_trajectory = rollout
+            reference_trajectory = get_gt_rollout(N+1, timestamp)
 
         case "unguided_members":
-            rollout, _ = get_rollout_files("unguided", rollout_id)
+            rollout, _ = get_rollout_files("unguided_rollout", rollout_id)
             reference_trajectory = rollout.sel(member=m)
 
         # TODO: need to move this to get trajectory or move everything together, 

@@ -1,6 +1,20 @@
 # TODOs
 
+Communicate:
+- serve one experiment on some cloud machine for them to access and play around with
+- explain pipeline and code base visuall
+- domain all has another bug
+
 Rollouts:
+- Guide both entire states (can define guidance at variable level and state level)
+- Define mask for both state and gradients (or penalize in loss)
+- New mask types: normal and cost-lines prior
+- simply try to define a much broader area, or sweep over different sizes of the mask using the corners (nice, and make it a sweep param: like percentage corner increase)
+- find real extremes (maybe even unpredictable) as use case
+- define delta trajectory in terms of extremity (whathever that is) or guide using some notion of std of the forecast bands
+- maybe define coarser gaussian mask?
+- attempt new sampling route of AI+RES and FK-steering
+- Implement gradient averaging and loss-based-guidance --> new sweep param
 - run eval with correct timestamp and compare
 - manage paths in single place
 - merge all experiments in single xarrays
@@ -9,6 +23,8 @@ Rollouts:
 - implement hydra experiment for automatic logging instead of bash script?
 
 Analysis:
+- Cross-check variables distribution 
+- how to compare parameters on the same plots?
 - visualize unguided from guided at n so we can always know what the guidance is producing compared to the unguided model
 - explainers for all variables
 - new analysis over T:

@@ -6,69 +6,71 @@ import xarray as xr
 import torch
 
 from src.utils.read_write import (
-    save_to_json,
+    dump_json,
     get_td_dataset,
-    update_experiment_params,
+    update_sweep_params,
 )
 from src.utils.dataset_utils import get_x_cond
+from src.utils.converters import tensor_timestamp_to_string
 from src.utils.converters import (
     rollout_to_xarray,
     batchify_and_move,
     xr_rollout_slice_to_tdict,
+    list_tensors_to_floats, 
+    get_var_idx, get_level_idx,
 )
 from src.utils.setup import ensure_rollout_dir, get_device
-from src.funcs import make_hash
+from src.funcs import make_hash, T_schedule
 from src.rollout_config import GUIDANCE_PARAMS, RolloutConfig
 from src.target import get_reference_rollout, get_target_rollout
-from src.mask import get_mask_tdict
+from src.mask import get_mask_tdict, get_mask_2d
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
-from tensordict.tensordict import TensorDict
-
 
 def rollout(
     config: RolloutConfig,
     flow_model: GuidedFlow | None = None,
     test: bool = False,
 ):  
+    var_idx = get_var_idx(config.partition, config.var)
+    level_idx = get_level_idx(config.partition, config.level)
+    mask_2d = get_mask_2d(config.mask_mode, config.mask_corners)
+    lambda_schedule = T_schedule(config.alpha, config.w)
     rollout_dir = ensure_rollout_dir(config.rollout_id)
     if config.guidance_flag:
-        update_experiment_params(rollout_dir, config.to_dict(), GUIDANCE_PARAMS)
+        update_sweep_params(rollout_dir, config.to_dict(), GUIDANCE_PARAMS)
 
     ds = get_td_dataset(multistep=config.N)
     x_cond = get_x_cond(ds, config.timestamp)
 
     device = get_device()
     x_cond = batchify_and_move(x_cond, device)
-    # TODO: clean this bs
-    lead_time_hours = int(x_cond["lead_time_hours"].cpu().flatten()[0].item())
 
     member_datasets = []
     for m in range(config.M):
         logger.info(f"sampling member={m}")
 
-        if config.guidance_flag and not test and config.reference != "sampled_trajectory":
-            reference_trajectory = get_reference_rollout(config, m)
-            target_trajectory = get_target_rollout(config, reference_trajectory)
+        if config.guidance_flag and not test and config.guidance_reference != "sampled_trajectory":
+            reference_rollout = get_reference_rollout(config.guidance_reference, m)
+            target_rollout = get_target_rollout(config.guidance_reference, reference_rollout)
             target_tdicts = [
-                xr_rollout_slice_to_tdict(target_trajectory.isel(time=n))[None].to(device)
+                xr_rollout_slice_to_tdict(target_rollout.isel(time=n)).unsqueeze(0).to(device)
                 for n in range(config.N)
             ]
-            masks = [
-                get_mask_tdict(config, target_trajectory.isel(time=n), x_cond["state"])
-                for n in range(config.N)
-            ]
+            masks_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
         else:
             target_tdicts = None
-            masks = None
+            masks_tdict = None
 
+        current_timestamp = x_cond["timestamp"]
         if not test:
             sample_multistep = flow_model.sample_rollout(
-                config,
+                config.N, 
+                lambda_schedule,
                 m=m,
                 x_cond=x_cond,
                 y=target_tdicts,
-                masks=masks,
+                mask=masks_tdict,
             )
         else:
             sample_multistep = x_cond["future_states"]
@@ -76,14 +78,12 @@ def rollout(
         sample_multistep = torch.cat(
             [x_cond["state"].unsqueeze(1), sample_multistep],  # unsqueeze adds batch dim
             dim=1,
-        )
-
+        ).squeeze(0)
         xr_member = rollout_to_xarray(
             ds=ds,
             sample_multistep=sample_multistep,
-            init_timestamp=x_cond["timestamp"],
+            start_timestamp= current_timestamp,
             member=m,
-            lead_time_hours=lead_time_hours,
         )
         member_datasets.append(xr_member)
 
@@ -99,11 +99,11 @@ def rollout(
         }
 
         guided_id = make_hash(params)
-        guided_path = rollout_dir / "guided" / guided_id
+        guided_path = rollout_dir / "guided_rollout" / guided_id
         guided_path.mkdir(parents=True, exist_ok=True)
 
-        xr_pred.to_netcdf(guided_path / "guided.nc")
-        save_to_json(config_dict, guided_path, "config")
+        xr_pred.to_netcdf(guided_path / "guided_rollout.nc")
+        dump_json(config_dict, guided_path, "config")
     else:
-        save_to_json(config_dict, rollout_dir, "config")
-        xr_pred.to_netcdf(rollout_dir / "unguided.nc")
+        dump_json(config_dict, rollout_dir, "config")
+        xr_pred.to_netcdf(rollout_dir / "unguided_rollout.nc")

@@ -32,15 +32,14 @@ def _():
     from src.utils.dataset_utils import get_x_cond
     from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
     from src.utils.setup import get_now_timestamp
-    from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices
+    from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices, get_gt_rollout
     from src.utils.read_write import (
-        get_xr_dataset,
-        save_to_json, get_dict_from_json, get_rollout_ids, get_rollout_files
+        dump_json, get_dict_from_json, get_rollout_ids, get_rollout_files
     )
 
     from src.funcs import N_schedule, T_schedule, make_hash
 
-    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
+    from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma
     from src.target import get_reference_rollout, get_target_rollout
 
     return (
@@ -52,10 +51,12 @@ def _():
         ROLLOUTS,
         RUN_CONFIGS,
         RolloutConfig,
+        T_schedule,
         VARIABLES_DICT,
-        get_N_slices,
+        dump_json,
         get_N_timestamps,
         get_dict_from_json,
+        get_gt_rollout,
         get_level_idx,
         get_mask_2d,
         get_masked_mean,
@@ -68,19 +69,12 @@ def _():
         get_target_rollout,
         get_timestamp_from_sliders,
         get_var_idx,
-        get_xr_dataset,
         make_hash,
         max_day,
         plot_dual_trajectory,
-        save_to_json,
+        plot_trajectory,
         visualize_map,
     )
-
-
-@app.cell
-def _(get_xr_dataset):
-    ds = get_xr_dataset()
-    return (ds,)
 
 
 @app.cell(hide_code=True)
@@ -120,7 +114,7 @@ def _(mo):
 def _(mo, refresh_button):
     if refresh_button.value:
         pass
-    
+
     NOTEBOOK_MODES = ["unguided_rollout", "guided_rollout", "analyze_rollout"]
     notebook_mode_dropdown = mo.ui.dropdown(
         options=NOTEBOOK_MODES,
@@ -139,9 +133,9 @@ def _(get_rollout_ids, mo, notebook_mode_dropdown):
         case "unguided_rollout":
             ROLLOUT_IDS=[]
         case "guided_rollout":
-            ROLLOUT_IDS=get_rollout_ids("unguided")
+            ROLLOUT_IDS=get_rollout_ids("unguided_rollout")
         case "analyze_rollout":
-            ROLLOUT_IDS=get_rollout_ids("guided")
+            ROLLOUT_IDS=get_rollout_ids("guided_rollout")
             save_config_button=None
         case _:
             pass
@@ -165,7 +159,9 @@ def _(
     N,
     RUN_CONFIGS,
     RolloutConfig,
+    alpha,
     delta_trajectory,
+    dump_json,
     guidance_flag,
     guidance_reference,
     level,
@@ -175,9 +171,9 @@ def _(
     partition,
     rollout_id,
     save_config_button,
-    save_to_json,
     timestamp,
     var,
+    w,
 ):
     if save_config_button is not None:
         if save_config_button.value and notebook_mode!="analyze_rollout":
@@ -194,9 +190,11 @@ def _(
                 mask_corners=mask_corners,
                 guidance_reference=guidance_reference,
                 delta_trajectory=delta_trajectory,
+                alpha=alpha,
+                w=w
             )
-            run_dir = RUN_CONFIGS / "unguided"
-            save_to_json(save_config.to_dict(), run_dir, f"{rollout_id}")
+            run_dir = RUN_CONFIGS / notebook_mode
+            dump_json(save_config.to_dict(), run_dir, f"{rollout_id}")
     return
 
 
@@ -213,9 +211,25 @@ def _(
     match notebook_mode:
         case "unguided_rollout" | "guided_rollout":
             guidance_reference_dropdown = mo.ui.dropdown(GUIDANCE_REFERENCES, value=GUIDANCE_REFERENCES[0], label="guidance reference: ")
+            alpha_defaults = [0, 1, 2]
+            alpha_slider = mo.ui.slider(
+                steps=alpha_defaults,
+                value=alpha_defaults[-1],
+                label="alpha: ",
+                debounce=True,
+                show_value=True
+            )
+            w_defaults = [5, 10]
+            w_slider = mo.ui.slider(
+                steps=w_defaults,
+                value=w_defaults[0],
+                label="w: ",
+                debounce=True,
+                show_value=True
+            )
             sweep_params_widget = None
         case "analyze_rollout":
-            experiment_params = get_dict_from_json(Path(ROLLOUTS, rollout_id, "experiment_params.json"))
+            experiment_params = get_dict_from_json(Path(ROLLOUTS, rollout_id, "sweep_params.json"))
 
             # TODO: decide between the two depending on notebook mode
             guidance_reference_dropdown = mo.ui.dropdown(
@@ -363,11 +377,11 @@ def _(get_rollout_files, hash_params, make_hash, notebook_mode, rollout_id):
             config=None
             # TODO: set everything to None
         case "guided_rollout":
-            unguided_xr, config = get_rollout_files("unguided", rollout_id)
+            unguided_xr, config = get_rollout_files("unguided_rollout", rollout_id)
         case "analyze_rollout":
-            unguided_xr, _ = get_rollout_files("unguided", rollout_id)
+            unguided_xr, _ = get_rollout_files("unguided_rollout", rollout_id)
             guided_id = make_hash(hash_params)
-            unguided_xr, config = get_rollout_files("guided", rollout_id, guided_id)
+            unguided_xr, config = get_rollout_files("guided_rollout", rollout_id, guided_id)
         case _:
             pass
     return config, unguided_xr
@@ -396,6 +410,7 @@ def _(
     notebook_mode,
     partition,
     rollout_id,
+    timestamp,
     var,
     var_idx,
 ):
@@ -406,13 +421,14 @@ def _(
             mu, sigma = get_mu_sigma(*mask_corners)
             mask=get_mask_2d(mask_mode, mask_corners)
             delta_trajectory=None
+            target_rollout=None
             target_trajectory=None
         case "guided_rollout":
             mask_corners = get_corners()
             mu, sigma = get_mu_sigma(*mask_corners)
             mask=get_mask_2d(mask_mode, mask_corners)
             delta_trajectory = N_schedule(N, delta_shape_slider.value, delta_peak, peak_at_n=delta_peak_at_slider.value)
-            reference_rollout = get_reference_rollout(guidance_reference, rollout_id, m=m)
+            reference_rollout = get_reference_rollout(guidance_reference, rollout_id, m=m, N=N, timestamp=timestamp)
             # TODO: not sure if this good
             target_rollout = get_target_rollout(
                 partition, var_idx, level_idx,
@@ -426,7 +442,7 @@ def _(
             mu, sigma = get_mu_sigma(*mask_corners)
             mask=get_mask_2d(mask_mode, mask_corners)
             delta_trajectory=config.delta_trajectory
-            reference_rollout = get_reference_rollout(guidance_reference, rollout_id, m=m)
+            reference_rollout = get_reference_rollout(guidance_reference, rollout_id, m=m, N=N, timestamp=timestamp)
             # TODO: not sure if this good
             target_rollout = get_target_rollout(
                 partition, var_idx, level_idx,
@@ -449,8 +465,7 @@ def _(guidance_reference, reference_trajectories):
 @app.cell
 def _(
     N,
-    ds,
-    get_N_slices,
+    get_gt_rollout,
     get_masked_mean,
     get_slices,
     level,
@@ -504,7 +519,8 @@ def _(
             pass
 
     # gt
-    gt_N_slices = get_N_slices(ds, N+1, timestamp, partition, var, level)
+    gt_rollout = get_gt_rollout(N+1, timestamp)
+    gt_N_slices = get_slices(gt_rollout, partition, var, level)
     gt_trajectory = get_masked_mean(gt_N_slices, mask)
     return (
         gt_N_slices,
@@ -515,6 +531,21 @@ def _(
         ung_mean_trajectory,
         ung_ub_trajectory,
     )
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell
@@ -922,15 +953,30 @@ def _(mo):
 
 
 @app.cell
-def _():
-    return
+def _(T_schedule, alpha_slider, plot_trajectory, w_slider):
+    alpha = alpha_slider.value
+    w=w_slider.value
+    lambda_trajectory = T_schedule(alpha, w)
+    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "$\lambda_t$", title="$\lambda_t$ schedule")
+    return alpha, lambda_trajectory_plot, w
 
 
 @app.cell
-def _(alpha_slider, mo):
-    mo.hstack([
-        alpha_slider, 
+def _(alpha_slider, lambda_trajectory_plot, mo, w_slider):
+    mo.vstack([
+        mo.hstack([
+            alpha_slider, w_slider
+        ], justify="start"),
+        lambda_trajectory_plot,
     ])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - gradient and vector field plots
+    """)
     return
 
 

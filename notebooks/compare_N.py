@@ -46,7 +46,7 @@ def _():
     from old_rollout import rollout
     from src.utils.read_write import (
         get_td_dataset, get_model,
-        read_state, get_xr_slice, save_to_json, read_json,
+        read_state, get_xr_slice, dump_json, read_json,
         read_states,
     )
     from src.utils.setup import ensure_rollout_dir

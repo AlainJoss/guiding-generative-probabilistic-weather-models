@@ -8,9 +8,15 @@ from tensordict.tensordict import TensorDict
 
 from src.paths import ERA5
 from src.utils.converters import tensor_timestamp_to_string
+from src.utils.read_write import get_xr_dataset
 
 
-def get_x_cond(ds, timestamp):
+def get_gt_rollout(N, timestamp):
+    ds = get_xr_dataset()
+    return get_N_states(ds, N, timestamp)
+
+
+def get_x_cond(ds, timestamp: datetime):
     timestamp = np.datetime64(timestamp, "ns")
 
     ds_timestamps = [
@@ -22,7 +28,7 @@ def get_x_cond(ds, timestamp):
     x_cond = ds[idx]
 
     ts = tensor_timestamp_to_string(x_cond["timestamp"])
-    print(f"get x_cond with timestamp {ts}")
+    print(f"get x_cond with timestamp {ts} from timestamp {timestamp}")
 
     return x_cond
 
@@ -32,19 +38,6 @@ def get_xr_slice(state, partition, level, var, timestamp):
         return state[var].sel(time=timestamp, method='nearest')
     else: 
         return state[var].sel(time=timestamp, level=level, method='nearest')
-
-# TODO: check this bs
-def get_td_slice(
-    state: TensorDict,
-    partition: str,
-    var_idx: int,
-    level_idx: int | None = None,
-):
-    if partition == "surface":
-        # expected shape maybe [B, V, 1, H, W] or [V, 1, H, W]
-        return state["surface"][..., var_idx, 0, :, :]
-
-    return state["level"][..., var_idx, level_idx, :, :]
 
 
 def get_timestamps(ds: xr.Dataset):

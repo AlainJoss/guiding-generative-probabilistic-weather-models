@@ -29,15 +29,6 @@ def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
     return mu, sigma
 
 
-def get_masked_mean(N_slices: np.ndarray, mask: np.ndarray):
-    """
-    mask == normal: weights sum to 1.
-    mask == bbox: weights sum to count(mask!=0)
-    """
-    masked_slices = get_masked_slices(N_slices, mask)
-    return masked_slices.sum(axis=(-1,-2))
-
-
 def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     """
     Normalizes to 1.
@@ -56,24 +47,17 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     mask = (lon_mask & lat_mask).astype(np.float32)
     return mask / mask.sum()
 
-# TODO: test
-def get_mask_tensordict(example_tdict: TensorDict, partition: str, var_idx: int, level_idx: int, mask_2d: torch.Tensor):
-    if mask_2d is not None:
-        mask = tensordict_apply(lambda x: torch.zeros_like(x), example_tdict)
-        mask[partition][..., var_idx, level_idx, :, :] = mask_2d
-    else:
-        mask = tensordict_apply(lambda x: torch.ones_like(x), example_tdict)
+
+def get_masked_mean(N_slices: np.ndarray, mask: np.ndarray):
+    masked_slices = N_slices * mask
+    return masked_slices.sum(axis=(-1,-2))
+
+
+def get_mask_tdict(example_tdict: TensorDict, partition: str, var_idx: int, level_idx: int, mask_2d: torch.Tensor):
+    assert mask is not None
+    mask = tensordict_apply(lambda x: torch.zeros_like(x), example_tdict)
+    mask[partition][..., var_idx, level_idx, :, :] = mask_2d
     return mask
-
-def get_masked_slices(N_slices: np.ndarray, mask: np.ndarray):
-    return N_slices * mask
-
-
-def minmax_slice(slice_: torch.Tensor):
-    max_ = slice_.max()
-    min_ = slice_.min()
-    assert max_ != min_
-    return (slice_ -  min_) / (max_ - min_)
 
 
 def get_normal_mask(mu, sigma, shape=(121, 240)):
@@ -93,18 +77,6 @@ def get_mask_2d(
     mask_mode: str,
     mask_corners: any
 ):  
-    """
-    examples:
-    {
-        "mask_mode": "bbox",
-        "corners": [...],
-    }
-    {
-        "mask_mode": "normal",
-        "mu": (100, 120),
-        "sigma": (20, 30),
-    }
-    """
     match mask_mode:
         case "bbox":
             mask_2d = get_mask_from_corners(*mask_corners)
@@ -114,64 +86,3 @@ def get_mask_2d(
         case _:
             raise ValueError(f"Invalid mask_params {mask_corners}")
     return mask_2d
-
-
-def get_mask_tdict(
-    config: RolloutConfig,
-    state_xr: xr.Dataset,
-    example_tdict: TensorDict,
-):
-    def _xr_slice_at_time(state_xr: xr.Dataset, partition: str, var_idx: int, level_idx: int) -> torch.Tensor:
-        var_name = VARIABLES_DICT[partition][var_idx]
-        if partition == "surface":
-            slice_xr = state_xr[var_name]
-        else:
-            level_val = LEVELS_DICT["level"][level_idx]
-            slice_xr = state_xr[var_name].sel(level=level_val)
-        return torch.as_tensor(slice_xr.values, dtype=torch.float32)
-
-    device = example_tdict[config.partition].device
-
-    match config.mask_mode:
-        case "bbox":
-            mask_2d = get_mask_from_corners(*config.mask["corners"]).to(device)
-
-        case "normal":
-            slice_ = _xr_slice_at_time(state_xr, config.partition, config.var_idx, config.level_idx)
-            mask_2d = get_normal_mask(
-                mu=config.mask["mu"],
-                sigma=config.mask["sigma"],
-                shape=tuple(slice_.shape),
-                device=device,
-            )
-
-        case "normal_minmax":
-            slice_ = _xr_slice_at_time(state_xr, config.partition, config.var_idx, config.level_idx).to(device)
-            normal_mask = get_normal_mask(
-                mu=config.mask["mu"],
-                sigma=config.mask["sigma"],
-                shape=tuple(slice_.shape),
-                device=device,
-            )
-            norm_slice = minmax_slice(slice_)
-            mask_2d = normal_mask * norm_slice
-            mask_2d = mask_2d / mask_2d.sum().clamp_min(1e-8)
-
-        case "slice":
-            mask_2d = torch.ones(121, 240, device=device)
-
-        case "state":
-            raise NotImplementedError("mask_mode='state' not yet implemented")
-
-        case _:
-            raise ValueError(f"Invalid mask_mode '{config.mask_mode}'")
-
-    mask = get_mask_tensordict(
-        example_tdict,
-        config.partition,
-        config.var_idx,
-        config.level_idx,
-        mask_2d,
-    )
-
-    return mask

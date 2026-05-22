@@ -47,7 +47,7 @@ def _():
     from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices
     from src.utils.read_write import (
         get_xr_dataset,
-        save_to_json, get_rollout_ids, 
+        dump_json, get_rollout_ids, 
         get_rollout_files,
         get_dict_from_json
     )

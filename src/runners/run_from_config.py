@@ -11,7 +11,7 @@ from src.rollout import rollout
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--rollout_id", type=str, required=True)
-    parser.add_argument("--rollout_type", choices=["guided", "unguided"], required=True)
+    parser.add_argument("--rollout_type", choices=["guided_rollout", "unguided_rollout"], required=True)
     parser.add_argument("--test", action="store_true")
     return parser.parse_args()
 

@@ -107,35 +107,34 @@ class GuidedFlow(BaseLightningModule):
 
     def sample_rollout(
         self, 
-        config,
+        N: int,
+        lambda_schedule: list[torch.Tensor],
         m: int,
         x_cond: dict, 
         y: list[TensorDict] | None = None,
-        masks: list[TensorDict] | None = None
+        mask: list[TensorDict] | None = None
     ):
         guided_trajectory = []
-        for n in range(0, config.N):
+        for n in range(0, N):
             y_n = None if y is None else y[n]  # TODO: check the index of the guidance
-            mask_n = None if masks is None else masks[n]
             x_hat = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
-                mask=mask_n,
-                lambda_=config.lambda_,
-                seed=m + 1000 * n  # + batch_nb * 10**6
+                mask=mask,
+                lambda_schedule=lambda_schedule,
+                seed= m + 1000 * n  # + batch_nb * 10**6
             )
             guided_trajectory.append(x_hat.cpu())
             if torch.cuda.is_available() and self.device.type == "cuda":
                 torch.cuda.empty_cache()
             
             # after the last iteration no need to set this again
-            if n < config.N-1:
-                # in seconds
-                next_timestamp = x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600
+            if n < N-1:
+                # TODO: wrap this into a function, it's painful to watch
                 x_cond = {
                     "prev_state": x_cond["state"],
                     "state": x_hat,
-                    "timestamp": next_timestamp,
+                    "timestamp": x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600, # converts to seconds the lead_time
                     "lead_time_hours": x_cond["lead_time_hours"],
                 }
         # TODO: what is this format???
@@ -148,7 +147,7 @@ class GuidedFlow(BaseLightningModule):
         x_cond: dict,  # timestamp, TensorDict for "state", "prev", etc.
         y_n: TensorDict | None = None, 
         mask: TensorDict | None = None, 
-        lambda_: list[torch.Tensor] | None = None,
+        lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None
     ):  
         # det prediction
@@ -162,7 +161,7 @@ class GuidedFlow(BaseLightningModule):
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.flow(x_cond, det_pred, y_n, mask, lambda_, seed)
+        z = self.flow(x_cond, det_pred, y_n, mask, lambda_schedule, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = det_pred + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
         return x_hat
@@ -172,7 +171,7 @@ class GuidedFlow(BaseLightningModule):
         det_pred: TensorDict,
         y_n: TensorDict | None = None,  # used as guidance flag (None== no guidance)
         mask: TensorDict | None = None, 
-        lambda_: list[torch.Tensor] | None = None,
+        lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None
     ):
         ##### init #####
@@ -219,7 +218,7 @@ class GuidedFlow(BaseLightningModule):
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
                 u_t = tensordict_apply(
-                    lambda u, g: u - (lambda_[i]) * g,
+                    lambda u, g: u - (lambda_schedule[i]) * g,
                     u_t,
                     grad_l,
                 )
