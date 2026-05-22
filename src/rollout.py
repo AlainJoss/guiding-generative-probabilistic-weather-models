@@ -71,7 +71,7 @@ def rollout(
             }
             guided_id = make_hash(sweep_params)
             sampling_trace_path = ROLLOUTS / config.rollout_id / "guided_rollout" / guided_id
-            sampling_trace_path=None
+            # sampling_trace_path=None
         else:
             target_tdicts = None
             masks_tdict = None
@@ -89,7 +89,7 @@ def rollout(
                 sampling_trace_path=sampling_trace_path
             )
         else:
-            sample_multistep = x_cond["future_states"]
+            sample_multistep = x_cond["future_states"].cpu()
         
         sample_multistep = torch.cat(
             [x_cond["state"].unsqueeze(1).cpu(), sample_multistep],  # unsqueeze adds batch dim

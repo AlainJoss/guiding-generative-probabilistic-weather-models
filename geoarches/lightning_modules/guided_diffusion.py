@@ -317,10 +317,13 @@ class GuidedFlow(BaseLightningModule):
     def grad_loss(self, x_hat_t, y_n, mask, z_t):
         # in this block the shape is always "state" and type tensor_dict
         diff = x_hat_t - y_n
-        masked_diff = torch.mul(mask, diff)
+        # masked_diff = torch.mul(mask, diff)
+        masked_diff = tensordict_apply(lambda mask, diff: mask * diff, mask, diff)
 
         # l2norm
-        loss_ = torch.sum(masked_diff ** 2)
+        # loss_ = torch.sum(masked_diff ** 2)
+        loss_ = tensordict_apply(lambda masked_diff: masked_diff**2, masked_diff)
+        loss_ = torch.sum(loss_)
 
         # grad for each tensor in tensor dict
         keys = list(z_t.keys())
