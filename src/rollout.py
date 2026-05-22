@@ -76,11 +76,11 @@ def rollout(
             sample_multistep = x_cond["future_states"]
         
         sample_multistep = torch.cat(
-            [x_cond["state"].unsqueeze(1), sample_multistep],  # unsqueeze adds batch dim
+            [x_cond["state"].unsqueeze(1).cpu(), sample_multistep],  # unsqueeze adds batch dim
             dim=1,
         ).squeeze(0)
+        sample_multistep = ds.denormalize(sample_multistep)
         xr_member = rollout_to_xarray(
-            ds=ds,
             sample_multistep=sample_multistep,
             start_timestamp= current_timestamp,
             member=m,

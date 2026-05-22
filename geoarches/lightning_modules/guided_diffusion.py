@@ -12,6 +12,8 @@ from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
 from geoarches.paths import STATS_PATH
 
+from src.utils.converters import rollout_to_xarray
+
 
 class GuidedFlow(BaseLightningModule):
     """
@@ -117,7 +119,7 @@ class GuidedFlow(BaseLightningModule):
         guided_trajectory = []
         for n in range(0, N):
             y_n = None if y is None else y[n]  # TODO: check the index of the guidance
-            x_hat = self.sample(
+            x_hat, sampling_trace = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
                 mask=mask,
@@ -128,6 +130,22 @@ class GuidedFlow(BaseLightningModule):
             if torch.cuda.is_available() and self.device.type == "cuda":
                 torch.cuda.empty_cache()
             
+            # save sampling trace
+            for k, v in sampling_trace.items():
+                xr_member = rollout_to_xarray(
+                    sample_multistep=v,
+                    start_timestamp=x_cond["timestamp"]-24*3600,
+                    member=m,
+                    n=n
+                )
+                import xarray as xr
+                path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id / f"{k}.nc"
+                old_xr = xr.open_dataset()
+                xr_member.to_netcdf()
+
+                xr_pred = xr.concat(member_datasets, dim="member")
+                xr_member.to_netcdf()
+
             # after the last iteration no need to set this again
             if n < N-1:
                 # TODO: wrap this into a function, it's painful to watch
@@ -137,7 +155,6 @@ class GuidedFlow(BaseLightningModule):
                     "timestamp": x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600, # converts to seconds the lead_time
                     "lead_time_hours": x_cond["lead_time_hours"],
                 }
-        # TODO: what is this format???
         return torch.stack(guided_trajectory, dim=1)
     
     def get_det_pred(self, x_cond):
@@ -161,10 +178,10 @@ class GuidedFlow(BaseLightningModule):
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z = self.flow(x_cond, det_pred, y_n, mask, lambda_schedule, seed)
+        z, sampling_trace = self.flow(x_cond, det_pred, y_n, mask, lambda_schedule, seed)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = det_pred + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
-        return x_hat
+        return x_hat, sampling_trace
     
     def flow(self,
         x_cond, 
@@ -187,6 +204,10 @@ class GuidedFlow(BaseLightningModule):
         z_t = z_t * self.scale_input_noise
     
         ##### sample #####
+        grads = []
+        vfs = []
+        guided_vfs = []
+        clean_preds = []
         timesteps = torch.linspace(self.num_train_timesteps, 1, self.T).to(self.device)
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
@@ -209,6 +230,7 @@ class GuidedFlow(BaseLightningModule):
             # vector field 
             with torch.no_grad():
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                vfs.append(u_t.cpu())
 
             if y_n is not None:
                 with torch.enable_grad():
@@ -217,16 +239,27 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_t = self.denormalize(x_hat_norm_t)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
+                    clean_preds.append(x_hat_t.cpu())
+                    grads.append(grad_l.cpu())
+
                 u_t = tensordict_apply(
                     lambda u, g: u - (lambda_schedule[i]) * g,
                     u_t,
                     grad_l,
                 )
+                guided_vfs.append(u_t.cpu())
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
-        
-        return z_t
+
+        sampling_trace = {
+            "grads": grads,
+            "vfs": vfs,
+            "guided_vfs": vfs,
+            "clean_preds": clean_preds
+        }
+        return z_t, sampling_trace
+    
     
     def embedd_time(self, batch, t):
         times = pd.to_datetime(

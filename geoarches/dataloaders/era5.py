@@ -407,3 +407,34 @@ class Era5Forecast(Era5Dataset):
             delta_end = self.multistep * self.lead_time_hours * np.timedelta64(1, "h")
 
             super().set_timestamp_bounds(start_time - delta_start, end_time + delta_end)
+
+
+def convert_to_xarray(tdict, timestamp):
+    tdict = tdict.cpu()
+
+    if tdict["surface"].shape == torch.Size([]):
+        tdict = tdict[None]
+
+    surface = tdict["surface"].squeeze(-3)
+    level = tdict["level"]
+
+    times = pd.to_datetime(timestamp.cpu().numpy(), unit="s").tz_localize(None)
+
+    return xr.Dataset(
+        data_vars={
+            **{
+                v: (["time", "level", "latitude", "longitude"], level[:, i])
+                for i, v in enumerate(level_variables)
+            },
+            **{
+                v: (["time", "latitude", "longitude"], surface[:, i])
+                for i, v in enumerate(surface_variables)
+            },
+        },
+        coords={
+            "time": times,
+            "latitude": np.arange(90, -90 - 1e-6, -180 / 120),
+            "longitude": np.arange(0, 360, 360 / 240),
+            "level": pressure_levels,
+        },
+    )

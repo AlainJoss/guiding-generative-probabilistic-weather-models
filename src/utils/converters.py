@@ -66,22 +66,21 @@ def batchify_and_move(sample, device):
         for k, v in sample.items()
     }
 
-# TODO: clean this complete bs
+from geoarches.dataloaders.era5 import convert_to_xarray
 def rollout_to_xarray(
-    ds,
     sample_multistep,
     start_timestamp,
     member,
-):
-    sample_multistep = ds.denormalize(sample_multistep)
+) -> xr.Dataset:
     xr_rollout = []
     for i, sample in enumerate(sample_multistep):
-        xr_sample = ds.convert_to_xarray(sample.unsqueeze(0), start_timestamp+i*24*3600)
+        xr_sample = convert_to_xarray(sample.unsqueeze(0), start_timestamp+i*24*3600)
         xr_rollout.append(xr_sample)
 
     xr_rollout = xr.concat(xr_rollout, dim="time")
 
-    return xr_rollout.expand_dims(member=[member])
+    xr_rollout = xr_rollout.expand_dims(member=[member])
+    return xr_rollout
 
 
 def list_tensors_to_floats(list_):
