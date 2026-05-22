@@ -120,7 +120,7 @@ class GuidedFlow(BaseLightningModule):
         guided_trajectory = []
         for n in range(0, N):
             y_n = None if y is None else y[n]  # TODO: check the index of the guidance
-            x_hat, sampling_trace = self.sample(
+            x_hat, sampling_traces = self.sample(
                 x_cond=x_cond,
                 y_n=y_n,
                 mask=mask,
@@ -139,10 +139,11 @@ class GuidedFlow(BaseLightningModule):
                 import xarray as xr
                 from pathlib import Path
                 from src.utils.converters import sampling_trace_to_xarray
-                for k, v in sampling_trace.items():
-                    if not v:
+                for k, trace in sampling_traces.items():
+                    print(trace)
+                    if not trace:
                         continue
-                    xr_m_n = sampling_trace_to_xarray(v, m=m, n=n)
+                    xr_m_n = sampling_trace_to_xarray(trace, m=m, time=x_cond["timestamp"])
                     path = Path(sampling_trace_path, f"{k}.nc")
                     if path.exists():
                         with xr.open_dataset(path) as ds:

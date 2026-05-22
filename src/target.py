@@ -1,7 +1,5 @@
 from datetime import datetime
 
-import xarray as xr
-
 from src.utils.read_write import get_rollout_files
 from src.utils.dataset_utils import get_gt_rollout
 from src.dimensions import LEVELS_DICT, VARIABLES_DICT

@@ -54,7 +54,7 @@ def get_masked_mean(N_slices: np.ndarray, mask: np.ndarray):
 
 
 def get_mask_tdict(example_tdict: TensorDict, partition: str, var_idx: int, level_idx: int, mask_2d: torch.Tensor):
-    assert mask is not None
+    assert mask_2d is not None
     mask = tensordict_apply(lambda x: torch.zeros_like(x), example_tdict)
     mask[partition][..., var_idx, level_idx, :, :] = mask_2d
     return mask
