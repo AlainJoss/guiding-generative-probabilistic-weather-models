@@ -131,20 +131,20 @@ class GuidedFlow(BaseLightningModule):
                 torch.cuda.empty_cache()
             
             # save sampling trace
-            for k, v in sampling_trace.items():
-                xr_member = rollout_to_xarray(
-                    sample_multistep=v,
-                    start_timestamp=x_cond["timestamp"]-24*3600,
-                    member=m,
-                    n=n
-                )
-                import xarray as xr
-                path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id / f"{k}.nc"
-                old_xr = xr.open_dataset()
-                xr_member.to_netcdf()
+            # for k, v in sampling_trace.items():
+            #     xr_member = rollout_to_xarray(
+            #         sample_multistep=v,
+            #         start_timestamp=x_cond["timestamp"]-24*3600,
+            #         member=m,
+            #         n=n
+            #     )
+            #     import xarray as xr
+            #     path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id / f"{k}.nc"
+            #     old_xr = xr.open_dataset()
+            #     xr_member.to_netcdf()
 
-                xr_pred = xr.concat(member_datasets, dim="member")
-                xr_member.to_netcdf()
+            #     xr_pred = xr.concat(member_datasets, dim="member")
+            #     xr_member.to_netcdf()
 
             # after the last iteration no need to set this again
             if n < N-1:
@@ -271,7 +271,7 @@ class GuidedFlow(BaseLightningModule):
         hour = torch.tensor(times.hour).to(self.device)
         hour_emb = self.hour_embedder(hour)
         timestep_emb = self.timestep_embedder(torch.tensor([t]).to(self.device))
-        print(f"embedding time for gen model - month:{int(month)}, hour:{int(hour)}")
+        # print(f"embedding time for gen model - month:{int(month)}, hour:{int(hour)}")
 
         time_embedding = month_emb + hour_emb + timestep_emb
         return time_embedding
