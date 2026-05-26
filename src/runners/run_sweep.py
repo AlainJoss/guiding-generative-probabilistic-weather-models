@@ -19,11 +19,11 @@ from src.utils.converters import (
     list_tensors_to_floats,
 )
 from src.rollout import rollout 
-from rollout_config import UnguidedConfig, GUIDANCE_REFERENCES
-
-
-ALPHAS = [2.0]
-WS = [5.0, 10.0, 15.0]
+from rollout_config import (
+    RolloutConfig, 
+    SWEEP_PARAMS,
+    GUIDANCE_REFERENCES, MASK_MODES, ALPHAS, WS
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,13 +49,11 @@ def load_configs(config_type: str) -> list[tuple[str, dict[str, Any]]]:
 
     return configs
 
-
+# TODO: refactor
 def apply_guidance_overrides(
-    config: UnguidedConfig,
-    guidance_mode: str,
-    alpha: float,
-    w: float,
-) -> UnguidedConfig:
+    config: RolloutConfig,
+    sweep_params: list[str]
+) -> RolloutConfig:
     config_ = deepcopy(config)
     config_.guidance_mode = guidance_mode
     config_.alpha = alpha
@@ -88,7 +86,9 @@ def main() -> None:
         rollout_dir = ensure_rollout_dir(config["rollout_id"])
 
         if args.rollout_type == "guided":
+            # TODO refactor
             for guidance_mode, alpha, w in product(GUIDANCE_REFERENCES, ALPHAS, WS):
+                # TODO: refactor to abstract
                 config_ = apply_guidance_overrides(
                     config,
                     guidance_mode=guidance_mode,
@@ -98,8 +98,8 @@ def main() -> None:
 
                 logger.info(
                     f"Running guided rollout | "
-                    f"config_id={config_id}, "
-                    f"mode={guidance_mode}, alpha={alpha}, w={w}"
+                    f"config_id={config_id}, " # TODO: refactor
+                    # f"mode={guidance_mode}, alpha={alpha}, w={w}"
                 )
 
                 try:
@@ -108,31 +108,26 @@ def main() -> None:
                         flow_model,
                         test=args.test,
                     )
-
                     logger.info(
-                        f"Saved rollout to: {rollout_dir} | "
-                        f"mode={guidance_mode}, alpha={alpha}, w={w}"
+                        f"Saved rollout to: {rollout_dir}"
                     )
 
                 except Exception:
                     logger.exception(
                         f"FAILED guided rollout | "
-                        f"config_id={config_id}, "
-                        f"mode={guidance_mode}, alpha={alpha}, w={w}"
+                        f"config_id={config_id}, " # TODO: refactor
+                        # f"mode={guidance_mode}, alpha={alpha}, w={w}"
                     )
                     raise
 
         else:
-        
             logger.info(f"Running unguided rollout | config_id={config_id}")
             try:
                 rollout_dir = rollout(
                     config,
                     flow_model,
-                    None,
                     test=args.test,
                 )
-
                 logger.info(f"Saved rollout to: {rollout_dir}")
 
             except Exception:

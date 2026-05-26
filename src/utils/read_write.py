@@ -9,7 +9,6 @@ from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
 from src.paths import ERA5, MODELSTORE, ROLLOUTS, RUN_CONFIGS
-from src.dimensions import VARIABLES_DICT
 from src.rollout_config import RolloutConfig
 
 
@@ -54,13 +53,19 @@ def get_rollout_files(rollout_type: str, rollout_id: str, guided_id:str=None) ->
     match rollout_type:
         case "unguided_rollout":
             path = ROLLOUTS / rollout_id 
+            config_path = path / "config.json"
+            ds_path = path / f"unguided_rollout.nc"
         case "guided_rollout":
-            path = ROLLOUTS / rollout_id / rollout_type / guided_id
+            path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id
+            config_path = path / "config.json"
+            ds_path = path / f"guided_rollout.nc"
+        case "clean_preds" | "grads" | "guided_vfs" | "vfs":
+            path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id
+            config_path = path / "config.json"
+            ds_path = path / f"{rollout_type}.nc"
         case _:
             raise ValueError(f"Not a valid rollout_type: {rollout_type}")
-    ds_path = path / f"{rollout_type}.nc"
     ds = xr.open_dataset(ds_path, engine="netcdf4")
-    config_path = path / "config.json"
     config_dict = get_dict_from_json(config_path)
     config = RolloutConfig.from_dict(config_dict)
     return ds, config

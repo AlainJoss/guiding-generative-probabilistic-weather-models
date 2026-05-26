@@ -69,16 +69,12 @@ def batchify_and_move(sample, device):
 from geoarches.dataloaders.era5 import convert_to_xarray
 
 
-def sampling_trace_to_xarray(trace: list[TensorDict], m, n):
-    T = len(trace)
-    dummy_ts = torch.tensor(0)
-    xr_steps = [convert_to_xarray(s.unsqueeze(0), dummy_ts) for s in trace]
-    xr_v = xr.concat(xr_steps, dim="time")
-    xr_v = xr_v.rename({"time": "diffusion_step"}).assign_coords(
-        diffusion_step=list(range(T))
-    )
-    xr_v = xr_v.expand_dims(member=[m], n=[n])
-    return xr_v
+# TODO: I want the real times of course
+def sampling_trace_to_xarray(traces: list[TensorDict], m, timestamp):
+    xr_traces = [convert_to_xarray(t, timestamp+24*3600) for t in traces]
+    xr_trace = xr.concat(xr_traces, dim="t").assign_coords(t=range(len(xr_traces)))
+    xr_trace = xr_trace.expand_dims(member=[m])
+    return xr_trace
 
 
 def rollout_to_xarray(
@@ -88,10 +84,12 @@ def rollout_to_xarray(
 ) -> xr.Dataset:
     xr_rollout = []
     for i, sample in enumerate(sample_multistep):
+        current = start_timestamp+i*24*3600
+        print(f"timestamp of conversion: {tensor_timestamp_to_string(current)}")
         xr_sample = convert_to_xarray(sample.unsqueeze(0), start_timestamp+i*24*3600)
         xr_rollout.append(xr_sample)
 
-    xr_rollout = xr.concat(xr_rollout, dim="time")
+    xr_rollout = xr.concat(xr_rollout, dim="time", join="exact")
 
     xr_rollout = xr_rollout.expand_dims(member=[member])
     return xr_rollout

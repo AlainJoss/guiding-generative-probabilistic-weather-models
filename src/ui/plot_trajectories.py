@@ -17,6 +17,7 @@ def plot_trajectories(
     # ensemble bands
     guided_ensemble: list[list[float]] | None = None,
     unguided_ensemble: list[list[float]] | None = None,
+    target_ensemble: list[list[float]] | None = None,
 
     # optional summaries / references
     mean_unguided_rollout: list[float] | None = None,
@@ -108,6 +109,7 @@ def plot_trajectories(
 
     guided_ensemble = _as_step_member_array(guided_ensemble, "guided_ensemble")
     unguided_ensemble = _as_step_member_array(unguided_ensemble, "unguided_ensemble")
+    target_ensemble = _as_step_member_array(target_ensemble, "target_ensemble")
 
     colors = {
         "guided": "#0072B2",
@@ -238,6 +240,17 @@ def plot_trajectories(
                 show_mean=show_guided_mean,
             )
 
+        if target_ensemble is not None:
+            _plot_ensemble_band(
+                ensemble=target_ensemble,
+                color=colors["target"],
+                label_prefix="Target",
+                zorder_fill=2,
+                zorder_line=3,
+                selected_member=None,
+                show_mean=False,
+            )
+
         # ------------------------------------------------------------
         # Planned guidance
         # ------------------------------------------------------------
@@ -261,7 +274,7 @@ def plot_trajectories(
                     [
                         pe.Stroke(
                             linewidth=4.2,
-                            foreground="white",
+                            # foreground="white",
                             alpha=0.9,
                         ),
                         pe.Normal(),
@@ -318,8 +331,8 @@ def plot_trajectories(
                 zorder=8,
                 path_effects=[
                     pe.Stroke(
-                        linewidth=unguided_linewidth + 2,
-                        foreground="white",
+                        linewidth=unguided_linewidth + 1,
+                        # foreground="white",
                         alpha=0.95,
                     ),
                     pe.Normal(),
@@ -344,8 +357,8 @@ def plot_trajectories(
                 zorder=9,
                 path_effects=[
                     pe.Stroke(
-                        linewidth=guided_linewidth + 2,
-                        foreground="white",
+                        linewidth=guided_linewidth + 1,
+                        # foreground="white",
                         alpha=0.95,
                     ),
                     pe.Normal(),

@@ -115,8 +115,10 @@ class GuidedFlow(BaseLightningModule):
         x_cond: dict, 
         y: list[TensorDict] | None = None,
         mask: list[TensorDict] | None = None,
-        sampling_trace_path: str = None
+        sampling_trace_path: str = None,
+        T: int = 25
     ):
+        self.T=T
         guided_trajectory = []
         for n in range(0, N):
             y_n = None if y is None else y[n]  # TODO: check the index of the guidance
@@ -126,7 +128,7 @@ class GuidedFlow(BaseLightningModule):
                 mask=mask,
                 lambda_schedule=lambda_schedule,
                 seed= m + 1000 * n,  # + batch_nb * 10**6
-                sampling_trace_flag=True if sampling_trace_path is not None else False
+                sampling_trace_flag=True if sampling_trace_path is not None else False,
             )
             guided_trajectory.append(x_hat.cpu())
             if torch.cuda.is_available() and self.device.type == "cuda":
@@ -140,17 +142,25 @@ class GuidedFlow(BaseLightningModule):
                 import xarray as xr
                 from pathlib import Path
                 from src.utils.converters import sampling_trace_to_xarray
+
                 for k, trace in sampling_traces.items():
-                    print(trace)
-                    if not trace:
-                        continue
-                    xr_m_n = sampling_trace_to_xarray(trace, m=m, time=x_cond["timestamp"])
+                    xr_m_n = sampling_trace_to_xarray(
+                        trace,
+                        m=m,
+                        timestamp=x_cond["timestamp"],
+                    )
+
                     path = Path(sampling_trace_path, f"{k}.nc")
+                    tmp_path = path.with_suffix(".tmp.nc")
+
                     if path.exists():
                         with xr.open_dataset(path) as ds:
                             full = ds.load()
-                        concat_dim = "member" if n == 0 else "n"
-                        xr.concat([full, xr_m_n], dim=concat_dim).to_netcdf(path)
+
+                        full = xr_m_n.combine_first(full).sortby(["member", "time"])
+
+                        full.to_netcdf(tmp_path)
+                        tmp_path.replace(path)
                     else:
                         xr_m_n.to_netcdf(path)
 
@@ -249,9 +259,10 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_norm_t = det_pred + sigma_z_t
                     x_hat_t = self.denormalize(x_hat_norm_t)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
+                    print("grad_norm", torch.norm(grad_l["surface"], 2))
 
                 if sampling_trace_flag is not None:
-                    vfs.append(u_t.cpu())
+                    vfs.append(u_t.detach().cpu())
 
                 u_t = tensordict_apply(
                     lambda u, g: u - (lambda_schedule[i]) * g,
@@ -260,9 +271,9 @@ class GuidedFlow(BaseLightningModule):
                 )
 
                 if sampling_trace_flag is not None:
-                    clean_preds.append(x_hat_t.cpu())
-                    grads.append(grad_l.cpu())
-                    guided_vfs.append(u_t.cpu())
+                    clean_preds.append(x_hat_t.detach().cpu())
+                    grads.append(grad_l.detach().cpu())
+                    guided_vfs.append(u_t.detach().cpu())
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
@@ -318,16 +329,11 @@ class GuidedFlow(BaseLightningModule):
         return u_t
     
     def grad_loss(self, x_hat_t, y_n, mask, z_t):
-        # in this block the shape is always "state" and type tensor_dict
         diff = x_hat_t - y_n
-        # masked_diff = torch.mul(mask, diff)
-        masked_diff = tensordict_apply(torch.mul, mask, diff)
-
-        # l2norm
-        # loss_ = torch.sum(masked_diff ** 2)
-        loss_ = tensordict_apply(lambda masked_diff: masked_diff**2, masked_diff)
-        loss_ = sum(v.sum() for v in loss_.values())
-        
+        loss_ = sum(
+            (mask[k] * diff[k] ** 2).sum()
+            for k in diff.keys()
+        )
 
         # grad for each tensor in tensor dict
         keys = list(z_t.keys())

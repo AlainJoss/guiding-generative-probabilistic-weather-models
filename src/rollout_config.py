@@ -12,16 +12,24 @@ from src.utils.converters import (
 
 ROLLOUT_TYPES = ["unguided", "guided"]
 
+SWEEP_PARAMS = ["mask_mode", "guidance_reference", "alpha", "w"]
+
 GUIDANCE_REFERENCES = [
     "unguided_members",
     "ground_truth",
     # "lower_boundary",
     # "upper_boundary",
 ]
-
-GUIDANCE_PARAMS = ["guidance_reference", "alpha", "w"]
-
-MASK_MODES = ["bbox", "normal"]
+MASK_MODES = [
+    "bbox", 
+    "normal"
+]
+ALPHAS = [
+    0.0, 2.0
+]
+WS = [
+    5.0, 10.0, 15.0
+]
 
 ##### config class #####
 

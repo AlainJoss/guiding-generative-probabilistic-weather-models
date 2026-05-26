@@ -5,9 +5,6 @@ import numpy as np
 from tensordict.tensordict import TensorDict
 from geoarches.utils.tensordict_utils import tensordict_apply
 
-from src.dimensions import LEVELS_DICT, VARIABLES_DICT
-from src.rollout_config import RolloutConfig
-
 
 def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
     H, W = 121, 240
@@ -29,7 +26,7 @@ def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
     return mu, sigma
 
 
-def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
+def get_bbox_mask(lon_left, lon_right, lat_bottom, lat_top):
     """
     Normalizes to 1.
     """
@@ -48,6 +45,27 @@ def get_mask_from_corners(lon_left, lon_right, lat_bottom, lat_top):
     return mask / mask.sum()
 
 
+def get_normal_mask(lon_left, lon_right, lat_bottom, lat_top):
+    mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
+    shape = (121, 240)
+    y, x = np.indices(shape)
+    my, mx = mu
+    sy, sx = sigma
+    H, W = shape
+
+    dx = np.minimum(abs(x - mx), W - abs(x - mx))
+    dy = y - my
+
+    z = np.exp(-0.5 * ((dy / sy) ** 2 + (dx / sx) ** 2))
+    return z / z.sum()
+
+
+def get_mask_center(lon_left, lon_right, lat_bottom, lat_top):
+    x=lon_right+lon_left
+    y=lat_top+lat_bottom
+    return x/2,y/2
+
+
 def get_masked_mean(N_slices: np.ndarray, mask: np.ndarray):
     masked_slices = N_slices * mask
     return masked_slices.sum(axis=(-1,-2))
@@ -61,29 +79,15 @@ def get_mask_tdict(example_tdict: TensorDict, partition: str, var_idx: int, leve
     return mask
 
 
-def get_normal_mask(mu, sigma, shape=(121, 240)):
-    y, x = np.indices(shape)
-    my, mx = mu
-    sy, sx = sigma
-    H, W = shape
-
-    dx = np.minimum(abs(x - mx), W - abs(x - mx))
-    dy = y - my
-
-    z = np.exp(-0.5 * ((dy / sy) ** 2 + (dx / sx) ** 2))
-    return z / z.sum()
-
-
 def get_mask_2d(
     mask_mode: str,
     mask_corners: any
 ):  
     match mask_mode:
         case "bbox":
-            mask_2d = get_mask_from_corners(*mask_corners)
+            mask_2d = get_bbox_mask(*mask_corners)
         case "normal":
-            mu, sigma = get_mu_sigma(*mask_corners)
-            mask_2d = get_normal_mask(mu, sigma)
+            mask_2d = get_normal_mask(*mask_corners)
         case _:
             raise ValueError(f"Invalid mask_params {mask_corners}")
     return mask_2d

@@ -28,18 +28,14 @@ def _():
         get_mask_center,
     )
     from src.ui.plot_variable_change_parallel import plot_variable_change_parallel
-    from src.ui.analysis.analysis_plots import plot_guidance_tracking
-    from src.ui.analysis.helpers import format_time_value, get_time_values, clean_coord_value, get_member_values, member_label, as_numpy_2d, select_xr_field, xr_field_to_array, build_mask_rollouts, mean_rollout_terms, member_rollout_terms
-
+    from src.ui import plot_trajectories
     #####
     from src.paths import ROLLOUTS, RUN_CONFIGS
     from src.rollout_config import GUIDANCE_REFERENCES, MASK_MODES
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
-    from src.ui.analysis.analysis_plots import plot_guidance_tracking
     from src.ui.map import visualize_map
     from src.ui.plot_trajectory import plot_trajectory
-    from src.ui.plot_dual_trajectory import plot_dual_trajectory
 
     from src.utils.dataset_utils import get_x_cond
     from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
@@ -54,7 +50,7 @@ def _():
 
     from src.funcs import N_schedule, T_schedule
 
-    from src.mask import get_masked_slices, get_masked_mean, get_mask_2d, get_normal_mask, get_mask_from_corners, get_mu_sigma
+    from src.mask import get_masked_mean, get_mask_2d, get_normal_mask, get_bbox_mask, get_mu_sigma
     from src.target import get_target_rollout, get_reference_rollout
 
     return (
@@ -62,23 +58,18 @@ def _():
         PARTITIONS,
         ROLLOUTS,
         VARIABLES_DICT,
-        build_mask_rollouts,
         get_dict_from_json,
         get_level_idx,
         get_mask_2d,
         get_mask_center,
         get_masked_mean,
-        get_member_values,
         get_rollout_files,
         get_rollout_ids,
         get_slices,
         get_var_idx,
         make_hash,
-        member_rollout_terms,
-        plot_guidance_tracking,
         safe_abs_limits,
         visualize_map,
-        xr_field_to_array,
     )
 
 
