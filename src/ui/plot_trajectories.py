@@ -8,26 +8,41 @@ import matplotlib.patheffects as pe
 from matplotlib.ticker import AutoMinorLocator
 
 
-def plot_dual_trajectory(
+def plot_trajectories(
+    *,
+    # selected members
+    guided_member: list[float] | None = None,
+    unguided_member: list[float] | None = None,
+
+    # ensemble bands
+    guided_ensemble: list[list[float]] | None = None,
+    unguided_ensemble: list[list[float]] | None = None,
+
+    # optional summaries / references
+    mean_unguided_rollout: list[float] | None = None,
+    mean_guided_rollout: list[float] | None = None,
+    target_trajectory: list[float] | None = None,
+    ground_truth: list[float] | None = None,
+    reference_trajectory: list[float] | None = None,
+
+    # percentage axis, used if y_trajectory is not None
+    delta_trajectory: list[float] | None = None,
+
+    # display
+    show_guided_mean: bool = False,
+    show_unguided_mean: bool = False,
+
     timestamps: list[str],
     var: str,
-    m: int, 
-    mean_rollout: list[float] | None = None,
-    reference_trajectory: list[float] | None = None,
-    unguided_member: list[float] | None = None,
-    planned_guidance: list[float] | None = None,
-    ground_truth: list[float] | None = None,
-    y_trajectory: list[float] | None = None,
-    ensemble_rollout: list[list[float]] | None = None,
-    ymin_left: float | None = None,
-    ymax_left: float | None = None,
-    right_axis: bool = True,
+    m: int | None = None,
     n: int | None = None,
+    dpi: int = 180,
+    figsize: tuple[float, float] = (17.5, 5.5),
     title: str | None = None,
     subtitle: str | None = None,
     ylabel: str | None = None,
-    dpi: int = 180,
-    figsize: tuple[float, float] = (17.5, 5.5),
+    ymin_left: float | None = None,
+    ymax_left: float | None = None,
 ):
     num_steps = len(timestamps)
     time_values = pd.to_datetime(timestamps)
@@ -35,53 +50,70 @@ def plot_dual_trajectory(
     if n is not None and not (0 <= n < num_steps):
         raise ValueError(f"n must be in [0, {num_steps - 1}], got n={n}")
 
-    mean_rollout = (
-        np.asarray(mean_rollout, dtype=float)
-        if mean_rollout is not None
-        else None
-    )
-    unguided_member = (
-        np.asarray(unguided_member, dtype=float)
-        if unguided_member is not None
-        else None
-    )
-    planned_guidance = (
-        np.asarray(planned_guidance, dtype=float)
-        if planned_guidance is not None
-        else None
-    )
-    ground_truth = (
-        np.asarray(ground_truth, dtype=float)
-        if ground_truth is not None
-        else None
-    )
-    reference_trajectory = (
-        np.asarray(reference_trajectory, dtype=float)
-        if reference_trajectory is not None
-        else None
-    )
-    y_trajectory = (
-        np.asarray(y_trajectory, dtype=float) * 100.0
-        if y_trajectory is not None
-        else None
-    )
+    def _as_1d(values, name: str):
+        if values is None:
+            return None
 
-    for name, values in {
-        "unguided_member": unguided_member,
-        "mean_rollout": mean_rollout,
-        "planned_guidance": planned_guidance,
-        "ground_truth": ground_truth,
-        "reference_trajectory": reference_trajectory,
-        "y_trajectory": y_trajectory,
-    }.items():
-        if values is not None and len(values) != num_steps:
+        values = np.asarray(values, dtype=float)
+
+        if values.ndim != 1:
+            raise ValueError(f"{name} must be 1D, got shape {values.shape}")
+
+        if len(values) != num_steps:
             raise ValueError(f"{name} must have the same length as timestamps")
 
+        return values
+
+    def _as_step_member_array(values, name: str):
+        if values is None:
+            return None
+
+        values = np.asarray(values, dtype=float)
+
+        if values.ndim != 2:
+            raise ValueError(f"{name} must be 2D, got shape {values.shape}")
+
+        if values.shape[0] == num_steps:
+            return values
+
+        if values.shape[1] == num_steps:
+            return values.T
+
+        raise ValueError(
+            f"{name} must have one dimension equal to num_steps={num_steps}. "
+            f"Got shape {values.shape}."
+        )
+
+    guided_member = _as_1d(guided_member, "guided_member")
+    unguided_member = _as_1d(unguided_member, "unguided_member")
+
+    mean_unguided_rollout = _as_1d(
+        mean_unguided_rollout,
+        "mean_unguided_rollout",
+    )
+    mean_guided_rollout = _as_1d(
+        mean_guided_rollout,
+        "mean_guided_rollout",
+    )
+
+    target_trajectory = _as_1d(target_trajectory, "planned_guidance")
+    ground_truth = _as_1d(ground_truth, "ground_truth")
+    reference_trajectory = _as_1d(reference_trajectory, "reference_trajectory")
+
+    delta_trajectory = (
+        _as_1d(delta_trajectory, "y_trajectory") * 100.0
+        if delta_trajectory is not None
+        else None
+    )
+
+    guided_ensemble = _as_step_member_array(guided_ensemble, "guided_ensemble")
+    unguided_ensemble = _as_step_member_array(unguided_ensemble, "unguided_ensemble")
+
     colors = {
-        "mean": "#6E6E6E",
-        "ensemble": "#6E6E6E",
+        "guided": "#0072B2",
+        "unguided": "#6E6E6E",
         "target": "#D55E00",
-        "reference": "#009E73",
+        "ground_truth": "#009E73",
         "reference_trajectory": "#E6B800",
         "y": "#7B2CBF",
         "grid_major": "#D7D7D7",
@@ -89,6 +121,9 @@ def plot_dual_trajectory(
         "text": "#222222",
         "n_marker": "#222222",
     }
+
+    def _member_label(prefix: str):
+        return f"{prefix} member, m={m}" if m is not None else f"{prefix} member"
 
     with plt.rc_context(
         {
@@ -105,38 +140,40 @@ def plot_dual_trajectory(
 
         y_values = []
 
-        # ------------------------------------------------------------
-        # Ensemble shadow
-        # Expected shape: (num_steps, num_members)
-        # ------------------------------------------------------------
-        if ensemble_rollout is not None:
-            ensemble_rollout = ensemble_rollout.T
+        def _plot_ensemble_band(
+            ensemble,
+            color: str,
+            label_prefix: str,
+            zorder_fill: int,
+            zorder_line: int,
+            selected_member=None,
+            show_mean: bool = False,
+        ):
+            num_members = ensemble.shape[1]
 
-            if ensemble_rollout.ndim != 2:
-                raise ValueError(
-                    f"ensemble_rollout must be 2D, got shape {ensemble_rollout.shape}"
-                )
+            ens_min = np.nanmin(ensemble, axis=1)
+            ens_max = np.nanmax(ensemble, axis=1)
+            ens_mean = np.nanmean(ensemble, axis=1)
 
-            if ensemble_rollout.shape[0] != num_steps:
-                raise ValueError(
-                    "ensemble_rollout must have shape (num_steps, num_members). "
-                    f"Got shape {ensemble_rollout.shape}, num_steps={num_steps}."
-                )
-
-            num_members = ensemble_rollout.shape[1]
-
-            ens_min = np.nanmin(ensemble_rollout, axis=1)
-            ens_max = np.nanmax(ensemble_rollout, axis=1)
+            if selected_member is not None:
+                if not np.all(
+                    (selected_member >= ens_min - 1e-10)
+                    & (selected_member <= ens_max + 1e-10)
+                ):
+                    raise ValueError(
+                        f"{label_prefix.lower()} selected member is outside the "
+                        f"{label_prefix.lower()} ensemble range. Check timestamp/member alignment."
+                    )
 
             ax.fill_between(
                 time_values,
                 ens_min,
                 ens_max,
-                color=colors["ensemble"],
+                color=color,
                 alpha=0.16,
                 linewidth=0,
-                label=f"Ensemble range, M={num_members}",
-                zorder=1,
+                label=f"{label_prefix} ensemble range, M={num_members}",
+                zorder=zorder_fill,
             )
 
             ax.plot(
@@ -144,9 +181,9 @@ def plot_dual_trajectory(
                 ens_min,
                 linestyle="-",
                 linewidth=0.9,
-                color=colors["ensemble"],
+                color=color,
                 alpha=0.45,
-                zorder=2,
+                zorder=zorder_line,
                 label="_nolegend_",
             )
 
@@ -155,27 +192,65 @@ def plot_dual_trajectory(
                 ens_max,
                 linestyle="-",
                 linewidth=0.9,
-                color=colors["ensemble"],
+                color=color,
                 alpha=0.45,
-                zorder=2,
+                zorder=zorder_line,
                 label="_nolegend_",
             )
 
-            y_values.append(ensemble_rollout.reshape(-1))
+            y_values.append(ensemble.reshape(-1))
+
+            if show_mean:
+                ax.plot(
+                    time_values,
+                    ens_mean,
+                    linestyle="--",
+                    linewidth=1.5,
+                    color=color,
+                    alpha=0.85,
+                    label=f"{label_prefix} ensemble mean",
+                    zorder=zorder_line + 2,
+                )
+                y_values.append(ens_mean)
+
+        # ------------------------------------------------------------
+        # Ensemble bands
+        # ------------------------------------------------------------
+        if unguided_ensemble is not None:
+            _plot_ensemble_band(
+                ensemble=unguided_ensemble,
+                color=colors["unguided"],
+                label_prefix="Unguided",
+                zorder_fill=1,
+                zorder_line=2,
+                selected_member=unguided_member,
+                show_mean=show_unguided_mean,
+            )
+
+        if guided_ensemble is not None:
+            _plot_ensemble_band(
+                ensemble=guided_ensemble,
+                color=colors["guided"],
+                label_prefix="Guided",
+                zorder_fill=3,
+                zorder_line=4,
+                selected_member=guided_member,
+                show_mean=show_guided_mean,
+            )
 
         # ------------------------------------------------------------
         # Planned guidance
         # ------------------------------------------------------------
         planned_equals_ground_truth = (
-            planned_guidance is not None
+            target_trajectory is not None
             and ground_truth is not None
-            and np.allclose(planned_guidance, ground_truth, equal_nan=True)
+            and np.allclose(target_trajectory, ground_truth, equal_nan=True)
         )
 
-        if planned_guidance is not None:
+        if target_trajectory is not None:
             ax.plot(
                 time_values,
-                planned_guidance,
+                target_trajectory,
                 linestyle="--" if planned_equals_ground_truth else "-",
                 linewidth=2.4 if planned_equals_ground_truth else 2.0,
                 color=colors["target"],
@@ -195,46 +270,89 @@ def plot_dual_trajectory(
                     else None
                 ),
             )
-            y_values.append(planned_guidance)
-
+            y_values.append(target_trajectory)
 
         # ------------------------------------------------------------
-        # Mean rollout
+        # Mean rollouts
         # ------------------------------------------------------------
-        if mean_rollout is not None:
+        if mean_unguided_rollout is not None:
             ax.plot(
                 time_values,
-                mean_rollout,
-                linestyle="-",
-                linewidth=0,
-                color=colors["mean"],
-                alpha=0.16,
-                label="Mean rollout",
-                zorder=6,
-                path_effects=[
-                    pe.Stroke(linewidth=1, alpha=0.16),
-                    pe.Normal(),
-                ],
+                mean_unguided_rollout,
+                linestyle="--",
+                linewidth=1.5,
+                color=colors["unguided"],
+                alpha=0.85,
+                label="Mean unguided rollout",
+                zorder=5,
             )
-            y_values.append(mean_rollout)
+            y_values.append(mean_unguided_rollout)
 
+        if mean_guided_rollout is not None:
+            ax.plot(
+                time_values,
+                mean_guided_rollout,
+                linestyle="--",
+                linewidth=1.6,
+                color=colors["guided"],
+                alpha=0.85,
+                label="Mean guided rollout",
+                zorder=6,
+            )
+            y_values.append(mean_guided_rollout)
 
+        # ------------------------------------------------------------
+        # Selected unguided member
+        # ------------------------------------------------------------
         if unguided_member is not None:
+            unguided_linewidth = 2.2
+
             ax.plot(
                 time_values,
                 unguided_member,
                 linestyle="-",
-                linewidth=2.4,
-                color=colors["mean"],
+                linewidth=unguided_linewidth,
+                color=colors["unguided"],
                 alpha=0.98,
-                label=f"Unguided member {m}",
-                zorder=6,
+                label=_member_label("Unguided"),
+                zorder=8,
                 path_effects=[
-                    pe.Stroke(linewidth=2.2, alpha=0.9),
+                    pe.Stroke(
+                        linewidth=unguided_linewidth + 2,
+                        foreground="white",
+                        alpha=0.95,
+                    ),
                     pe.Normal(),
                 ],
             )
             y_values.append(unguided_member)
+
+        # ------------------------------------------------------------
+        # Selected guided member
+        # ------------------------------------------------------------
+        if guided_member is not None:
+            guided_linewidth = 2.8
+
+            ax.plot(
+                time_values,
+                guided_member,
+                linestyle="-",
+                linewidth=guided_linewidth,
+                color=colors["guided"],
+                alpha=0.99,
+                label=_member_label("Guided"),
+                zorder=9,
+                path_effects=[
+                    pe.Stroke(
+                        linewidth=guided_linewidth + 2,
+                        foreground="white",
+                        alpha=0.95,
+                    ),
+                    pe.Normal(),
+                ],
+            )
+            y_values.append(guided_member)
+
         # ------------------------------------------------------------
         # Ground truth
         # ------------------------------------------------------------
@@ -244,7 +362,7 @@ def plot_dual_trajectory(
                 ground_truth,
                 linestyle="-",
                 linewidth=2.2,
-                color=colors["reference"],
+                color=colors["ground_truth"],
                 alpha=0.70 if planned_equals_ground_truth else 0.95,
                 label="Ground truth",
                 zorder=7,
@@ -268,7 +386,7 @@ def plot_dual_trajectory(
             y_values.append(reference_trajectory)
 
         # ------------------------------------------------------------
-        # Vertical grid lines at every forecast step
+        # Vertical grid lines
         # ------------------------------------------------------------
         for step_idx, step_time in enumerate(time_values):
             if n is not None and step_idx == n:
@@ -285,7 +403,7 @@ def plot_dual_trajectory(
             )
 
         # ------------------------------------------------------------
-        # Optional current n marker
+        # Current n marker and automatic delta annotation
         # ------------------------------------------------------------
         if n is not None:
             ax.axvline(
@@ -298,8 +416,14 @@ def plot_dual_trajectory(
                 zorder=10,
             )
 
+            if guided_member is not None and unguided_member is not None:
+                member_diff = guided_member - unguided_member
+                annotation = f"n={n}\nΔ={member_diff[n]:.3f}"
+            else:
+                annotation = f"n={n}"
+
             ax.annotate(
-                f"n={n}",
+                annotation,
                 xy=(time_values[n], 1.0),
                 xycoords=("data", "axes fraction"),
                 xytext=(6, -8),
@@ -381,14 +505,14 @@ def plot_dual_trajectory(
         # ------------------------------------------------------------
         # Optional right axis for percentage trajectory
         # ------------------------------------------------------------
-        has_right_axis = right_axis and y_trajectory is not None
+        has_right_axis = delta_trajectory is not None
 
         if has_right_axis:
             ax2 = ax.twinx()
 
             ax2.plot(
                 time_values,
-                y_trajectory,
+                delta_trajectory,
                 linestyle="-",
                 linewidth=1.6,
                 color=colors["y"],
@@ -405,12 +529,12 @@ def plot_dual_trajectory(
                 zorder=0,
             )
 
-            # No right-axis label; show percent directly on tick labels.
             ax2.set_ylabel("")
             ax2.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
 
             ax2.spines["top"].set_visible(False)
             ax2.spines["right"].set_color("#BBBBBB")
+
             ax2.tick_params(
                 axis="both",
                 colors=colors["y"],
@@ -419,8 +543,8 @@ def plot_dual_trajectory(
             )
 
             left_min, left_max = ax.get_ylim()
-            y_min = float(np.nanmin(y_trajectory))
-            y_max = float(np.nanmax(y_trajectory))
+            y_min = float(np.nanmin(delta_trajectory))
+            y_max = float(np.nanmax(delta_trajectory))
 
             if y_min == y_max:
                 y_min -= 1.0
@@ -442,11 +566,10 @@ def plot_dual_trajectory(
         else:
             handles, labels = ax.get_legend_handles_labels()
 
-        unique = dict(zip(labels, handles))
-
         # ------------------------------------------------------------
         # Legend
         # ------------------------------------------------------------
+        unique = dict(zip(labels, handles))
         legend_x = 1.05 if has_right_axis else 1.015
 
         ax.legend(

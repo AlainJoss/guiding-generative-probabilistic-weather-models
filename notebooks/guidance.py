@@ -71,7 +71,6 @@ def _():
         get_var_idx,
         make_hash,
         max_day,
-        plot_dual_trajectory,
         plot_trajectory,
         visualize_map,
     )
@@ -80,9 +79,11 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    - visualize the guidance ... -> need to open the analyze notebook again
     - shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
     - Use daterange calendar for presentation -> use in guided and analysis modes
     - I'm hiding the lambda_schedule from the ui for now to simplify things.
+    - Remerge utils!
     """)
     return
 
@@ -459,7 +460,7 @@ def _(
 @app.cell
 def _(guidance_reference, reference_trajectories):
     reference_trajectory = reference_trajectories[guidance_reference]
-    return (reference_trajectory,)
+    return
 
 
 @app.cell
@@ -525,27 +526,13 @@ def _(
     return (
         gt_N_slices,
         gt_trajectory,
+        gui_M_N_trajectories,
+        gui_m_trajectory,
         ung_M_N_trajectories,
         ung_lb_trajectory,
         ung_m_trajectory,
-        ung_mean_trajectory,
         ung_ub_trajectory,
     )
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-@app.cell
-def _():
-    return
 
 
 @app.cell
@@ -819,6 +806,14 @@ def _(mo):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    - show dist of planned guidances
+    """)
+    return
+
+
 @app.cell
 def _(trajectory_widget):
     trajectory_widget
@@ -827,49 +822,36 @@ def _(trajectory_widget):
 
 @app.cell
 def _(
-    delta_trajectory,
     gt_trajectory,
+    gui_M_N_trajectories,
+    gui_m_trajectory,
     m,
     n,
-    plot_dual_trajectory,
-    reference_trajectory,
     target_trajectory,
     timestamps,
     ung_M_N_trajectories,
     ung_m_trajectory,
-    ung_mean_trajectory,
     var,
 ):
-    """
-    refactor to include all of this:
-    ung_M_N_trajectories
-    ung_mean_trajectory
-    ung_m_trajectory
+    from src.ui.plot_trajectories import plot_trajectories
 
-    gui_M_N_trajectories
-    gui_mean_trajectory
-    gui_m_trajectory
-
-    gt_trajectory
-    """
-    trajectories_plot = plot_dual_trajectory(
+    trajectories_plot = plot_trajectories(
         timestamps=timestamps,
         var=var,
-        unguided_member=ung_m_trajectory,
-        reference_trajectory=reference_trajectory,
         m=m,
         n=n,
-        mean_rollout=ung_mean_trajectory,
+        guided_member=gui_m_trajectory,
+        unguided_member=ung_m_trajectory,
+        guided_ensemble=gui_M_N_trajectories,
+        unguided_ensemble=ung_M_N_trajectories,
+        target_trajectory=target_trajectory,
         ground_truth=gt_trajectory,
-        planned_guidance=target_trajectory,
-        y_trajectory=delta_trajectory,
-        ensemble_rollout=ung_M_N_trajectories,
-        ymin_left=None,
-        ymax_left=None, # ... ?
-        figsize=(17.5, 5.5),
-        title=f"{var} trajectory",
-        subtitle="mask weighted average",
-        dpi=500
+        delta_trajectory=None, # delta_trajectory,
+        show_guided_mean=False,
+        show_unguided_mean=False,
+        title=f"Realized guidance - {var}",
+        subtitle="Guided vs unguided mask-averaged trajectory",
+        ylabel="Mask-averaged value",
     )
     return (trajectories_plot,)
 
