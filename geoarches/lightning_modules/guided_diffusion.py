@@ -250,13 +250,14 @@ class GuidedFlow(BaseLightningModule):
             input_state = self.get_velocity_input_state(z_t, x_cond)
 
             # vector field 
-            with torch.no_grad():
+            with torch.enable_grad():
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
 
             if y_n is not None:
                 with torch.enable_grad():
-                    sigma_z_t = tensordict_apply(torch.mul, z_t, self.residual_to_pangu_scale)
-                    x_hat_norm_t = det_pred + sigma_z_t
+                    r_hat_t = self.euler_step(z_t, u_t, 1)
+                    sigma_r_hat_t = tensordict_apply(torch.mul, r_hat_t, self.residual_to_pangu_scale)
+                    x_hat_norm_t = det_pred + sigma_r_hat_t
                     x_hat_t = self.denormalize(x_hat_norm_t)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
@@ -265,11 +266,7 @@ class GuidedFlow(BaseLightningModule):
                     sampling_trace["grad"].append(grad_l.detach().cpu())
                     sampling_trace["vf"].append(u_t.detach().cpu())
 
-                u_t = tensordict_apply(
-                    lambda u, g: u - (lambda_schedule[i]) * g,
-                    u_t,
-                    grad_l,
-                )
+                u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, grad_l)
 
                 if sampling_trace_flag is not None:
                     sampling_trace["guided_vf"].append(u_t.detach().cpu())

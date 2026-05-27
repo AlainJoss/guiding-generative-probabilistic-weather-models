@@ -1302,10 +1302,10 @@ def _(alpha_slider, lambda_trajectory_plot, mo, notebook_mode, w_slider):
 @app.cell
 def _(get_rollout_files, guided_id, notebook_mode, rollout_id):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        grads_xr, _ = get_rollout_files("grads", rollout_id, guided_id)
-        vfs_xr, _ = get_rollout_files("vfs", rollout_id, guided_id)
+        grads_xr, _ = get_rollout_files("grad", rollout_id, guided_id)
+        vfs_xr, _ = get_rollout_files("vf", rollout_id, guided_id)
         clean_preds_xr, _ = get_rollout_files("clean_preds", rollout_id, guided_id)
-        guided_vfs_xr, _ = get_rollout_files("guided_vfs", rollout_id, guided_id)
+        guided_vfs_xr, _ = get_rollout_files("guided_vf", rollout_id, guided_id)
     return clean_preds_xr, grads_xr, guided_vfs_xr, vfs_xr
 
 

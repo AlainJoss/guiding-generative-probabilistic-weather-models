@@ -96,6 +96,8 @@ def build_jobs(config: RolloutConfig) -> list[RolloutJob]:
             f"w={w}"
         )
         jobs.append(RolloutJob(swept, label))
+    print(f"created {len(jobs)} sweep jobs:")
+    print(f"{jobs}")
     return jobs
 
 
