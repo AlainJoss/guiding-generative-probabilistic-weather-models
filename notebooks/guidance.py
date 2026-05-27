@@ -101,10 +101,7 @@ def _(mo):
 
 
 @app.cell
-def _(mo, refresh_button):
-    if refresh_button.value:
-        pass
-
+def _(mo):
     NOTEBOOK_MODES = ["unguided_rollout", "guided_rollout", "analyze_rollout"]
     notebook_mode_dropdown = mo.ui.dropdown(
         options=NOTEBOOK_MODES,
@@ -115,7 +112,10 @@ def _(mo, refresh_button):
 
 
 @app.cell
-def _(get_rollout_ids, mo, notebook_mode_dropdown):
+def _(get_rollout_ids, mo, notebook_mode_dropdown, refresh_button):
+    if refresh_button.value:
+        pass
+
     notebook_mode = notebook_mode_dropdown.value
 
     save_config_button = mo.ui.run_button(label="save config")
@@ -194,10 +194,10 @@ def _(
 @app.cell
 def _(
     GUIDANCE_REFERENCES,
+    MASK_MODES,
     Path,
     ROLLOUTS,
     get_dict_from_json,
-    mask_mode_dropdown,
     mo,
     notebook_mode,
     rollout_id,
@@ -221,6 +221,7 @@ def _(
                 debounce=True,
                 show_value=True
             )
+            mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
             sweep_params_widget = None
         case "analyze_rollout":
             experiment_params = get_dict_from_json(Path(ROLLOUTS, rollout_id, "sweep_params.json"))
@@ -248,8 +249,10 @@ def _(
                 show_value=True
             )
 
+            mask_mode_dropdown = mo.ui.dropdown(options=experiment_params["mask_mode"], value=experiment_params["mask_mode"][0], label="mask_mode: ")
+
             sweep_params_widget = mo.vstack([
-                guidance_reference_dropdown,mask_mode_dropdown,
+                guidance_reference_dropdown, mask_mode_dropdown,
                 alpha_slider,
                 w_slider,
             ])
@@ -259,20 +262,27 @@ def _(
     return (
         alpha_slider,
         guidance_reference_dropdown,
+        mask_mode_dropdown,
         sweep_params_widget,
         w_slider,
     )
 
 
 @app.cell
-def _(alpha_slider, guidance_reference_dropdown, notebook_mode, w_slider):
+def _(
+    alpha_slider,
+    guidance_reference_dropdown,
+    mask_mode_dropdown,
+    notebook_mode,
+    w_slider,
+):
     match notebook_mode:
         case "unguided_rollout" | "guided_rollout":
             hash_params = None
         case "analyze_rollout":
             hash_params = {
                 "guidance_reference": guidance_reference_dropdown.value,
-                # "mask_mode": mask_mode_dropdown.value,
+                "mask_mode": mask_mode_dropdown.value,
                 "alpha": alpha_slider.value,
                 "w": w_slider.value,
             }
@@ -644,9 +654,8 @@ def _(M, N, mo):
 
 
 @app.cell
-def _(MASK_MODES, mo):
-    mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
-    return (mask_mode_dropdown,)
+def _():
+    return
 
 
 @app.cell
@@ -823,11 +832,13 @@ def _(trajectory_widget):
 
 @app.cell
 def _(
+    delta_trajectory,
     gt_trajectory,
     gui_M_N_trajectories,
     gui_m_trajectory,
     m,
     n,
+    notebook_mode,
     target_trajectories,
     target_trajectory,
     timestamps,
@@ -849,7 +860,7 @@ def _(
         target_ensemble=target_trajectories,
         target_trajectory=target_trajectory,
         ground_truth=gt_trajectory,
-        delta_trajectory=None, # delta_trajectory,
+        delta_trajectory=delta_trajectory if notebook_mode == "guided_rollout" else None, # delta_trajectory,
         show_guided_mean=False,
         show_unguided_mean=False,
         title=f"Realized guidance - {var}",
@@ -900,7 +911,7 @@ def _(
         # mask_corners=mask_corners, # TODO: simplify to this
         rectangle_x=(mask_corners[0], mask_corners[1]),
         rectangle_y=(mask_corners[2], mask_corners[3]),
-        # figsize=(12, 5),
+        figsize=(14, 8),
         dpi=dpi_slider.value,
     )
     if map_interactive:
@@ -924,7 +935,7 @@ def _(dpi_slider, mask, mask_corners, np, visualize_map):
         center=np.mean(mask),
         rectangle_x=(mask_corners[0], mask_corners[1]),
         rectangle_y=(mask_corners[2], mask_corners[3]),
-        # figsize=(14, 8),
+        figsize=(14, 8),
         dpi=dpi_slider.value
     )
     return (mask_map,)
@@ -1110,6 +1121,7 @@ def _(
                     zoom_center_lon=zoom_centers[0],
                     zoom_center_lat=zoom_centers[1],
                     dpi=dpi_slider.value,
+                    figsize=(14, 8),
                 )
     
             curr_map = absolute_maps["$x_t$"]
@@ -1159,6 +1171,7 @@ def _(
                     value_threshold=text_thresh_slider.value,
                     value_fontsize=5,
                     dpi=dpi_slider.value,
+                    figsize=(14, 8),
                 )
     
             gt_gt_map = difference_maps["$x_{t+1} - x_t$"]
@@ -1260,9 +1273,9 @@ def _(T_schedule, alpha_slider, plot_trajectory, w_slider):
 
 
 @app.cell
-def _(mo):
+def _(grads_xr, mo, notebook_mode):
     t_slider = mo.ui.slider(
-        steps=range(25),
+        steps=range(len(grads_xr.t)) if notebook_mode == "analyze_rollout" else range(25),
         value=0,
         label="t: ",
         debounce=True,
@@ -1272,14 +1285,17 @@ def _(mo):
 
 
 @app.cell
-def _(alpha_slider, lambda_trajectory_plot, mo, t_slider, w_slider):
-    mo.vstack([
-        t_slider,
-        mo.hstack([
-            alpha_slider, w_slider
-        ], justify="start"),
-        lambda_trajectory_plot,
-    ])
+def _(alpha_slider, lambda_trajectory_plot, mo, notebook_mode, w_slider):
+    if notebook_mode not in ("unguided_rollout"):
+        flow_schedule_widget = mo.vstack([
+            mo.hstack([
+                alpha_slider, w_slider
+            ], justify="start"),
+            lambda_trajectory_plot,
+        ])
+    else:
+        flow_schedule_widget=None
+    flow_schedule_widget
     return
 
 
@@ -1394,8 +1410,8 @@ def _(
             diff_vfs_slice,
             title="vf^guided_t - vf_t",
             interactive=False,
-            vmin=np.min(diff_vfs_slice) if np.min(diff_vfs_slice)<0 else -0.001,
-            vmax=np.max(diff_vfs_slice) if np.max(diff_vfs_slice)>0 else 0.001,
+            vmin=np.min(diff_vfs_slice) if not np.min(diff_vfs_slice)==0 else -0.001,
+            vmax=np.max(diff_vfs_slice) if not np.max(diff_vfs_slice)==0 else 0.001,
             center=np.mean(diff_vfs_slice) if n>0 else 0,
             rectangle_x=(mask_corners[0], mask_corners[1]),
             rectangle_y=(mask_corners[2], mask_corners[3]),
@@ -1527,6 +1543,7 @@ def _(
 
 @app.cell
 def _(
+    alpha_slider,
     clean_preds_map,
     diff_grads_map,
     diff_vfs_map,
@@ -1545,10 +1562,12 @@ def _(
     t_slider,
     var_dropdown,
     vfs_map,
+    w_slider,
     zoom_slider,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
         flow_controls = [
+            mo.hstack([alpha_slider, w_slider], justify="start"),
             mo.hstack([t_slider, dpi_slider], justify="start"),
             mo.hstack([n_slider, m_slider], justify="start"),
             mo.hstack(

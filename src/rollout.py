@@ -86,7 +86,6 @@ def rollout(
             masks_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
             
             sampling_trace_path = ROLLOUTS / config.rollout_id / "guided_rollout" / guided_id
-            # sampling_trace_path=None
         else:
             target_tdicts = None
             masks_tdict = None

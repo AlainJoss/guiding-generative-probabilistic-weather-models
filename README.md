@@ -5,9 +5,8 @@ Resources:
 
 Run analysis:
 ```bash
-python -m src.runners.sweep --rollout_id 2026-05-27_10:01:30
-python -m src.runners.run_from_config --rollout_id "2026-05-27_10:01:30" --rollout_type unguided_rollout --test
-python -m src.runners.run_from_config --rollout_id "2026-05-22_17:53:46" --rollout_type guided_rollout --test
+python -m src.runners.run_sweep --rollout_id 2026-05-27_14:32:22
+python -m src.runners.run_from_config --rollout_type guided_rollout --rollout_id 2026-05-27_14:32:22 --test
 ```
 
 Notebooks:
