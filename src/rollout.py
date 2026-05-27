@@ -31,7 +31,7 @@ def rollout(
     flow_model: GuidedFlow | None = None,
     test: bool = False,
 ):  
-
+    flow_model.move_objects_to_device()
     rollout_dir = ensure_rollout_dir(config.rollout_id)
     sweep_params = {
         "guidance_reference": config.guidance_reference,

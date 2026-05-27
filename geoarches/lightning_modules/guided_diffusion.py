@@ -98,15 +98,18 @@ class GuidedFlow(BaseLightningModule):
             level=pangu_stats["level_std"],
         )
 
+    def move_objects_to_device(self):
+        self.residual_to_pangu_scale = self.residual_to_pangu_scale.to(self.device)
+        self.data_mean = self.data_mean.to(self.device)
+        self.data_std = self.data_std.to(self.device)
+
     def denormalize(self, batch):
-        means = self.data_mean #.to(self.device)
-        stds = self.data_std #.to(self.device)
         # TODO: not sure why the presence of surface should enable this 
         if "surface" in batch:
             # we can denormalize directly
-            return batch * stds + means
+            return batch * self.data_std + self.data_mean
 
-        out = {k: (v * stds + means if "state" in k else v) for k, v in batch.items()}
+        out = {k: (v * self.data_std + self.data_mean if "state" in k else v) for k, v in batch.items()}
         return out
 
     def sample_rollout(
@@ -194,10 +197,6 @@ class GuidedFlow(BaseLightningModule):
         with torch.no_grad():
             det_pred = self.det_model(x_cond)
             x_cond["pred_state"] = det_pred
-            
-            self.residual_to_pangu_scale = self.residual_to_pangu_scale.to(self.device)
-            self.data_mean = self.data_mean.to(self.device)
-            self.data_std = self.data_std.to(self.device)
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
@@ -219,7 +218,7 @@ class GuidedFlow(BaseLightningModule):
         # draw noise
         generator = torch.Generator(device=self.device)
         if seed is not None:
-            print(f"set seed: {seed}")
+            # print(f"set seed: {seed}")
             generator.manual_seed(seed)
             
         z_t = x_cond["state"].apply(
@@ -228,8 +227,11 @@ class GuidedFlow(BaseLightningModule):
         z_t = z_t * self.scale_input_noise
     
         ##### sample #####
-        sampling_trace=defaultdict(list)
-        
+        if sampling_trace_flag:
+            sampling_trace=defaultdict(list)
+        else:
+            sampling_trace=None
+
         timesteps = torch.linspace(self.num_train_timesteps, 1, self.T).to(self.device)
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
@@ -250,28 +252,25 @@ class GuidedFlow(BaseLightningModule):
             input_state = self.get_velocity_input_state(z_t, x_cond)
 
             # vector field 
-            with torch.enable_grad():
-                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-
-            if y_n is not None:
+            if y_n is None:
+                with torch.no_grad():
+                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+            else:
                 with torch.enable_grad():
-                    r_t = tensordict_apply(lambda z, u: z + s_t * u, z_t, u_t)
-                    sigma_r_hat_t = tensordict_apply(torch.mul, r_t, self.residual_to_pangu_scale)
-                    x_hat_norm_t = det_pred + sigma_r_hat_t
-                    x_hat_t = self.denormalize(x_hat_norm_t)
+                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                    x_hat_t = self.denormalize(det_pred + (z_t + s_t * u_t) * self.residual_to_pangu_scale)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
-                if sampling_trace_flag is not None:
-                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+                if sampling_trace_flag:
+                    # sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                     sampling_trace["grad"].append(grad_l.detach().cpu())
-                    sampling_trace["vf"].append(u_t.detach().cpu())
+                    # sampling_trace["vf"].append(u_t.detach().cpu())
 
                 u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, grad_l)
 
-                if sampling_trace_flag is not None:
-                    sampling_trace["guided_vf"].append(u_t.detach().cpu())
-                else:
-                    sampling_trace=None
+                if sampling_trace_flag:
+                    pass
+                    # sampling_trace["guided_vf"].append(u_t.detach().cpu())
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)
