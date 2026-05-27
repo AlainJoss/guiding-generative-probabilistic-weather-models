@@ -255,8 +255,8 @@ class GuidedFlow(BaseLightningModule):
 
             if y_n is not None:
                 with torch.enable_grad():
-                    r_hat_t = self.euler_step(z_t, u_t, 1)
-                    sigma_r_hat_t = tensordict_apply(torch.mul, r_hat_t, self.residual_to_pangu_scale)
+                    r_t = tensordict_apply(lambda z, u: z + s_t * u, z_t, u_t)
+                    sigma_r_hat_t = tensordict_apply(torch.mul, r_t, self.residual_to_pangu_scale)
                     x_hat_norm_t = det_pred + sigma_r_hat_t
                     x_hat_t = self.denormalize(x_hat_norm_t)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)

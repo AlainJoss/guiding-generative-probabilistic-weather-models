@@ -55,8 +55,6 @@ def rollout(
     var_idx = get_var_idx(config.partition, config.var)
     level_idx = get_level_idx(config.partition, config.level)
     mask_2d = get_mask_2d(config.mask_mode, config.mask_corners)
-    MASK_MULTIPLIER = 1
-    mask_2d = mask_2d*MASK_MULTIPLIER
     lambda_schedule = T_schedule(config.alpha, config.w)
 
     ds = get_td_dataset(multistep=config.N)
