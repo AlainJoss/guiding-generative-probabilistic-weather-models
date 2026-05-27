@@ -12,7 +12,7 @@ from src.utils.converters import (
 
 ROLLOUT_TYPES = ["unguided", "guided"]
 
-SWEEP_PARAMS = ["mask_mode", "guidance_reference", "alpha", "w"]
+SWEEP_PARAMS = ["guidance_reference", "mask_mode", "alpha", "w"]
 
 GUIDANCE_REFERENCES = [
     "unguided_members",

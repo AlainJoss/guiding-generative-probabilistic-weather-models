@@ -13,7 +13,10 @@ print(f"DATA path: {DATA}")
 
 LOGS = DATA / "logs"
 RUN_CONFIGS = DATA / "configs"
-MODELSTORE = DATA / "modelstore"
+if Path(ROOT, "modelstore").exists():
+    MODELSTORE = Path(ROOT, "modelstore")
+else:
+    MODELSTORE = DATA / "modelstore"
 DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-seed0",
     MODELSTORE / "archesweather-m-seed1",

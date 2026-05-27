@@ -31,24 +31,33 @@ def rollout(
     flow_model: GuidedFlow | None = None,
     test: bool = False,
 ):  
-    # TODO: refactor
+
+    rollout_dir = ensure_rollout_dir(config.rollout_id)
     sweep_params = {
         "guidance_reference": config.guidance_reference,
+        "mask_mode": config.mask_mode,
         "alpha": config.alpha,
         "w": config.w,
     }
     guided_id = make_hash(sweep_params)
+    
+    if config.guidance_flag:
+        guided_path = rollout_dir / "guided_rollout" / guided_id
+        output_path = guided_path / "guided_rollout.nc"
+
+        if output_path.exists() and not test:
+            logger.info(f"Skipping existing guided rollout: {guided_path}")
+            return rollout_dir
+
+        guided_path.mkdir(parents=True, exist_ok=True)
+        update_sweep_params(rollout_dir, config.to_dict(), SWEEP_PARAMS)
+
     var_idx = get_var_idx(config.partition, config.var)
     level_idx = get_level_idx(config.partition, config.level)
     mask_2d = get_mask_2d(config.mask_mode, config.mask_corners)
     MASK_MULTIPLIER = 1
     mask_2d = mask_2d*MASK_MULTIPLIER
     lambda_schedule = T_schedule(config.alpha, config.w)
-    rollout_dir = ensure_rollout_dir(config.rollout_id)
-    if config.guidance_flag:
-        guided_path = rollout_dir / "guided_rollout" / guided_id
-        guided_path.mkdir(parents=True, exist_ok=True)
-        update_sweep_params(rollout_dir, config.to_dict(), SWEEP_PARAMS)
 
     ds = get_td_dataset(multistep=config.N)
     x_cond = get_x_cond(ds, config.timestamp)
@@ -62,7 +71,7 @@ def rollout(
         logger.info(f"sampling member={m}")
 
         if config.guidance_flag and not test and config.guidance_reference != "sampled_trajectory":
-            reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m)
+            reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m, config.N, config.timestamp)
             target_rollout = get_target_rollout(
                 config.partition, 
                 var_idx,
@@ -92,7 +101,7 @@ def rollout(
                 y=target_tdicts,
                 mask=masks_tdict,
                 sampling_trace_path=sampling_trace_path,
-                T=25
+                T=2
             )
         else:
             sample_multistep = x_cond["future_states"].cpu()
@@ -119,3 +128,4 @@ def rollout(
     else:
         xr_pred.to_netcdf(rollout_dir / "unguided_rollout.nc")
         dump_json(config_dict, rollout_dir, "config")
+    return rollout_dir

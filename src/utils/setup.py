@@ -17,10 +17,9 @@ def setup_logging(log_prefix: str = "run") -> None:
         filename=log_file,
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        handlers=[
-            logging.FileHandler(),
-            logging.StreamHandler(sys.stdout),
-        ],
+        # handlers=[
+        #     logging.StreamHandler(sys.stdout),
+        # ],
         force=True,
     )
 

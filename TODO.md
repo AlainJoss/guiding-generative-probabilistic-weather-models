@@ -1,5 +1,11 @@
 # TODOs
 
+Random:
+- what happen to the rollout after we stop guiding?
+- shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
+- Use daterange calendar for presentation -> use in guided and analysis modes
+- Remerge utils!
+
 Communicate:
 - serve one experiment on some cloud machine for them to access and play around with
 - explain pipeline and code base visuall

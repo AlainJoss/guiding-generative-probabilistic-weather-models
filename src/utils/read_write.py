@@ -77,7 +77,12 @@ def get_run_config(rollout_type: str, rollout_id: str) -> RolloutConfig:
     return RolloutConfig.from_dict(config_dict)
 
 
-def get_rollout_ids(type_: str):
+def get_rollout_ids(rollout_type: str, config_type: str = None):
+    if config_type == "run":
+        experiments = Path(RUN_CONFIGS, rollout_type).glob("2026*")
+        experiments = sorted([p.name for p in experiments], reverse=True)
+        return experiments
+    
     experiments = Path(ROLLOUTS).glob("2026*")
 
     def has_config(path: Path) -> bool:
@@ -90,7 +95,7 @@ def get_rollout_ids(type_: str):
         [
             p.name
             for p in experiments
-            if has_config(p) and has_file(p, type_)
+            if has_config(p) and has_file(p, rollout_type)
         ],
         reverse=True,
     )
@@ -102,38 +107,37 @@ def dump_json(dict_: dict, rollout_dir: Path, name:str):
     path = rollout_dir / f"{name}.json"
     with open(path, "w") as f:
         json.dump(dict_, f, indent=2)
-
-
 def update_sweep_params(
     rollout_dir: Path,
     config: dict[str, Any],
-    params: list["str"]
+    params: list[str],
 ) -> dict[str, list[Any]]:
     """
-    Pass config and update sweep_param.json with its sweep values.
+    Update sweep_params.json with the sweep values from config.
     """
-    # reads existing dict or create empty one
+    path = rollout_dir / "sweep_params.json"
+
     try:
-        path = rollout_dir / "experiment_params.json"
         sweep_params = get_dict_from_json(path)
     except FileNotFoundError:
-        sweep_params = {k: [] for k in params}
+        sweep_params = {}
 
     for param_key in params:
-        # create default value
-        sweep_params.setdefault(param_key, [])
-        
-        # list
-        values = config[param_key]
-    
-        # update values list if value is not already there
-        if values not in sweep_params[param_key]:
-            sweep_params[param_key].append(values)
+        if param_key not in config:
+            raise KeyError(f"Missing sweep parameter in config: {param_key}")
 
-        # sort for later access 
+        value = config[param_key]
+
+        sweep_params.setdefault(param_key, [])
+
+        if value not in sweep_params[param_key]:
+            sweep_params[param_key].append(value)
+
         sweep_params[param_key] = sorted(
             sweep_params[param_key],
-            key=lambda x: (str(type(x)), x),
+            key=lambda x: (str(type(x)), str(x)),
         )
 
     dump_json(sweep_params, rollout_dir, "sweep_params")
+
+    return sweep_params
