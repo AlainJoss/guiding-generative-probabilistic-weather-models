@@ -25,6 +25,8 @@ Setup:
 ```bash
 # on Renku
 ln -s ../data data
+mkdir modelstore
+cp -r data/modelstore/. modelstore
 # locally
 ln -s ~/switchdrive data
 # remember to git push after running config

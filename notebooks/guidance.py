@@ -265,20 +265,14 @@ def _(
 
 
 @app.cell
-def _(
-    alpha_slider,
-    guidance_reference_dropdown,
-    mask_mode_dropdown,
-    notebook_mode,
-    w_slider,
-):
+def _(alpha_slider, guidance_reference_dropdown, notebook_mode, w_slider):
     match notebook_mode:
         case "unguided_rollout" | "guided_rollout":
             hash_params = None
         case "analyze_rollout":
             hash_params = {
                 "guidance_reference": guidance_reference_dropdown.value,
-                "mask_mode": mask_mode_dropdown.value,
+                # "mask_mode": mask_mode_dropdown.value,
                 "alpha": alpha_slider.value,
                 "w": w_slider.value,
             }
