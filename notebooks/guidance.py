@@ -309,6 +309,12 @@ def _(
 
 
 @app.cell
+def _(guided_id):
+    guided_id
+    return
+
+
+@app.cell
 def _(get_now_timestamp, notebook_mode, rollout_id_dropdown):
     # rollout
     # conf params 

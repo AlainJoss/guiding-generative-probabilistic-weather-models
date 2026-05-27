@@ -50,7 +50,7 @@ class GuidedFlow(BaseLightningModule):
     ):
         super().__init__()
         self.__dict__.update(locals())
-        print("initialized GuidedFlow")
+        print("initializing GuidedFlow")
         
         # some constants that were floating hardcoded around the codebase 
         # or are uselessly in the cfg (since they are fix anyway)
@@ -97,6 +97,7 @@ class GuidedFlow(BaseLightningModule):
             surface=pangu_stats["surface_std"],
             level=pangu_stats["level_std"],
         )
+        print("initialized GuidedFlow")
 
     def move_objects_to_device(self):
         self.residual_to_pangu_scale = self.residual_to_pangu_scale.to(self.device)
@@ -258,19 +259,19 @@ class GuidedFlow(BaseLightningModule):
             else:
                 with torch.enable_grad():
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                    x_hat_t = self.denormalize(det_pred + (z_t + s_t * u_t) * self.residual_to_pangu_scale)
+                    x_hat_t = self.denormalize(det_pred + (z_t + tensordict_apply(torch.mul, s_t, u_t)) * self.residual_to_pangu_scale)
                     grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
 
                 if sampling_trace_flag:
-                    # sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+                    # alr
+                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                     sampling_trace["grad"].append(grad_l.detach().cpu())
-                    # sampling_trace["vf"].append(u_t.detach().cpu())
+                    sampling_trace["vf"].append(u_t.detach().cpu())
 
                 u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, grad_l)
 
                 if sampling_trace_flag:
-                    pass
-                    # sampling_trace["guided_vf"].append(u_t.detach().cpu())
+                    sampling_trace["guided_vf"].append(u_t.detach().cpu())
 
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, dt)

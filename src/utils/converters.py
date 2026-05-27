@@ -85,7 +85,7 @@ def rollout_to_xarray(
     xr_rollout = []
     for i, sample in enumerate(sample_multistep):
         current = start_timestamp+i*24*3600
-        print(f"timestamp of conversion: {tensor_timestamp_to_string(current)}")
+        # print(f"timestamp of conversion: {tensor_timestamp_to_string(current)}")
         xr_sample = convert_to_xarray(sample.unsqueeze(0), start_timestamp+i*24*3600)
         xr_rollout.append(xr_sample)
 

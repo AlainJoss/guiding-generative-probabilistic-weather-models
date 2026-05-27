@@ -25,10 +25,10 @@ MASK_MODES = [
     "normal"
 ]
 ALPHAS = [
-    0.0, 2.0
+    0, 2
 ]
 WS = [
-    5.0, 10.0, 15.0
+    100, 1000
 ]
 
 ##### config class #####

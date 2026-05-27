@@ -8,7 +8,7 @@ from pathlib import Path
 from src.utils.read_write import get_model, get_run_config, get_rollout_ids
 from src.utils.setup import ensure_rollout_dir, get_device, setup_logging
 from src.rollout import rollout
-from src.rollout_config import RolloutConfig
+from src.rollout_config import RolloutConfig, GUIDANCE_REFERENCES, MASK_MODES, ALPHAS, WS
 
 """
 Change hash to:
@@ -29,25 +29,6 @@ But then also change on id!
 """
 
 logger = logging.getLogger(__name__)
-
-SWEEP_PARAMS = ["guidance_reference", "mask_mode", "alpha", "w"]
-
-GUIDANCE_REFERENCES = [
-    "unguided_members",
-    "ground_truth",
-    # "lower_boundary",
-    # "upper_boundary",
-]
-MASK_MODES = [
-    "bbox", 
-    "normal"
-]
-ALPHAS = [
-    0.0, 2.0
-]
-WS = [
-    10.0, 100
-]
 
 # TODO: check if specific rollout already exists and skip if true
 

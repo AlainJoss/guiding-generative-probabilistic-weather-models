@@ -26,10 +26,8 @@ def get_x_cond(ds, timestamp: datetime):
 
     idx = ds_timestamps.index(timestamp) - 4  # everything is shifted because we have a "prev_state"
     x_cond = ds[idx]
-
-    ts = tensor_timestamp_to_string(x_cond["timestamp"])
-    print(f"get x_cond with timestamp {ts} from timestamp {timestamp}")
-
+    # ts = tensor_timestamp_to_string(x_cond["timestamp"])
+    # print(f"get x_cond with timestamp {ts} from timestamp {timestamp}")
     return x_cond
 
 
