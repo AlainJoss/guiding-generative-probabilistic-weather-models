@@ -1374,6 +1374,103 @@ def _(t_slider):
 
 
 @app.cell
+def _():
+    # if notebook_mode not in ("unguided_rollout", "guided_rollout"):
+    #     grads_map = visualize_map(
+    #         grads_slice,
+    #         title="grad_t",
+    #         interactive=False,
+    #         vmin=np.min(grads_slice) if n>0 else -1,
+    #         vmax=np.max(grads_slice) if n>0 else 1,
+    #         center=np.mean(grads_slice) if n>0 else 0,
+    #         rectangle_x=(mask_corners[0], mask_corners[1]),
+    #         rectangle_y=(mask_corners[2], mask_corners[3]),
+    #         figsize=(14, 8),
+    #         dpi=dpi_slider.value,
+    #         zoom=zoom_slider.value,
+    #         zoom_center_lon=zoom_centers[0],
+    #         zoom_center_lat=zoom_centers[1],
+    #     )
+    #     diff_vfs_map = visualize_map(
+    #         diff_vfs_slice,
+    #         title="vf^guided_t - vf_t",
+    #         interactive=False,
+    #         vmin=np.min(diff_vfs_slice) if not np.min(diff_vfs_slice)==0 else -0.001,
+    #         vmax=np.max(diff_vfs_slice) if not np.max(diff_vfs_slice)==0 else 0.001,
+    #         center=np.mean(diff_vfs_slice) if n>0 else 0,
+    #         rectangle_x=(mask_corners[0], mask_corners[1]),
+    #         rectangle_y=(mask_corners[2], mask_corners[3]),
+    #         figsize=(14, 8),
+    #         dpi=dpi_slider.value,
+    #         zoom=zoom_slider.value,
+    #         zoom_center_lon=zoom_centers[0],
+    #         zoom_center_lat=zoom_centers[1],
+    #     )
+    
+    #     vfs_map = visualize_map(
+    #         vfs_slice,
+    #         title="vf_t",
+    #         interactive=False,
+    #         vmin=np.min(vfs_slice) if n>0 else -0.001,
+    #         vmax=np.max(vfs_slice) if n>0 else 0.001,
+    #         center=np.mean(vfs_slice) if n>0 else 0,
+    #         rectangle_x=(mask_corners[0], mask_corners[1]),
+    #         rectangle_y=(mask_corners[2], mask_corners[3]),
+    #         figsize=(14, 8),
+    #         dpi=dpi_slider.value,
+    #         zoom=zoom_slider.value,
+    #         zoom_center_lon=zoom_centers[0],
+    #         zoom_center_lat=zoom_centers[1],
+    #     )
+    #     clean_preds_map = visualize_map(
+    #         clean_preds_slice,
+    #         title="x_hat_t",
+    #         interactive=False,
+    #         vmin=np.min(clean_preds_slice) if n>0 else -1,
+    #         vmax=np.max(clean_preds_slice) if n>0 else 1,
+    #         center=np.mean(clean_preds_slice) if n>0 else 0,
+    #         rectangle_x=(mask_corners[0], mask_corners[1]),
+    #         rectangle_y=(mask_corners[2], mask_corners[3]),
+    #         figsize=(14, 8),
+    #         dpi=dpi_slider.value,
+    #         zoom=zoom_slider.value,
+    #         zoom_center_lon=zoom_centers[0],
+    #         zoom_center_lat=zoom_centers[1],
+    #     )
+    #     guided_vfs_map = visualize_map(
+    #         guided_vfs_slice,
+    #         title="vf^guided_t",
+    #         interactive=False,
+    #         vmin=np.min(guided_vfs_slice) if n>0 else -1,
+    #         vmax=np.max(guided_vfs_slice) if n>0 else 1,
+    #         center=np.mean(guided_vfs_slice) if n>0 else 0,
+    #         rectangle_x=(mask_corners[0], mask_corners[1]),
+    #         rectangle_y=(mask_corners[2], mask_corners[3]),
+    #         figsize=(14, 8),
+    #         dpi=dpi_slider.value,
+    #         zoom=zoom_slider.value,
+    #         zoom_center_lon=zoom_centers[0],
+    #         zoom_center_lat=zoom_centers[1],
+    #     )
+    #     diff_grads_map = visualize_map(
+    #         diff_grads_slice,
+    #         title="grad_t - grad_{t-1}",
+    #         interactive=False,
+    #         vmin=np.min(diff_grads_slice) if np.min(diff_grads_slice)<0 else -1,
+    #         vmax=np.max(diff_grads_slice) if np.max(diff_grads_slice)>0 else 1,
+    #         center=np.mean(diff_grads_slice) if n>0 else 0,
+    #         rectangle_x=(mask_corners[0], mask_corners[1]),
+    #         rectangle_y=(mask_corners[2], mask_corners[3]),
+    #         figsize=(14, 8),
+    #         dpi=dpi_slider.value,
+    #         zoom=zoom_slider.value,
+    #         zoom_center_lon=zoom_centers[0],
+    #         zoom_center_lat=zoom_centers[1],
+    #     )
+    return
+
+
+@app.cell
 def _(
     clean_preds_slice,
     diff_grads_slice,
@@ -1391,97 +1488,43 @@ def _(
     zoom_slider,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        grads_map = visualize_map(
-            grads_slice,
-            title="grad_t",
-            interactive=False,
-            vmin=np.min(grads_slice) if n>0 else -1,
-            vmax=np.max(grads_slice) if n>0 else 1,
-            center=np.mean(grads_slice) if n>0 else 0,
-            rectangle_x=(mask_corners[0], mask_corners[1]),
-            rectangle_y=(mask_corners[2], mask_corners[3]),
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-        )
-        diff_vfs_map = visualize_map(
-            diff_vfs_slice,
-            title="vf^guided_t - vf_t",
-            interactive=False,
-            vmin=np.min(diff_vfs_slice) if not np.min(diff_vfs_slice)==0 else -0.001,
-            vmax=np.max(diff_vfs_slice) if not np.max(diff_vfs_slice)==0 else 0.001,
-            center=np.mean(diff_vfs_slice) if n>0 else 0,
-            rectangle_x=(mask_corners[0], mask_corners[1]),
-            rectangle_y=(mask_corners[2], mask_corners[3]),
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-        )
-    
-        vfs_map = visualize_map(
-            vfs_slice,
-            title="vf_t",
-            interactive=False,
-            vmin=np.min(vfs_slice) if n>0 else -0.001,
-            vmax=np.max(vfs_slice) if n>0 else 0.001,
-            center=np.mean(vfs_slice) if n>0 else 0,
-            rectangle_x=(mask_corners[0], mask_corners[1]),
-            rectangle_y=(mask_corners[2], mask_corners[3]),
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-        )
-        clean_preds_map = visualize_map(
-            clean_preds_slice,
-            title="x_hat_t",
-            interactive=False,
-            vmin=np.min(clean_preds_slice) if n>0 else -1,
-            vmax=np.max(clean_preds_slice) if n>0 else 1,
-            center=np.mean(clean_preds_slice) if n>0 else 0,
-            rectangle_x=(mask_corners[0], mask_corners[1]),
-            rectangle_y=(mask_corners[2], mask_corners[3]),
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-        )
-        guided_vfs_map = visualize_map(
-            guided_vfs_slice,
-            title="vf^guided_t",
-            interactive=False,
-            vmin=np.min(guided_vfs_slice) if n>0 else -1,
-            vmax=np.max(guided_vfs_slice) if n>0 else 1,
-            center=np.mean(guided_vfs_slice) if n>0 else 0,
-            rectangle_x=(mask_corners[0], mask_corners[1]),
-            rectangle_y=(mask_corners[2], mask_corners[3]),
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-        )
-        diff_grads_map = visualize_map(
-            diff_grads_slice,
-            title="grad_t - grad_{t-1}",
-            interactive=False,
-            vmin=np.min(diff_grads_slice) if np.min(diff_grads_slice)<0 else -1,
-            vmax=np.max(diff_grads_slice) if np.max(diff_grads_slice)>0 else 1,
-            center=np.mean(diff_grads_slice) if n>0 else 0,
-            rectangle_x=(mask_corners[0], mask_corners[1]),
-            rectangle_y=(mask_corners[2], mask_corners[3]),
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-        )
+        map_specs = [
+            ("grads_map", grads_slice, "grad_t", -1, 1),
+            ("diff_vfs_map", diff_vfs_slice, "vf^guided_t - vf_t", -0.001, 0.001),
+            ("vfs_map", vfs_slice, "vf_t", -0.001, 0.001),
+            ("clean_preds_map", clean_preds_slice, "x_hat_t", -1, 1),
+            ("guided_vfs_map", guided_vfs_slice, "vf^guided_t", -1, 1),
+            ("diff_grads_map", diff_grads_slice, "grad_t - grad_{t-1}", -1, 1),
+        ]
+
+        maps = {}
+
+        for name, data, title, fallback_vmin, fallback_vmax in map_specs:
+            data_min = np.min(data)
+            data_max = np.max(data)
+
+            maps[name] = visualize_map(
+                data,
+                title=title,
+                interactive=False,
+                vmin=data_min if data_min != 0 else fallback_vmin,
+                vmax=data_max if data_max != 0 else fallback_vmax,
+                center=np.mean(data) if n > 0 else 0,
+                rectangle_x=(mask_corners[0], mask_corners[1]),
+                rectangle_y=(mask_corners[2], mask_corners[3]),
+                figsize=(14, 8),
+                dpi=dpi_slider.value,
+                zoom=zoom_slider.value,
+                zoom_center_lon=zoom_centers[0],
+                zoom_center_lat=zoom_centers[1],
+            )
+
+        grads_map = maps["grads_map"]
+        diff_vfs_map = maps["diff_vfs_map"]
+        vfs_map = maps["vfs_map"]
+        clean_preds_map = maps["clean_preds_map"]
+        guided_vfs_map = maps["guided_vfs_map"]
+        diff_grads_map = maps["diff_grads_map"]
     return (
         clean_preds_map,
         diff_grads_map,

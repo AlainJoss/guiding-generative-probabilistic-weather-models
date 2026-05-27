@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import pandas as pd
 import torch
 
@@ -232,8 +234,8 @@ class GuidedFlow(BaseLightningModule):
         vfs = []
         guided_vfs = []
         clean_preds = []
-        from collections import defaultdict
-        norms = defaultdict()
+        
+        norms = defaultdict(list)
         timesteps = torch.linspace(self.num_train_timesteps, 1, self.T).to(self.device)
         for i in tqdm(range(len(timesteps))):
             t = timesteps[i]
