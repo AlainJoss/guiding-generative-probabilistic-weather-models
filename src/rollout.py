@@ -99,7 +99,7 @@ def rollout(
                 y=target_tdicts,
                 mask=masks_tdict,
                 sampling_trace_path=sampling_trace_path,
-                T=2
+                T=25
             )
         else:
             sample_multistep = x_cond["future_states"].cpu()

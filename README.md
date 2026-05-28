@@ -23,14 +23,15 @@ uv run marimo edit notebooks/analyze.py --watch --no-token
 Setup:
 ```bash
 # on Renku
+cd guiding-generative-probabilistic-weather-models
 ln -s ../data data
-cd ..
 mkdir modelstore
-cp -r data/modelstore/ guiding-generative-probabilistic-weather-models/modelstore
+cd ..  # work
+cp -r data/modelstore/* guiding-generative-probabilistic-weather-models/modelstore/
+# or rsync -av data/modelstore/ guiding-generative-probabilistic-weather-models/modelstore/
+
 # locally
 ln -s ~/switchdrive data
-# remember to git push after running config
-git add . && git commit -m "Run configs." && git push origin main
-# also when changing code locally
+git push
 git pull
 ```

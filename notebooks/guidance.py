@@ -96,8 +96,13 @@ def _(mo):
 @app.cell
 def _(mo):
     refresh_button = mo.ui.run_button(label="refresh")
-    refresh_button
     return (refresh_button,)
+
+
+@app.cell
+def _(mo, notebook_mode_dropdown, refresh_button):
+    mo.hstack([notebook_mode_dropdown, refresh_button], justify="start")
+    return
 
 
 @app.cell
@@ -292,25 +297,11 @@ def _(
 
 
 @app.cell
-def _(
-    mo,
-    notebook_mode_dropdown,
-    rollout_id_dropdown,
-    save_config_button,
-    sweep_params_widget,
-):
-    setup_widget = mo.vstack([    
-        notebook_mode_dropdown,
-        rollout_id_dropdown,
-        save_config_button if save_config_button is not None else sweep_params_widget
-    ])
+def _(mo, rollout_id_dropdown, save_config_button, sweep_params_widget):
+    setup_widget = mo.hstack([    
+        rollout_id_dropdown, save_config_button if save_config_button is not None else sweep_params_widget
+    ], justify="start")
     setup_widget
-    return
-
-
-@app.cell
-def _(guided_id):
-    guided_id
     return
 
 
