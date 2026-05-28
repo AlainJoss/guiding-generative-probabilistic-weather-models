@@ -2,14 +2,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parent.parent.resolve()
+print(f"ROOT @ {ROOT}")
 
-# on Renku: ln -s ../data data
 DATA = ROOT / "data"
 
-# use to connect: ln -s ~/switchdrive data 
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
-print(f"DATA path: {DATA}")
 
 LOGS = DATA / "logs"
 RUN_CONFIGS = DATA / "configs"

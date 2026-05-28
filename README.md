@@ -24,8 +24,9 @@ Setup:
 ```bash
 # on Renku
 ln -s ../data data
+cd ..
 mkdir modelstore
-cp -r data/modelstore/. modelstore
+cp -r data/modelstore/ guiding-generative-probabilistic-weather-models/modelstore
 # locally
 ln -s ~/switchdrive data
 # remember to git push after running config
