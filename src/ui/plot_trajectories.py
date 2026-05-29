@@ -13,16 +13,19 @@ def plot_trajectories(
     # selected members
     guided_member: list[float] | None = None,
     unguided_member: list[float] | None = None,
+    unguided_guided_member: list[float] | None = None,
 
     # ensemble bands
     guided_ensemble: list[list[float]] | None = None,
     unguided_ensemble: list[list[float]] | None = None,
     target_ensemble: list[list[float]] | None = None,
+    target_guidance_ensemble: list[list[float]] | None = None,
 
     # optional summaries / references
     mean_unguided_rollout: list[float] | None = None,
     mean_guided_rollout: list[float] | None = None,
     target_trajectory: list[float] | None = None,
+    target_guidance_trajectory: list[float] | None = None,
     ground_truth: list[float] | None = None,
     reference_trajectory: list[float] | None = None,
 
@@ -87,6 +90,7 @@ def plot_trajectories(
 
     guided_member = _as_1d(guided_member, "guided_member")
     unguided_member = _as_1d(unguided_member, "unguided_member")
+    unguided_guided_member = _as_1d(unguided_guided_member, "unguided_guided_member")
 
     mean_unguided_rollout = _as_1d(
         mean_unguided_rollout,
@@ -98,6 +102,7 @@ def plot_trajectories(
     )
 
     target_trajectory = _as_1d(target_trajectory, "planned_guidance")
+    target_guidance_trajectory = _as_1d(target_guidance_trajectory, "target_guidance_trajectory")
     ground_truth = _as_1d(ground_truth, "ground_truth")
     reference_trajectory = _as_1d(reference_trajectory, "reference_trajectory")
 
@@ -110,14 +115,17 @@ def plot_trajectories(
     guided_ensemble = _as_step_member_array(guided_ensemble, "guided_ensemble")
     unguided_ensemble = _as_step_member_array(unguided_ensemble, "unguided_ensemble")
     target_ensemble = _as_step_member_array(target_ensemble, "target_ensemble")
+    target_guidance_ensemble = _as_step_member_array(target_guidance_ensemble, "target_guidance_ensemble")
 
     colors = {
         "guided": "#0072B2",
         "unguided": "#6E6E6E",
         "target": "#D55E00",
+        "target_guidance": "#B7950B",
         "ground_truth": "#009E73",
         "reference_trajectory": "#E6B800",
         "y": "#7B2CBF",
+        "unguided_guided": "#4A6FA5",
         "grid_major": "#D7D7D7",
         "grid_minor": "#EAEAEA",
         "text": "#222222",
@@ -251,6 +259,17 @@ def plot_trajectories(
                 show_mean=False,
             )
 
+        if target_guidance_ensemble is not None:
+            _plot_ensemble_band(
+                ensemble=target_guidance_ensemble,
+                color=colors["target_guidance"],
+                label_prefix="Target guidance",
+                zorder_fill=2,
+                zorder_line=3,
+                selected_member=None,
+                show_mean=False,
+            )
+
         # ------------------------------------------------------------
         # Planned guidance
         # ------------------------------------------------------------
@@ -284,6 +303,22 @@ def plot_trajectories(
                 ),
             )
             y_values.append(target_trajectory)
+
+        # ------------------------------------------------------------
+        # Target guidance: (1 + delta_n) * unguided masked mean
+        # ------------------------------------------------------------
+        if target_guidance_trajectory is not None:
+            ax.plot(
+                time_values,
+                target_guidance_trajectory,
+                linestyle="-",
+                linewidth=2.0,
+                color=colors["target_guidance"],
+                alpha=0.95,
+                label="Target guidance",
+                zorder=5,
+            )
+            y_values.append(target_guidance_trajectory)
 
         # ------------------------------------------------------------
         # Mean rollouts
@@ -365,6 +400,38 @@ def plot_trajectories(
                 ],
             )
             y_values.append(guided_member)
+
+        # ------------------------------------------------------------
+        # Unguided-guided: point per n + dashed branch from previous guided
+        # ------------------------------------------------------------
+        if unguided_guided_member is not None:
+            if guided_member is not None:
+                for n_idx in range(1, num_steps):
+                    ug = unguided_guided_member[n_idx]
+                    g_prev = guided_member[n_idx - 1]
+                    if np.isnan(ug) or np.isnan(g_prev):
+                        continue
+                    ax.plot(
+                        [time_values[n_idx - 1], time_values[n_idx]],
+                        [g_prev, ug],
+                        linestyle="--",
+                        linewidth=1.2,
+                        color=colors["unguided_guided"],
+                        alpha=0.7,
+                        zorder=7,
+                        label="_nolegend_",
+                    )
+            ax.scatter(
+                time_values,
+                unguided_guided_member,
+                s=42,
+                color=colors["unguided_guided"],
+                edgecolors="white",
+                linewidths=0.8,
+                zorder=9,
+                label=_member_label("Unguided-guided"),
+            )
+            y_values.append(unguided_guided_member)
 
         # ------------------------------------------------------------
         # Ground truth
@@ -605,7 +672,7 @@ def plot_trajectories(
             fig.suptitle(
                 title,
                 x=0.06,
-                y=0.98,
+                y=0.95,
                 ha="left",
                 fontsize=15,
                 fontweight="bold",

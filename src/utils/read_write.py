@@ -43,6 +43,7 @@ def get_model(device):
 
 ##### read files #####
 
+
 def get_dict_from_json(path: Path):
     with open(path, "r") as f:
         dict_ = json.load(f)
@@ -59,7 +60,7 @@ def get_rollout_files(rollout_type: str, rollout_id: str, guided_id:str=None) ->
             path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id
             config_path = path / "config.json"
             ds_path = path / f"guided_rollout.nc"
-        case "clean_pred" | "grad" | "guided_vf" | "vf" | "unguided_rollout":
+        case "clean_pred" | "grad" | "guided_vf" | "vf" | "unguided_guided_rollout":
             path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id
             config_path = path / "config.json"
             ds_path = path / f"{rollout_type}.nc"
@@ -101,12 +102,16 @@ def get_rollout_ids(rollout_type: str, config_type: str = None):
     )
     return experiments
 
+
 ##### write files #####
+
 
 def dump_json(dict_: dict, rollout_dir: Path, name:str):
     path = rollout_dir / f"{name}.json"
     with open(path, "w") as f:
         json.dump(dict_, f, indent=2)
+
+
 def update_sweep_params(
     rollout_dir: Path,
     config: dict[str, Any],

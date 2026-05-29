@@ -1,6 +1,7 @@
 # TODOs
 
 Random:
+- Copy data locally since I have 2TB disk!
 - what happen to the rollout after we stop guiding?
 - shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
 - Use daterange calendar for presentation -> use in guided and analysis modes

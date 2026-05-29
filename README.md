@@ -5,7 +5,7 @@ Resources:
 
 Run analysis:
 ```bash
-python -m src.runners.run_sweep --rollout_id 2026-05-27_14:32:22
+python -m src.runners.run_sweep --rollout_id 2026-05-28_11:44:34
 python -m src.runners.run_from_config --rollout_type unguided_rollout --rollout_id 2026-05-28_11:44:34 --test
 python -m src.runners.run_all_configs --rollout_type unguided_rollout
 ```
@@ -27,7 +27,7 @@ Setup:
 cd guiding-generative-probabilistic-weather-models
 ln -s ../data data
 mkdir modelstore
-cd ..  # work
+cd ..  
 cp -r data/modelstore/* guiding-generative-probabilistic-weather-models/modelstore/
 # or rsync -av data/modelstore/ guiding-generative-probabilistic-weather-models/modelstore/
 

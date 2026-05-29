@@ -334,6 +334,7 @@ def plot_map_static(
     figsize=(14, 5),
     dpi=100,
     title=None,
+    suptitle=None,
     mask_edgecolor="red",
     mask_linewidth=1.0,
     mask_with_points=False,
@@ -361,6 +362,9 @@ def plot_map_static(
     world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
     fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, y=0.88)
 
     zoom_ = max(1, int(zoom))
 
@@ -448,6 +452,7 @@ def make_interactive_map(
     vmax=None,
     center=None,
     title=None,
+    suptitle=None,
     rectangle_x=(-10.0, 2.0),
     rectangle_y=(45.0, 35.0),
 ):
@@ -462,6 +467,9 @@ def make_interactive_map(
         fig = ax.figure
         while len(fig.axes) > 1:
             fig.delaxes(fig.axes[-1])
+
+        if suptitle is not None:
+            fig.suptitle(suptitle)
 
         draw_base_map(
             ax,
@@ -522,6 +530,7 @@ def visualize_map(
     figsize=(15, 5),
     interactive=False,
     title=None,
+    suptitle=None,
     dpi=100,
     mask_2d=None,
     show=False,
@@ -549,6 +558,7 @@ def visualize_map(
             vmax=vmax,
             center=center,
             title=title,
+            suptitle=suptitle,
             rectangle_x=rectangle_x,
             rectangle_y=rectangle_y,
         )
@@ -563,6 +573,7 @@ def visualize_map(
         figsize=figsize,
         dpi=dpi,
         title=title,
+        suptitle=suptitle,
         show=show,
         show_mask=show_mask,
         zoom=zoom,

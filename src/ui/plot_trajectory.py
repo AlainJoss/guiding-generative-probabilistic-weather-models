@@ -12,17 +12,23 @@ import matplotlib.patheffects as pe
 from matplotlib.ticker import AutoMinorLocator
 
 def plot_trajectory(
-    trajectory: list[np.float64],
-    var: str,
+    trajectory: list[np.float64] | dict[str, list[np.float64]],
+    var: str | None = None,
     ymin: float | None = None,
     ymax: float | None = None,
     title: str | None = "Trajectory",
     subtitle: str | None = None,
     dpi: int = 180,
     figsize: tuple[float, float] = (17.5, 4.0),
+    t: int | None = None,
+    right_trajectory: list[np.float64] | None = None,
+    right_label: str = r"$\lambda_t$",
+    right_color: str = "#7B2CBF",
+    xlabel:str="$t$"
 ):
-    trajectory = np.asarray(trajectory, dtype=float)
-    num_steps = len(trajectory)
+    trajectory_dict = trajectory if isinstance(trajectory, dict) else {var: trajectory}
+    trajectory_dict = {k: np.asarray(v, dtype=float) for k, v in trajectory_dict.items()}
+    num_steps = max(len(v) for v in trajectory_dict.values())
 
     if num_steps == 0:
         raise ValueError("trajectory must contain at least one value")
@@ -54,9 +60,9 @@ def plot_trajectory(
         # ------------------------------------------------------------
         # Vertical grid lines at every timestep
         # ------------------------------------------------------------
-        for t in x:
+        for step in x:
             ax.axvline(
-                t,
+                step,
                 color=colors["grid_major"],
                 linestyle="-",
                 linewidth=0.65,
@@ -78,33 +84,38 @@ def plot_trajectory(
         )
 
         # ------------------------------------------------------------
-        # Main trajectory
+        # Main trajectories
         # ------------------------------------------------------------
-        ax.plot(
-            x,
-            trajectory,
-            linestyle="-",
-            linewidth=2.2,
-            color=colors["line"],
-            alpha=0.95,
-            label=var,
-            zorder=4,
-            path_effects=[
-                pe.Stroke(linewidth=4.0, foreground="white", alpha=0.85),
-                pe.Normal(),
-            ],
-        )
+        single = len(trajectory_dict) == 1
+        palette = list(plt.get_cmap("tab10").colors)
 
-        ax.scatter(
-            x,
-            trajectory,
-            s=28,
-            color=colors["marker"],
-            alpha=0.95,
-            zorder=5,
-            edgecolors="white",
-            linewidths=0.7,
-        )
+        for i, (label, traj) in enumerate(trajectory_dict.items()):
+            color = colors["line"] if single else palette[i % len(palette)]
+            ax.plot(
+                x[: len(traj)],
+                traj,
+                linestyle="-",
+                linewidth=2.2,
+                color=color,
+                alpha=0.95,
+                label=label,
+                zorder=4,
+                path_effects=[
+                    pe.Stroke(linewidth=4.0, foreground="white", alpha=0.85),
+                    pe.Normal(),
+                ] if single else None,
+            )
+
+            ax.scatter(
+                x[: len(traj)],
+                traj,
+                s=28,
+                color=color,
+                alpha=0.95,
+                zorder=5,
+                edgecolors="white",
+                linewidths=0.7,
+            )
 
         # ------------------------------------------------------------
         # Axis styling
@@ -112,7 +123,7 @@ def plot_trajectory(
         ax.set_xlim(0, max(num_steps - 1, 1))
         ax.set_xticks(x)
 
-        ax.set_xlabel(r"$t$")
+        ax.set_xlabel(xlabel)
         ax.set_ylabel(var)
 
         ax.yaxis.set_minor_locator(AutoMinorLocator(2))
@@ -156,8 +167,9 @@ def plot_trajectory(
         # ------------------------------------------------------------
         # Y-limits with padding
         # ------------------------------------------------------------
-        y_min = float(np.nanmin(trajectory))
-        y_max = float(np.nanmax(trajectory))
+        y_all = np.concatenate(list(trajectory_dict.values()))
+        y_min = float(np.nanmin(y_all))
+        y_max = float(np.nanmax(y_all))
         y_pad = 0.08 * (y_max - y_min) if y_max > y_min else 1.0
 
         final_ymin = ymin if ymin is not None else y_min - y_pad
@@ -169,12 +181,82 @@ def plot_trajectory(
 
         ax.set_ylim(final_ymin, final_ymax)
 
+        if t is not None:
+            ax.axvline(
+                t,
+                color=colors["text"],
+                linestyle=(0, (4, 4)),
+                linewidth=1.2,
+                alpha=0.75,
+                label="_nolegend_",
+                zorder=10,
+            )
+
+            if single:
+                only = next(iter(trajectory_dict.values()))
+                subtract = only[t-1] if t > 0 else only[t]
+                lambda_diff = only[t] - subtract
+                annotation = f"t={t}\nΔ={lambda_diff:.3f}"
+
+                ax.annotate(
+                    annotation,
+                    xy=(t, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    xytext=(6, -8),
+                    textcoords="offset points",
+                    ha="left",
+                    va="top",
+                    fontsize=9,
+                    color=colors["text"],
+                    alpha=0.85,
+                    zorder=12,
+                )
+
+
+        # ------------------------------------------------------------
+        # Optional right axis
+        # ------------------------------------------------------------
+        has_right_axis = right_trajectory is not None
+
+        if has_right_axis:
+            right = np.asarray(right_trajectory, dtype=float)
+            ax2 = ax.twinx()
+            ax2.plot(
+                x[: len(right)],
+                right,
+                linestyle="-",
+                linewidth=1.6,
+                color=right_color,
+                alpha=0.7,
+                label=right_label,
+                zorder=4,
+            )
+            ax2.axhline(0.0, color=colors["grid_major"], linewidth=0.8, alpha=0.7, zorder=0)
+            ax2.set_ylabel("")
+            ax2.spines["top"].set_visible(False)
+            ax2.spines["right"].set_color("#BBBBBB")
+            ax2.tick_params(axis="both", colors=right_color, length=4, width=0.8)
+
+            r_min, r_max = float(np.nanmin(right)), float(np.nanmax(right))
+            if r_min == r_max:
+                r_min -= 1.0
+                r_max += 1.0
+            r_pad = 0.08 * (r_max - r_min)
+            ax2.set_ylim(r_min - r_pad, r_max + r_pad)
+
+            handles1, labels1 = ax.get_legend_handles_labels()
+            handles2, labels2 = ax2.get_legend_handles_labels()
+            handles, labels = handles1 + handles2, labels1 + labels2
+        else:
+            handles, labels = ax.get_legend_handles_labels()
+
         # ------------------------------------------------------------
         # Legend
         # ------------------------------------------------------------
         ax.legend(
+            handles, labels,
             loc="center left",
-            bbox_to_anchor=(1.015, 0.5),
+            bbox_to_anchor=(1.05 if has_right_axis else 1.015, 0.5),
             frameon=False,
             handlelength=2.4,
             borderaxespad=0.0,
@@ -206,7 +288,7 @@ def plot_trajectory(
             )
 
         fig.tight_layout(
-            rect=(0.0, 0.0, 0.84, 0.90 if (title or subtitle) else 1.0)
+            rect=(0.0, 0.0, 0.80 if has_right_axis else 0.84, 0.90 if (title or subtitle) else 1.0)
         )
 
     return fig

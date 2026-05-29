@@ -280,7 +280,7 @@ class GuidedFlow(BaseLightningModule):
                     grad_l = self.grad_loss(x_hat_t, x_hat_ung, delta_t, mask, z_t)
                     vf_norm = torch.sqrt(sum((v ** 2).sum() for v in u_t.values()))
                     grad_norm = torch.sqrt(sum((g ** 2).sum() for g in grad_l.values()))
-                    print(f"norms | vf_norm: {vf_norm} | grad_norm: {grad_norm}")
+                    # print(f"norms | vf_norm: {vf_norm} | grad_norm: {grad_norm}")
 
                 if sampling_trace_flag:
                     sampling_trace["clean_pred"].append(x_hat_t.detach().cpu())

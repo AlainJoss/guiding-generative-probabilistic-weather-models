@@ -46,7 +46,7 @@ def rollout(
         output_path = guided_path / "guided_rollout.nc"
 
         if output_path.exists() and not test:
-            logger.info(f"Skipping existing guided rollout: {guided_path}")
+            print(f"Skipping existing guided rollout: {guided_path}")
             return rollout_dir
 
         guided_path.mkdir(parents=True, exist_ok=True)
@@ -120,10 +120,7 @@ def rollout(
             )
             gui_member_datasets.append(gui_trajectory)
 
-        ung_trajectory = torch.cat(
-            [x_cond["state"].unsqueeze(1).cpu(), ung_trajectory],  # unsqueeze adds batch dim
-            dim=1,
-        ).squeeze(0)
+        ung_trajectory = ung_trajectory.squeeze(0)
         ung_trajectory = ds.denormalize(ung_trajectory)
         ung_trajectory = rollout_to_xarray(
             sample_multistep=ung_trajectory,
