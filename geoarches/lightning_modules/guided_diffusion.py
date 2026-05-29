@@ -119,32 +119,45 @@ class GuidedFlow(BaseLightningModule):
         lambda_schedule: list[torch.Tensor],
         m: int,
         x_cond: dict, 
-        y: list[TensorDict] | None = None,
+        delta_trajectory=list[torch.Tensor],
         mask: list[TensorDict] | None = None,
         sampling_trace_path: str = None,
         T: int = 25
     ):
         self.T=T
-        guided_trajectory = []
+        ung_trajectory = []
+        gui_trajectory = []
         for n in range(0, N):
-            y_n = None if y is None else y[n]  # TODO: check the index of the guidance
-            x_hat, sampling_trace = self.sample(
+            print("unguided flow")
+            x_hat_ung, _ = self.sample(
                 x_cond=x_cond,
-                y_n=y_n,
-                mask=mask,
-                lambda_schedule=lambda_schedule,
+                delta_t=None,
+                mask=None,
+                x_hat_ung=None, 
+                lambda_schedule=None,
                 seed= m + 1000 * n,  # + batch_nb * 10**6
-                sampling_trace_flag=True if sampling_trace_path is not None else False,
+                sampling_trace_flag=None,
             )
-            guided_trajectory.append(x_hat.cpu())
+            x_hat_curr = x_hat_ung
+            if delta_trajectory is not None:
+                print("guided flow")
+                x_hat_gui, sampling_trace = self.sample(
+                    x_cond=x_cond,
+                    delta_t=delta_trajectory[n],
+                    mask=mask,
+                    x_hat_ung=self.denormalize(x_hat_ung.detach().clone()), # TODO: check it's tensordict
+                    lambda_schedule=lambda_schedule,
+                    seed= m + 1000 * n,  # + batch_nb * 10**6
+                    sampling_trace_flag=True if sampling_trace_path is not None else False,
+                )
+                gui_trajectory.append(x_hat_gui.cpu())
+                x_hat_curr = x_hat_gui
+            ung_trajectory.append(x_hat_ung.cpu())
             if torch.cuda.is_available() and self.device.type == "cuda":
                 torch.cuda.empty_cache()
 
-
-            ### NOTE: start new implemented part
-
             # save sampling trace
-            if sampling_trace_path is not None:
+            if sampling_trace_path is not None and delta_trajectory is not None:
                 import xarray as xr
                 from pathlib import Path
                 from src.utils.converters import sampling_trace_to_xarray
@@ -170,26 +183,29 @@ class GuidedFlow(BaseLightningModule):
                     else:
                         xr_m_n.to_netcdf(path)
 
-            ### NOTE: end new implemented part
-
             # after the last iteration no need to set this again
             if n < N-1:
                 # TODO: wrap this into a function, it's painful to watch
                 x_cond = {
                     "prev_state": x_cond["state"],
-                    "state": x_hat,
+                    "state": x_hat_curr,
                     "timestamp": x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600, # converts to seconds the lead_time
                     "lead_time_hours": x_cond["lead_time_hours"],
                 }
-        return torch.stack(guided_trajectory, dim=1)
-    
-    def get_det_pred(self, x_cond):
-        return self.det_model(x_cond)
+
+        # end of loop
+        if delta_trajectory is not None:
+            gui_trajectory = torch.stack(gui_trajectory, dim=1) if len(gui_trajectory) >0 else None
+        else: 
+            gui_trajectory = None
+        ung_trajectory = torch.stack(ung_trajectory, dim=1) if len(ung_trajectory) >0 else None
+        return gui_trajectory, ung_trajectory
 
     def sample(self,
         x_cond: dict,  # timestamp, TensorDict for "state", "prev", etc.
-        y_n: TensorDict | None = None, 
+        delta_t: torch.Tensor | None = None, 
         mask: TensorDict | None = None, 
+        x_hat_ung: TensorDict | None = None,  
         lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
         sampling_trace_flag: bool = None
@@ -201,7 +217,7 @@ class GuidedFlow(BaseLightningModule):
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
-        z, sampling_trace = self.flow(x_cond, det_pred, y_n, mask, lambda_schedule, seed, sampling_trace_flag)
+        z, sampling_trace = self.flow(x_cond, det_pred, delta_t, mask, x_hat_ung, lambda_schedule, seed, sampling_trace_flag)
         # x_hat = x_det + r_hat (=sigma*z_T)
         x_hat = det_pred + tensordict_apply(torch.mul, z, self.residual_to_pangu_scale)
         return x_hat, sampling_trace
@@ -209,8 +225,9 @@ class GuidedFlow(BaseLightningModule):
     def flow(self,
         x_cond, 
         det_pred: TensorDict,
-        y_n: TensorDict | None = None,  # used as guidance flag (None== no guidance)
+        delta_t: torch.Tensor | None = None,  # NOTE: used as guidance flag (None == no guidance)
         mask: TensorDict | None = None, 
+        x_hat_ung: TensorDict | None = None,
         lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
         sampling_trace_flag: bool = None
@@ -246,25 +263,28 @@ class GuidedFlow(BaseLightningModule):
                 dt = s_t
 
             # reset graph at each step and make z_t differentiable
-            if y_n is not None:
+            if delta_t is not None:
                 z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
             
             time_embedding = self.embedd_time(x_cond, t)      
             input_state = self.get_velocity_input_state(z_t, x_cond)
 
             # vector field 
-            if y_n is None:
+            if delta_t is None:
                 with torch.no_grad():
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
             else:
                 with torch.enable_grad():
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
                     x_hat_t = self.denormalize(det_pred + (z_t + tensordict_apply(torch.mul, s_t, u_t)) * self.residual_to_pangu_scale)
-                    grad_l = self.grad_loss(x_hat_t, y_n, mask, z_t)
+                    grad_l = self.grad_loss(x_hat_t, x_hat_ung, delta_t, mask, z_t)
+                    vf_norm = torch.sqrt(sum((v ** 2).sum() for v in u_t.values()))
+                    grad_norm = torch.sqrt(sum((g ** 2).sum() for g in grad_l.values()))
+                    print(f"norms | vf_norm: {vf_norm} | grad_norm: {grad_norm}")
 
                 if sampling_trace_flag:
-                    # alr
-                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+                    sampling_trace["clean_pred"].append(x_hat_t.detach().cpu())
+                    sampling_trace["noisy_pred"].append(x_hat_t.detach().cpu())
                     sampling_trace["grad"].append(grad_l.detach().cpu())
                     sampling_trace["vf"].append(u_t.detach().cpu())
 
@@ -315,28 +335,39 @@ class GuidedFlow(BaseLightningModule):
         # u_t = r_t - eps_t := (r_t - z_t) / s_t
         u_t = (r_t - z_t).apply(lambda x: x / s_t)
         return u_t
-    
-    def grad_loss(self, x_hat_t, y_n, mask, z_t):
-        diff = x_hat_t - y_n
-        loss_ = sum(
-            (mask[k] * diff[k] ** 2).sum()
-            for k in diff.keys()
+        
+    def grad_loss(self, x_hat_t, x_hat_ung, delta_t, mask, z_t):
+        # L = \left( \sum_{ij} m_{ij} x^{\text{hat}}_{t,ij} - (1+\delta_t)\sum_{ij} m_{ij} x^{\text{hat,ung}}_{ij} \right)^2
+        term_left = sum(
+            (mask[k] * x_hat_t[k]).sum()
+            for k in x_hat_t.keys()
         )
+        term_right = sum(
+            (mask[k] * x_hat_ung[k]).sum()
+            for k in x_hat_t.keys()
+        ) * (1 + delta_t)
+        loss_ = (term_left - term_right) ** 2
 
-        # grad for each tensor in tensor dict
         keys = list(z_t.keys())
         tensors = [z_t[k] for k in keys]
+
         grads = torch.autograd.grad(
             loss_,
             tensors,
             retain_graph=False,
             create_graph=False,
+            allow_unused=True,
         )
+
         grad_l = z_t.__class__(
-            {k: g for k, g in zip(keys, grads)},
+            {
+                k: torch.zeros_like(z_t[k]) if g is None else g
+                for k, g in zip(keys, grads)
+            },
             batch_size=z_t.batch_size,
             device=z_t.device,
         )
+
         return grad_l
     
     def euler_step(self, z_t, u_t, dt):

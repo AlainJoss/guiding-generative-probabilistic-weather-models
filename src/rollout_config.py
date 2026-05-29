@@ -16,7 +16,7 @@ SWEEP_PARAMS = ["guidance_reference", "mask_mode", "alpha", "w"]
 
 GUIDANCE_REFERENCES = [
     "unguided_members",
-    "ground_truth",
+    # "ground_truth",
     # "lower_boundary",
     # "upper_boundary",
 ]

@@ -80,6 +80,18 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    - Planned guidance orange should be None if not variable of interest.
+    - Compute per variable norm of all sampling_traces and plot trajectory
+    - Plot new rollout with unguided_guided_xr
+    - Really need to think about how to compare experiments by putting everything in a single netcdf or better zarr s.t. we can append online when sweeping experiments
+    - What happens when you stop rolling out? ...
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     # Guiding Generative Probabilistic Weather Models
     """)
     return
@@ -101,7 +113,7 @@ def _(mo):
 
 @app.cell
 def _(mo, notebook_mode_dropdown, refresh_button):
-    mo.hstack([notebook_mode_dropdown, refresh_button], justify="start")
+    mo.hstack([notebook_mode_dropdown, refresh_button], justify="start", align="start")
     return
 
 
@@ -208,8 +220,10 @@ def _(
     rollout_id,
 ):
     match notebook_mode:
-        case "unguided_rollout" | "guided_rollout":
-            guidance_reference_dropdown = mo.ui.dropdown(GUIDANCE_REFERENCES, value=GUIDANCE_REFERENCES[0], label="guidance reference: ")
+        case "unguided_rollout":
+            guidance_reference_dropdown = mo.ui.dropdown(
+                GUIDANCE_REFERENCES, value=GUIDANCE_REFERENCES[0], label="guidance reference: "
+            )
             alpha_defaults = [0, 1, 2]
             alpha_slider = mo.ui.slider(
                 steps=alpha_defaults,
@@ -228,6 +242,30 @@ def _(
             )
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
             sweep_params_widget = None
+
+        case "guided_rollout":
+            guidance_reference_dropdown = mo.ui.dropdown(
+                GUIDANCE_REFERENCES, value=GUIDANCE_REFERENCES[0], label="guidance reference: "
+            )
+            alpha_defaults = [0, 1, 2]
+            alpha_slider = mo.ui.slider(
+                steps=alpha_defaults,
+                value=alpha_defaults[-1],
+                label="alpha: ",
+                debounce=True,
+                show_value=True
+            )
+            w_defaults = [5, 10]
+            w_slider = mo.ui.slider(
+                steps=w_defaults,
+                value=w_defaults[0],
+                label="w: ",
+                debounce=True,
+                show_value=True
+            )
+            mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
+            sweep_params_widget = None
+
         case "analyze_rollout":
             experiment_params = get_dict_from_json(Path(ROLLOUTS, rollout_id, "sweep_params.json"))
 
@@ -274,6 +312,12 @@ def _(
 
 
 @app.cell
+def _(rollout_id):
+    rollout_id
+    return
+
+
+@app.cell
 def _(
     alpha_slider,
     guidance_reference_dropdown,
@@ -300,7 +344,7 @@ def _(
 def _(mo, rollout_id_dropdown, save_config_button, sweep_params_widget):
     setup_widget = mo.hstack([    
         rollout_id_dropdown, save_config_button if save_config_button is not None else sweep_params_widget
-    ], justify="start")
+    ], justify="start", align="start")
     setup_widget
     return
 
@@ -352,7 +396,7 @@ def _(
             day=None
             hour=None
             timestamp=config.timestamp
-            map_interactive = True
+            map_interactive = False
         case "analyze_rollout":
             guidance_flag=None
             M=config.M
@@ -430,7 +474,7 @@ def _(
             target_trajectories=None
             target_trajectory=None
         case "guided_rollout":
-            mask_corners = get_corners()
+            mask_corners = config.mask_corners
             mu, sigma = get_mu_sigma(*mask_corners)
             mask=get_mask_2d(mask_mode, mask_corners)
             delta_trajectory = N_schedule(N, delta_shape_slider.value, delta_peak, peak_at_n=delta_peak_at_slider.value)
@@ -1098,16 +1142,17 @@ def _(
                 ("$x_{t+1}^{unguided}$", ung_curr),
                 ("$x_{t+1}^{guided}$", gui_curr),
             ]
-    
+
             abs_vmin, abs_vmax, abs_center = safe_abs_limits(
                 [arr for _, arr in absolute_panels]
             )
-    
+
             absolute_maps = {}
-    
+
             for label, arr in absolute_panels:
                 absolute_maps[label] = visualize_map(
                     arr,
+                    mask_2d=mask,
                     title=label,
                     interactive=map_interactive,
                     vmin=abs_vmin,
@@ -1120,17 +1165,17 @@ def _(
                     dpi=dpi_slider.value,
                     figsize=(14, 8),
                 )
-    
+
             curr_map = absolute_maps["$x_t$"]
             prev_map = absolute_maps["$x_{t+1}$"]
             ung_map = absolute_maps["$x_{t+1}^{unguided}$"]
             gui_map = absolute_maps["$x_{t+1}^{guided}$"]
-    
+
             gt_gt_map = None
             gui_gui_map = None
             gui_ung_map = None
             gui_gt_map = None
-    
+
         else:
             difference_panels = [
                 ("$x_{t+1} - x_t$", gt_gt),
@@ -1138,21 +1183,21 @@ def _(
                 ("$x_{t+1}^{guided} - x_{t+1}^{unguided}$", gui_ung),
                 ("$x_{t+1}^{guided} - x_{t}^{guided}$", gui_gui),
             ]
-    
+
             diff_vmin = min(float(np.nanmin(arr)) for _, arr in difference_panels)
             diff_vmax = max(float(np.nanmax(arr)) for _, arr in difference_panels)
-    
+
             difference_maps = {}
-    
+
             for label, arr in difference_panels:
                 # is_guided_unguided = label == "$x_{t+1}^{guided} - x_{t+1}^{unguided}$"
-    
+
                 if norm_mode_dropdown.value == "own_scale":
                     v_min = min(float(np.nanmin(arr)), -1e-12)
                     v_max = max(float(np.nanmax(arr)), 1e-12)
                 else:
                     v_min, v_max = diff_vmin, diff_vmax
-    
+
                 difference_maps[label] = visualize_map(
                     arr,
                     mask_2d=mask,
@@ -1170,12 +1215,12 @@ def _(
                     dpi=dpi_slider.value,
                     figsize=(14, 8),
                 )
-    
+
             gt_gt_map = difference_maps["$x_{t+1} - x_t$"]
             gui_gui_map = difference_maps["$x_{t+1}^{guided} - x_{t}^{guided}$"]
             gui_ung_map = difference_maps["$x_{t+1}^{guided} - x_{t+1}^{unguided}$"]
             gui_gt_map = difference_maps["$x_{t+1}^{guided} - x_{t+1}$"]
-    
+
             curr_map = None
             prev_map = None
             ung_map = None
@@ -1226,7 +1271,7 @@ def _(
                 justify="start",
             ),
         ]
-    
+
         if analysis_type_dropdown.value == "absolute":
             inspect_states_widget_make = mo.vstack(
                 [
@@ -1238,7 +1283,7 @@ def _(
                 ],
                 justify="start",
             )
-    
+
         else:
             inspect_states_widget_make = mo.vstack(
                 [
@@ -1301,8 +1346,9 @@ def _(get_rollout_files, guided_id, notebook_mode, rollout_id):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
         grads_xr, _ = get_rollout_files("grad", rollout_id, guided_id)
         vfs_xr, _ = get_rollout_files("vf", rollout_id, guided_id)
-        clean_preds_xr, _ = get_rollout_files("clean_preds", rollout_id, guided_id)
+        clean_preds_xr, _ = get_rollout_files("clean_pred", rollout_id, guided_id)
         guided_vfs_xr, _ = get_rollout_files("guided_vf", rollout_id, guided_id)
+        unguided_guided_xr, _ = get_rollout_files("unguided_rollout", rollout_id, guided_id)
     return clean_preds_xr, grads_xr, guided_vfs_xr, vfs_xr
 
 
@@ -1339,14 +1385,14 @@ def _(
             zeros = np.zeros_like(slices[:, :, None, 0])
             # print(zeros.shape)
             return np.concatenate([zeros, slices], axis=2)
-    
-    
+
+
         clean_preds_slices = get_trace_slices(clean_preds_xr)
         grads_slices = get_trace_slices(grads_xr)
         vfs_slices = get_trace_slices(vfs_xr)
         guided_vfs_slices = get_trace_slices(guided_vfs_xr)
         diff_vfs_slices = guided_vfs_slices - vfs_slices
-    
+
         clean_preds_slice = clean_preds_slices[m][t][n]
         grads_slice = grads_slices[m][t][n]
         grads_slice_prev_slice = grads_slices[m][t-1][n] if t>0 else grads_slices[m][t][n]
@@ -1403,7 +1449,7 @@ def _():
     #         zoom_center_lon=zoom_centers[0],
     #         zoom_center_lat=zoom_centers[1],
     #     )
-    
+
     #     vfs_map = visualize_map(
     #         vfs_slice,
     #         title="vf_t",
@@ -1615,7 +1661,7 @@ def _(
                 justify="start",
             ),
         ]
-    
+
         flow_widget_make = mo.vstack(
             [
                 *flow_controls,

@@ -145,7 +145,12 @@ The reason for going back to denormalized data space is that the guidance target
 In contrast, defining the corresponding target directly in normalized space is not straightforward, because the normalization depends on variable-wise training statistics and on the residual parameterization.
 
 \subsection{Loss}
-
+$$
+L = \left\| \mathbf{m} \odot \hat{\mathbf{x}}_t - (1+\delta_t)\,\mathbf{m} \odot \hat{\mathbf{x}}_{\mathrm{ung}} \right\|_1^2
+$$
+$$
+L = \left( \sum_{ij} m_{ij} x^{\text{hat}}_{t,ij} - (1+\delta_t)\sum_{ij} m_{ij} x^{\text{hat,ung}}_{ij} \right)^2
+$$
 Now that we have both the mask term $m(z_t)$ and the guidance target $y_n$, we define the loss of interest as the squared $\ell_2$ distance:
 \begin{align*} 
     \mathcal{L}(y_n, z_t) &= \frac{1}{2} \left\lVert y_n - m(z_t) \right\rVert^2 \\

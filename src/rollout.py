@@ -64,66 +64,86 @@ def rollout(
     x_cond = batchify_and_move(x_cond, device)
     current_timestamp = x_cond["timestamp"].clone()
 
-    member_datasets = []
+    gui_member_datasets = []
+    ung_member_datasets = []
     for m in range(config.M):
         logger.info(f"sampling member={m}")
 
         if config.guidance_flag and not test and config.guidance_reference != "sampled_trajectory":
-            reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m, config.N, config.timestamp)
-            target_rollout = get_target_rollout(
-                config.partition, 
-                var_idx,
-                level_idx,
-                config.delta_trajectory,
-                reference_rollout
-            )
-            target_tdicts = [
-                xr_rollout_slice_to_tdict(target_rollout.isel(time=n)).unsqueeze(0).to(device)
-                for n in range(config.N)
-            ]
-            masks_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
+            # reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m, config.N, config.timestamp)
+            # target_rollout = get_target_rollout(
+            #     config.partition, 
+            #     var_idx,
+            #     level_idx,
+            #     config.delta_trajectory,
+            #     reference_rollout
+            # )
+            # target_tdicts = [
+            #     xr_rollout_slice_to_tdict(target_rollout.isel(time=n)).unsqueeze(0).to(device)
+            #     for n in range(config.N)
+            # ]
+            mask_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
             
             sampling_trace_path = ROLLOUTS / config.rollout_id / "guided_rollout" / guided_id
-            sampling_trace_path=None
+            # sampling_trace_path=None
         else:
             target_tdicts = None
-            masks_tdict = None
+            mask_tdict = None
             sampling_trace_path=None
 
         if not test:
-            sample_multistep = flow_model.sample_rollout(
+            gui_trajectory, ung_trajectory = flow_model.sample_rollout( 
                 config.N, 
                 lambda_schedule,
                 m=m,
                 x_cond=x_cond,
-                y=target_tdicts,
-                mask=masks_tdict,
+                # target_states=None, # before we had target_tdicts, but not anymore with new loss
+                mask=mask_tdict,
+                delta_trajectory=config.delta_trajectory[1:], 
                 sampling_trace_path=sampling_trace_path,
                 T=25
             )
         else:
-            sample_multistep = x_cond["future_states"].cpu()
-        
-        sample_multistep = torch.cat(
-            [x_cond["state"].unsqueeze(1).cpu(), sample_multistep],  # unsqueeze adds batch dim
+            gui_trajectory = x_cond["future_states"].cpu()
+            ung_trajectory = x_cond["future_states"].cpu()
+
+        if config.guidance_flag:
+            gui_trajectory = torch.cat(
+                [x_cond["state"].unsqueeze(1).cpu(), gui_trajectory],  # unsqueeze adds batch dim
+                dim=1,
+            ).squeeze(0)
+            gui_trajectory = ds.denormalize(gui_trajectory)
+            gui_trajectory = rollout_to_xarray(
+                sample_multistep=gui_trajectory,
+                start_timestamp= current_timestamp,
+                member=m,
+            )
+            gui_member_datasets.append(gui_trajectory)
+
+        ung_trajectory = torch.cat(
+            [x_cond["state"].unsqueeze(1).cpu(), ung_trajectory],  # unsqueeze adds batch dim
             dim=1,
         ).squeeze(0)
-        sample_multistep = ds.denormalize(sample_multistep)
-        xr_member = rollout_to_xarray(
-            sample_multistep=sample_multistep,
+        ung_trajectory = ds.denormalize(ung_trajectory)
+        ung_trajectory = rollout_to_xarray(
+            sample_multistep=ung_trajectory,
             start_timestamp= current_timestamp,
             member=m,
         )
-        member_datasets.append(xr_member)
-    
-    xr_pred = xr.concat(member_datasets, dim="member", join='exact')
+        ung_member_datasets.append(ung_trajectory)
+
+    if config.guidance_flag:
+        xr_pred_gui = xr.concat(gui_member_datasets, dim="member", join='exact')
+
+    xr_pred_ung = xr.concat(ung_member_datasets, dim="member", join='exact')
 
     config_dict = config.to_dict()
 
     if config.guidance_flag:
-        xr_pred.to_netcdf(guided_path / "guided_rollout.nc")
+        xr_pred_gui.to_netcdf(guided_path / "guided_rollout.nc")
+        xr_pred_ung.to_netcdf(guided_path / "unguided_rollout.nc")
         dump_json(config_dict, guided_path, "config")
     else:
-        xr_pred.to_netcdf(rollout_dir / "unguided_rollout.nc")
+        xr_pred_ung.to_netcdf(rollout_dir / "unguided_rollout.nc")
         dump_json(config_dict, rollout_dir, "config")
     return rollout_dir

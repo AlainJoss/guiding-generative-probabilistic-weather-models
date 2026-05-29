@@ -59,7 +59,7 @@ def get_rollout_files(rollout_type: str, rollout_id: str, guided_id:str=None) ->
             path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id
             config_path = path / "config.json"
             ds_path = path / f"guided_rollout.nc"
-        case "clean_preds" | "grad" | "guided_vf" | "vf":
+        case "clean_pred" | "grad" | "guided_vf" | "vf" | "unguided_rollout":
             path = ROLLOUTS / rollout_id / "guided_rollout" / guided_id
             config_path = path / "config.json"
             ds_path = path / f"{rollout_type}.nc"
