@@ -1,0 +1,390 @@
+##########################
+# setup utils
+##########################
+
+import logging
+import json
+from typing import Any
+from pathlib import Path 
+from datetime import datetime, timezone, timedelta
+
+import xarray as xr
+import torch
+import numpy as np
+# import dask.array as da
+# import zarr
+
+from src.paths import LOGS, ROLLOUTS
+from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS, SPATIAL_COORDS
+from src.paths import ERA5, MODELSTORE, ROLLOUTS
+from src.rollout_config import RolloutConfig
+
+from geoarches.lightning_modules import load_module
+from geoarches.dataloaders.era5 import Era5Forecast
+
+from tensordict.tensordict import TensorDict
+
+
+def setup_logging(log_prefix: str = "run") -> None:
+    LOGS.mkdir(parents=True, exist_ok=True)
+    log_file = LOGS / f"{log_prefix}_{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
+    logging.basicConfig(
+        filename=log_file,
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        # handlers=[
+        #     logging.StreamHandler(sys.stdout),
+        # ],
+        force=True,
+    )
+
+
+def get_now_timestamp():
+    date, time = str(datetime.now().replace(microsecond=0)).split(" ")
+    return date + "_" + time
+
+
+def ensure_rollout_dir(id_: str = None) -> Path:
+    rollout_dir = Path(ROLLOUTS, f"{id_}")
+    rollout_dir.mkdir(parents=True, exist_ok=True)
+    return rollout_dir
+
+
+def get_device():
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    print(f"running on device: {device}")
+    return device
+
+
+##########################
+# read write utils
+##########################
+
+##### data and model #####
+
+def get_xr_dataset(year: int):
+    if year == 2026:
+        path = ERA5 / "arches_era5_26.nc"
+        ds = xr.open_dataset(path)
+        return ds
+    path = ERA5 / "arches_era5.nc"
+    ds = xr.open_dataset(path)
+    return ds
+
+
+def get_td_dataset(multistep:int=1):
+    return Era5Forecast(
+        path=ERA5,  # default path
+        domain="test",  # all files under ERA5; year-slicing happens on the time coord
+        load_prev=True,  # whether to load previous state
+        norm_scheme="pangu",  # default normalization scheme
+        lead_time_hours=24,
+        timedelta_hours=6,
+        multistep=multistep
+    )
+
+
+def get_model(device):
+    gen_model, _ = load_module(  # _ := gen_config
+        MODELSTORE / "archesweathergen",
+        module_target="geoarches.lightning_modules.guided_diffusion.GuidedFlow",
+    )
+    gen_model = gen_model.to(device)
+    gen_model.move_objects_to_device()
+    return gen_model
+
+
+##### data files #####
+
+def get_rollout_dir(rollout_id:str):
+    return ROLLOUTS / rollout_id
+
+
+def get_dict_from_json(path: Path):
+    with open(path, "r") as f:
+        dict_ = json.load(f)
+    return dict_
+
+
+def get_sweep_dict(rollout_id):
+    path = get_rollout_dir(rollout_id) / "sweep_params.json"
+    return get_dict_from_json(path)
+
+
+def get_rollout(rollout_type:str, rollout_id:str):
+    path = get_rollout_dir(rollout_id) / f"{rollout_type}.zarr"
+    rollout = xr.open_zarr(path)
+    return rollout
+
+
+def get_config(rollout_id: str) -> RolloutConfig:
+    path = get_rollout_dir(rollout_id) / f"config.json"
+    config_dict = get_dict_from_json(path)
+    return RolloutConfig.from_dict(config_dict)
+
+
+def get_rollout_ids(rollout_type: str):
+    experiments = Path(ROLLOUTS).glob("2026*")
+
+    def has_config(path: Path) -> bool:
+        return (path / "config.json").exists()
+
+    def has_file(path: Path, type_: str) -> bool:
+        return any(path.glob(f"**/{type_}.zarr"))
+
+    experiments = sorted(
+        [
+            p.name
+            for p in experiments
+            if has_config(p) and has_file(p, rollout_type)
+        ],
+        reverse=True,
+    )
+    return experiments
+
+
+##### write files #####
+
+def advance_x_cond(x_cond: dict, x_hat_curr: TensorDict):
+    return {
+        "prev_state": x_cond["state"],
+        "state": x_hat_curr,
+        "timestamp": x_cond["timestamp"] + x_cond["lead_time_hours"] * 3600, # converts to seconds the lead_time
+        "lead_time_hours": x_cond["lead_time_hours"],
+    }
+
+def create_slice_zarr_container(
+    m: int,
+    n: int,
+    t_dim: bool = False,
+    sweep_params: dict | None = None,
+) -> xr.Dataset:
+    ds = create_full_zarr_container(
+        M=1,
+        N=1,
+        t_dim=t_dim,
+        sweep_params={
+            k: [v]
+            for k, v in (sweep_params or {}).items()
+        },
+    )
+
+    return ds.assign_coords(
+        m=[m],
+        n=[n],
+    )
+
+
+def create_full_zarr_container(
+    M:int, N:int, t_dim:bool,
+    sweep_params:dict[str,list],
+) -> xr.Dataset:
+    m_steps = range(M)
+    n_steps = range(N)
+    t_steps = range(25)
+    
+    coords = {
+        "m": m_steps,
+        "n": n_steps,
+    }
+
+    surface_dims = ["m", "n"]
+    level_dims = ["m", "n"]
+
+
+    if t_dim:
+        coords["t"] = t_steps
+        surface_dims.append("t")
+        level_dims.append("t")
+
+    coords["level"] = LEVELS_DICT["level"]
+    coords["latitude"] = SPATIAL_COORDS["latitude"]
+    coords["longitude"] = SPATIAL_COORDS["longitude"]
+
+    # spatial dims last so tdict_to_xr's trailing-axis assignment broadcasts correctly
+    surface_dims += ["latitude", "longitude"]
+    level_dims += ["level", "latitude", "longitude"]
+
+    coords.update(sweep_params)
+    surface_dims += list(sweep_params.keys())
+    level_dims += list(sweep_params.keys())
+
+    data_vars = {}
+    
+    for var in VARIABLES_DICT["surface"]:
+        shape_ = tuple(len(coords[d]) for d in surface_dims)
+        data_vars[var] = (
+            surface_dims,
+            np.full(shape_, np.nan, dtype=np.float32),
+        )
+    
+    for var in VARIABLES_DICT["level"]:
+        shape_ = tuple(len(coords[d]) for d in level_dims)
+        data_vars[var] = (
+            level_dims,
+            np.full(shape_, np.nan, dtype=np.float32),
+        )
+    
+    container_ds = xr.Dataset(
+        data_vars=data_vars,
+        coords=coords,
+    )
+
+    return container_ds
+
+
+def tdict_to_xr(container: xr.Dataset, tdict: TensorDict, t_dim: bool = False):
+    if not t_dim:
+        surface = tdict["surface"].squeeze(2).squeeze(0).detach().cpu().numpy()
+        level = tdict["level"].squeeze(0).detach().cpu().numpy()
+
+        for i, var in enumerate(VARIABLES_DICT["surface"]):
+            container[var].values[...] = surface[i].reshape(container[var].shape)
+
+        for i, var in enumerate(VARIABLES_DICT["level"]):
+            container[var].values[...] = level[i].reshape(container[var].shape)
+
+    else:
+        surface = tdict["surface"].squeeze(3).squeeze(1).detach().cpu().numpy()
+        level = tdict["level"].squeeze(1).detach().cpu().numpy()
+
+        # surface: (t, 4, lat, lon)
+        # level:   (t, 6, level, lat, lon)
+
+        for i, var in enumerate(VARIABLES_DICT["surface"]):
+            container[var].values[...] = surface[:, i].reshape(container[var].shape)
+
+        for i, var in enumerate(VARIABLES_DICT["level"]):
+            container[var].values[...] = level[:, i].reshape(container[var].shape)
+
+    return container
+
+
+def append_to_zarr(rollout_dir, name: str, ds_slice: xr.Dataset) -> None:
+    ds_slice.to_zarr(
+        rollout_dir / f"{name}.zarr",
+        mode="r+",
+        region="auto",
+    )
+
+def dump_json(dict_: dict, path: Path):
+    with open(path, "w") as f:
+        json.dump(dict_, f, indent=4)
+
+
+##########################
+# converters
+##########################
+
+
+def get_var_idx(partition: str, var: str) -> int:
+    match partition:
+        case "surface":
+            variables = VARIABLES_DICT["surface"]
+        case "level":
+            variables = VARIABLES_DICT["level"]
+        case _:
+            raise ValueError(
+                f"Unknown partition '{partition}'. "
+                f"Expected one of {PARTITIONS}."
+            )
+    return variables.index(var)
+
+
+def get_level_idx(partition: str, level: int) -> int:
+    match partition:
+        case "surface":
+            levels = LEVELS_DICT["surface"]
+        case "level":
+            levels = LEVELS_DICT["level"]
+        case _:
+            raise ValueError(
+                f"Unknown partition '{partition}'. "
+                f"Expected one of {PARTITIONS}."
+            )
+    return levels.index(level)
+
+
+def batchify_and_move(sample, device):
+    return {
+        k: v[None].to(device) if hasattr(v, "to") else v
+        for k, v in sample.items()
+    }
+
+
+def tensor_timestamp_to_string(
+    timestamp: torch.Tensor,
+    fmt: str = "%Y-%m-%d %H:%M:%S",
+) -> str:
+    ts = timestamp.item()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(fmt)
+
+
+##########################
+# dataset utils
+##########################
+
+
+def get_gt_rollout(N, timestamp):
+    ds = get_xr_dataset(timestamp.year)
+    return get_N_states(ds, N, timestamp)
+
+
+def get_x_cond(timestamp: datetime, N):
+    timestamp = np.datetime64(timestamp, "ns")
+
+    ds = get_td_dataset(multistep=N)
+
+    ds_timestamps = [
+        np.datetime64(ts[2], "ns")
+        for ts in ds.timestamps
+    ]
+
+    idx = ds_timestamps.index(timestamp) - 4  # everything is shifted because we have a "prev_state"
+    x_cond = ds[idx]
+    # ts = tensor_timestamp_to_string(x_cond["timestamp"])
+    # print(f"get x_cond with timestamp {ts} from timestamp {timestamp}")
+    return x_cond
+
+
+def get_timestamps(ds: xr.Dataset):
+    timestamps = []
+    for i in range(len(ds.time)):
+        ns_ts = ds.time[i].item()
+        dt_utc = datetime.fromtimestamp(ns_ts / 10**9, tz=timezone.utc)
+        dt_display = dt_utc.replace(tzinfo=None)
+        dt = str(dt_display)
+        timestamps.append(dt)
+
+    return timestamps
+
+
+def get_N_timestamps(timestamp: str, N: int) -> list[datetime]:
+    return [timestamp + timedelta(days=n) for n in range(N)]
+
+
+def get_N_states(ds: xr.Dataset, N: int, timestamp: datetime):
+    # assert timestamp.tzinfo is None 
+    # alternatively
+    # timestamp = timestamp.replace(tzinfo=None)
+    timestamps = get_N_timestamps(timestamp, N)
+    return ds.sel(time=timestamps)
+
+
+def get_slices(states: xr.Dataset, partition: str, var: str, level: str):
+    slices = states[var]
+    if partition == "level":
+        slices = slices.sel(level=level)
+    slices = slices.to_numpy()
+    return slices
+
+
+def get_N_slices(ds: xr.Dataset, N: int, timestamp: datetime, partition: str, var: str, level: str):
+    N_states = get_N_states(ds, N, timestamp)
+    N_slices = get_slices(N_states, partition, var, level)
+    return N_slices

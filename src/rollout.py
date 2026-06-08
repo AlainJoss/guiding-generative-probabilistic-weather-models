@@ -1,146 +1,136 @@
-import logging
-
-logger = logging.getLogger(__name__)
+from pathlib import Path
 
 import xarray as xr
 import torch
 
-from src.utils.read_write import (
-    dump_json,
-    get_td_dataset,
-    update_sweep_params,
-)
-from src.utils.dataset_utils import get_x_cond
-from src.utils.converters import (
-    rollout_to_xarray,
+from src.utils import get_x_cond
+from src.utils import (
     batchify_and_move,
-    xr_rollout_slice_to_tdict,
     get_var_idx, get_level_idx,
 )
-from src.paths import ROLLOUTS
-from src.utils.setup import ensure_rollout_dir, get_device
-from src.funcs import make_hash, T_schedule
-from src.rollout_config import SWEEP_PARAMS, RolloutConfig
-from src.target import get_reference_rollout, get_target_rollout
+from src.funcs import T_schedule
+from src.rollout_config import RolloutConfig
 from src.mask import get_mask_tdict, get_mask_2d
 
+from src.utils import create_slice_zarr_container, tdict_to_xr, append_to_zarr, advance_x_cond
+
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
+from tensordict.tensordict import TensorDict
+
 
 def rollout(
+    rollout_dir: Path,
+    guidance_flag: bool,
     config: RolloutConfig,
-    flow_model: GuidedFlow | None = None,
-    test: bool = False,
+    flow_model: GuidedFlow,
+    sweep_params: dict[str, any]
 ):  
-    flow_model.move_objects_to_device()
-    rollout_dir = ensure_rollout_dir(config.rollout_id)
-    sweep_params = {
-        "guidance_reference": config.guidance_reference,
-        "mask_mode": config.mask_mode,
-        "alpha": config.alpha,
-        "w": config.w,
-    }
-    guided_id = make_hash(sweep_params)
-    
-    if config.guidance_flag:
-        guided_path = rollout_dir / "guided_rollout" / guided_id
-        output_path = guided_path / "guided_rollout.nc"
+    # create objects from config
+    x_cond = get_x_cond(config.timestamp, config.N)
+    x_cond = batchify_and_move(x_cond, flow_model.device)
 
-        if output_path.exists() and not test:
-            print(f"Skipping existing guided rollout: {guided_path}")
-            return rollout_dir
+    if guidance_flag and config.guidance_reference != "sampled_trajectory":
+        var_idx = get_var_idx(config.partition, config.var)
+        level_idx = get_level_idx(config.partition, config.level)
+        mask_2d = get_mask_2d(config.mask_mode, config.mask_corners)
 
-        guided_path.mkdir(parents=True, exist_ok=True)
-        update_sweep_params(rollout_dir, config.to_dict(), SWEEP_PARAMS)
-
-    var_idx = get_var_idx(config.partition, config.var)
-    level_idx = get_level_idx(config.partition, config.level)
-    mask_2d = get_mask_2d(config.mask_mode, config.mask_corners)
-    lambda_schedule = T_schedule(config.alpha, config.w)
-
-    ds = get_td_dataset(multistep=config.N)
-    x_cond = get_x_cond(ds, config.timestamp)
-
-    device = get_device()
-    x_cond = batchify_and_move(x_cond, device)
-    current_timestamp = x_cond["timestamp"].clone()
-
-    gui_member_datasets = []
-    ung_member_datasets = []
-    for m in range(config.M):
-        logger.info(f"sampling member={m}")
-
-        if config.guidance_flag and not test and config.guidance_reference != "sampled_trajectory":
-            # reference_rollout = get_reference_rollout(config.guidance_reference, config.rollout_id, m, config.N, config.timestamp)
-            # target_rollout = get_target_rollout(
-            #     config.partition, 
-            #     var_idx,
-            #     level_idx,
-            #     config.delta_trajectory,
-            #     reference_rollout
-            # )
-            # target_tdicts = [
-            #     xr_rollout_slice_to_tdict(target_rollout.isel(time=n)).unsqueeze(0).to(device)
-            #     for n in range(config.N)
-            # ]
-            mask_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
-            
-            sampling_trace_path = ROLLOUTS / config.rollout_id / "guided_rollout" / guided_id
-            # sampling_trace_path=None
-        else:
-            target_tdicts = None
-            mask_tdict = None
-            sampling_trace_path=None
-
-        if not test:
-            gui_trajectory, ung_trajectory = flow_model.sample_rollout( 
-                config.N, 
-                lambda_schedule,
-                m=m,
-                x_cond=x_cond,
-                # target_states=None, # before we had target_tdicts, but not anymore with new loss
-                mask=mask_tdict,
-                delta_trajectory=config.delta_trajectory[1:], 
-                sampling_trace_path=sampling_trace_path,
-                T=25
-            )
-        else:
-            gui_trajectory = x_cond["future_states"].cpu()
-            ung_trajectory = x_cond["future_states"].cpu()
-
-        if config.guidance_flag:
-            gui_trajectory = torch.cat(
-                [x_cond["state"].unsqueeze(1).cpu(), gui_trajectory],  # unsqueeze adds batch dim
-                dim=1,
-            ).squeeze(0)
-            gui_trajectory = ds.denormalize(gui_trajectory)
-            gui_trajectory = rollout_to_xarray(
-                sample_multistep=gui_trajectory,
-                start_timestamp= current_timestamp,
-                member=m,
-            )
-            gui_member_datasets.append(gui_trajectory)
-
-        ung_trajectory = ung_trajectory.squeeze(0)
-        ung_trajectory = ds.denormalize(ung_trajectory)
-        ung_trajectory = rollout_to_xarray(
-            sample_multistep=ung_trajectory,
-            start_timestamp= current_timestamp,
-            member=m,
-        )
-        ung_member_datasets.append(ung_trajectory)
-
-    if config.guidance_flag:
-        xr_pred_gui = xr.concat(gui_member_datasets, dim="member", join='exact')
-
-    xr_pred_ung = xr.concat(ung_member_datasets, dim="member", join='exact')
-
-    config_dict = config.to_dict()
-
-    if config.guidance_flag:
-        xr_pred_gui.to_netcdf(guided_path / "guided_rollout.nc")
-        xr_pred_ung.to_netcdf(guided_path / "unguided_rollout.nc")
-        dump_json(config_dict, guided_path, "config")
+        delta_trajectory = config.delta_trajectory
+        lambda_schedule = T_schedule(config.alpha, config.w) 
+        mask_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
     else:
-        xr_pred_ung.to_netcdf(rollout_dir / "unguided_rollout.nc")
-        dump_json(config_dict, rollout_dir, "config")
-    return rollout_dir
+        delta_trajectory=None
+        lambda_schedule=None
+        mask_tdict = None
+
+    # run
+    for m in range(config.M):
+        # note how config gets not passed onwards
+        # appends to zarr with m, n, sweep_params
+        sample_rollout( 
+            rollout_dir=rollout_dir,
+            guidance_flag=guidance_flag,
+            flow_model=flow_model,
+            sweep_params=sweep_params,
+            N=config.N, 
+            m=m,
+            x_cond=x_cond,
+            mask=mask_tdict,
+            delta_trajectory=delta_trajectory,
+            lambda_schedule=lambda_schedule
+        )
+
+def sample_rollout(
+    rollout_dir: Path,
+    guidance_flag,
+    flow_model: GuidedFlow,
+    sweep_params: dict[str, any],
+    m,
+    N,
+    x_cond, 
+    mask: TensorDict | None = None,
+    delta_trajectory: list[torch.Tensor] | None = None,
+    lambda_schedule: list[torch.Tensor] | None = None
+):  
+    # flow_model.T=25
+    for n in range(N):
+        # runs both if guidance
+        x_hat_ung, _ = flow_model.sample(
+            guidance_flag=False,
+            x_cond=x_cond,
+            delta_t=None,
+            mask=None,
+            x_hat_ung=None, 
+            lambda_schedule=None,
+            seed= m + 1000 * n,  # + batch_nb * 10**6
+        )
+        x_hat_curr = x_hat_ung
+
+        if guidance_flag:
+            x_hat_gui, sampling_trace = flow_model.sample(
+                guidance_flag=True,
+                x_cond=x_cond,
+                delta_t=delta_trajectory[n],
+                mask=mask,
+                x_hat_ung=flow_model.denormalize(x_hat_ung.detach().clone()), 
+                lambda_schedule=lambda_schedule,
+                seed = m + 1000 * n,  # + batch_nb * 10**6
+            )
+            x_hat_curr = x_hat_gui
+            
+        if guidance_flag:
+            save_state = flow_model.denormalize(x_hat_gui).cpu()
+            save_state = tdict_to_xr(
+                create_slice_zarr_container(m, n, t_dim=False, sweep_params=sweep_params),
+                save_state,
+                t_dim=False
+            )
+            append_to_zarr(rollout_dir, "gui", save_state)
+
+            save_state = flow_model.denormalize(x_hat_ung).cpu()
+            save_state = tdict_to_xr(
+                create_slice_zarr_container(m, n, t_dim=False, sweep_params=sweep_params),
+                save_state,
+                t_dim=False
+            )
+            append_to_zarr(rollout_dir, "ung_gui", save_state)
+
+            for trace_type, trace in sampling_trace.items():
+                save_trace = torch.stack(trace, dim=0)
+                save_trace = tdict_to_xr(
+                    create_slice_zarr_container(m, n, t_dim=True, sweep_params=sweep_params),
+                    save_trace,
+                    t_dim=True
+                )
+                append_to_zarr(rollout_dir, trace_type, save_trace)
+
+        else:
+            save_state = flow_model.denormalize(x_hat_ung).cpu()
+            save_state = tdict_to_xr(
+                create_slice_zarr_container(m, n, t_dim=False, sweep_params={}),
+                save_state,
+            )
+            append_to_zarr(rollout_dir, "ung", save_state)
+
+        # after the last iteration no need to set this again
+        if n < N-1:
+            x_cond = advance_x_cond(x_cond, x_hat_curr)

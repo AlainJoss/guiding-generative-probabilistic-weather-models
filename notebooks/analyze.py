@@ -27,7 +27,7 @@ def _():
         visualize_map,
         get_mask_center,
     )
-    from src.ui.plot_variable_change_parallel import plot_variable_change_parallel
+
     from src.ui import plot_trajectories
     #####
     from src.paths import ROLLOUTS, RUN_CONFIGS
@@ -37,8 +37,8 @@ def _():
     from src.ui.map import visualize_map
     from src.ui.plot_trajectory import plot_trajectory
 
-    from src.utils.dataset_utils import get_x_cond
-    from src.utils.converters import list_tensors_to_floats, get_var_idx, get_level_idx
+    from src.utils import get_x_cond
+    from src.utils import list_tensors_to_floats, get_var_idx, get_level_idx
     from src.utils.setup import get_now_timestamp
     from src.utils.dataset_utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices
     from src.utils.read_write import (
@@ -51,7 +51,7 @@ def _():
     from src.funcs import N_schedule, T_schedule
 
     from src.mask import get_masked_mean, get_mask_2d, get_normal_mask, get_bbox_mask, get_mu_sigma
-    from src.target import get_target_rollout, get_reference_rollout
+    from src.target import get_target_slices, get_reference_rollout
 
     return (
         LEVELS_DICT,

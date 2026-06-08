@@ -9,7 +9,7 @@ import marimo as mo
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.dates as mdates
 import matplotlib.patheffects as pe
-from matplotlib.ticker import AutoMinorLocator
+from matplotlib.ticker import AutoMinorLocator, FormatStrFormatter
 
 def plot_trajectory(
     trajectory: list[np.float64] | dict[str, list[np.float64]],
@@ -20,11 +20,13 @@ def plot_trajectory(
     subtitle: str | None = None,
     dpi: int = 180,
     figsize: tuple[float, float] = (17.5, 4.0),
-    t: int | None = None,
+    step: int | None = None,
     right_trajectory: list[np.float64] | None = None,
     right_label: str = r"$\lambda_t$",
     right_color: str = "#7B2CBF",
-    xlabel:str="$t$"
+    xlabel:str="$t$",
+    color_map: dict | None = None,
+    right_percentage: bool = False,
 ):
     trajectory_dict = trajectory if isinstance(trajectory, dict) else {var: trajectory}
     trajectory_dict = {k: np.asarray(v, dtype=float) for k, v in trajectory_dict.items()}
@@ -60,9 +62,9 @@ def plot_trajectory(
         # ------------------------------------------------------------
         # Vertical grid lines at every timestep
         # ------------------------------------------------------------
-        for step in x:
+        for tick in x:
             ax.axvline(
-                step,
+                tick,
                 color=colors["grid_major"],
                 linestyle="-",
                 linewidth=0.65,
@@ -90,7 +92,10 @@ def plot_trajectory(
         palette = list(plt.get_cmap("tab10").colors)
 
         for i, (label, traj) in enumerate(trajectory_dict.items()):
-            color = colors["line"] if single else palette[i % len(palette)]
+            if color_map and label in color_map:
+                color = color_map[label]
+            else:
+                color = colors["line"] if single else palette[i % len(palette)]
             ax.plot(
                 x[: len(traj)],
                 traj,
@@ -181,9 +186,9 @@ def plot_trajectory(
 
         ax.set_ylim(final_ymin, final_ymax)
 
-        if t is not None:
+        if step is not None:
             ax.axvline(
-                t,
+                step,
                 color=colors["text"],
                 linestyle=(0, (4, 4)),
                 linewidth=1.2,
@@ -192,25 +197,19 @@ def plot_trajectory(
                 zorder=10,
             )
 
-            if single:
-                only = next(iter(trajectory_dict.values()))
-                subtract = only[t-1] if t > 0 else only[t]
-                lambda_diff = only[t] - subtract
-                annotation = f"t={t}\nΔ={lambda_diff:.3f}"
-
-                ax.annotate(
-                    annotation,
-                    xy=(t, 1.0),
-                    xycoords=("data", "axes fraction"),
-                    xytext=(6, -8),
-                    textcoords="offset points",
-                    ha="left",
-                    va="top",
-                    fontsize=9,
-                    color=colors["text"],
-                    alpha=0.85,
-                    zorder=12,
-                )
+            ax.annotate(
+                f"{xlabel}={step}",
+                xy=(step, 1.0),
+                xycoords=("data", "axes fraction"),
+                xytext=(6, -8),
+                textcoords="offset points",
+                ha="left",
+                va="top",
+                fontsize=9,
+                color=colors["text"],
+                alpha=0.85,
+                zorder=12,
+            )
 
 
         # ------------------------------------------------------------
@@ -219,7 +218,7 @@ def plot_trajectory(
         has_right_axis = right_trajectory is not None
 
         if has_right_axis:
-            right = np.asarray(right_trajectory, dtype=float)
+            right = np.asarray(right_trajectory, dtype=float) * (100.0 if right_percentage else 1.0)
             ax2 = ax.twinx()
             ax2.plot(
                 x[: len(right)],
@@ -233,6 +232,8 @@ def plot_trajectory(
             )
             ax2.axhline(0.0, color=colors["grid_major"], linewidth=0.8, alpha=0.7, zorder=0)
             ax2.set_ylabel("")
+            if right_percentage:
+                ax2.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
             ax2.spines["top"].set_visible(False)
             ax2.spines["right"].set_color("#BBBBBB")
             ax2.tick_params(axis="both", colors=right_color, length=4, width=0.8)

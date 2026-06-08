@@ -1,46 +1,36 @@
 from dataclasses import dataclass
 from typing import Any
+from datetime import datetime
 
 import torch
 
-from src.utils.converters import (
-    list_floats_to_tensors, list_tensors_to_floats, 
-    datetime_to_string, string_to_datetime
-)
-
 ##### guidance constants #####
-
-ROLLOUT_TYPES = ["unguided", "guided"]
-
-SWEEP_PARAMS = ["guidance_reference", "mask_mode", "alpha", "w"]
 
 GUIDANCE_REFERENCES = [
     "unguided_members",
     # "ground_truth",
-    # "lower_boundary",
-    # "upper_boundary",
 ]
 MASK_MODES = [
     "bbox", 
     "normal"
 ]
-ALPHAS = [
-    0, 2
-]
-WS = [
-    100, 1000
-]
 
 ##### config class #####
+from src.constants import DATETIME_STR_FORMAT
 
-# TODO: should I actually implement Enums instead of lists?
+def datetime_to_string(timestamp: datetime):
+    return datetime.strftime(timestamp, DATETIME_STR_FORMAT)
+
+
+def string_to_datetime(timestamp: str):
+    return datetime.strptime(timestamp, DATETIME_STR_FORMAT)
+
+
+
 @dataclass
 class RolloutConfig:
 
     ### fixed params
-
-    rollout_id: str | None = None
-    guidance_flag: bool | None = None
 
     M: int | None = None
     N: int | None = None
@@ -50,11 +40,11 @@ class RolloutConfig:
     level: int | None = None
     var: str | None = None
 
+    mask_corners: Any | None = None
+
     ### sweep params -> save them in config to use in rollout, but not extracted 
 
     mask_mode: str | None = None
-    mask_corners: Any | None = None
-
     guidance_reference: str | None = None
     delta_trajectory: list[torch.Tensor] | None = None
 
@@ -64,9 +54,6 @@ class RolloutConfig:
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
         return cls(
-            rollout_id=config.get("rollout_id"),
-            guidance_flag=config.get("guidance_flag"),
-
             M=config.get("M"),
             N=config.get("N"),
             timestamp=string_to_datetime(config.get("timestamp")),
@@ -74,35 +61,45 @@ class RolloutConfig:
             partition=config.get("partition"),
             level=config.get("level"),
             var=config.get("var"),
-
-            mask_mode=config.get("mask_mode"),
+    
             mask_corners=config.get("mask_corners"),
 
+
+            mask_mode=config.get("mask_mode"),
             guidance_reference=config.get("guidance_reference"),
             delta_trajectory=config.get("delta_trajectory"),
+
             alpha=config.get("alpha"),
             w=config.get("w"),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "rollout_id": self.rollout_id,
-            "guidance_flag": self.guidance_flag,
-
             "M": self.M,
             "N": self.N,
-            "timestamp": datetime_to_string(self.timestamp),
+            "timestamp": datetime_to_string(self.timestamp) if self.timestamp is not None else None,
 
             "partition": self.partition,
             "level": self.level,
             "var": self.var,
 
-            "mask_mode": self.mask_mode,
             "mask_corners": self.mask_corners,
 
+            "mask_mode": self.mask_mode,
             "guidance_reference": self.guidance_reference,
             "delta_trajectory": self.delta_trajectory,
 
             "alpha": self.alpha,
             "w": self.w,
+        }
+
+
+    def to_dict_list(self) -> dict[str, Any]:
+        return {
+            "mask_mode": [self.mask_mode],
+            "guidance_reference": [self.guidance_reference],
+            "delta_trajectory": [self.delta_trajectory],
+
+            "alpha": [self.alpha],
+            "w": [self.w],
         }

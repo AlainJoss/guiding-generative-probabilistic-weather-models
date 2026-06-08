@@ -59,6 +59,8 @@ dependencies = [
     "nbformat>=5.10.4",
     "nbconvert>=7.17.1",
     "playwright>=1.58.0",
+    "opencv-python>=4.13.0.92",
+    "cdsapi>=0.7.7",
 ]
 
 

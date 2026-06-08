@@ -10,7 +10,6 @@ if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
 
 LOGS = DATA / "logs"
-RUN_CONFIGS = DATA / "configs"
 if Path(ROOT, "modelstore").exists():
     MODELSTORE = Path(ROOT, "modelstore")
 else:

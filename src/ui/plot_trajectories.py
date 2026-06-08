@@ -54,7 +54,7 @@ def plot_trajectories(
     if n is not None and not (0 <= n < num_steps):
         raise ValueError(f"n must be in [0, {num_steps - 1}], got n={n}")
 
-    def _as_1d(values, name: str):
+    def _as_1d(values, name: str, gt0=None):
         if values is None:
             return None
 
@@ -63,12 +63,15 @@ def plot_trajectories(
         if values.ndim != 1:
             raise ValueError(f"{name} must be 1D, got shape {values.shape}")
 
-        if len(values) != num_steps:
-            raise ValueError(f"{name} must have the same length as timestamps")
+        if len(values) == num_steps:
+            return values
 
-        return values
+        if gt0 is not None and len(values) == num_steps - 1:
+            return np.concatenate([[gt0], values])
 
-    def _as_step_member_array(values, name: str):
+        raise ValueError(f"{name} must have the same length as timestamps")
+
+    def _as_step_member_array(values, name: str, gt0=None):
         if values is None:
             return None
 
@@ -83,39 +86,52 @@ def plot_trajectories(
         if values.shape[1] == num_steps:
             return values.T
 
+        if gt0 is not None and num_steps - 1 in values.shape:
+            if values.shape[1] == num_steps - 1:
+                values = values.T
+            num_members = values.shape[1]
+            return np.vstack([np.full((1, num_members), gt0), values])
+
         raise ValueError(
             f"{name} must have one dimension equal to num_steps={num_steps}. "
             f"Got shape {values.shape}."
         )
 
-    guided_member = _as_1d(guided_member, "guided_member")
-    unguided_member = _as_1d(unguided_member, "unguided_member")
-    unguided_guided_member = _as_1d(unguided_guided_member, "unguided_guided_member")
+    # Ground truth carries the initial (n=0) step; gt0 is prepended to every
+    # forecast array that is one step short (length num_steps - 1) so all
+    # trajectories start from the common initial point.
+    ground_truth = _as_1d(ground_truth, "ground_truth")
+    gt0 = ground_truth[0] if ground_truth is not None else None
+
+    guided_member = _as_1d(guided_member, "guided_member", gt0=gt0)
+    unguided_member = _as_1d(unguided_member, "unguided_member", gt0=gt0)
+    unguided_guided_member = _as_1d(unguided_guided_member, "unguided_guided_member", gt0=gt0)
 
     mean_unguided_rollout = _as_1d(
         mean_unguided_rollout,
         "mean_unguided_rollout",
+        gt0=gt0,
     )
     mean_guided_rollout = _as_1d(
         mean_guided_rollout,
         "mean_guided_rollout",
+        gt0=gt0,
     )
 
-    target_trajectory = _as_1d(target_trajectory, "planned_guidance")
-    target_guidance_trajectory = _as_1d(target_guidance_trajectory, "target_guidance_trajectory")
-    ground_truth = _as_1d(ground_truth, "ground_truth")
-    reference_trajectory = _as_1d(reference_trajectory, "reference_trajectory")
+    target_trajectory = _as_1d(target_trajectory, "planned_guidance", gt0=gt0)
+    target_guidance_trajectory = _as_1d(target_guidance_trajectory, "target_guidance_trajectory", gt0=gt0)
+    reference_trajectory = _as_1d(reference_trajectory, "reference_trajectory", gt0=gt0)
 
     delta_trajectory = (
-        _as_1d(delta_trajectory, "y_trajectory") * 100.0
+        _as_1d(delta_trajectory, "y_trajectory", gt0=gt0) * 100.0
         if delta_trajectory is not None
         else None
     )
 
-    guided_ensemble = _as_step_member_array(guided_ensemble, "guided_ensemble")
-    unguided_ensemble = _as_step_member_array(unguided_ensemble, "unguided_ensemble")
-    target_ensemble = _as_step_member_array(target_ensemble, "target_ensemble")
-    target_guidance_ensemble = _as_step_member_array(target_guidance_ensemble, "target_guidance_ensemble")
+    guided_ensemble = _as_step_member_array(guided_ensemble, "guided_ensemble", gt0=gt0)
+    unguided_ensemble = _as_step_member_array(unguided_ensemble, "unguided_ensemble", gt0=gt0)
+    target_ensemble = _as_step_member_array(target_ensemble, "target_ensemble", gt0=gt0)
+    target_guidance_ensemble = _as_step_member_array(target_guidance_ensemble, "target_guidance_ensemble", gt0=gt0)
 
     colors = {
         "guided": "#0072B2",
@@ -496,14 +512,8 @@ def plot_trajectories(
                 zorder=10,
             )
 
-            if guided_member is not None and unguided_member is not None:
-                member_diff = guided_member - unguided_member
-                annotation = f"n={n}\nΔ={member_diff[n]:.3f}"
-            else:
-                annotation = f"n={n}"
-
             ax.annotate(
-                annotation,
+                f"n={n}",
                 xy=(time_values[n], 1.0),
                 xycoords=("data", "axes fraction"),
                 xytext=(6, -8),
