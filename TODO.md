@@ -33,6 +33,7 @@ Communicate:
 - domain all has another bug
 
 Rollouts:
+- handle delta trajectories from the UI
 - Assess likelihood of gui vs ung_gui
 - Guide full slice of temperature and observe what happens
 - Guide both entire states (can define guidance at variable level and state level)

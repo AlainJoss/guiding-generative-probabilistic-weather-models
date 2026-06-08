@@ -8,11 +8,9 @@ from itertools import product
 
 from src.rollout import rollout
 from src.rollout_config import RolloutConfig
-from src.utils import get_model, get_config, get_sweep_dict, get_rollout_dir
+from src.utils import get_model, get_config, get_sweep_dict, get_rollout_dir, ensure_rollout_dir
 from src.utils import get_device, setup_logging
 from src.utils import create_full_zarr_container
-
-from src.paths import ROLLOUTS
 
 
 logger = logging.getLogger(__name__)
@@ -73,11 +71,15 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, sweep_params):
         case _:
             pass
 
+    ensure_rollout_dir(rollout_id)
+
     for (container_type, t_dim_flag) in container_args:
         container_ds = create_full_zarr_container(M, N, t_dim_flag, sweep_params)
-        
+
         save_path = get_rollout_dir(rollout_id) / f"{container_type}.zarr"
-        container_ds.to_zarr(save_path, mode="w")
+        # compute=False: write only metadata + coords (dask-backed NaN chunks are
+        # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
+        container_ds.to_zarr(save_path, mode="w", compute=False)
 
         
 def main() -> None:

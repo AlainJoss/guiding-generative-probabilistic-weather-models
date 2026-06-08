@@ -11,8 +11,8 @@ from datetime import datetime, timezone, timedelta
 import xarray as xr
 import torch
 import numpy as np
-# import dask.array as da
-# import zarr
+import dask.array as da
+import zarr
 
 from src.paths import LOGS, ROLLOUTS
 from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS, SPATIAL_COORDS
@@ -172,6 +172,7 @@ def create_slice_zarr_container(
             k: [v]
             for k, v in (sweep_params or {}).items()
         },
+        lazy=False,  # writable numpy so tdict_to_xr can assign into it
     )
 
     return ds.assign_coords(
@@ -183,6 +184,7 @@ def create_slice_zarr_container(
 def create_full_zarr_container(
     M:int, N:int, t_dim:bool,
     sweep_params:dict[str,list],
+    lazy:bool=True,
 ) -> xr.Dataset:
     m_steps = range(M)
     n_steps = range(N)
@@ -215,20 +217,28 @@ def create_full_zarr_container(
     level_dims += list(sweep_params.keys())
 
     data_vars = {}
-    
+
+    # chunk size 1 along m, n and sweep dims so each (m, n, sweep) region write
+    # lands on exactly one chunk; full along t / level / spatial dims.
+    full_chunk_dims = {"t", "level", "latitude", "longitude"}
+
+    def _chunks_for(dims):
+        return tuple(len(coords[d]) if d in full_chunk_dims else 1 for d in dims)
+
+    def _data(dims, shape_):
+        # lazy (dask) for the full store so the all-NaN skeleton is never held in RAM;
+        # numpy for per-slice containers so tdict_to_xr can write into .values.
+        if lazy:
+            return da.full(shape_, np.nan, dtype=np.float32, chunks=_chunks_for(dims))
+        return np.full(shape_, np.nan, dtype=np.float32)
+
     for var in VARIABLES_DICT["surface"]:
         shape_ = tuple(len(coords[d]) for d in surface_dims)
-        data_vars[var] = (
-            surface_dims,
-            np.full(shape_, np.nan, dtype=np.float32),
-        )
-    
+        data_vars[var] = (surface_dims, _data(surface_dims, shape_))
+
     for var in VARIABLES_DICT["level"]:
         shape_ = tuple(len(coords[d]) for d in level_dims)
-        data_vars[var] = (
-            level_dims,
-            np.full(shape_, np.nan, dtype=np.float32),
-        )
+        data_vars[var] = (level_dims, _data(level_dims, shape_))
     
     container_ds = xr.Dataset(
         data_vars=data_vars,
