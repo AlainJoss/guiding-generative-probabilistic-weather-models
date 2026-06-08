@@ -77,7 +77,7 @@ def get_xr_dataset(year: int):
     return ds
 
 
-def get_td_dataset(multistep:int=1):
+def get_td_dataset(multistep:int=1, year:int=2020):
     return Era5Forecast(
         path=ERA5,  # default path
         domain="test",  # all files under ERA5; year-slicing happens on the time coord
@@ -336,9 +336,8 @@ def get_gt_rollout(N, timestamp):
 
 
 def get_x_cond(timestamp: datetime, N):
+    ds = get_td_dataset(multistep=N, year=timestamp.year)
     timestamp = np.datetime64(timestamp, "ns")
-
-    ds = get_td_dataset(multistep=N)
 
     ds_timestamps = [
         np.datetime64(ts[2], "ns")

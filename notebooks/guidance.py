@@ -588,8 +588,8 @@ def _(
             gui_m_trajectory = None
 
             ung_gui_m_trajectory = None
-            target_guidance_trajectory = (1 + np.asarray(delta_trajectory)) * ung_m_trajectory
-            target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * ung_M_N_trajectories
+            target_guidance_trajectory = None
+            target_guidance_M_N_trajectories = None
         case "analyze_rollout":
             ung_M_N_slices = get_slices(unguided_xr, partition, var, level)
             ung_M_N_trajectories = get_masked_mean(ung_M_N_slices, mask)
@@ -1964,7 +1964,7 @@ def _(T_schedule, alpha_slider, plot_trajectory, t, w_slider):
     alpha = alpha_slider.value
     w=w_slider.value
     lambda_trajectory = T_schedule(alpha, w)
-    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "$\lambda_t$", title="$\lambda_t$ schedule", step=t, figsize=(22, 6))
+    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "$\\lambda_t$", title="$\\lambda_t$ schedule", step=t, figsize=(22, 6))
     return alpha, lambda_trajectory_plot, w
 
 

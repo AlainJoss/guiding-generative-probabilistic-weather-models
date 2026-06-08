@@ -73,6 +73,7 @@ def sample_rollout(
 ):  
     # flow_model.T=25
     for n in range(N):
+        print(f"m={m} - n={n}")
         # runs both if guidance
         x_hat_ung, _ = flow_model.sample(
             guidance_flag=False,

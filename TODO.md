@@ -1,11 +1,31 @@
 # TODOs
 
+Storage requirements:
+M * N 
+4 * 12 = 48
+M * N * T
+4 * 12 * 25 = 1200
+1 state: 6.9MB
+3 * M * N + 4 * M * N * T
+ung: 
+gui: 
+ung_gui: 
+sampling trace: 
+
 Random:
+- Compute a priori the size of the experiment
 - Copy data locally since I have 2TB disk!
 - what happen to the rollout after we stop guiding?
 - shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
 - Use daterange calendar for presentation -> use in guided and analysis modes
 - Remerge utils!
+
+Experiments:
+- tune w
+- tune alpha with w
+- fix alpha and w
+- sweep mask size and mode
+- try out guiding towards full state
 
 Communicate:
 - serve one experiment on some cloud machine for them to access and play around with
@@ -13,6 +33,8 @@ Communicate:
 - domain all has another bug
 
 Rollouts:
+- Assess likelihood of gui vs ung_gui
+- Guide full slice of temperature and observe what happens
 - Guide both entire states (can define guidance at variable level and state level)
 - Define mask for both state and gradients (or penalize in loss)
 - New mask types: normal and cost-lines prior
@@ -41,6 +63,7 @@ Analysis:
 - make checkboxes for things to plot or not in analyze part
 
 Guidance:
+- for final evaluation rehabilitate det model with all 4 submodels
 - sweep var to test how model function reacts: see whether guided percentage corresponds in untargeted guided version. 
 For instance t2m-mslp and mslp-t2m
 - define masks with physical priors
@@ -65,3 +88,6 @@ What we do not do:
 
 14.05
 - The problem I'm having with the targeted guidance is that we can achieve some tail event, but it's not easy at all to assess the realism of the generated weather states, and as a consequence the trajectory as a whole.
+
+08.06 
+- We are bounded by the deterministic prediction in terms of what we can explore

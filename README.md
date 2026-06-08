@@ -3,9 +3,13 @@
 Resources:
 - [Notes](/resources/latex-notes/main.pdf)
 
+UI launcher:
+
+[![launch - renku](https://renkulab.io/renku-badge.svg)](https://renkulab.io/p/alain.joss.1998/generative-weather/sessions/01KPWVZG1FCADRDKX0A77VDYKM/start)
+
 Run analysis:
 ```bash
-python -m src.run --rollout_id 2026-06-05_13:10:44 --rollout_type ung
+python -m src.run --rollout_id 2026-06-08_11:18:37 --rollout_type gui
 
 
 python -m src.runners.run_from_config --rollout_type unguided_rollout --rollout_id 2026-05-28_11:44:34 --test
