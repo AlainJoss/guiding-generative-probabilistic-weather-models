@@ -98,7 +98,6 @@ class RolloutConfig:
         return {
             "mask_mode": [self.mask_mode],
             "guidance_reference": [self.guidance_reference],
-            "delta_trajectory": [self.delta_trajectory],
 
             "alpha": [self.alpha],
             "w": [self.w],

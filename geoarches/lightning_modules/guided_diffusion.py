@@ -256,7 +256,7 @@ class GuidedFlow(BaseLightningModule):
         )
         term_right = sum(
             (mask[k] * x_hat_ung[k]).sum()
-            for k in x_hat_t.keys()
+            for k in x_hat_ung.keys()
         ) * (1 + delta_t)
         loss_ = (term_left - term_right) ** 2
 

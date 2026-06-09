@@ -191,15 +191,29 @@ def _(
         if save_config_button.value and notebook_mode == "guided_rollout":
             save_id = rollout_id
             rollout_dir = ensure_rollout_dir(save_id)
-            print(rollout_dir)
-            path = rollout_dir / "sweep_params.json"
+            path = rollout_dir / "config.json"
             # TODO: these are only placeholders
             #       implement version with lists?
+            print("here")
+            save_config = RolloutConfig(
+                # common to guided and unguided
+                M=M,
+                N=N,
+                timestamp=timestamp,  
+                # experiment level params
+                level=level,
+                partition=partition,
+                var=var,
+                mask_corners=mask_corners,
+                delta_trajectory=delta_trajectory,
+            )
+            dump_json(save_config.to_dict(), path)
+            print(save_config.to_dict_list())
+            path = rollout_dir / "sweep_params.json"
             save_config = RolloutConfig(
                 # guided rollout specific params -> can be swept
                 mask_mode=mask_mode,
                 guidance_reference=guidance_reference,
-                delta_trajectory=delta_trajectory,
                 alpha=alpha,
                 w=w
             )
@@ -216,6 +230,7 @@ def _(
     notebook_mode,
     rollout_id,
 ):
+    w_defaults = [5, 10, 20, 50, 100]
     match notebook_mode:
         case "unguided_rollout":
             guidance_reference_dropdown = mo.ui.dropdown(
@@ -229,7 +244,6 @@ def _(
                 debounce=True,
                 show_value=True
             )
-            w_defaults = [5, 10]
             w_slider = mo.ui.slider(
                 steps=w_defaults,
                 value=w_defaults[0],
@@ -252,7 +266,6 @@ def _(
                 debounce=True,
                 show_value=True
             )
-            w_defaults = [5, 10]
             w_slider = mo.ui.slider(
                 steps=w_defaults,
                 value=w_defaults[0],
@@ -423,9 +436,9 @@ def _(get_config, get_rollout, notebook_mode, rollout_id, sweep_params):
             guided_xr = None
             config = get_config(rollout_id)
         case "analyze_rollout":
-            unguided_xr = get_rollout("ung", rollout_id)
-            guided_xr = get_rollout("gui", rollout_id)
-            guided_xr = guided_xr.sel(sweep_params)
+            unguided_xr = get_rollout("ung", rollout_id).compute()
+            guided_xr = get_rollout("gui", rollout_id).compute()
+            guided_xr = guided_xr.sel(sweep_params).compute()
             config = get_config(rollout_id)
         case _:
             pass
@@ -871,6 +884,7 @@ def _(
     mo,
     notebook_mode,
     partition_dropdown,
+    sweep_params_widget,
     traj_checks,
     trajectories_plot,
     var_dropdown,
@@ -915,11 +929,12 @@ def _(
                 mask_widget_controls,
                 m_n_widget,
                 delta_widget,
-                trajectories_plot
-            ])
+                mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot], justify="start", align="start")
+            ], align="start")
             inspect_states_widget=inspect_states_widget_make
         case "analyze_rollout":   
             trajectory_widget=mo.vstack([
+                sweep_params_widget,
                 mask_widget_controls,
                 m_n_widget,
                 mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot, lambda_trajectory_plot], justify="start", align="start")
@@ -1026,8 +1041,8 @@ def _(
         suptitle="mask",
         title=f"partition={partition} | var={var} | level={level}",
         interactive=False,
-        vmin=np.min(mask),
-        vmax=np.max(mask),
+        vmin=np.min(mask) if np.min(mask) > np.max(mask) else -0.001,
+        vmax=np.max(mask) if np.min(mask) > np.max(mask) else 0.001,
         center=np.mean(mask),
         rectangle_x=(mask_corners[0], mask_corners[1]),
         rectangle_y=(mask_corners[2], mask_corners[3]),
@@ -1084,7 +1099,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    dpi_slider = mo.ui.slider(start=50, stop=500, step=50, value=100, debounce=False, show_value=True, label="dpi: ")
+    dpi_slider = mo.ui.slider(start=50, stop=500, step=50, value=100, debounce=True, show_value=True, label="dpi: ")
     return (dpi_slider,)
 
 
@@ -1321,8 +1336,8 @@ def _(
                 absolute_panels = [
                     ("$x_n$", gt_curr),
                     ("$x_{n}^{\\text{ung_gui}}$", ung_onl_curr),
-                    ("$x_{n}^{ung}$", ung_curr),
                     ("$x_{n}^{gui}$", gui_curr),
+                    ("$x_{n}^{ung}$", ung_curr),
                 ]
 
                 abs_vmin, abs_vmax, abs_center = safe_abs_limits(
@@ -1551,7 +1566,7 @@ def _(
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider], justify="start"),
                         mo.hstack([curr_map, prev_map], justify="start"),
-                        mo.hstack([ung_map, gui_map], justify="start"),
+                        mo.hstack([gui_map, ung_map], justify="start"),
                     ],
                     justify="start",
                 )
@@ -1931,13 +1946,13 @@ def _(
     target_guidance_M_N_trajectories,
 ):
     if notebook_mode =="analyze_rollout":
-        _diff_per_n = get_masked_mean(clean_preds_slices[m, -1], mask).astype(float) - target_guidance_M_N_trajectories[m]
+        _diff_per_n = get_masked_mean(clean_preds_slices[m, :, -1], mask).astype(float) - target_guidance_M_N_trajectories[m]
         _diff_per_n[0] = 0.0
         if abs_checkbox.value: _diff_per_n = np.abs(_diff_per_n)
         guidance_convergence_plot = plot_trajectory(
             {"realized − target": _diff_per_n},
             title="Convergence per rollout step",
-            subtitle=f"member={m} | final clean pred (t={clean_preds_slices.shape[1]-1})",
+            subtitle=f"member={m} | final clean pred (t={clean_preds_slices.shape[2]-1})",
             xlabel="$n$",
             step=n,
             color_map={"realized − target": "#B7950B"},
@@ -2067,11 +2082,11 @@ def _(alpha_slider, lambda_trajectory_plot, mo, notebook_mode, w_slider):
 @app.cell
 def _(get_rollout, notebook_mode, rollout_id, sweep_params):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        grads_xr = get_rollout("grads", rollout_id).sel(sweep_params)
-        vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params)
-        clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params)
-        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params)
-        ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params)
+        grads_xr = get_rollout("grads", rollout_id).sel(sweep_params).compute()
+        vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params).compute()
+        clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params).compute()
+        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
+        ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params).compute()
     return clean_preds_xr, grads_xr, gui_vfs_xr, ung_gui_xr, vfs_xr
 
 
@@ -2102,18 +2117,18 @@ def _(
         # slices of interest
         # 1
         diff_gt_ung_onl_slice =  ung_onl_curr - gt_curr
-        diff_gt_clean_pred_slice = clean_preds_slices[m][t][n] - gt_curr
+        diff_gt_clean_pred_slice = clean_preds_slices[m][n][t] - gt_curr
         # 2
-        ung_onl_clean_diff_slice = clean_preds_slices[m][t][n] - ung_onl_curr
-        clean_preds_slice_prev = clean_preds_slices[m][t-1][n] if t>0 else clean_preds_slices[m][t][n]
-        clean_preds_diff_slice = clean_preds_slices[m][t][n] - clean_preds_slice_prev
+        ung_onl_clean_diff_slice = clean_preds_slices[m][n][t]- ung_onl_curr
+        clean_preds_slice_prev = clean_preds_slices[m][n][t-1] if t>0 else clean_preds_slices[m][n][t]
+        clean_preds_diff_slice = clean_preds_slices[m][n][t] - clean_preds_slice_prev
         # 3
-        grads_slice = grads_slices[m][t][n]
-        grads_slice_prev_slice = grads_slices[m][t-1][n] if t>0 else grads_slices[m][t][n]
+        grads_slice = grads_slices[m][n][t]
+        grads_slice_prev_slice = grads_slices[m][n][t-1] if t>0 else grads_slices[m][n][t]
         diff_grads_slice = grads_slice- grads_slice_prev_slice
         # 4
-        guided_vfs_slice = guided_vfs_slices[m][t][n]
-        vfs_slice = vfs_slices[m][t][n]
+        guided_vfs_slice = guided_vfs_slices[m][n][t]
+        vfs_slice = vfs_slices[m][n][t]
     return (
         clean_preds_diff_slice,
         clean_preds_slices,
@@ -2156,9 +2171,9 @@ def _(
         diff_vfs_slice = guided_vfs_slice - vfs_slice
 
         map_specs = [
-            ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{\text{ung}} - x_n$", -1, 1),
+            ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{\text{ung_gui}} - x_n$", -1, 1),
             ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$\hat{x}_t - x_n$", -1, 1),
-            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$\hat{x}_t - x_{\text{ung}}$", -1, 1),
+            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$\hat{x}_t - x_{\text{ung_gui}}$", -1, 1),
             ("clean_preds_diff_map", clean_preds_diff_slice, r"$\hat{x}_t - \hat{x}_{t-1}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
@@ -2172,6 +2187,7 @@ def _(
             data_min = np.min(data)
             data_max = np.max(data)
             data_mean = np.mean(data)
+            print(name)
 
             maps[name] = visualize_map(
                 data,
@@ -2179,8 +2195,8 @@ def _(
                 show_mask=show_mask_switch.value,
                 title=title,
                 interactive=False,
-                vmin=data_min if data_min != 0 else fallback_vmin,
-                vmax=data_max if data_max != 0 else fallback_vmax,
+                vmin=data_min if data_min != 0 else -1,
+                vmax=data_max if data_max != 0 else 1,
                 center=data_mean if data_mean != 0 else 0,
                 figsize=(14, 8),
                 dpi=dpi_slider.value,

@@ -183,3 +183,5 @@ journal/latex-notes/*
 !journal/latex-notes/main.tex
 !journal/latex-notes/preamble.pdf
 !journal/latex-notes/refs.bib
+
+/local_data

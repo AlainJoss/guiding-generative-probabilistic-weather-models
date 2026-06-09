@@ -21,6 +21,7 @@ Random:
 - Remerge utils!
 
 Experiments:
+- save gt also as file to minimize storage
 - tune w
 - tune alpha with w
 - fix alpha and w

@@ -8,12 +8,16 @@ DATA = ROOT / "data"
 
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
+    # DATA = ROOT / "local_data"
+
+print(f"DATA @ {DATA}")
 
 LOGS = DATA / "logs"
 if Path(ROOT, "modelstore").exists():
     MODELSTORE = Path(ROOT, "modelstore")
 else:
     MODELSTORE = DATA / "modelstore"
+print(f"MODELSTORE @ {MODELSTORE}")
 DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-seed0",
     MODELSTORE / "archesweather-m-seed1",

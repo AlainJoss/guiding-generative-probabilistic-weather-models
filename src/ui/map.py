@@ -1,3 +1,5 @@
+import functools
+
 import torch
 import numpy as np
 import pandas as pd
@@ -13,6 +15,12 @@ import geodatasets
 from wigglystuff import ChartPuck
 
 plt.rcParams["font.family"] = "Menlo"    # INter
+
+
+@functools.lru_cache(maxsize=1)
+def _get_world():
+    """Coastline geometry, loaded once and shared (read-only) across all map renders."""
+    return gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
 
 def get_mask_corners_from_widget(map_widget):
@@ -289,7 +297,7 @@ def draw_base_map(
     ax.margins(0)
 
     if world is None:
-        world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
+        world = _get_world()
 
     world.boundary.plot(ax=ax, color="black", linewidth=0.4, zorder=5)
     if show_values:
@@ -359,7 +367,7 @@ def plot_map_static(
 ):
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
-    world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
+    world = _get_world()
 
     fig, ax = plt.subplots(1, 1, figsize=figsize, dpi=dpi)
 
@@ -459,7 +467,7 @@ def make_interactive_map(
     plt.rcParams["font.family"] = "Menlo"
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
-    world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
+    world = _get_world()
 
     def draw_map(ax, widget):
         ax.clear()
@@ -660,7 +668,7 @@ def visualize_grid(
             f"{nrows}x{ncols}={nrows * ncols}"
         )
 
-    world = gpd.read_file(geodatasets.get_path("naturalearth.land"))
+    world = _get_world()
 
     first_arr = np.asarray(panels[0][1])
     grid_geom = prepare_era5_plot_grid(first_arr)

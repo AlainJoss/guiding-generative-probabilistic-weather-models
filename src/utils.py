@@ -4,6 +4,7 @@
 
 import logging
 import json
+import functools
 from typing import Any
 from pathlib import Path 
 from datetime import datetime, timezone, timedelta
@@ -12,7 +13,7 @@ import xarray as xr
 import torch
 import numpy as np
 import dask.array as da
-import zarr
+# import zarr
 
 from src.paths import LOGS, ROLLOUTS
 from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS, SPATIAL_COORDS
@@ -67,6 +68,7 @@ def get_device():
 
 ##### data and model #####
 
+@functools.lru_cache(maxsize=None)
 def get_xr_dataset(year: int):
     if year == 2026:
         path = ERA5 / "arches_era5_26.nc"
@@ -116,6 +118,7 @@ def get_sweep_dict(rollout_id):
     return get_dict_from_json(path)
 
 
+@functools.lru_cache(maxsize=None)
 def get_rollout(rollout_type:str, rollout_id:str):
     path = get_rollout_dir(rollout_id) / f"{rollout_type}.zarr"
     rollout = xr.open_zarr(path)
