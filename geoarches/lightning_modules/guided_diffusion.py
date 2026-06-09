@@ -1,3 +1,4 @@
+import math
 from collections import defaultdict
 
 import pandas as pd
@@ -57,6 +58,12 @@ class GuidedFlow(BaseLightningModule):
         self.cond_dim=256
         self.T = 25
 
+        # LBG (Monte-Carlo loss-based guidance) hyperparameters (tunable)
+        # n_mc: number of MC samples; r_t: std of the Gaussian q(x0|xt)=N(x_hat_t, r_t^2 I)
+        # drawn in normalized space. n_mc=1, r_t=0 makes LBG reduce to DPS.
+        self.n_mc = 4
+        self.r_t = 0.1
+
         self.cfg = cfg
         self.backbone = instantiate(cfg.backbone)  # necessary to put it on device
         self.embedder = instantiate(cfg.embedder)
@@ -113,9 +120,20 @@ class GuidedFlow(BaseLightningModule):
 
         out = {k: (v * self.data_std + self.data_mean if "state" in k else v) for k, v in batch.items()}
         return out
+    
+    def normalize(self, batch):
+        if "surface" in batch:
+            return (batch - self.data_mean) / self.data_std
+
+        out = {
+            k: ((v - self.data_mean) / self.data_std if "state" in k else v)
+            for k, v in batch.items()
+        }
+        return out
 
     def sample(self,
         guidance_flag: bool, # TODO implement
+        guidance_type: str,
         x_cond: dict,  # timestamp, TensorDict for "state", "prev", etc.
         delta_t: torch.Tensor | None = None, 
         mask: TensorDict | None = None, 
@@ -123,15 +141,16 @@ class GuidedFlow(BaseLightningModule):
         lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
     ):  
-        # det prediction
+        # NOTE: det prediction is in normalized space!
         with torch.no_grad():
             det_pred = self.det_model(x_cond)
             x_cond["pred_state"] = det_pred
+
         
         # remove next_state (save compute)
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k} 
         z, sampling_trace = self.flow(
-            guidance_flag, 
+            guidance_flag, guidance_type,
             x_cond, det_pred, 
             delta_t, mask, x_hat_ung, lambda_schedule, 
             seed
@@ -143,6 +162,7 @@ class GuidedFlow(BaseLightningModule):
     
     def flow(self,
         guidance_flag,
+        guidance_type,
         x_cond, 
         det_pred: TensorDict,
         delta_t: torch.Tensor | None = None,  # NOTE: used as guidance flag (None == no guidance)
@@ -188,14 +208,17 @@ class GuidedFlow(BaseLightningModule):
             if guidance_flag:
                 with torch.enable_grad():
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                    x_hat_t = self.denormalize(det_pred + (z_t + tensordict_apply(torch.mul, s_t, u_t)) * self.residual_to_pangu_scale)
-                    grad_l = self.grad_loss(x_hat_t, x_hat_ung, delta_t, mask, z_t)
+                    x_hat_t_norm = det_pred + (z_t + tensordict_apply(torch.mul, s_t, u_t)) * self.residual_to_pangu_scale
+                    x_hat_t = self.denormalize(x_hat_t_norm)
+
+                    gui_vec = self.get_guidance(guidance_type, x_hat_t, x_hat_ung, delta_t, mask, z_t, dt, x_hat_t_norm)
+            
                 sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
-                sampling_trace["grads"].append(grad_l.detach().cpu())
+                sampling_trace["grads"].append(gui_vec.detach().cpu())
                 sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())  # rescale to only have the raw diff in residual
 
                 # guided vector field
-                u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, grad_l)
+                u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, gui_vec)
                 # sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())  # rescale to only have the raw diff in residual
             else:
                 with torch.no_grad():
@@ -247,19 +270,12 @@ class GuidedFlow(BaseLightningModule):
         # u_t = r_t - eps_t := (r_t - z_t) / s_t
         u_t = (r_t - z_t).apply(lambda x: x / s_t)
         return u_t
+            
+    def euler_step(self, z_t, u_t, dt):
+        # z_new = z_t + h * u_t, where h = dt
+        return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)
         
-    def grad_loss(self, x_hat_t, x_hat_ung, delta_t, mask, z_t):
-        # L = \left( \sum_{ij} m_{ij} x^{\text{hat}}_{t,ij} - (1+\delta_t)\sum_{ij} m_{ij} x^{\text{hat,ung}}_{ij} \right)^2
-        term_left = sum(
-            (mask[k] * x_hat_t[k]).sum()
-            for k in x_hat_t.keys()
-        )
-        term_right = sum(
-            (mask[k] * x_hat_ung[k]).sum()
-            for k in x_hat_ung.keys()
-        ) * (1 + delta_t)
-        loss_ = (term_left - term_right) ** 2
-
+    def grad_loss(self, loss_, z_t):
         keys = list(z_t.keys())
         tensors = [z_t[k] for k in keys]
 
@@ -282,6 +298,74 @@ class GuidedFlow(BaseLightningModule):
 
         return grad_l
     
-    def euler_step(self, z_t, u_t, dt):
-        # z_new = z_t + h * u_t, where h = dt
-        return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)
+    def get_guidance(self, guidance_type, x_hat_t, x_hat_ung, delta_t, mask, z_t, dt, x_hat_t_norm):
+        match guidance_type:
+            case "DPS":
+                return self.DPS_guidance(x_hat_t, x_hat_ung, delta_t, mask, z_t)
+            case "UG":
+                return self.UG_guidance(x_hat_ung, dt, x_hat_t_norm)
+            case "LBG":
+                return self.LBG_guidance(x_hat_t_norm, x_hat_ung, delta_t, mask, z_t)
+            case _:
+                raise ValueError(f"Invalid loss type {guidance_type} -.-")
+            
+    def DPS_guidance(self, x_hat_t, x_hat_ung, delta_t, mask, z_t):
+        # L = \left( \sum_{ij} m_{ij} x^{\text{hat}}_{t,ij} - (1+\delta_t)\sum_{ij} m_{ij} x^{\text{hat,ung}}_{ij} \right)^2
+        term_left = sum(
+            (mask[k] * x_hat_t[k]).sum()
+            for k in x_hat_t.keys()
+        )
+        term_right = sum(
+            (mask[k] * x_hat_ung[k]).sum()
+            for k in x_hat_ung.keys()
+        ) * (1 + delta_t)
+        loss_ = (term_left - term_right) ** 2
+
+        grad_l = self.grad_loss(loss_, z_t)
+
+        return grad_l
+
+
+    def UG_guidance(self, x_hat_ung, dt, x_hat_t_norm):
+        x_hat_ung_norm = self.normalize(x_hat_ung)
+        Delta = x_hat_ung - x_hat_ung_norm
+        eps = x_hat_ung.apply(
+            lambda x: torch.empty_like(x).normal_(generator=self.generator)
+        )
+        return Delta + eps * dt  # TODO: not sure if h must be applied here or it's enough to have it later
+
+    def LBG_guidance(self, x_hat_t_norm, x_hat_ung, delta_t, mask, z_t):
+        # Monte-Carlo loss-based guidance (Eq. 9):
+        #   MC_n(x_t, y) = grad_{x_t} log( (1/n) sum_i exp(-l_y(x^(i))) )
+        # with x^(i) ~ N(x_hat_t, r_t^2 I) drawn in normalized space, l_y the DPS loss.
+        # We differentiate the scalar
+        #   L_MC = -log( (1/n) sum_i exp(-l_i) ) = log(n) - logsumexp_i(-l_i)
+        # which reduces to DPS_guidance when n_mc=1, r_t=0.
+        n_mc, r_t = self.n_mc, self.r_t
+
+        # target term: constant w.r.t. z_t (x_hat_ung is detached upstream)
+        term_right = sum(
+            (mask[k] * x_hat_ung[k]).sum()
+            for k in x_hat_ung.keys()
+        ) * (1 + delta_t)
+
+        per_sample_losses = []
+        for _ in range(n_mc):
+            # perturb in normalized space (scalar r_t), then denormalize -> x^(i) (physical units).
+            # noise is a fresh leaf (no grad), so the gradient flows only through x_hat_t_norm -> z_t.
+            x_i_norm = x_hat_t_norm.apply(
+                lambda x: x + r_t * torch.empty_like(x).normal_(generator=self.generator)
+            )
+            x_i = self.denormalize(x_i_norm)
+            term_left = sum(
+                (mask[k] * x_i[k]).sum()
+                for k in x_i.keys()
+            )
+            per_sample_losses.append((term_left - term_right) ** 2)
+
+        losses = torch.stack(per_sample_losses)  # (n_mc,)
+        loss_ = math.log(n_mc) - torch.logsumexp(-losses, dim=0)
+
+        grad_l = self.grad_loss(loss_, z_t)
+
+        return grad_l

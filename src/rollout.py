@@ -37,10 +37,12 @@ def rollout(
         delta_trajectory = config.delta_trajectory
         lambda_schedule = T_schedule(config.alpha, config.w) 
         mask_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
+        guidance_type = config.guidance_mode
     else:
         delta_trajectory=None
         lambda_schedule=None
         mask_tdict = None
+        guidance_type = None
 
     # run
     for m in range(config.M):
@@ -49,6 +51,7 @@ def rollout(
         sample_rollout( 
             rollout_dir=rollout_dir,
             guidance_flag=guidance_flag,
+            guidance_type=guidance_type,
             flow_model=flow_model,
             sweep_params=sweep_params,
             N=config.N, 
@@ -62,6 +65,7 @@ def rollout(
 def sample_rollout(
     rollout_dir: Path,
     guidance_flag,
+    guidance_type,
     flow_model: GuidedFlow,
     sweep_params: dict[str, any],
     m,
@@ -77,6 +81,7 @@ def sample_rollout(
         # runs both if guidance
         x_hat_ung, _ = flow_model.sample(
             guidance_flag=False,
+            guidance_type=None,
             x_cond=x_cond,
             delta_t=None,
             mask=None,
@@ -89,6 +94,7 @@ def sample_rollout(
         if guidance_flag:
             x_hat_gui, sampling_trace = flow_model.sample(
                 guidance_flag=True,
+                guidance_type=guidance_type,
                 x_cond=x_cond,
                 delta_t=delta_trajectory[n],
                 mask=mask,

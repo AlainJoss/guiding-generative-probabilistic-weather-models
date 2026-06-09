@@ -102,6 +102,13 @@ def main() -> None:
         case _:
             pass
 
+    for key, values in sweep_params.items():
+        assert len(values) == len(set(values)), (
+            f"sweep_params['{key}'] has duplicate values {values}; "
+            f"each sweep axis must be uniquely valued or the zarr region write fails. "
+            f"Fix {get_rollout_dir(args.rollout_id) / 'sweep_params.json'}."
+        )
+
     create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, sweep_params)
 
     for job in build_jobs(config, sweep_params):

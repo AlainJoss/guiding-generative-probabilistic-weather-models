@@ -15,6 +15,12 @@ MASK_MODES = [
     "normal"
 ]
 
+GUIDANCE_MODES = [
+    "DPS",
+    "UG",
+    "LBG"
+]
+
 ##### config class #####
 from src.constants import DATETIME_STR_FORMAT
 
@@ -45,6 +51,7 @@ class RolloutConfig:
     ### sweep params -> save them in config to use in rollout, but not extracted 
 
     mask_mode: str | None = None
+    guidance_mode: str | None = None
     guidance_reference: str | None = None
     delta_trajectory: list[torch.Tensor] | None = None
 
@@ -66,6 +73,7 @@ class RolloutConfig:
 
 
             mask_mode=config.get("mask_mode"),
+            guidance_mode=config.get("guidance_mode"),
             guidance_reference=config.get("guidance_reference"),
             delta_trajectory=config.get("delta_trajectory"),
 
@@ -86,6 +94,7 @@ class RolloutConfig:
             "mask_corners": self.mask_corners,
 
             "mask_mode": self.mask_mode,
+            "guidance_mode": self.guidance_mode,
             "guidance_reference": self.guidance_reference,
             "delta_trajectory": self.delta_trajectory,
 
@@ -97,6 +106,7 @@ class RolloutConfig:
     def to_dict_list(self) -> dict[str, Any]:
         return {
             "mask_mode": [self.mask_mode],
+            "guidance_mode": [self.guidance_mode],
             "guidance_reference": [self.guidance_reference],
 
             "alpha": [self.alpha],

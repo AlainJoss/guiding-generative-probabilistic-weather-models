@@ -20,7 +20,7 @@ def _():
 @app.cell
 def _():
     from src.paths import ROLLOUTS
-    from src.rollout_config import GUIDANCE_REFERENCES, MASK_MODES, RolloutConfig
+    from src.rollout_config import GUIDANCE_REFERENCES, MASK_MODES, RolloutConfig, GUIDANCE_MODES
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
@@ -33,20 +33,21 @@ def _():
     from src.utils import (
         dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config
     )
-    from src.funcs import N_schedule, T_schedule, make_hash, safe_abs_limits
+    from src.funcs import N_schedule, delta_schedule, T_schedule, make_hash, safe_abs_limits
 
     from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma, get_mask_center
     from src.target import get_target_slices
 
     return (
+        GUIDANCE_MODES,
         GUIDANCE_REFERENCES,
         LEVELS_DICT,
         MASK_MODES,
-        N_schedule,
         PARTITIONS,
         RolloutConfig,
         T_schedule,
         VARIABLES_DICT,
+        delta_schedule,
         dump_json,
         ensure_rollout_dir,
         get_N_timestamps,
@@ -159,6 +160,7 @@ def _(
     dump_json,
     ensure_rollout_dir,
     get_now_timestamp,
+    guidance_mode,
     guidance_reference,
     level,
     mask_corners,
@@ -213,6 +215,7 @@ def _(
             save_config = RolloutConfig(
                 # guided rollout specific params -> can be swept
                 mask_mode=mask_mode,
+                guidance_mode=guidance_mode,
                 guidance_reference=guidance_reference,
                 alpha=alpha,
                 w=w
@@ -449,10 +452,11 @@ def _(get_config, get_rollout, notebook_mode, rollout_id, sweep_params):
 def _(
     M,
     N,
-    N_schedule,
     config,
+    delta_mode_dropdown,
     delta_peak,
     delta_peak_at_slider,
+    delta_schedule,
     delta_shape_slider,
     get_corners,
     get_mask_2d,
@@ -466,6 +470,8 @@ def _(
     notebook_mode,
     partition,
     rollout_id,
+    stop_at_n_checkbox,
+    stop_at_n_slider,
     timestamp,
     var,
 ):
@@ -483,7 +489,12 @@ def _(
             mask_corners = config.mask_corners
             mu, sigma = get_mu_sigma(*mask_corners)
             mask=get_mask_2d(mask_mode, mask_corners)
-            delta_trajectory = N_schedule(N, delta_shape_slider.value, delta_peak, peak_at_n=delta_peak_at_slider.value)[1:]
+            stop_n = stop_at_n_slider.value if stop_at_n_checkbox.value else None
+            delta_trajectory = delta_schedule(
+                N, delta_mode_dropdown.value, delta_peak,
+                peak_at_n=delta_peak_at_slider.value, stop_at_n=stop_n,
+                flatness=delta_shape_slider.value,
+            )[1:]
             if (
                 partition == config.partition
                 and var == config.var
@@ -819,7 +830,19 @@ def _(N, delta_bounds_slider, delta_granularity_slider, mo):
         show_value=True,
         debounce=True,
     )
-    return delta_peak_at_slider, delta_peak_slider, delta_shape_slider
+
+    delta_mode_dropdown = mo.ui.dropdown(["linear", "sinusoidal"], value="sinusoidal", label="delta_mode: ")
+    stop_at_n_slider = mo.ui.slider(1, N, step=1, value=N, label="stop @ n: ", show_value=True, debounce=True)
+    stop_at_n_checkbox = mo.ui.checkbox(label="stop at n", value=False)
+
+    return (
+        delta_mode_dropdown,
+        delta_peak_at_slider,
+        delta_peak_slider,
+        delta_shape_slider,
+        stop_at_n_checkbox,
+        stop_at_n_slider,
+    )
 
 
 @app.cell
@@ -867,13 +890,21 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 
 
 @app.cell
+def _(GUIDANCE_MODES, mo):
+    guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_MODES, value=GUIDANCE_MODES[0], label="guidance_mode: ")
+    return (guidance_mode_dropdown,)
+
+
+@app.cell
 def _(
     M_N_widget,
     delta_bounds_slider,
     delta_granularity_slider,
+    delta_mode_dropdown,
     delta_peak_at_slider,
     delta_peak_slider,
     delta_shape_slider,
+    guidance_mode_dropdown,
     guidance_reference_dropdown,
     inspect_states_widget_make,
     lambda_trajectory_plot,
@@ -884,6 +915,8 @@ def _(
     mo,
     notebook_mode,
     partition_dropdown,
+    stop_at_n_checkbox,
+    stop_at_n_slider,
     sweep_params_widget,
     traj_checks,
     trajectories_plot,
@@ -902,14 +935,18 @@ def _(
         align="start",
     )
     mask_widget = mo.vstack([
+        guidance_mode_dropdown,
         mask_mode_dropdown,
         mask_widget_controls, mask_widget_maps], align="start")
     delta_widget = mo.hstack([
+        delta_mode_dropdown,
         delta_peak_slider,
         delta_granularity_slider,
         delta_bounds_slider,
         delta_shape_slider,
         delta_peak_at_slider,
+        stop_at_n_slider,
+        stop_at_n_checkbox,
     ], justify="start")
 
     match notebook_mode:
@@ -1810,7 +1847,6 @@ def _(
     diff_gui_ung_gui_plot,
     grad_norms_plot,
     guidance_convergence_plot,
-    guided_vf_norms_plot,
     m_slider,
     mo,
     n_slider,
@@ -1832,7 +1868,7 @@ def _(
                     align="start",
                 ).style(width="fit-content"),
                 mo.vstack(
-                    [grad_norms_plot, vf_norms_plot, guided_vf_norms_plot],
+                    [grad_norms_plot, vf_norms_plot], # guided_vf_norms_plot
                     justify="start",
                     align="start",
                 ).style(width="fit-content"),
@@ -2017,36 +2053,18 @@ def _(
 
 
 @app.cell
-def _(
-    abs_checkbox,
-    aggregate_by_level_checkbox,
-    color_for,
-    differential_checkbox,
-    grouped_vars,
-    gui_vfs_xr,
-    level_var_dropdown,
-    m,
-    maybe_abs,
-    maybe_diff,
-    n,
-    notebook_mode,
-    np,
-    plot_trajectory,
-    t,
-    top_k,
-    top_k_slider,
-):
-    if notebook_mode == "analyze_rollout":
-        _ds_gvf = gui_vfs_xr.isel(m=m, n=n-1)
-        _gvf_traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
-                       for k, das in grouped_vars(_ds_gvf, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
-        _gvf_traces = top_k(maybe_abs(maybe_diff(_gvf_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
-        guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided VF norms",
-            subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_gvf_traces),
-            figsize=(22, 6))
-    else:
-        guided_vf_norms_plot = None
-    return (guided_vf_norms_plot,)
+def _():
+    # if notebook_mode == "analyze_rollout":
+    #     _ds_gvf = gui_vfs_xr.isel(m=m, n=n-1)
+    #     _gvf_traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
+    #                    for k, das in grouped_vars(_ds_gvf, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
+    #     _gvf_traces = top_k(maybe_abs(maybe_diff(_gvf_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
+    #     guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided VF norms",
+    #         subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_gvf_traces),
+    #         figsize=(22, 6))
+    # else:
+    #     guided_vf_norms_plot = None
+    return
 
 
 @app.cell
@@ -2085,9 +2103,9 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
         grads_xr = get_rollout("grads", rollout_id).sel(sweep_params).compute()
         vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params).compute()
         clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params).compute()
-        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
+        # gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
         ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params).compute()
-    return clean_preds_xr, grads_xr, gui_vfs_xr, ung_gui_xr, vfs_xr
+    return clean_preds_xr, grads_xr, ung_gui_xr, vfs_xr
 
 
 @app.cell
@@ -2096,7 +2114,6 @@ def _(
     get_slices,
     grads_xr,
     gt_curr,
-    gui_vfs_xr,
     level,
     m,
     n,
@@ -2112,7 +2129,7 @@ def _(
         clean_preds_slices = get_slices(clean_preds_xr, partition, var, level)
         grads_slices = get_slices(grads_xr, partition, var, level)
         vfs_slices = get_slices(vfs_xr, partition, var, level)
-        guided_vfs_slices = get_slices(gui_vfs_xr, partition, var, level)
+        # guided_vfs_slices = get_slices(gui_vfs_xr, partition, var, level)
 
         # slices of interest
         # 1
@@ -2127,7 +2144,7 @@ def _(
         grads_slice_prev_slice = grads_slices[m][n][t-1] if t>0 else grads_slices[m][n][t]
         diff_grads_slice = grads_slice- grads_slice_prev_slice
         # 4
-        guided_vfs_slice = guided_vfs_slices[m][n][t]
+        # guided_vfs_slice = guided_vfs_slices[m][n][t]
         vfs_slice = vfs_slices[m][n][t]
     return (
         clean_preds_diff_slice,
@@ -2136,7 +2153,6 @@ def _(
         diff_gt_clean_pred_slice,
         diff_gt_ung_onl_slice,
         grads_slice,
-        guided_vfs_slice,
         ung_onl_clean_diff_slice,
         vfs_slice,
     )
@@ -2156,7 +2172,6 @@ def _(
     diff_gt_ung_onl_slice,
     dpi_slider,
     grads_slice,
-    guided_vfs_slice,
     mask,
     notebook_mode,
     np,
@@ -2168,7 +2183,7 @@ def _(
     zoom_slider,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        diff_vfs_slice = guided_vfs_slice - vfs_slice
+        # diff_vfs_slice = guided_vfs_slice - vfs_slice
 
         map_specs = [
             ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{\text{ung_gui}} - x_n$", -1, 1),
@@ -2178,7 +2193,7 @@ def _(
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
             ("vfs_map", vfs_slice, r"$\text{vf}_t$", -0.001, 0.001),
-            ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
+            # ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
         ]
 
         maps = {}
@@ -2187,7 +2202,7 @@ def _(
             data_min = np.min(data)
             data_max = np.max(data)
             data_mean = np.mean(data)
-            print(name)
+            print(name, data_min, data_mean, data_max)
 
             maps[name] = visualize_map(
                 data,
@@ -2212,14 +2227,13 @@ def _(
         grads_map = maps["grads_map"]
         diff_grads_map = maps["diff_grads_map"]
         vfs_map = maps["vfs_map"]
-        guided_vfs_map = maps["guided_vfs_map"]
+        # guided_vfs_map = maps["guided_vfs_map"]
     return (
         clean_preds_diff_map,
         diff_grads_map,
         diff_gt_clean_pred_map,
         diff_gt_ung_onl_map,
         grads_map,
-        guided_vfs_map,
         ung_onl_clean_diff_map,
         vfs_map,
     )
@@ -2243,7 +2257,6 @@ def _(
     dpi_slider,
     flow_checks,
     grads_map,
-    guided_vfs_map,
     level_slider,
     m_slider,
     mo,
@@ -2296,7 +2309,7 @@ def _(
             ("diffs_to_gt", [diff_gt_ung_onl_map, diff_gt_clean_pred_map]),
             ("diffs_clean_preds", [ung_onl_clean_diff_map, clean_preds_diff_map]),
             ("grad_maps", [grads_map, diff_grads_map]),
-            ("vf_maps", [vfs_map, guided_vfs_map]),
+            ("vf_maps", [vfs_map, ]), # guided_vfs_map
         ]
 
         flow_widget_make = mo.vstack(
