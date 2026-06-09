@@ -196,7 +196,7 @@ class GuidedFlow(BaseLightningModule):
 
                 # guided vector field
                 u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, grad_l)
-                sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())  # rescale to only have the raw diff in residual
+                # sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())  # rescale to only have the raw diff in residual
             else:
                 with torch.no_grad():
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
