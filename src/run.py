@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from itertools import product
 
+import xarray as xr
 
 from src.rollout import rollout
 from src.rollout_config import RolloutConfig
@@ -55,21 +56,51 @@ def build_jobs(
         yield RolloutJob(config=config, sweep=sweep, label=label)
 
 
-def create_zarr_containers(rollout_type, rollout_id, M, N, sweep_params):
+def get_container_args(rollout_type):
     match rollout_type:
         case "ung":
-            container_args = [("ung", False)]
+            return [("ung", False)]
         case "gui":
-            container_args = [
-                ("grads", True), 
-                ("vfs", True), 
+            return [
+                ("grads", True),
+                ("vfs", True),
                 ("gui_vfs", True),
                 ("clean_preds", True),
-                ("gui", False), 
+                ("gui", False),
                 ("ung_gui", False)
             ]
         case _:
-            pass
+            return []
+
+
+def find_resume_index(rollout_dir, rollout_type, sweep_params):
+    """Return the index into the product-ordered sweep list at which to resume.
+
+    Walks the sweeps in the same order as build_jobs. A sweep is "filled" only
+    when every container has no NaN in that sweep's (m, n, ...) region. Returns
+    the index of the first not-fully-filled sweep (half-filled or empty), so the
+    loop skips completed sweeps and overwrites the first incomplete one.
+    """
+    container_args = get_container_args(rollout_type)
+
+    datasets = []
+    for (container_type, _) in container_args:
+        path = rollout_dir / f"{container_type}.zarr"
+        if not path.exists():
+            return 0  # missing container -> nothing reliably filled, run all
+        datasets.append(xr.open_zarr(path))
+
+    sweeps = list(iter_sweeps(sweep_params))
+    for i, sweep in enumerate(sweeps):
+        for ds in datasets:
+            probe = ds[list(ds.data_vars)[0]].sel(sweep)
+            if not bool(probe.notnull().all().compute()):
+                return i  # first not-fully-filled sweep
+    return len(sweeps)  # all sweeps already filled
+
+
+def create_zarr_containers(rollout_type, rollout_id, M, N, sweep_params):
+    container_args = get_container_args(rollout_type)
 
     ensure_rollout_dir(rollout_id)
 
@@ -109,9 +140,25 @@ def main() -> None:
             f"Fix {get_rollout_dir(args.rollout_id) / 'sweep_params.json'}."
         )
 
-    create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, sweep_params)
+    # a store from a prior run is resumed, not recreated: create_zarr_containers
+    # uses mode="w" and would wipe partially-filled sweeps.
+    container_args = get_container_args(args.rollout_type)
+    store_exists = all(
+        (rollout_dir / f"{c}.zarr").exists() for (c, _) in container_args
+    )
 
-    for job in build_jobs(config, sweep_params):
+    if store_exists:
+        resume_idx = find_resume_index(rollout_dir, args.rollout_type, sweep_params)
+        logger.info("Existing store found, resuming sweep at index %d", resume_idx)
+    else:
+        create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, sweep_params)
+        resume_idx = 0
+
+    for i, job in enumerate(build_jobs(config, sweep_params)):
+        if i < resume_idx:
+            logger.info("Skipping filled %s", job.label)
+            continue
+
         logger.info("Running %s", job.label)
 
         rollout(rollout_dir, guidance_flag, job.config, flow_model, job.sweep)

@@ -301,7 +301,7 @@ class GuidedFlow(BaseLightningModule):
             case "DPS":
                 return self.DPS_guidance(x_hat_t, x_hat_ung, delta_t, mask, z_t)
             case "UG":
-                return self.UG_guidance(x_hat_t, x_hat_ung, delta_t, mask)
+                return self.UG_guidance(x_hat_t, x_hat_ung, delta_t, mask, z_t)
             case "LBG":
                 return self.LBG_guidance(x_hat_t_norm, x_hat_ung, delta_t, mask, z_t)
             case _:
@@ -324,13 +324,20 @@ class GuidedFlow(BaseLightningModule):
         return grad_l
 
 
-    def UG_guidance(self, dt, x_hat_t, x_hat_ung):
-        Delta = x_hat_ung- x_hat_t
-        Delta = self.normalize(Delta)
-        eps = Delta.apply(
-            lambda x: torch.empty_like(x).normal_(generator=self.generator)
+    def UG_guidance(self, x_hat_t, x_hat_ung, delta_t, mask, z_t):
+        # Forward universal guidance: gradient of a per-cell field-matching loss over the mask.
+        # Unlike DPS (which matches the masked MEAN), this matches the masked field pointwise.
+        # x_hat_t is denormalized and depends on z_t via the graph; grad_loss differentiates w.r.t z_t,
+        # so autograd supplies all Jacobians -> same residual space as DPS, same lambda_schedule.
+        # L = sum_k || mask[k] * (x_hat_t[k] - (1 + delta_t) * x_hat_ung[k]) ||^2
+        loss_ = sum(
+            ((mask[k] * (x_hat_t[k] - (1 + delta_t) * x_hat_ung[k])) ** 2).sum()
+            for k in x_hat_t.keys()
         )
-        return Delta + eps * dt  # TODO: not sure if h must be applied here or it's enough to have it later
+
+        grad_l = self.grad_loss(loss_, z_t)
+
+        return grad_l
 
     def LBG_guidance(self, x_hat_t_norm, x_hat_ung, delta_t, mask, z_t):
         # Monte-Carlo loss-based guidance (Eq. 9):

@@ -1856,6 +1856,7 @@ def _(
     grad_norms_plot,
     guidance_convergence_plot,
     guidance_mode_dropdown,
+    guided_vf_norms_plot,
     m_slider,
     mo,
     n_slider,
@@ -1878,7 +1879,7 @@ def _(
                     align="start",
                 ).style(width="fit-content"),
                 mo.vstack(
-                    [grad_norms_plot, vf_norms_plot], # guided_vf_norms_plot
+                    [grad_norms_plot, vf_norms_plot, guided_vf_norms_plot], # 
                     justify="start",
                     align="start",
                 ).style(width="fit-content"),
@@ -2063,18 +2064,36 @@ def _(
 
 
 @app.cell
-def _():
-    # if notebook_mode == "analyze_rollout":
-    #     _ds_gvf = gui_vfs_xr.isel(m=m, n=n-1)
-    #     _gvf_traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
-    #                    for k, das in grouped_vars(_ds_gvf, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
-    #     _gvf_traces = top_k(maybe_abs(maybe_diff(_gvf_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
-    #     guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided VF norms",
-    #         subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_gvf_traces),
-    #         figsize=(22, 6))
-    # else:
-    #     guided_vf_norms_plot = None
-    return
+def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
+    color_for,
+    differential_checkbox,
+    grouped_vars,
+    gui_vfs_xr,
+    level_var_dropdown,
+    m,
+    maybe_abs,
+    maybe_diff,
+    n,
+    notebook_mode,
+    np,
+    plot_trajectory,
+    t,
+    top_k,
+    top_k_slider,
+):
+    if notebook_mode == "analyze_rollout":
+        _ds_gvf = gui_vfs_xr.isel(m=m, n=n-1)
+        _gvf_traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
+                       for k, das in grouped_vars(_ds_gvf, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
+        _gvf_traces = top_k(maybe_abs(maybe_diff(_gvf_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
+        guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided VF norms",
+            subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_gvf_traces),
+            figsize=(22, 6))
+    else:
+        guided_vf_norms_plot = None
+    return (guided_vf_norms_plot,)
 
 
 @app.cell
@@ -2115,7 +2134,7 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
         clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params).compute()
         gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
         ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params).compute()
-    return clean_preds_xr, grads_xr, ung_gui_xr, vfs_xr
+    return clean_preds_xr, grads_xr, gui_vfs_xr, ung_gui_xr, vfs_xr
 
 
 @app.cell
@@ -2124,6 +2143,7 @@ def _(
     get_slices,
     grads_xr,
     gt_curr,
+    gui_vfs_xr,
     level,
     m,
     n,
@@ -2139,7 +2159,7 @@ def _(
         clean_preds_slices = get_slices(clean_preds_xr, partition, var, level)
         grads_slices = get_slices(grads_xr, partition, var, level)
         vfs_slices = get_slices(vfs_xr, partition, var, level)
-        # guided_vfs_slices = get_slices(gui_vfs_xr, partition, var, level)
+        guided_vfs_slices = get_slices(gui_vfs_xr, partition, var, level)
 
         # slices of interest
         # 1
@@ -2154,7 +2174,7 @@ def _(
         grads_slice_prev_slice = grads_slices[m][n][t-1] if t>0 else grads_slices[m][n][t]
         diff_grads_slice = grads_slice- grads_slice_prev_slice
         # 4
-        # guided_vfs_slice = guided_vfs_slices[m][n][t]
+        guided_vfs_slice = guided_vfs_slices[m][n][t]
         vfs_slice = vfs_slices[m][n][t]
     return (
         clean_preds_diff_slice,
@@ -2163,6 +2183,7 @@ def _(
         diff_gt_clean_pred_slice,
         diff_gt_ung_onl_slice,
         grads_slice,
+        guided_vfs_slice,
         ung_onl_clean_diff_slice,
         vfs_slice,
     )
@@ -2182,6 +2203,7 @@ def _(
     diff_gt_ung_onl_slice,
     dpi_slider,
     grads_slice,
+    guided_vfs_slice,
     mask,
     notebook_mode,
     np,
@@ -2193,7 +2215,7 @@ def _(
     zoom_slider,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        # diff_vfs_slice = guided_vfs_slice - vfs_slice
+        diff_vfs_slice = guided_vfs_slice - vfs_slice
 
         map_specs = [
             ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{\text{ung_gui}} - x_n$", -1, 1),
@@ -2203,7 +2225,7 @@ def _(
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
             ("vfs_map", vfs_slice, r"$\text{vf}_t$", -0.001, 0.001),
-            # ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
+            ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
         ]
 
         maps = {}
@@ -2237,13 +2259,14 @@ def _(
         grads_map = maps["grads_map"]
         diff_grads_map = maps["diff_grads_map"]
         vfs_map = maps["vfs_map"]
-        # guided_vfs_map = maps["guided_vfs_map"]
+        guided_vfs_map = maps["guided_vfs_map"]
     return (
         clean_preds_diff_map,
         diff_grads_map,
         diff_gt_clean_pred_map,
         diff_gt_ung_onl_map,
         grads_map,
+        guided_vfs_map,
         ung_onl_clean_diff_map,
         vfs_map,
     )
@@ -2268,6 +2291,7 @@ def _(
     flow_checks,
     grads_map,
     guidance_mode_dropdown,
+    guided_vfs_map,
     level_slider,
     m_slider,
     mo,
@@ -2321,7 +2345,7 @@ def _(
             ("diffs_to_gt", [diff_gt_ung_onl_map, diff_gt_clean_pred_map]),
             ("diffs_clean_preds", [ung_onl_clean_diff_map, clean_preds_diff_map]),
             ("grad_maps", [grads_map, diff_grads_map]),
-            ("vf_maps", [vfs_map, ]), # guided_vfs_map
+            ("vf_maps", [vfs_map, guided_vfs_map]), # 
         ]
 
         flow_widget_make = mo.vstack(

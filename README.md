@@ -1,5 +1,23 @@
 # Guiding Generative Probabilistic Weather Models
 
+better describe the UI
+Order variables in legend
+add option aggregate over the mask 
+tune the schedule to 
+isotrophic on the sphere
+statements about scheduling
+masking size
+variables that mostly influence
+delta change flat line 1%
+compute cumulative percentage increase
+write down the formula of 
+sigmoud or poisson shape --> reach it in 10 days and have a function that imposes some prior assumption 
+"force" states and how
+define extremes
+compute difference to ground truth in addition to unguided_guided or unguided
+start much prior to heatwave
+there are regions that have era5 anomalies
+
 Resources:
 - [report](/reports/latex-notes/main.pdf)
 

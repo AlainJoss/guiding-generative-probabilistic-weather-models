@@ -8,7 +8,7 @@ DATA = ROOT / "data"
 
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
-    # DATA = ROOT / "local_data"
+    DATA = ROOT / "local_data"
 
 print(f"DATA @ {DATA}")
 
