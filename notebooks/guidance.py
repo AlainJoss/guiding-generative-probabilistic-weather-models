@@ -160,7 +160,7 @@ def _(
     dump_json,
     ensure_rollout_dir,
     get_now_timestamp,
-    guidance_mode,
+    guidance_mode_dropdown,
     guidance_reference,
     level,
     mask_corners,
@@ -215,7 +215,7 @@ def _(
             save_config = RolloutConfig(
                 # guided rollout specific params -> can be swept
                 mask_mode=mask_mode,
-                guidance_mode=guidance_mode,
+                guidance_mode=guidance_mode_dropdown.value,
                 guidance_reference=guidance_reference,
                 alpha=alpha,
                 w=w
@@ -229,6 +229,7 @@ def _(
     GUIDANCE_REFERENCES,
     MASK_MODES,
     get_sweep_dict,
+    guidance_mode_dropdown,
     mo,
     notebook_mode,
     rollout_id,
@@ -312,6 +313,7 @@ def _(
                 guidance_reference_dropdown, mask_mode_dropdown,
                 alpha_slider,
                 w_slider,
+                guidance_mode_dropdown
             ])
 
         case _:
@@ -659,12 +661,19 @@ def _(
 
 
 @app.cell
-def _(alpha_slider, guidance_reference_dropdown, mask_mode_dropdown, w_slider):
+def _(
+    alpha_slider,
+    guidance_mode_dropdown,
+    guidance_reference_dropdown,
+    mask_mode_dropdown,
+    w_slider,
+):
     sweep_params = {
         "w": w_slider.value,
         "alpha": alpha_slider.value,
         "guidance_reference": guidance_reference_dropdown.value,
-        "mask_mode": mask_mode_dropdown.value
+        "mask_mode": mask_mode_dropdown.value,
+        "guidance_mode": guidance_mode_dropdown.value
     }
     return (sweep_params,)
 
@@ -834,7 +843,6 @@ def _(N, delta_bounds_slider, delta_granularity_slider, mo):
     delta_mode_dropdown = mo.ui.dropdown(["linear", "sinusoidal"], value="sinusoidal", label="delta_mode: ")
     stop_at_n_slider = mo.ui.slider(1, N, step=1, value=N, label="stop @ n: ", show_value=True, debounce=True)
     stop_at_n_checkbox = mo.ui.checkbox(label="stop at n", value=False)
-
     return (
         delta_mode_dropdown,
         delta_peak_at_slider,
@@ -1468,8 +1476,8 @@ def _(
 
                 gradmap_mag_panels = [
                     (r"$\|\nabla x_n\|$", gradmap_gt_mag),
-                    (r"$\|\nabla x_n^{\text{gui}}\|$", gradmap_gui_mag),
                     (r"$\|\nabla x_n^{\text{ung}}\|$", gradmap_ung_mag),
+                    (r"$\|\nabla x_n^{\text{gui}}\|$", gradmap_gui_mag),
                     (r"$\|\nabla (x_n^{\text{ung_gui}})\|$", gradmap_gui_ung_mag),
                 ]
 
@@ -1847,6 +1855,7 @@ def _(
     diff_gui_ung_gui_plot,
     grad_norms_plot,
     guidance_convergence_plot,
+    guidance_mode_dropdown,
     m_slider,
     mo,
     n_slider,
@@ -1858,6 +1867,7 @@ def _(
 ):
     if notebook_mode =="analyze_rollout":
         cross_checks_widget = mo.vstack([
+            guidance_mode_dropdown,
             cross_check_controls,
             mo.hstack([m_slider, n_slider, t_slider], justify="start"),
             mo.hstack([
@@ -1914,7 +1924,7 @@ def _(
         _traces = top_k(maybe_abs(maybe_diff(_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
         _realized_minus_target = (get_masked_mean(clean_preds_slices[m, :, n], mask) - target_guidance_M_N_trajectories[m, n]) if show_realized_diff_checkbox.value else None
         grad_norms_plot = plot_trajectory(_traces, title="Grad norms",
-            subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_traces),
+            subtitle=f"member={m} | rollout step n={n+1}", step=t, color_map=color_for(_traces),
             right_trajectory=_realized_minus_target,
             right_label=r"realized $-$ target",
             right_color="#8A2BE2",
@@ -1955,7 +1965,7 @@ def _(
             title="Diff (guided − unguided_guided)",
             subtitle=f"member={m} | normalized",
             xlabel="$n$",
-            step=n,
+            step=n+1,
             color_map=color_for(_raw),
             right_trajectory=delta_trajectory if show_delta_checkbox.value else None,
             right_label=r"$\delta_t$",
@@ -1990,7 +2000,7 @@ def _(
             title="Convergence per rollout step",
             subtitle=f"member={m} | final clean pred (t={clean_preds_slices.shape[2]-1})",
             xlabel="$n$",
-            step=n,
+            step=n+1,
             color_map={"realized − target": "#B7950B"},
             right_trajectory=delta_trajectory,
             right_label=r"$\delta_n$",
@@ -2103,7 +2113,7 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
         grads_xr = get_rollout("grads", rollout_id).sel(sweep_params).compute()
         vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params).compute()
         clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params).compute()
-        # gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
+        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
         ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params).compute()
     return clean_preds_xr, grads_xr, ung_gui_xr, vfs_xr
 
@@ -2257,6 +2267,7 @@ def _(
     dpi_slider,
     flow_checks,
     grads_map,
+    guidance_mode_dropdown,
     level_slider,
     m_slider,
     mo,
@@ -2290,6 +2301,7 @@ def _(
                         mo.hstack([alpha_slider, w_slider], justify="start", align="start"),
                         mo.hstack([t_slider, dpi_slider], justify="start", align="start"),
                         mo.hstack([m_slider, n_slider], justify="start", align="start"),
+                        guidance_mode_dropdown
                     ],
                     align="start",
                 ),

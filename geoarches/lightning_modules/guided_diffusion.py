@@ -61,8 +61,6 @@ class GuidedFlow(BaseLightningModule):
         # LBG (Monte-Carlo loss-based guidance) hyperparameters (tunable)
         # n_mc: number of MC samples; r_t: std of the Gaussian q(x0|xt)=N(x_hat_t, r_t^2 I)
         # drawn in normalized space. n_mc=1, r_t=0 makes LBG reduce to DPS.
-        self.n_mc = 4
-        self.r_t = 0.1
 
         self.cfg = cfg
         self.backbone = instantiate(cfg.backbone)  # necessary to put it on device
@@ -219,7 +217,7 @@ class GuidedFlow(BaseLightningModule):
 
                 # guided vector field
                 u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, gui_vec)
-                # sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())  # rescale to only have the raw diff in residual
+                sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())  # rescale to only have the raw diff in residual
             else:
                 with torch.no_grad():
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
@@ -303,7 +301,7 @@ class GuidedFlow(BaseLightningModule):
             case "DPS":
                 return self.DPS_guidance(x_hat_t, x_hat_ung, delta_t, mask, z_t)
             case "UG":
-                return self.UG_guidance(x_hat_ung, dt, x_hat_t_norm)
+                return self.UG_guidance(x_hat_t, x_hat_ung, delta_t, mask)
             case "LBG":
                 return self.LBG_guidance(x_hat_t_norm, x_hat_ung, delta_t, mask, z_t)
             case _:
@@ -326,10 +324,10 @@ class GuidedFlow(BaseLightningModule):
         return grad_l
 
 
-    def UG_guidance(self, x_hat_ung, dt, x_hat_t_norm):
-        x_hat_ung_norm = self.normalize(x_hat_ung)
-        Delta = x_hat_ung - x_hat_ung_norm
-        eps = x_hat_ung.apply(
+    def UG_guidance(self, dt, x_hat_t, x_hat_ung):
+        Delta = x_hat_ung- x_hat_t
+        Delta = self.normalize(Delta)
+        eps = Delta.apply(
             lambda x: torch.empty_like(x).normal_(generator=self.generator)
         )
         return Delta + eps * dt  # TODO: not sure if h must be applied here or it's enough to have it later
@@ -341,7 +339,7 @@ class GuidedFlow(BaseLightningModule):
         # We differentiate the scalar
         #   L_MC = -log( (1/n) sum_i exp(-l_i) ) = log(n) - logsumexp_i(-l_i)
         # which reduces to DPS_guidance when n_mc=1, r_t=0.
-        n_mc, r_t = self.n_mc, self.r_t
+        n_mc, r_t = 4, 1
 
         # target term: constant w.r.t. z_t (x_hat_ung is detached upstream)
         term_right = sum(

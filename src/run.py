@@ -63,7 +63,7 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, sweep_params):
             container_args = [
                 ("grads", True), 
                 ("vfs", True), 
-                # ("gui_vfs", True),
+                ("gui_vfs", True),
                 ("clean_preds", True),
                 ("gui", False), 
                 ("ung_gui", False)
