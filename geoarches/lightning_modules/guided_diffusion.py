@@ -423,11 +423,21 @@ class GuidedFlow(BaseLightningModule):
             case _:
                 # "UG" is handled by its own sampler (UG_flow), not this dispatch
                 raise ValueError(f"Invalid loss type {guidance_type} -.-")
+            
                 
-    # TODO: change or sweep loss
-    def DPS_guidance(self, x_hat_t, x_hat_ung, delta_t, mask, z_t):
-        loss_ = self.masked_regularized_loss(x_hat_t, x_hat_ung, delta_t, mask)
-        return self.guidance_grad(loss_, z_t)
+    def DPS_guidance(self, x_hat_t, x_hat_ung, delta_t, mask, z_t, beta=1e-4, eps=1e-8):
+        loss_, residual = self.regularized_masked_loss(
+            x_hat_t=x_hat_t,
+            x_hat_ung=x_hat_ung,
+            delta_t=delta_t,
+            mask=mask,
+            beta=beta,
+        )
+
+        gui_vec = self.guidance_grad(loss_, z_t)
+        scale = residual.detach().clamp_min(eps)
+
+        return gui_vec.apply(lambda g: g / scale)
         
 
     def masked_loss(self, x_hat_t, x_hat_ung, delta_t, mask):
@@ -442,33 +452,20 @@ class GuidedFlow(BaseLightningModule):
         ) * (1 + delta_t)
 
         return (term_left - term_right) ** 2
-    
-    def masked_regularized_loss(
-        self,
-        x_hat_t,
-        x_hat_ung,
-        delta_t,
-        mask,
-        beta: float = 1e-3,
-    ):
-        term_left = sum(
-            (mask[k] * x_hat_t[k]).sum()
-            for k in x_hat_t.keys()
-        )
+        
+    def regularized_masked_loss(self, x_hat_t, x_hat_ung, delta_t, mask, beta=1e-4):
+        term_left = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
+        term_right = sum((mask[k] * x_hat_ung[k]).sum() for k in x_hat_ung.keys()) * (1 + delta_t)
 
-        term_right = sum(
-            (mask[k] * x_hat_ung[k]).sum()
-            for k in x_hat_ung.keys()
-        ) * (1 + delta_t)
-
-        guide_loss = (term_left - term_right) ** 2
+        residual = term_left - term_right
+        guide_loss = residual ** 2
 
         similarity_loss = sum(
             ((x_hat_t[k] - x_hat_ung[k]) ** 2).mean()
             for k in x_hat_t.keys()
         )
 
-        return guide_loss + beta * similarity_loss
+        return guide_loss + beta * similarity_loss, residual.abs()
 
 
     def LBG_guidance(self, x_hat_t_norm, x_hat_ung, delta_t, mask, z_t):
