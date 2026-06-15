@@ -373,16 +373,17 @@ class GuidedFlow(BaseLightningModule):
         for i in tqdm(range(len(timesteps))):
             t, s_t, dt = self.get_step_factors(i, timesteps)
 
+            # track computation graph for loss down the line
+            # we take single step gradients here
             z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
 
             with torch.enable_grad():
                 time_embedding = self.embedd_time(x_cond, t)
                 input_state = self.get_velocity_input_state(z_t, x_cond)
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
- 
-                x_hat_t_norm = det_pred + (
-                    z_t + tensordict_apply(torch.mul, s_t, u_t)
-                ) * self.residual_to_pangu_scale
+
+                # NOTE: we want to go back in one step to the denoised space
+                x_hat_t_norm = det_pred + self.euler_step(z_t, u_t, 1) * self.residual_to_pangu_scale
 
                 x_hat_t = self.denormalize(x_hat_t_norm)
 
@@ -471,7 +472,7 @@ class GuidedFlow(BaseLightningModule):
         return grad_l
 
 
-    ### flow variant 1-2 ###
+    ### flow variant 3 ###
 
     def UG_flow(self,
         x_cond,
