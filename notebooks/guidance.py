@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.6"
+__generated_with = "0.23.9"
 app = marimo.App(width="full")
 
 
@@ -156,20 +156,32 @@ def _(
     N,
     RolloutConfig,
     alpha,
+    beta_slider,
     delta_trajectory,
     dump_json,
     ensure_rollout_dir,
+    fg_gamma_slider,
+    fg_init_lambda_slider,
+    fg_lr_slider,
+    fg_n_opt_slider,
     get_now_timestamp,
     guidance_mode_dropdown,
     guidance_reference,
+    lbg_n_mc_slider,
+    lbg_r_t_slider,
     level,
     mask_corners,
     mask_mode,
+    normalize_checkbox,
     notebook_mode,
     partition,
+    regularized_checkbox,
     rollout_id,
     save_config_button,
     timestamp,
+    ug_S_slider,
+    ug_delta_lr_slider,
+    ug_m_slider,
     var,
     w,
 ):
@@ -208,6 +220,19 @@ def _(
                 var=var,
                 mask_corners=mask_corners,
                 delta_trajectory=delta_trajectory,
+                # guidance hyperparameters
+                regularized=regularized_checkbox.value,
+                normalize=normalize_checkbox.value,
+                beta=beta_slider.value,
+                lbg_n_mc=lbg_n_mc_slider.value,
+                lbg_r_t=lbg_r_t_slider.value,
+                ug_S=ug_S_slider.value,
+                ug_m=ug_m_slider.value,
+                ug_delta_lr=ug_delta_lr_slider.value,
+                fg_n_opt=fg_n_opt_slider.value,
+                fg_lr=fg_lr_slider.value,
+                fg_gamma=fg_gamma_slider.value,
+                fg_init_lambda=fg_init_lambda_slider.value,
             )
             dump_json(save_config.to_dict(), path)
             print(save_config.to_dict_list())
@@ -948,6 +973,46 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 def _(GUIDANCE_MODES, mo):
     guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_MODES, value=GUIDANCE_MODES[0], label="guidance_mode: ")
     return (guidance_mode_dropdown,)
+
+
+@app.cell(hide_code=True)
+def _(mo, notebook_mode):
+    # guidance hyperparameters (guided_rollout) -> saved into config.json
+    regularized_checkbox = mo.ui.checkbox(label="regularized", value=False)
+    normalize_checkbox = mo.ui.checkbox(label="normalize", value=True)
+    beta_slider = mo.ui.slider(steps=[1e-5, 1e-4, 1e-3, 1e-2], value=1e-4, label="beta: ", show_value=True)
+    lbg_n_mc_slider = mo.ui.slider(1, 16, step=1, value=4, label="lbg n_mc: ", show_value=True)
+    lbg_r_t_slider = mo.ui.slider(steps=[0.0, 0.5, 1.0, 2.0], value=1.0, label="lbg r_t: ", show_value=True)
+    ug_S_slider = mo.ui.slider(1, 8, step=1, value=4, label="ug S: ", show_value=True)
+    ug_m_slider = mo.ui.slider(1, 20, step=1, value=5, label="ug m: ", show_value=True)
+    ug_delta_lr_slider = mo.ui.slider(steps=[1e-2, 5e-2, 1e-1, 5e-1], value=1e-1, label="ug delta_lr: ", show_value=True)
+    fg_n_opt_slider = mo.ui.slider(1, 50, step=1, value=10, label="fg n_opt: ", show_value=True)
+    fg_lr_slider = mo.ui.slider(steps=[1e-3, 1e-2, 5e-2], value=1e-2, label="fg lr: ", show_value=True)
+    fg_gamma_slider = mo.ui.slider(steps=[1e-4, 1e-3, 1e-2], value=1e-3, label="fg gamma: ", show_value=True)
+    fg_init_lambda_slider = mo.ui.slider(-20, 0, step=1, value=-10, label="fg init_lambda: ", show_value=True)
+
+    hypers_widget = mo.vstack([
+        mo.hstack([regularized_checkbox, normalize_checkbox, beta_slider], justify="start"),
+        mo.hstack([lbg_n_mc_slider, lbg_r_t_slider], justify="start"),
+        mo.hstack([ug_S_slider, ug_m_slider, ug_delta_lr_slider], justify="start"),
+        mo.hstack([fg_n_opt_slider, fg_lr_slider, fg_gamma_slider, fg_init_lambda_slider], justify="start"),
+    ], align="start")
+
+    hypers_widget if notebook_mode == "guided_rollout" else None
+    return (
+        beta_slider,
+        fg_gamma_slider,
+        fg_init_lambda_slider,
+        fg_lr_slider,
+        fg_n_opt_slider,
+        lbg_n_mc_slider,
+        lbg_r_t_slider,
+        normalize_checkbox,
+        regularized_checkbox,
+        ug_S_slider,
+        ug_delta_lr_slider,
+        ug_m_slider,
+    )
 
 
 @app.cell

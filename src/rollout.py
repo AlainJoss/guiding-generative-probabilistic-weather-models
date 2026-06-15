@@ -18,6 +18,42 @@ from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
 
 
+def build_guidance_kwargs(config: RolloutConfig) -> dict[str, any]:
+    """Select the guidance hyperparameters relevant to config.guidance_mode and
+    drop unset (None) ones so the method defaults in GuidedFlow still apply."""
+    shared = {
+        "regularized": config.regularized,
+        "beta": config.beta,
+        "normalize": config.normalize,
+        "eps": config.eps,
+    }
+
+    match config.guidance_mode:
+        case "DPS":
+            kwargs = shared
+        case "LBG":
+            kwargs = {**shared, "n_mc": config.lbg_n_mc, "r_t": config.lbg_r_t}
+        case "UG":
+            kwargs = {
+                **shared,
+                "S": config.ug_S,
+                "m": config.ug_m,
+                "delta_lr": config.ug_delta_lr,
+            }
+        case "FLOWGRAD":
+            kwargs = {
+                **shared,
+                "n_opt": config.fg_n_opt,
+                "lr": config.fg_lr,
+                "gamma": config.fg_gamma,
+                "init_lambda": config.fg_init_lambda,
+            }
+        case _:
+            kwargs = {}
+
+    return {k: v for k, v in kwargs.items() if v is not None}
+
+
 def rollout(
     rollout_dir: Path,
     guidance_flag: bool,
@@ -44,6 +80,8 @@ def rollout(
         mask_tdict = None
         guidance_type = None
 
+    guidance_kwargs = build_guidance_kwargs(config) if guidance_flag else {}
+
     # run
     for m in range(config.M):
         # note how config gets not passed onwards
@@ -59,7 +97,8 @@ def rollout(
             x_cond=x_cond,
             mask=mask_tdict,
             delta_trajectory=delta_trajectory,
-            lambda_schedule=lambda_schedule
+            lambda_schedule=lambda_schedule,
+            guidance_kwargs=guidance_kwargs,
         )
 
 def sample_rollout(
@@ -73,8 +112,9 @@ def sample_rollout(
     x_cond, 
     mask: TensorDict | None = None,
     delta_trajectory: list[torch.Tensor] | None = None,
-    lambda_schedule: list[torch.Tensor] | None = None
-):  
+    lambda_schedule: list[torch.Tensor] | None = None,
+    guidance_kwargs: dict[str, any] | None = None,
+):
     # flow_model.T=25
     for n in range(N):
         print(f"m={m} - n={n}")
@@ -96,6 +136,7 @@ def sample_rollout(
                 guidance_flag=True,
                 guidance_type=guidance_type,
                 x_cond=x_cond,
+                guidance_kwargs=guidance_kwargs,
                 delta_t=delta_trajectory[n],
                 mask=mask,
                 x_hat_ung=flow_model.denormalize(x_hat_ung.detach().clone()), 

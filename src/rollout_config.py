@@ -18,7 +18,8 @@ MASK_MODES = [
 GUIDANCE_MODES = [
     "DPS",
     "UG",
-    "LBG"
+    "LBG",
+    "FLOWGRAD",
 ]
 
 ##### config class #####
@@ -58,6 +59,29 @@ class RolloutConfig:
     alpha: float | None = None
     w: float | None = None
 
+    ### guidance hyperparameters (sweepable; None -> method default is used)
+
+    # shared across guidance types
+    regularized: bool | None = None
+    beta: float | None = None
+    normalize: bool | None = None
+    eps: float | None = None
+
+    # LBG only
+    lbg_n_mc: int | None = None
+    lbg_r_t: float | None = None
+
+    # UG only
+    ug_S: int | None = None
+    ug_m: int | None = None
+    ug_delta_lr: float | None = None
+
+    # FLOWGRAD only
+    fg_n_opt: int | None = None
+    fg_lr: float | None = None
+    fg_gamma: float | None = None
+    fg_init_lambda: float | None = None
+
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
         return cls(
@@ -79,6 +103,23 @@ class RolloutConfig:
 
             alpha=config.get("alpha"),
             w=config.get("w"),
+
+            regularized=config.get("regularized"),
+            beta=config.get("beta"),
+            normalize=config.get("normalize"),
+            eps=config.get("eps"),
+
+            lbg_n_mc=config.get("lbg_n_mc"),
+            lbg_r_t=config.get("lbg_r_t"),
+
+            ug_S=config.get("ug_S"),
+            ug_m=config.get("ug_m"),
+            ug_delta_lr=config.get("ug_delta_lr"),
+
+            fg_n_opt=config.get("fg_n_opt"),
+            fg_lr=config.get("fg_lr"),
+            fg_gamma=config.get("fg_gamma"),
+            fg_init_lambda=config.get("fg_init_lambda"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -100,6 +141,23 @@ class RolloutConfig:
 
             "alpha": self.alpha,
             "w": self.w,
+
+            "regularized": self.regularized,
+            "beta": self.beta,
+            "normalize": self.normalize,
+            "eps": self.eps,
+
+            "lbg_n_mc": self.lbg_n_mc,
+            "lbg_r_t": self.lbg_r_t,
+
+            "ug_S": self.ug_S,
+            "ug_m": self.ug_m,
+            "ug_delta_lr": self.ug_delta_lr,
+
+            "fg_n_opt": self.fg_n_opt,
+            "fg_lr": self.fg_lr,
+            "fg_gamma": self.fg_gamma,
+            "fg_init_lambda": self.fg_init_lambda,
         }
 
 
@@ -111,4 +169,21 @@ class RolloutConfig:
 
             "alpha": [self.alpha],
             "w": [self.w],
+
+            "regularized": [self.regularized],
+            "beta": [self.beta],
+            "normalize": [self.normalize],
+            "eps": [self.eps],
+
+            "lbg_n_mc": [self.lbg_n_mc],
+            "lbg_r_t": [self.lbg_r_t],
+
+            "ug_S": [self.ug_S],
+            "ug_m": [self.ug_m],
+            "ug_delta_lr": [self.ug_delta_lr],
+
+            "fg_n_opt": [self.fg_n_opt],
+            "fg_lr": [self.fg_lr],
+            "fg_gamma": [self.fg_gamma],
+            "fg_init_lambda": [self.fg_init_lambda],
         }
