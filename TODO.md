@@ -14,14 +14,8 @@ sampling trace:
 
 Random:
 - Compute a priori the size of the experiment
-- Copy data locally since I have 2TB disk!
-- what happen to the rollout after we stop guiding?
-- shouldn't show interactivity elements when they are fixed parameters -> calendar, N, M, ... present them in a compact way
-- Use daterange calendar for presentation -> use in guided and analysis modes
-- Remerge utils!
 
 Experiments:
-- save gt also as file to minimize storage
 - tune w
 - tune alpha with w
 - fix alpha and w
@@ -31,17 +25,12 @@ Experiments:
 
 Communicate:
 - serve one experiment on some cloud machine for them to access and play around with
-- explain pipeline and code base visuall
-- domain all has another bug
+- explain pipeline and code base visually
 
 Rollouts:
-- handle delta trajectories from the UI
 - Assess likelihood of gui vs ung_gui
 - Guide full slice of temperature and observe what happens
 - Guide both entire states (can define guidance at variable level and state level)
-- Define mask for both state and gradients (or penalize in loss)
-- New mask types: normal and cost-lines prior
-- simply try to define a much broader area, or sweep over different sizes of the mask using the corners (nice, and make it a sweep param: like percentage corner increase)
 - find real extremes (maybe even unpredictable) as use case
 - define delta trajectory in terms of extremity (whathever that is) or guide using some notion of std of the forecast bands
 - maybe define coarser gaussian mask?
@@ -94,3 +83,6 @@ What we do not do:
 
 08.06 
 - We are bounded by the deterministic prediction in terms of what we can explore
+
+Bug reports:
+- domain all has another bug

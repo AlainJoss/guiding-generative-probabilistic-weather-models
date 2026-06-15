@@ -185,9 +185,9 @@ class GuidedFlow(BaseLightningModule):
         )
 
 
-    def euler_step(self, z_t, u_t, dt):
-        # z_new = z_t + h * u_t, where h = dt
-        return tensordict_apply(lambda z, u: z + dt * u, z_t, u_t)
+    def euler_step(self, z_t, u_t, h):
+        # z_new = z_t + h * u_t
+        return tensordict_apply(lambda z, u: z + h * u, z_t, u_t)
     
 
     def init_noise(self, x_cond, seed=None):
@@ -215,11 +215,11 @@ class GuidedFlow(BaseLightningModule):
 
         if i < len(timesteps) - 1:
             s_next = timesteps[i + 1] / self.num_train_timesteps
-            dt = s_t - s_next
+            h = s_t - s_next
         else:
-            dt = s_t
+            h = s_t
 
-        return t, s_t, dt
+        return t, s_t, h
  
 
     def clean_prediction(self, det_pred, z_t, u_t, s_t):
@@ -342,13 +342,13 @@ class GuidedFlow(BaseLightningModule):
         timesteps = self.get_timesteps()
 
         for i in tqdm(range(len(timesteps))):
-            t, s_t, dt = self.get_step_factors(i, timesteps)
+            t, s_t, h = self.get_step_factors(i, timesteps)
 
             with torch.no_grad():
                 time_embedding = self.embedd_time(x_cond, t)
                 input_state = self.get_velocity_input_state(z_t, x_cond)
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                z_t = self.euler_step(z_t, u_t, dt)
+                z_t = self.euler_step(z_t, u_t, h)
 
         return z_t, None
     
@@ -371,7 +371,7 @@ class GuidedFlow(BaseLightningModule):
         sampling_trace = defaultdict(list)
 
         for i in tqdm(range(len(timesteps))):
-            t, s_t, dt = self.get_step_factors(i, timesteps)
+            t, s_t, h = self.get_step_factors(i, timesteps)
 
             # track computation graph for loss down the line
             # we take single step gradients here
@@ -383,7 +383,9 @@ class GuidedFlow(BaseLightningModule):
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
 
                 # NOTE: we want to go back in one step to the denoised space
-                x_hat_t_norm = det_pred + self.euler_step(z_t, u_t, 1) * self.residual_to_pangu_scale
+                #       s_t = t/1000 where t starts at 1000
+                #       s_t := "remaining integration to do for clean prediction"
+                x_hat_t_norm = det_pred + self.euler_step(z_t, u_t, s_t) * self.residual_to_pangu_scale
 
                 x_hat_t = self.denormalize(x_hat_t_norm)
 
@@ -394,7 +396,7 @@ class GuidedFlow(BaseLightningModule):
                     delta_t=delta_t,
                     mask=mask,
                     z_t=z_t,
-                    dt=dt,
+                    h=h,
                     x_hat_t_norm=x_hat_t_norm,
                 )
 
@@ -407,12 +409,12 @@ class GuidedFlow(BaseLightningModule):
             sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
 
             with torch.no_grad():
-                z_t = self.euler_step(z_t, u_t, dt)
+                z_t = self.euler_step(z_t, u_t, h)
 
         return z_t, sampling_trace
     
     
-    def get_gradient_based_guidance(self, guidance_type, x_hat_t, x_hat_ung, delta_t, mask, z_t, dt, x_hat_t_norm):
+    def get_gradient_based_guidance(self, guidance_type, x_hat_t, x_hat_ung, delta_t, mask, z_t, h, x_hat_t_norm):
         match guidance_type:
             case "DPS":
                 return self.DPS_guidance(x_hat_t, x_hat_ung, delta_t, mask, z_t)
@@ -504,10 +506,10 @@ class GuidedFlow(BaseLightningModule):
                 s_t = t / self.num_train_timesteps
                 if i < len(timesteps) - 1:
                     s_next = timesteps[i + 1] / self.num_train_timesteps
-                    dt = s_t - s_next
+                    h = s_t - s_next
                 else:
                     s_next = 0.0  # clean level (for the final renoise)
-                    dt = s_t
+                    h = s_t
 
                 time_embedding = self.embedd_time(x_cond, t)
 
@@ -520,7 +522,7 @@ class GuidedFlow(BaseLightningModule):
                     gui_vec = self.UG_guidance(x_hat_t, x_hat_ung, delta_t, mask, s_t)
                     u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, gui_vec)
 
-                    z_next = self.euler_step(z_t, u_t, dt)
+                    z_next = self.euler_step(z_t, u_t, h)
                     if k < S - 1:
                         z_t = self.renoise(z_next, s_t, s_next)  # renoise back up to s_t, repeat
 
@@ -634,7 +636,7 @@ class GuidedFlow(BaseLightningModule):
         timesteps = self.get_timesteps()
 
         for i in range(len(timesteps)):
-            t, s_t, dt = self.get_step_factors(i, timesteps)
+            t, s_t, h = self.get_step_factors(i, timesteps)
 
             # do NOT detach here
             z_t = z_t.apply(lambda x: x.requires_grad_(True))
@@ -656,7 +658,7 @@ class GuidedFlow(BaseLightningModule):
             )
 
             # do NOT use no_grad here
-            z_t = self.euler_step(z_t, u_t, dt)
+            z_t = self.euler_step(z_t, u_t, h)
 
         return z_t
 
@@ -676,7 +678,7 @@ class GuidedFlow(BaseLightningModule):
         sampling_trace = defaultdict(list)
 
         for i in tqdm(range(len(timesteps)), desc="FLOWGRAD final sampling"):
-            t, s_t, dt = self.get_step_factors(i, timesteps)
+            t, s_t, h = self.get_step_factors(i, timesteps)
 
             z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
 
@@ -704,6 +706,6 @@ class GuidedFlow(BaseLightningModule):
             sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
 
             with torch.no_grad():
-                z_t = self.euler_step(z_t, u_t, dt)
+                z_t = self.euler_step(z_t, u_t, h)
 
         return z_t, sampling_trace
