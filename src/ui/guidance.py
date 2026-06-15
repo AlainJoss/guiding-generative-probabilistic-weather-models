@@ -442,7 +442,8 @@ def _(get_config, get_rollout, notebook_mode, rollout_id, sweep_params):
             config = get_config(rollout_id)
         case "analyze_rollout":
             unguided_xr = get_rollout("ung", rollout_id).compute()
-            guided_xr = get_rollout("gui", rollout_id).sel(sweep_params).compute()
+            guided_xr = get_rollout("gui", rollout_id).compute()
+            guided_xr = guided_xr.sel(sweep_params).compute()
             config = get_config(rollout_id)
         case _:
             pass
@@ -451,30 +452,7 @@ def _(get_config, get_rollout, notebook_mode, rollout_id, sweep_params):
 
 @app.cell
 def _(
-    config,
-    get_corners,
-    get_mask_2d,
-    get_mu_sigma,
-    mask_mode,
-    notebook_mode,
-):
-    # mask
-    match notebook_mode:
-        case "unguided_rollout":
-            mask_corners = get_corners()
-            mu, sigma = get_mu_sigma(*mask_corners)
-            mask=get_mask_2d(mask_mode, mask_corners)
-        case "guided_rollout" | "analyze_rollout":
-            mask_corners = config.mask_corners
-            mu, sigma = get_mu_sigma(*mask_corners)
-            mask=get_mask_2d(mask_mode, mask_corners)
-        case _:
-            pass
-    return mask, mask_corners
-
-
-@app.cell
-def _(
+    M,
     N,
     config,
     delta_mode_dropdown,
@@ -482,62 +460,43 @@ def _(
     delta_peak_at_slider,
     delta_schedule,
     delta_shape_slider,
-    delta_start_slider,
+    get_corners,
+    get_mask_2d,
+    get_masked_mean,
+    get_mu_sigma,
+    get_target_slices,
+    guidance_reference,
+    level,
+    m,
+    mask_mode,
     notebook_mode,
-    np,
+    partition,
+    rollout_id,
     stop_at_n_checkbox,
     stop_at_n_slider,
+    timestamp,
+    var,
 ):
-    # delta schedule
+    # sweep params 
     match notebook_mode:
         case "unguided_rollout":
+            mask_corners = get_corners()
+            mu, sigma = get_mu_sigma(*mask_corners)
+            mask=get_mask_2d(mask_mode, mask_corners)
             delta_trajectory=None
+            planned_guidance_rollout=None
+            planned_guidance_trajectories=None
+            planned_guidance_trajectory=None
         case "guided_rollout":
+            mask_corners = config.mask_corners
+            mu, sigma = get_mu_sigma(*mask_corners)
+            mask=get_mask_2d(mask_mode, mask_corners)
             stop_n = stop_at_n_slider.value if stop_at_n_checkbox.value else None
             delta_trajectory = delta_schedule(
                 N, delta_mode_dropdown.value, delta_peak,
                 peak_at_n=delta_peak_at_slider.value, stop_at_n=stop_n,
                 flatness=delta_shape_slider.value,
-                start_value=delta_start_slider.value / 100,
             )[1:]
-        case "analyze_rollout":
-            delta_trajectory=config.delta_trajectory
-        case _:
-            pass
-
-    cumulative_delta_trajectory = (
-        np.cumprod(1 + np.asarray(delta_trajectory, dtype=float)) - 1
-        if delta_trajectory is not None
-        else None
-    )
-    return cumulative_delta_trajectory, delta_trajectory
-
-
-@app.cell
-def _(
-    M,
-    N,
-    config,
-    cumulative_delta_trajectory,
-    get_masked_mean,
-    get_target_slices,
-    guidance_reference,
-    level,
-    m,
-    mask,
-    notebook_mode,
-    partition,
-    rollout_id,
-    timestamp,
-    var,
-):
-    # planned guidance (depends on level/var/partition)
-    match notebook_mode:
-        case "unguided_rollout":
-            planned_guidance_rollout=None
-            planned_guidance_trajectories=None
-            planned_guidance_trajectory=None
-        case "guided_rollout" | "analyze_rollout":
             if (
                 partition == config.partition
                 and var == config.var
@@ -552,11 +511,42 @@ def _(
                     partition,
                     var,
                     level,
-                    cumulative_delta_trajectory,
+                    delta_trajectory,
                     m,
                 )
                 planned_guidance_trajectories = get_masked_mean(planned_guidance_slices, mask)
                 planned_guidance_trajectory = planned_guidance_trajectories[m]
+                pass
+            else:
+                planned_guidance_rollout = None
+                planned_guidance_slices = None
+                planned_guidance_trajectories = None
+                planned_guidance_trajectory = None
+        case "analyze_rollout":        
+            mask_corners=config.mask_corners # should be a sweep param mask_corners_dropdown.value
+            mu, sigma = get_mu_sigma(*mask_corners)
+            mask=get_mask_2d(mask_mode, mask_corners)
+            delta_trajectory=config.delta_trajectory
+            if (
+                partition == config.partition
+                and var == config.var
+                and level == config.level
+            ):
+                planned_guidance_slices = get_target_slices(
+                    guidance_reference,
+                    rollout_id,
+                    N,
+                    M,
+                    timestamp,
+                    partition,
+                    var,
+                    level,
+                    delta_trajectory,
+                    m,
+                )
+                planned_guidance_trajectories = get_masked_mean(planned_guidance_slices, mask)
+                planned_guidance_trajectory = planned_guidance_trajectories[m]
+                pass
             else:
                 planned_guidance_rollout = None
                 planned_guidance_slices = None
@@ -564,28 +554,13 @@ def _(
                 planned_guidance_trajectory = None
         case _:
             pass
-    return planned_guidance_trajectories, planned_guidance_trajectory
-
-
-@app.cell
-def _(
-    clean_preds_xr,
-    config,
-    delta_trajectory,
-    get_masked_mean,
-    get_slices,
-    mask,
-    notebook_mode,
-    np,
-    ung_gui_xr,
-):
-    # guidance-target at config coords (pinned — independent of browsing sliders)
-    if notebook_mode == "analyze_rollout":
-        cfg_clean_preds_slices = get_slices(clean_preds_xr, config.partition, config.var, config.level)
-        cfg_ung_gui_M_N_slices = get_slices(ung_gui_xr, config.partition, config.var, config.level)
-        cfg_ung_gui_M_N_trajectories = get_masked_mean(cfg_ung_gui_M_N_slices, mask)
-        cfg_target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * cfg_ung_gui_M_N_trajectories
-    return cfg_clean_preds_slices, cfg_target_guidance_M_N_trajectories
+    return (
+        delta_trajectory,
+        mask,
+        mask_corners,
+        planned_guidance_trajectories,
+        planned_guidance_trajectory,
+    )
 
 
 @app.cell
@@ -670,7 +645,6 @@ def _(
     gt_trajectory = get_masked_mean(gt_N_slices, mask)
     return (
         gt_N_slices,
-        gt_rollout,
         gt_trajectory,
         gui_M_N_slices,
         gui_M_N_trajectories,
@@ -729,27 +703,12 @@ def _(partition_dropdown):
 
 
 @app.cell
-def _(level_slider):
+def _(level_slider, m_slider, n_slider, var_dropdown):
     level=level_slider.value
-    return (level,)
-
-
-@app.cell
-def _(var_dropdown):
     var=var_dropdown.value
-    return (var,)
-
-
-@app.cell
-def _(n_slider):
     n=n_slider.value-1
-    return (n,)
-
-
-@app.cell
-def _(m_slider):
     m=m_slider.value
-    return (m,)
+    return level, m, n, var
 
 
 @app.cell
@@ -832,6 +791,11 @@ def _(M, N, mo):
 
 
 @app.cell
+def _():
+    return
+
+
+@app.cell
 def _(mo):
     delta_bounds_slider = mo.ui.slider(
         steps=[5, 10, 25, 50, 100], value=10, label="bounds (%): ", show_value=True
@@ -876,16 +840,6 @@ def _(N, delta_bounds_slider, delta_granularity_slider, mo):
         debounce=True,
     )
 
-    delta_start_slider = mo.ui.slider(
-        -delta_bounds_slider.value,
-        delta_bounds_slider.value,
-        value=0,
-        step=delta_granularity_slider.value,
-        label="start@ (%): ",
-        show_value=True,
-        debounce=True,
-    )
-
     delta_mode_dropdown = mo.ui.dropdown(["linear", "sinusoidal"], value="sinusoidal", label="delta_mode: ")
     stop_at_n_slider = mo.ui.slider(1, N, step=1, value=N, label="stop @ n: ", show_value=True, debounce=True)
     stop_at_n_checkbox = mo.ui.checkbox(label="stop at n", value=False)
@@ -894,7 +848,6 @@ def _(N, delta_bounds_slider, delta_granularity_slider, mo):
         delta_peak_at_slider,
         delta_peak_slider,
         delta_shape_slider,
-        delta_start_slider,
         stop_at_n_checkbox,
         stop_at_n_slider,
     )
@@ -959,7 +912,6 @@ def _(
     delta_peak_at_slider,
     delta_peak_slider,
     delta_shape_slider,
-    delta_start_slider,
     guidance_mode_dropdown,
     guidance_reference_dropdown,
     inspect_states_widget_make,
@@ -996,7 +948,6 @@ def _(
         mask_widget_controls, mask_widget_maps], align="start")
     delta_widget = mo.hstack([
         delta_mode_dropdown,
-        delta_start_slider,
         delta_peak_slider,
         delta_granularity_slider,
         delta_bounds_slider,
@@ -1162,7 +1113,7 @@ def _(inspect_states_widget):
 
 @app.cell
 def _(mo):
-    analysis_types = ["absolute", "difference", "sobel_grads", "sobel_diffs"]
+    analysis_types = ["absolute", "difference", "sobel_grads"]
     analysis_type_dropdown = mo.ui.dropdown(
         analysis_types,
         value=analysis_types[0],
@@ -1209,6 +1160,41 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    show_values_checkbox = mo.ui.checkbox(label="show values")
+    return (show_values_checkbox,)
+
+
+@app.cell
+def _(mo):
+    # text thresh
+    center_value_for_threshold = 0.0
+    max_abs_diff_for_threshold =0.2
+    # = float(
+    #     max(
+    #         np.nanmax(gui_ung),
+    #         abs(np.nanmin(gui_ung)),
+    #     )
+    # )
+
+    if max_abs_diff_for_threshold <= 0:
+        max_abs_diff_for_threshold = 1e-8
+
+    default_value_threshold = max_abs_diff_for_threshold * 0.9
+
+    text_thresh_slider = mo.ui.slider(
+        start=center_value_for_threshold,
+        stop=max_abs_diff_for_threshold,
+        step=max_abs_diff_for_threshold / 20,
+        value=default_value_threshold,
+        label="text thresh: ",
+        debounce=True,
+        show_value=True
+    )
+    return (text_thresh_slider,)
+
+
+@app.cell
 def _(get_mask_center, mask_corners):
     zoom_centers = get_mask_center(*mask_corners)
     return (zoom_centers,)
@@ -1235,7 +1221,9 @@ def _(
         gt_prev = gt_N_slices[n-1] if n>0 else gt_N_slices[n]
 
         gt_gt = gt_curr - gt_prev
-        gt_ung = gt_curr - ung_curr
+        ung_ung = ung_curr - ung_prev
+        ung_gt = ung_curr - gt_curr
+        ung_gt_prev = ung_curr - gt_prev
 
     if notebook_mode =="analyze_rollout":
         ung_curr = ung_M_N_slices[m][n]
@@ -1247,28 +1235,25 @@ def _(
 
         ung_onl_slice = get_slices(ung_gui_xr, partition, var, level)
         ung_onl_curr = ung_onl_slice[m][n]
-        ung_onl_prev = ung_onl_slice[m][n-1] if n>0 else ung_onl_slice[m][n]
 
         gt_gt = gt_curr - gt_prev
         gui_gui = gui_curr - gui_prev
         gui_ung_gui = gui_curr - ung_onl_curr
         gui_gt = gui_curr - gt_curr
-        ung_gui_gt = ung_onl_curr - gt_curr
-        ung_gui_ung_gui = ung_onl_curr - ung_onl_prev
     return (
         gt_curr,
         gt_gt,
         gt_prev,
-        gt_ung,
         gui_curr,
         gui_gt,
         gui_gui,
         gui_ung_gui,
         ung_curr,
-        ung_gui_gt,
-        ung_gui_ung_gui,
+        ung_gt,
+        ung_gt_prev,
         ung_onl_curr,
         ung_prev,
+        ung_ung,
     )
 
 
@@ -1280,7 +1265,6 @@ def _(
     gt_curr,
     gt_gt,
     gt_prev,
-    gt_ung,
     gui_curr,
     gui_gt,
     gui_gui,
@@ -1293,11 +1277,14 @@ def _(
     np,
     safe_abs_limits,
     show_mask_switch,
+    show_values_checkbox,
+    text_thresh_slider,
     ung_curr,
-    ung_gui_gt,
-    ung_gui_ung_gui,
+    ung_gt,
+    ung_gt_prev,
     ung_onl_curr,
     ung_prev,
+    ung_ung,
     visualize_map,
     zoom_centers,
     zoom_slider,
@@ -1306,8 +1293,8 @@ def _(
         match analysis_type_dropdown.value:
             case "absolute":
                 absolute_panels = [
-                    ("$x_{n}^{\\text{gt}}$", gt_curr),
-                    ("$x_{n-1}^{\\text{gt}}$", gt_prev),
+                    ("$x_n$", gt_curr),
+                    ("$x_{n-1}$", gt_prev),
                     ("$x_{n}^{ung}$", ung_curr),
                     ("$x_{n-1}^{ung}$", ung_prev),
                 ]
@@ -1335,14 +1322,16 @@ def _(
                         figsize=(14, 8),
                     )
 
-                curr_map = absolute_maps["$x_{n}^{\\text{gt}}$"]
-                prev_map = absolute_maps["$x_{n-1}^{\\text{gt}}$"]
+                curr_map = absolute_maps["$x_n$"]
+                prev_map = absolute_maps["$x_{n-1}$"]
                 ung_map = absolute_maps["$x_{n}^{ung}$"]
                 ung_prev_map = absolute_maps["$x_{n-1}^{ung}$"]
             case "difference":
                 difference_panels = [
-                    ("$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$", gt_gt),
-                    ("$x_{n}^{\\text{gt}} - x_{n}^{\\text{ung}}$", gt_ung),
+                    ("$x_{n} - x_{n-1}$", gt_gt),
+                    ("$x_{n}^{ung} - x_{n}$", ung_gt),
+                    ("$x_{n}^{ung} - x_{n-1}^{ung}$", ung_ung),
+                    ("$x_{n}^{ung} - x_{n-1}$", ung_gt_prev),
                 ]
 
                 diff_vmin = min(float(np.nanmin(arr)) for _, arr in difference_panels)
@@ -1370,12 +1359,17 @@ def _(
                         zoom=zoom_slider.value,
                         zoom_center_lon=zoom_centers[0],
                         zoom_center_lat=zoom_centers[1],
+                        show_values=show_values_checkbox.value,
+                        value_threshold=text_thresh_slider.value,
+                        value_fontsize=5,
                         dpi=dpi_slider.value,
                         figsize=(14, 8),
                     )
 
-                gt_gt_map = difference_maps["$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$"]
-                gt_ung_map = difference_maps["$x_{n}^{\\text{gt}} - x_{n}^{\\text{ung}}$"]
+                gt_gt_map = difference_maps["$x_{n} - x_{n-1}$"]
+                ung_ung_map = difference_maps["$x_{n}^{ung} - x_{n}$"]
+                ung_ung_map = difference_maps["$x_{n}^{ung} - x_{n-1}^{ung}$"]
+                ung_gt_prev_map = difference_maps["$x_{n}^{ung} - x_{n-1}$"]
             case "sobel_grads":
                 sobel_grad_widget = None
             case _:
@@ -1385,7 +1379,7 @@ def _(
         match analysis_type_dropdown.value:
             case "absolute":
                 absolute_panels = [
-                    ("$x_{n}^{\\text{gt}}$", gt_curr),
+                    ("$x_n$", gt_curr),
                     ("$x_{n}^{\\text{ung_gui}}$", ung_onl_curr),
                     ("$x_{n}^{gui}$", gui_curr),
                     ("$x_{n}^{ung}$", ung_curr),
@@ -1414,19 +1408,17 @@ def _(
                         figsize=(14, 8),
                     )
 
-                curr_map = absolute_maps["$x_{n}^{\\text{gt}}$"]
+                curr_map = absolute_maps["$x_n$"]
                 prev_map = absolute_maps["$x_{n}^{\\text{ung_gui}}$"]
                 ung_map = absolute_maps["$x_{n}^{ung}$"]
                 gui_map = absolute_maps["$x_{n}^{gui}$"]
 
             case "difference":
                 difference_panels = [
-                    ("$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$", gt_gt),
-                    ("$x_{n}^{gui} - x_{n}^{\\text{gt}}$", gui_gt),
+                    ("$x_{n} - x_{n-1}$", gt_gt),
+                    ("$x_{n}^{gui} - x_{n}$", gui_gt),
                     ("$x_{n}^{gui} - x_{n}^{\\text{ung_gui}}$", gui_ung_gui),
                     ("$x_{n}^{gui} - x_{n-1}^{gui}$", gui_gui),
-                    ("$x_{n}^{\\text{ung_gui}} - x_{n}^{\\text{gt}}$", ung_gui_gt),
-                    ("$x_{n}^{\\text{ung_gui}} - x_{n-1}^{\\text{ung_gui}}$", ung_gui_ung_gui),
                 ]
 
                 diff_vmin = min(float(np.nanmin(arr)) for _, arr in difference_panels)
@@ -1454,16 +1446,17 @@ def _(
                         zoom=zoom_slider.value,
                         zoom_center_lon=zoom_centers[0],
                         zoom_center_lat=zoom_centers[1],
+                        show_values=show_values_checkbox.value,
+                        value_threshold=text_thresh_slider.value,
+                        value_fontsize=5,
                         dpi=dpi_slider.value,
                         figsize=(14, 8),
                     )
 
-                gt_gt_map = difference_maps["$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$"]
+                gt_gt_map = difference_maps["$x_{n} - x_{n-1}$"]
                 gui_gui_map = difference_maps["$x_{n}^{gui} - x_{n-1}^{gui}$"]
                 gui_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{ung_gui}}$"]
-                gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gt}}$"]
-                ung_gui_gt_map = difference_maps["$x_{n}^{\\text{ung_gui}} - x_{n}^{\\text{gt}}$"]
-                ung_gui_ung_gui_map = difference_maps["$x_{n}^{\\text{ung_gui}} - x_{n-1}^{\\text{ung_gui}}$"]
+                gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}$"]
             case "sobel_grads":
                 gradmap_gt_x = cv2.Sobel(gt_curr, cv2.CV_32F, 1, 0, ksize=3)
                 gradmap_gt_y = cv2.Sobel(gt_curr, cv2.CV_32F, 0, 1, ksize=3)
@@ -1482,7 +1475,7 @@ def _(
                 gradmap_gui_ung_mag = np.sqrt(gradmap_gui_ung_x**2 + gradmap_gui_ung_y**2)
 
                 gradmap_mag_panels = [
-                    (r"$\|\nabla x_n^{\text{gt}}\|$", gradmap_gt_mag),
+                    (r"$\|\nabla x_n\|$", gradmap_gt_mag),
                     (r"$\|\nabla x_n^{\text{ung}}\|$", gradmap_ung_mag),
                     (r"$\|\nabla x_n^{\text{gui}}\|$", gradmap_gui_mag),
                     (r"$\|\nabla (x_n^{\text{ung_gui}})\|$", gradmap_gui_ung_mag),
@@ -1494,22 +1487,21 @@ def _(
                 gradmap_figures = []
 
                 for gradmap_title, gradmap_arr in gradmap_mag_panels:
-                    if norm_mode_dropdown.value == "own_scale":
-                        _v_min = float(np.nanmin(gradmap_arr))
-                        _v_max = max(float(np.nanmax(gradmap_arr)), _v_min + 1e-12)
-                    else:
-                        _v_min, _v_max = gradmap_mag_vmin, gradmap_mag_vmax
                     gradmap_figures.append(
                         visualize_map(
                             gradmap_arr,
                             mask_2d=mask,
                             title=gradmap_title,
-                            vmin=_v_min,
-                            vmax=_v_max,
+                            # vmin=gradmap_mag_vmin,
+                            # vmax=gradmap_mag_vmax,
+                            # center=0.0,
                             show_mask=show_mask_switch.value,
                             zoom=zoom_slider.value,
                             zoom_center_lon=zoom_centers[0],
                             zoom_center_lat=zoom_centers[1],
+                            show_values=show_values_checkbox.value,
+                            value_threshold=text_thresh_slider.value,
+                            value_fontsize=5,
                             dpi=dpi_slider.value,
                             figsize=(14, 8),
                         )
@@ -1521,81 +1513,21 @@ def _(
                         mo.hstack(gradmap_figures[2:], justify="start"),
                     ]
                 )
-            case "sobel_diffs":
-                sobel_gt_x = cv2.Sobel(gt_curr, cv2.CV_32F, 1, 0, ksize=3)
-                sobel_gt_y = cv2.Sobel(gt_curr, cv2.CV_32F, 0, 1, ksize=3)
-                sobel_gt_mag = np.sqrt(sobel_gt_x**2 + sobel_gt_y**2)
-
-                sobel_gui_x = cv2.Sobel(gui_curr, cv2.CV_32F, 1, 0, ksize=3)
-                sobel_gui_y = cv2.Sobel(gui_curr, cv2.CV_32F, 0, 1, ksize=3)
-                sobel_gui_mag = np.sqrt(sobel_gui_x**2 + sobel_gui_y**2)
-
-                sobel_ung_x = cv2.Sobel(ung_curr, cv2.CV_32F, 1, 0, ksize=3)
-                sobel_ung_y = cv2.Sobel(ung_curr, cv2.CV_32F, 0, 1, ksize=3)
-                sobel_ung_mag = np.sqrt(sobel_ung_x**2 + sobel_ung_y**2)
-
-                sobel_ung_gui_x = cv2.Sobel(ung_onl_curr, cv2.CV_32F, 1, 0, ksize=3)
-                sobel_ung_gui_y = cv2.Sobel(ung_onl_curr, cv2.CV_32F, 0, 1, ksize=3)
-                sobel_ung_gui_mag = np.sqrt(sobel_ung_gui_x**2 + sobel_ung_gui_y**2)
-
-                sobel_diff_panels = [
-                    (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gt_mag - sobel_ung_mag),
-                    (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla x_n^{\text{gui}}\|$", sobel_gt_mag - sobel_gui_mag),
-                    (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla (x_n^{\text{ung_gui}})\|$", sobel_gt_mag - sobel_ung_gui_mag),
-                    (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla (x_n^{\text{ung_gui}})\|$", sobel_gui_mag - sobel_ung_gui_mag),
-                ]
-
-                sobel_diff_vmin = min(float(np.nanmin(arr)) for _, arr in sobel_diff_panels)
-                sobel_diff_vmax = max(float(np.nanmax(arr)) for _, arr in sobel_diff_panels)
-
-                sobel_diff_figures = []
-
-                for sobel_diff_title, sobel_diff_arr in sobel_diff_panels:
-                    if norm_mode_dropdown.value == "own_scale":
-                        _v_min = min(float(np.nanmin(sobel_diff_arr)), -1e-12)
-                        _v_max = max(float(np.nanmax(sobel_diff_arr)), 1e-12)
-                    else:
-                        _v_min, _v_max = min(sobel_diff_vmin, -1e-12), max(sobel_diff_vmax, 1e-12)
-                    sobel_diff_figures.append(
-                        visualize_map(
-                            sobel_diff_arr,
-                            mask_2d=mask,
-                            title=sobel_diff_title,
-                            vmin=_v_min,
-                            vmax=_v_max,
-                            center=0.0,
-                            show_mask=show_mask_switch.value,
-                            zoom=zoom_slider.value,
-                            zoom_center_lon=zoom_centers[0],
-                            zoom_center_lat=zoom_centers[1],
-                            dpi=dpi_slider.value,
-                            figsize=(14, 8),
-                        )
-                    )
-
-                sobel_diffs_widget = mo.vstack(
-                    [
-                        mo.hstack(sobel_diff_figures[:2], justify="start"),
-                        mo.hstack(sobel_diff_figures[2:], justify="start"),
-                    ]
-                )
             case _:
                 sobel_grad_widget = None
     return (
         curr_map,
         gt_gt_map,
-        gt_ung_map,
         gui_gt_map,
         gui_gui_map,
         gui_map,
         gui_ung_map,
         prev_map,
-        sobel_diffs_widget,
         sobel_grad_widget,
-        ung_gui_gt_map,
-        ung_gui_ung_gui_map,
+        ung_gt_prev_map,
         ung_map,
         ung_prev_map,
+        ung_ung_map,
     )
 
 
@@ -1605,7 +1537,6 @@ def _(
     curr_map,
     dpi_slider,
     gt_gt_map,
-    gt_ung_map,
     gui_gt_map,
     gui_gui_map,
     gui_map,
@@ -1619,12 +1550,13 @@ def _(
     partition_dropdown,
     prev_map,
     show_mask_switch,
-    sobel_diffs_widget,
+    show_values_checkbox,
     sobel_grad_widget,
-    ung_gui_gt_map,
-    ung_gui_ung_gui_map,
+    text_thresh_slider,
+    ung_gt_prev_map,
     ung_map,
     ung_prev_map,
+    ung_ung_map,
     var_dropdown,
     zoom_slider,
 ):
@@ -1654,8 +1586,9 @@ def _(
                 inspect_states_widget_make = mo.vstack(
                     [
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, mo.md(r"*own: $[\min, \max]$ per map · same: $[\min, \max]$ across maps · centered at 0*")], justify="start", align="center"),
-                        mo.hstack([gt_gt_map, gt_ung_map], justify="start")
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, show_values_checkbox, text_thresh_slider], justify="start"),
+                        mo.hstack([gt_gt_map, ung_ung_map], justify="start"),
+                        mo.hstack([ung_ung_map, ung_gt_prev_map], justify="start")
                     ], justify="start",
                 )
             case "sobel_grads":
@@ -1687,10 +1620,9 @@ def _(
                 inspect_states_widget_make = mo.vstack(
                     [
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, mo.md(r"*own: $[\min, \max]$ per map · same: $[\min, \max]$ across maps · centered at 0*")], justify="start", align="center"),
-                        mo.hstack([gt_gt_map, gui_gui_map], justify="start"),
-                        mo.hstack([gui_gt_map, gui_ung_map], justify="start"),
-                        mo.hstack([ung_gui_gt_map, ung_gui_ung_gui_map], justify="start")
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, show_values_checkbox, text_thresh_slider], justify="start"),
+                        mo.hstack([gt_gt_map, gui_ung_map], justify="start"),
+                        mo.hstack([gui_gt_map, gui_gui_map], justify="start")
                     ], justify="start",
                 )
 
@@ -1698,16 +1630,8 @@ def _(
                 inspect_states_widget_make = mo.vstack(
                     [
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, mo.md(r"*own: $[\min, \max]$ per map · same: $[\min, \max]$ across maps · centered at 0*")], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, show_values_checkbox, text_thresh_slider], justify="start"),
                         sobel_grad_widget
-                    ], justify="start",
-                )
-            case "sobel_diffs":
-                inspect_states_widget_make = mo.vstack(
-                    [
-                        *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, mo.md(r"*own: $[\min, \max]$ per map · same: $[\min, \max]$ across maps · centered at 0*")], justify="start", align="center"),
-                        sobel_diffs_widget
                     ], justify="start",
                 )
             case _:
@@ -1753,7 +1677,6 @@ def _():
 @app.cell
 def _(
     config,
-    cumulative_delta_trajectory,
     delta_trajectory,
     dpi_slider,
     gt_trajectory,
@@ -1793,7 +1716,6 @@ def _(
         target_guidance_trajectory=target_guidance_trajectory if (traj_checks["target_guidance"].value and var_check) else None,
         ground_truth=gt_trajectory,
         delta_trajectory=[0] +delta_trajectory if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
-        cumulative_delta_trajectory=[0] + list(cumulative_delta_trajectory) if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
         show_guided_mean=False,
         show_unguided_mean=False,
         title=f"rollout trajectories",
@@ -1814,7 +1736,7 @@ def _(mo):
 
 
 @app.cell
-def _(mask, mo, np):
+def _(mo, np):
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
 
@@ -1827,11 +1749,8 @@ def _(mask, mo, np):
 
     level_var_dropdown = mo.ui.dropdown(LEVEL_VARS + ["mean_sea_level_pressure"], label="variable: ")
     aggregate_by_level_checkbox = mo.ui.checkbox(label="aggregate by level")
-    aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
-    dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
-    cross_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "gt_diffs", "diffs", "grad_norms", "gui_vf_norms", "vf_norms", "deflections", "convergence",
-    )})
+    show_delta_checkbox = mo.ui.checkbox(label="delta_trajectory")
+    show_realized_diff_checkbox = mo.ui.checkbox(label="realized − target")
     differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
     abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$")
 
@@ -1869,82 +1788,29 @@ def _(mask, mo, np):
             out[label] = tuple(c + (1 - c) * (1 - intensity) for c in hue)
         return out
 
-    def maybe_mask(ds, mode):
-        if mode not in ("mask", "!mask"):
-            return ds
-        import xarray as _xr
-        _m = _xr.DataArray(
-            mask.astype(bool),
-            dims=("latitude", "longitude"),
-            coords={"latitude": ds.latitude, "longitude": ds.longitude},
-        )
-        return ds.where(_m if mode == "mask" else ~_m)
+    def maybe_diff(traces, on):
+        return {k: np.concatenate([[0.0], np.diff(v)]) for k, v in traces.items()} if on else traces
 
-    def cross_traces(red_ds, axis, agg, m_idx, *, k, var, by_level, diff, absv, bands):
-        """Member trace + optional min/max band from spatially pre-reduced cubes (see `red`).
-        Pure: all control values come in as args so callers carry the UI dependencies."""
-        _g = grouped_vars(red_ds, var, by_level)
-
-        def _reduce(das):
-            _other = lambda da: [d for d in da.dims if d not in (axis, "m")]
-            if agg == "l2":
-                out = np.sqrt(sum(da.sum(dim=_other(da)) for da in das))
-            else:
-                out = sum(da.mean(dim=_other(da)) for da in das) / len(das)
-            if "m" in out.dims:
-                out = out.transpose("m", axis)
-            arr = np.atleast_2d(out.values)  # (members, axis)
-            if diff:
-                arr = np.concatenate([np.zeros((arr.shape[0], 1)), np.diff(arr, axis=1)], axis=1)
-            if absv:
-                arr = np.abs(arr)
-            return arr
-
-        _full = {k_: _reduce(das) for k_, das in _g.items()}
-        traces = top_k({k_: v[m_idx if v.shape[0] > 1 else 0] for k_, v in _full.items()}, k)
-        bands_out = (
-            {k_: (_full[k_].min(axis=0), _full[k_].max(axis=0)) for k_ in traces if _full[k_].shape[0] > 1}
-            if bands
-            else None
-        )
-        return traces, bands_out
+    def maybe_abs(traces, on):
+        return {k: np.abs(v) for k, v in traces.items()} if on else traces
 
     def top_k(traces, k):
-        return dict(sorted(traces.items(), key=lambda kv: -float(np.max(np.abs(kv[1]))))[:k])
+        return dict(sorted(traces.items(), key=lambda kv: -float(np.max(np.abs(kv[1]))))[:k]) if k < len(traces) else traces
 
     return (
         abs_checkbox,
         aggregate_by_level_checkbox,
-        aggregate_spatially_dropdown,
         color_for,
-        cross_row_checks,
-        cross_traces,
         differential_checkbox,
-        dist_bands_checkbox,
+        grouped_vars,
         level_var_dropdown,
-        maybe_mask,
+        maybe_abs,
+        maybe_diff,
         n_traces,
+        show_delta_checkbox,
+        show_realized_diff_checkbox,
+        top_k,
     )
-
-
-@app.cell(hide_code=True)
-def _(
-    abs_checkbox,
-    aggregate_by_level_checkbox,
-    differential_checkbox,
-    dist_bands_checkbox,
-    level_var_dropdown,
-    top_k_slider,
-):
-    cross_ctl = dict(
-        k=top_k_slider.value,
-        var=level_var_dropdown.value,
-        by_level=aggregate_by_level_checkbox.value,
-        diff=differential_checkbox.value,
-        absv=abs_checkbox.value,
-        bands=dist_bands_checkbox.value,
-    )
-    return (cross_ctl,)
 
 
 @app.cell
@@ -1958,80 +1824,23 @@ def _(aggregate_by_level_checkbox, level_var_dropdown, mo, n_traces):
 def _(
     abs_checkbox,
     aggregate_by_level_checkbox,
-    aggregate_spatially_dropdown,
     differential_checkbox,
     level_var_dropdown,
     mo,
     top_k_slider,
 ):
-    cross_check_controls = mo.vstack(
-        [
-            mo.hstack([differential_checkbox, abs_checkbox, top_k_slider], justify="start", align="start"),
-            mo.hstack([level_var_dropdown, aggregate_by_level_checkbox, aggregate_spatially_dropdown], justify="start", align="start"),
-        ],
-        align="start",
-    )
+    cross_check_controls = mo.hstack([level_var_dropdown, aggregate_by_level_checkbox, differential_checkbox, abs_checkbox, top_k_slider], justify="start", align="start")
     return (cross_check_controls,)
 
 
 @app.cell
-def _(gt_rollout, guided_xr, notebook_mode, ung_gui_xr):
+def _(guided_xr, notebook_mode, ung_gui_xr):
     from src.normalization import XarrayNormalizer
     if notebook_mode == "analyze_rollout":
         xnorm = XarrayNormalizer()
         normalized_gui_xr = xnorm.normalize(guided_xr)
         normalized_ung_gui_xr = xnorm.normalize(ung_gui_xr)
-        normalized_gt_xr = xnorm.normalize(
-            gt_rollout.isel(time=slice(1, None))
-            .rename({"time": "n"})
-            # gt coords differ from rollout coords in float precision; assign exact
-            # copies so xarray alignment keeps the full grid
-            .assign_coords(
-                n=guided_xr.n,
-                latitude=guided_xr.latitude,
-                longitude=guided_xr.longitude,
-                level=guided_xr.level,
-            )
-        )
-    return normalized_gt_xr, normalized_gui_xr, normalized_ung_gui_xr, xnorm
-
-
-@app.cell(hide_code=True)
-def _(
-    aggregate_spatially_dropdown,
-    clean_preds_xr,
-    grads_xr,
-    gui_vfs_xr,
-    maybe_mask,
-    normalized_gt_xr,
-    normalized_gui_xr,
-    normalized_ung_gui_xr,
-    notebook_mode,
-    vfs_xr,
-    xnorm,
-):
-    # spatially-reduced cubes: heavy reductions happen here ONCE per data/mask change;
-    # sliders (m, n, t, k, variable, Δ, abs, bands) then only index these tiny arrays
-    if notebook_mode == "analyze_rollout":
-        _sp = ("latitude", "longitude")
-        _msk = lambda ds: maybe_mask(ds, aggregate_spatially_dropdown.value)
-        _sq = lambda ds: (_msk(ds).astype(float) ** 2).sum(dim=_sp)   # squared sums; sqrt after folding
-        _mn = lambda ds: _msk(ds).mean(dim=_sp)
-        _dvf_full = gui_vfs_xr - vfs_xr
-        red = {
-            "grads_l2": _sq(grads_xr),
-            "vfs_l2": _sq(vfs_xr),
-            "gui_vfs_l2": _sq(gui_vfs_xr),
-            "dvf_l2": _sq(_dvf_full),
-            "dvf_mean": _mn(_dvf_full),
-            "gui_ung_gui_mean": _mn(normalized_gui_xr - normalized_ung_gui_xr),
-            "gui_gt_mean": _mn(normalized_gui_xr - normalized_gt_xr),
-            # normalization is affine, so it commutes with the spatial mean
-            "clean_gt_mean": xnorm.normalize(_mn(clean_preds_xr)) - _mn(normalized_gt_xr),
-        }
-    else:
-        red = None
-    return (red,)
+    return normalized_gui_xr, normalized_ung_gui_xr
 
 
 @app.cell
@@ -2043,51 +1852,34 @@ def _():
 @app.cell
 def _(
     cross_check_controls,
-    cross_row_checks,
     diff_gui_ung_gui_plot,
-    diff_vfs_t_plot,
-    dist_bands_checkbox,
-    grad_norms_n_plot,
     grad_norms_plot,
-    gui_gt_diff_n_plot,
-    gui_gt_diff_t_plot,
-    gui_vf_norms_n_plot,
     guidance_convergence_plot,
-    guidance_convergence_t_plot,
     guidance_mode_dropdown,
     guided_vf_norms_plot,
     m_slider,
     mo,
     n_slider,
     notebook_mode,
+    show_delta_checkbox,
+    show_realized_diff_checkbox,
     t_slider,
-    vf_deflection_n_plot,
-    vf_deflection_t_plot,
-    vf_norms_n_plot,
     vf_norms_plot,
 ):
     if notebook_mode =="analyze_rollout":
         cross_checks_widget = mo.vstack([
-            dist_bands_checkbox,
             guidance_mode_dropdown,
             cross_check_controls,
             mo.hstack([m_slider, n_slider, t_slider], justify="start"),
             mo.hstack([
-                mo.vstack(list(cross_row_checks.values()), justify="start", align="start").style(width="fit-content"),
+                mo.vstack([show_delta_checkbox, show_realized_diff_checkbox], justify="start", align="start").style(width="fit-content"),
                 mo.vstack(
-                    [
-                        mo.hstack(_row, justify="start")
-                        for _key, _row in [
-                            ("gt_diffs", [gui_gt_diff_n_plot, gui_gt_diff_t_plot]),
-                            ("diffs", [diff_gui_ung_gui_plot, diff_vfs_t_plot]),
-                            ("grad_norms", [grad_norms_n_plot, grad_norms_plot]),
-                            ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
-                            ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
-                            ("deflections", [vf_deflection_n_plot, vf_deflection_t_plot]),
-                            ("convergence", [guidance_convergence_plot, guidance_convergence_t_plot]),
-                        ]
-                        if cross_row_checks[_key].value
-                    ],
+                    [diff_gui_ung_gui_plot, guidance_convergence_plot],
+                    justify="start",
+                    align="start",
+                ).style(width="fit-content"),
+                mo.vstack(
+                    [grad_norms_plot, vf_norms_plot, guided_vf_norms_plot], # 
                     justify="start",
                     align="start",
                 ).style(width="fit-content"),
@@ -2103,20 +1895,40 @@ def _(
 
 @app.cell
 def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
+    clean_preds_slices,
     color_for,
-    cross_ctl,
-    cross_traces,
+    differential_checkbox,
+    get_masked_mean,
+    grads_xr,
+    grouped_vars,
+    level_var_dropdown,
     m,
+    mask,
+    maybe_abs,
+    maybe_diff,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
-    red,
+    show_realized_diff_checkbox,
     t,
+    target_guidance_M_N_trajectories,
+    top_k,
+    top_k_slider,
 ):
     if notebook_mode =="analyze_rollout":
-        _traces, _bands = cross_traces(red["grads_l2"].isel(n=n-1), "t", "l2", m, **cross_ctl)
-        grad_norms_plot = plot_trajectory(_traces, title="Grad norms over $t$",
-            subtitle=r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial}}$", step=t, color_map=color_for(_traces), bands=_bands,
+        _ds = grads_xr.isel(m=m, n=n-1)
+        _traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
+                   for k, das in grouped_vars(_ds, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
+        _traces = top_k(maybe_abs(maybe_diff(_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
+        _realized_minus_target = (get_masked_mean(clean_preds_slices[m, :, n], mask) - target_guidance_M_N_trajectories[m, n]) if show_realized_diff_checkbox.value else None
+        grad_norms_plot = plot_trajectory(_traces, title="Grad norms",
+            subtitle=f"member={m} | rollout step n={n+1}", step=t, color_map=color_for(_traces),
+            right_trajectory=_realized_minus_target,
+            right_label=r"realized $-$ target",
+            right_color="#8A2BE2",
             figsize=(22, 6)
         )
         # grad_norms_plot
@@ -2125,98 +1937,69 @@ def _(
 
 @app.cell
 def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
     color_for,
-    cross_ctl,
-    cross_traces,
+    delta_trajectory,
+    differential_checkbox,
+    grouped_vars,
+    level_var_dropdown,
     m,
+    maybe_abs,
+    maybe_diff,
     n,
+    normalized_gui_xr,
+    normalized_ung_gui_xr,
     notebook_mode,
     plot_trajectory,
-    red,
+    show_delta_checkbox,
+    top_k,
+    top_k_slider,
 ):
     if notebook_mode =="analyze_rollout":
-        _raw, _bands = cross_traces(red["gui_ung_gui_mean"], "n", "mean", m, **cross_ctl)
+        _dds = (normalized_gui_xr - normalized_ung_gui_xr).isel(m=m)
+        _raw = {k: sum(da.mean(dim=[d for d in da.dims if d != "n"]).values for da in das) / len(das)
+                for k, das in grouped_vars(_dds, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
+        _raw = top_k(maybe_abs(maybe_diff(_raw, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
         diff_gui_ung_gui_plot = plot_trajectory(
             _raw,
-            title="Diff (gui − ung_gui) over $n$",
-            subtitle=r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{n} - \tilde{x}^{\,\mathrm{ung\_gui}}_{n})$  ($\tilde{x}$: normalized $x$)",
+            title="Diff (guided − unguided_guided)",
+            subtitle=f"member={m} | normalized",
             xlabel="$n$",
             step=n+1,
             color_map=color_for(_raw),
-            bands=_bands,
+            right_trajectory=delta_trajectory if show_delta_checkbox.value else None,
+            right_label=r"$\delta_t$",
+            right_color="#8A2BE2",
+            right_percentage=True,
             figsize=(22, 6),
         )
         # diff_gui_ung_gui_plot
     return (diff_gui_ung_gui_plot,)
 
 
-@app.cell(hide_code=True)
-def _(
-    color_for,
-    cross_ctl,
-    cross_traces,
-    m,
-    n,
-    notebook_mode,
-    plot_trajectory,
-    red,
-    t,
-):
-    if notebook_mode == "analyze_rollout":
-        def _plot(title, subtitle, ds, axis, agg):
-            _tr, _bands = cross_traces(ds, axis, agg, m, **cross_ctl)
-            return plot_trajectory(
-                _tr, title=title, subtitle=subtitle, xlabel=f"${axis}$",
-                step=(n + 1 if axis == "n" else t), color_map=color_for(_tr), bands=_bands, figsize=(22, 6),
-            )
-
-        gui_gt_diff_n_plot = _plot("Diff (gui − gt) over $n$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{n} - \tilde{x}^{\,\mathrm{gt}}_{n})$  ($\tilde{x}$: normalized $x$)", red["gui_gt_mean"], "n", "mean")
-        gui_gt_diff_t_plot = _plot("Diff (gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["clean_gt_mean"].isel(n=n-1), "t", "mean")
-        grad_norms_n_plot = _plot("Grad norms over $n$", r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial},\,t}$", red["grads_l2"], "n", "l2")
-        vf_deflection_n_plot = _plot("Vf deflection (gui − ung) over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}} - \mathrm{vf}\|_{\mathrm{spatial},\,t}$", red["dvf_l2"], "n", "l2")
-        vf_deflection_t_plot = _plot("Vf deflection (gui − ung) over $t$", r"$\|\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t\|_{\mathrm{spatial}}$", red["dvf_l2"].isel(n=n-1), "t", "l2")
-        gui_vf_norms_n_plot = _plot("Gui vf norms over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}}\|_{\mathrm{spatial},\,t}$", red["gui_vfs_l2"], "n", "l2")
-        vf_norms_n_plot = _plot("Vf norms over $n$", r"$\|\mathrm{vf}\|_{\mathrm{spatial},\,t}$", red["vfs_l2"], "n", "l2")
-        diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n-1), "t", "mean")
-    else:
-        grad_norms_n_plot = vf_deflection_n_plot = vf_deflection_t_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = gui_gt_diff_n_plot = gui_gt_diff_t_plot = None
-    return (
-        diff_vfs_t_plot,
-        grad_norms_n_plot,
-        gui_gt_diff_n_plot,
-        gui_gt_diff_t_plot,
-        gui_vf_norms_n_plot,
-        vf_deflection_n_plot,
-        vf_deflection_t_plot,
-        vf_norms_n_plot,
-    )
-
-
 @app.cell
 def _(
-    cfg_clean_preds_slices,
-    cfg_target_guidance_M_N_trajectories,
+    abs_checkbox,
+    clean_preds_slices,
     delta_trajectory,
-    dist_bands_checkbox,
     get_masked_mean,
-    lambda_trajectory,
     m,
     mask,
     n,
     notebook_mode,
     np,
     plot_trajectory,
-    t,
+    target_guidance_M_N_trajectories,
 ):
     if notebook_mode =="analyze_rollout":
-        _all_per_n = get_masked_mean(cfg_clean_preds_slices[:, :, -1], mask).astype(float) - cfg_target_guidance_M_N_trajectories
-        _all_per_n[:, 0] = 0.0
-        _diff_per_n = _all_per_n[m]
+        _diff_per_n = get_masked_mean(clean_preds_slices[m, :, -1], mask).astype(float) - target_guidance_M_N_trajectories[m]
+        _diff_per_n[0] = 0.0
+        if abs_checkbox.value: _diff_per_n = np.abs(_diff_per_n)
         guidance_convergence_plot = plot_trajectory(
             {"realized − target": _diff_per_n},
-            bands={"realized − target": (_all_per_n.min(axis=0), _all_per_n.max(axis=0))} if dist_bands_checkbox.value else None,
-            title="Guidance convergence over $n$",
-            subtitle=r"$\mathrm{mean}_{\mathrm{mask}}(x^{\mathrm{gui}}_{n,\,t=T}) - \mathrm{target}_n$",
+            title="Convergence per rollout step",
+            subtitle=f"member={m} | final clean pred (t={clean_preds_slices.shape[2]-1})",
             xlabel="$n$",
             step=n+1,
             color_map={"realized − target": "#B7950B"},
@@ -2226,30 +2009,8 @@ def _(
             right_percentage=True,
             figsize=(22, 6),
         )
-        _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
-        _diff_per_t = _all_per_t[m]
-        _delta_diff_t = np.concatenate([[0.0], np.diff(_diff_per_t)])
-        guidance_convergence_t_plot = plot_trajectory(
-            {"realized − target": _diff_per_t},
-            bands={"realized − target": (_all_per_t.min(axis=0), _all_per_t.max(axis=0))} if dist_bands_checkbox.value else None,
-            title="Guidance convergence over $t$",
-            subtitle=r"$\mathrm{mean}_{\mathrm{mask}}(x^{\mathrm{gui}}_{n,\,t}) - \mathrm{target}_n$",
-            xlabel="$t$",
-            step=t,
-            color_map={"realized − target": "#B7950B"},
-            right_trajectory={
-                r"$\Delta$(realized $-$ target)": _delta_diff_t,
-                r"$\lambda_t$ (scaled)": np.asarray(lambda_trajectory, dtype=float)
-                    / max(float(np.max(np.abs(lambda_trajectory))), 1e-12)
-                    * max(float(np.max(np.abs(_delta_diff_t))), 1e-12),
-            },
-            right_color={
-                r"$\Delta$(realized $-$ target)": "#2E86C1",
-                r"$\lambda_t$ (scaled)": "#8A2BE2",
-            },
-            figsize=(22, 6),
-        )
-    return guidance_convergence_plot, guidance_convergence_t_plot
+        # guidance_convergence_plot
+    return (guidance_convergence_plot,)
 
 
 @app.cell
@@ -2266,25 +2027,36 @@ def _(T_schedule, alpha_slider, plot_trajectory, t, w_slider):
     w=w_slider.value
     lambda_trajectory = T_schedule(alpha, w)
     lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "$\\lambda_t$", title="$\\lambda_t$ schedule", step=t, figsize=(22, 6))
-    return alpha, lambda_trajectory, lambda_trajectory_plot, w
+    return alpha, lambda_trajectory_plot, w
 
 
 @app.cell
 def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
     color_for,
-    cross_ctl,
-    cross_traces,
+    differential_checkbox,
+    grouped_vars,
+    level_var_dropdown,
     m,
+    maybe_abs,
+    maybe_diff,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
-    red,
     t,
+    top_k,
+    top_k_slider,
+    vfs_xr,
 ):
     if notebook_mode == "analyze_rollout":
-        _vf_traces, _bands = cross_traces(red["vfs_l2"].isel(n=n-1), "t", "l2", m, **cross_ctl)
-        vf_norms_plot = plot_trajectory(_vf_traces, title="Vf norms over $t$",
-            subtitle=r"$\|\mathrm{vf}_t\|_{\mathrm{spatial}}$", step=t, color_map=color_for(_vf_traces), bands=_bands,
+        _ds_vf = vfs_xr.isel(m=m, n=n-1)
+        _vf_traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
+                      for k, das in grouped_vars(_ds_vf, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
+        _vf_traces = top_k(maybe_abs(maybe_diff(_vf_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
+        vf_norms_plot = plot_trajectory(_vf_traces, title="VF norms",
+            subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_vf_traces),
             figsize=(22, 6))
     else:
         vf_norms_plot = None
@@ -2293,20 +2065,31 @@ def _(
 
 @app.cell
 def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
     color_for,
-    cross_ctl,
-    cross_traces,
+    differential_checkbox,
+    grouped_vars,
+    gui_vfs_xr,
+    level_var_dropdown,
     m,
+    maybe_abs,
+    maybe_diff,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
-    red,
     t,
+    top_k,
+    top_k_slider,
 ):
     if notebook_mode == "analyze_rollout":
-        _gvf_traces, _bands = cross_traces(red["gui_vfs_l2"].isel(n=n-1), "t", "l2", m, **cross_ctl)
-        guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Gui vf norms over $t$",
-            subtitle=r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|_{\mathrm{spatial}}$", step=t, color_map=color_for(_gvf_traces), bands=_bands,
+        _ds_gvf = gui_vfs_xr.isel(m=m, n=n-1)
+        _gvf_traces = {k: np.sqrt(sum((da.astype(float)**2).sum(dim=[d for d in da.dims if d != "t"]).values for da in das))
+                       for k, das in grouped_vars(_ds_gvf, level_var_dropdown.value, aggregate_by_level_checkbox.value).items()}
+        _gvf_traces = top_k(maybe_abs(maybe_diff(_gvf_traces, differential_checkbox.value), abs_checkbox.value), top_k_slider.value)
+        guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided VF norms",
+            subtitle=f"member={m} | rollout step n={n}", step=t, color_map=color_for(_gvf_traces),
             figsize=(22, 6))
     else:
         guided_vf_norms_plot = None
@@ -2393,7 +2176,6 @@ def _(
         # 4
         guided_vfs_slice = guided_vfs_slices[m][n][t]
         vfs_slice = vfs_slices[m][n][t]
-        vf_gui_prev_diff_slice = vfs_slice - (guided_vfs_slices[m][n][t-1] if t>0 else guided_vfs_slices[m][n][t])
     return (
         clean_preds_diff_slice,
         clean_preds_slices,
@@ -2403,7 +2185,6 @@ def _(
         grads_slice,
         guided_vfs_slice,
         ung_onl_clean_diff_slice,
-        vf_gui_prev_diff_slice,
         vfs_slice,
     )
 
@@ -2417,25 +2198,17 @@ def _(t_slider):
 @app.cell
 def _(
     clean_preds_diff_slice,
-    clean_preds_slices,
     diff_grads_slice,
     diff_gt_clean_pred_slice,
     diff_gt_ung_onl_slice,
     dpi_slider,
     grads_slice,
-    gt_curr,
     guided_vfs_slice,
-    m,
     mask,
-    n,
     notebook_mode,
     np,
     show_mask_switch,
-    t,
-    ung_curr,
     ung_onl_clean_diff_slice,
-    ung_onl_curr,
-    vf_gui_prev_diff_slice,
     vfs_slice,
     visualize_map,
     zoom_centers,
@@ -2445,20 +2218,14 @@ def _(
         diff_vfs_slice = guided_vfs_slice - vfs_slice
 
         map_specs = [
-            ("gt_state_map", gt_curr, r"$x_{n}^{\text{gt}}$", -1, 1),
-            ("ung_state_map", ung_curr, r"$x_{n}^{\text{ung}}$", -1, 1),
-            ("ung_onl_map", ung_onl_curr, r"$x_{n}^{\text{ung_gui}}$", -1, 1),
-            ("clean_pred_map", clean_preds_slices[m][n][t], r"$x_t^{\text{gui}}$", -1, 1),
-            ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{n}^{\text{ung_gui}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$x_t^{\text{gui}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$x_t^{\text{gui}} - x_{n}^{\text{ung_gui}}$", -1, 1),
-            ("clean_preds_diff_map", clean_preds_diff_slice, r"$x_t^{\text{gui}} - x_{t-1}^{\text{gui}}$", -1, 1),
+            ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{\text{ung_gui}} - x_n$", -1, 1),
+            ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$\hat{x}_t - x_n$", -1, 1),
+            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$\hat{x}_t - x_{\text{ung_gui}}$", -1, 1),
+            ("clean_preds_diff_map", clean_preds_diff_slice, r"$\hat{x}_t - \hat{x}_{t-1}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
+            ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
             ("vfs_map", vfs_slice, r"$\text{vf}_t$", -0.001, 0.001),
             ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
-            ("diff_vfs_map", diff_vfs_slice, r"$\text{vf}^{\text{gui}}_t - \text{vf}_t$", -0.001, 0.001),
-            ("vf_gui_prev_diff_map", vf_gui_prev_diff_slice, r"$\text{vf}_t - \text{vf}^{\text{gui}}_{t-1}$", -0.001, 0.001),
-            ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
         ]
 
         maps = {}
@@ -2485,32 +2252,22 @@ def _(
                 zoom_center_lat=zoom_centers[1],
             )
 
-        gt_state_map = maps["gt_state_map"]
-        ung_state_map = maps["ung_state_map"]
-        ung_onl_map = maps["ung_onl_map"]
-        clean_pred_map = maps["clean_pred_map"]
         diff_gt_ung_onl_map = maps["diff_gt_ung_onl_map"]
         diff_gt_clean_pred_map = maps["diff_gt_clean_pred_map"]
         ung_onl_clean_diff_map = maps["ung_onl_clean_diff_map"]
         clean_preds_diff_map = maps["clean_preds_diff_map"]
         grads_map = maps["grads_map"]
+        diff_grads_map = maps["diff_grads_map"]
         vfs_map = maps["vfs_map"]
         guided_vfs_map = maps["guided_vfs_map"]
-        diff_vfs_map = maps["diff_vfs_map"]
-        vf_gui_prev_diff_map = maps["vf_gui_prev_diff_map"]
-        diff_grads_map = maps["diff_grads_map"]
     return (
-        clean_pred_map,
+        clean_preds_diff_map,
         diff_grads_map,
         diff_gt_clean_pred_map,
-        diff_vfs_map,
+        diff_gt_ung_onl_map,
         grads_map,
-        gt_state_map,
         guided_vfs_map,
         ung_onl_clean_diff_map,
-        ung_onl_map,
-        ung_state_map,
-        vf_gui_prev_diff_map,
         vfs_map,
     )
 
@@ -2518,7 +2275,7 @@ def _(
 @app.cell
 def _(mo):
     flow_checks = mo.ui.dictionary({n: mo.ui.checkbox(label=n, value=True) for n in (
-        "gt & ung states", "gui states", "gui_t diffs", "grads", "vfs", "vf diffs",
+        "diffs_to_gt", "diffs_clean_preds", "grad_maps", "vf_maps",
     )})
     return (flow_checks,)
 
@@ -2526,14 +2283,13 @@ def _(mo):
 @app.cell
 def _(
     alpha_slider,
-    clean_pred_map,
+    clean_preds_diff_map,
     diff_grads_map,
     diff_gt_clean_pred_map,
-    diff_vfs_map,
+    diff_gt_ung_onl_map,
     dpi_slider,
     flow_checks,
     grads_map,
-    gt_state_map,
     guidance_mode_dropdown,
     guided_vfs_map,
     level_slider,
@@ -2545,10 +2301,7 @@ def _(
     show_mask_switch,
     t_slider,
     ung_onl_clean_diff_map,
-    ung_onl_map,
-    ung_state_map,
     var_dropdown,
-    vf_gui_prev_diff_map,
     vfs_map,
     w_slider,
     zoom_slider,
@@ -2589,12 +2342,10 @@ def _(
         )
 
         map_rows = [
-            ("gt & ung states", [gt_state_map, ung_state_map]),
-            ("gui states", [ung_onl_map, clean_pred_map]),
-            ("gui_t diffs", [ung_onl_clean_diff_map, diff_gt_clean_pred_map]),
-            ("grads", [grads_map, diff_grads_map]),
-            ("vfs", [vfs_map, guided_vfs_map]),
-            ("vf diffs", [vf_gui_prev_diff_map, diff_vfs_map]),
+            ("diffs_to_gt", [diff_gt_ung_onl_map, diff_gt_clean_pred_map]),
+            ("diffs_clean_preds", [ung_onl_clean_diff_map, clean_preds_diff_map]),
+            ("grad_maps", [grads_map, diff_grads_map]),
+            ("vf_maps", [vfs_map, guided_vfs_map]), # 
         ]
 
         flow_widget_make = mo.vstack(

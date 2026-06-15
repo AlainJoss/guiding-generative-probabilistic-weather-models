@@ -6,9 +6,11 @@ print(f"ROOT @ {ROOT}")
 
 DATA = ROOT / "data"
 
+# TODO: how can I define multiple sources and route to the correct one?
+
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
-    DATA = ROOT / "local_data"
+    # DATA = ROOT / "local_data"
 
 print(f"DATA @ {DATA}")
 

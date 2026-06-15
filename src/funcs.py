@@ -75,6 +75,7 @@ def delta_schedule(
     peak_at_n: int | None = None,
     stop_at_n: int | None = None,
     flatness: float = 1.0,
+    start_value: float = 0.0,
 ) -> list[float]:
     if N < 1:
         raise ValueError("N must be >= 1")
@@ -91,13 +92,16 @@ def delta_schedule(
 
     values = []
     for n in range(N + 1):
-        # natural full-span bump: rise to peak at peak_at_n, fall to 0 at N
+        # natural full-span bump: rise from start_value to peak at peak_at_n, fall to 0 at N
         if n <= peak_at_n:
-            x = n / peak_at_n if peak_at_n > 0 else 1.0           # rise: 0 -> peak
+            # rise anchored at n=1 (first kept step after [1:]): exactly start_value, then -> peak
+            denom = peak_at_n - 1
+            x = max((n - 1) / denom, 0.0) if denom > 0 else 1.0
+            v = start_value + (peak_magnitude - start_value) * shape(x)
         else:
             denom = N - peak_at_n
             x = (N - n) / denom if denom > 0 else 0.0             # fall: peak -> 0 at N
-        v = peak_magnitude * shape(x)
+            v = peak_magnitude * shape(x)
         # hard cutoff: stop_at_n zeroes the tail, independent of peak_at_n
         if stop_at_n is not None and n >= stop_at_n:
             v = 0.0

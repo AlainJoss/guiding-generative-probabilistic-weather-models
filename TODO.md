@@ -27,6 +27,7 @@ Experiments:
 - fix alpha and w
 - sweep mask size and mode
 - try out guiding towards full state
+- add flow grad to guidance modes
 
 Communicate:
 - serve one experiment on some cloud machine for them to access and play around with

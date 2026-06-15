@@ -342,7 +342,9 @@ def tensor_timestamp_to_string(
 # dataset utils
 ##########################
 
-
+# TODO: this is not a good pattern
+#       I should select lazyly and then compute() (or load() ) such that I don't have to load a 30GB file in memory
+#       Need to convert the netcdf to zarr  
 def get_gt_rollout(N, timestamp):
     ds = get_xr_dataset(timestamp.year)
     return get_N_states(ds, N, timestamp)

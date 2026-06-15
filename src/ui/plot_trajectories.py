@@ -31,6 +31,8 @@ def plot_trajectories(
 
     # percentage axis, used if y_trajectory is not None
     delta_trajectory: list[float] | None = None,
+    # per-step text markers on the percentage curve (fractions, like delta)
+    cumulative_delta_trajectory: list[float] | None = None,
 
     # display
     show_guided_mean: bool = False,
@@ -125,6 +127,12 @@ def plot_trajectories(
     delta_trajectory = (
         _as_1d(delta_trajectory, "y_trajectory", gt0=gt0) * 100.0
         if delta_trajectory is not None
+        else None
+    )
+
+    cumulative_delta_trajectory = (
+        _as_1d(cumulative_delta_trajectory, "cumulative_delta_trajectory", gt0=gt0) * 100.0
+        if cumulative_delta_trajectory is not None
         else None
     )
 
@@ -618,6 +626,25 @@ def plot_trajectories(
                 alpha=0.7,
                 zorder=0,
             )
+
+            if cumulative_delta_trajectory is not None:
+                for i, (t_val, d_val, c_val) in enumerate(
+                    zip(time_values, delta_trajectory, cumulative_delta_trajectory)
+                ):
+                    # step 0 is the prepended initial point, nothing accumulated yet
+                    if i == 0 or np.isnan(d_val) or np.isnan(c_val):
+                        continue
+                    ax2.annotate(
+                        f"cum%={c_val:.2f}",
+                        (t_val, d_val),
+                        textcoords="offset points",
+                        xytext=(0, 7),
+                        ha="center",
+                        fontsize=7,
+                        color=colors["y"],
+                        zorder=5,
+                        path_effects=[pe.withStroke(linewidth=2, foreground="white")],
+                    )
 
             ax2.set_ylabel("")
             ax2.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))

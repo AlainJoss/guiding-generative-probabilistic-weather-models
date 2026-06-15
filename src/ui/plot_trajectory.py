@@ -27,6 +27,7 @@ def plot_trajectory(
     xlabel:str="$t$",
     color_map: dict | None = None,
     right_percentage: bool = False,
+    bands: dict[str, tuple] | None = None,
 ):
     trajectory_dict = trajectory if isinstance(trajectory, dict) else {var: trajectory}
     trajectory_dict = {k: np.asarray(v, dtype=float) for k, v in trajectory_dict.items()}
@@ -121,6 +122,19 @@ def plot_trajectory(
                 edgecolors="white",
                 linewidths=0.7,
             )
+
+            if bands and label in bands:
+                band_lo, band_hi = bands[label]
+                ax.fill_between(
+                    x[: len(band_lo)],
+                    band_lo,
+                    band_hi,
+                    color=color,
+                    alpha=0.16,
+                    linewidth=0,
+                    label="_nolegend_",
+                    zorder=3,
+                )
 
         # ------------------------------------------------------------
         # Axis styling
@@ -218,27 +232,41 @@ def plot_trajectory(
         has_right_axis = right_trajectory is not None
 
         if has_right_axis:
-            right = np.asarray(right_trajectory, dtype=float) * (100.0 if right_percentage else 1.0)
-            ax2 = ax.twinx()
-            ax2.plot(
-                x[: len(right)],
-                right,
-                linestyle="-",
-                linewidth=1.6,
-                color=right_color,
-                alpha=0.7,
-                label=right_label,
-                zorder=4,
+            # dict -> multiple right-axis lines (shared scale); plain array -> one
+            rights = (
+                right_trajectory
+                if isinstance(right_trajectory, dict)
+                else {right_label: right_trajectory}
             )
+            right_colors = (
+                right_color if isinstance(right_color, dict) else {label: right_color for label in rights}
+            )
+            rights = {
+                label: np.asarray(vals, dtype=float) * (100.0 if right_percentage else 1.0)
+                for label, vals in rights.items()
+            }
+            ax2 = ax.twinx()
+            for label, right in rights.items():
+                ax2.plot(
+                    x[: len(right)],
+                    right,
+                    linestyle="-",
+                    linewidth=1.6,
+                    color=right_colors.get(label, "#7B2CBF"),
+                    alpha=0.7,
+                    label=label,
+                    zorder=4,
+                )
             ax2.axhline(0.0, color=colors["grid_major"], linewidth=0.8, alpha=0.7, zorder=0)
             ax2.set_ylabel("")
             if right_percentage:
                 ax2.yaxis.set_major_formatter(FormatStrFormatter("%.2f%%"))
             ax2.spines["top"].set_visible(False)
             ax2.spines["right"].set_color("#BBBBBB")
-            ax2.tick_params(axis="both", colors=right_color, length=4, width=0.8)
+            ax2.tick_params(axis="both", colors=next(iter(right_colors.values())), length=4, width=0.8)
 
-            r_min, r_max = float(np.nanmin(right)), float(np.nanmax(right))
+            right_all = np.concatenate(list(rights.values()))
+            r_min, r_max = float(np.nanmin(right_all)), float(np.nanmax(right_all))
             if r_min == r_max:
                 r_min -= 1.0
                 r_max += 1.0
@@ -288,8 +316,13 @@ def plot_trajectory(
                 color="#555555",
             )
 
-        fig.tight_layout(
-            rect=(0.0, 0.0, 0.80 if has_right_axis else 0.84, 0.90 if (title or subtitle) else 1.0)
+        # fixed margins (not tight_layout) so the axes box is identical with or
+        # without a right axis — keeps vertical lines aligned across plot grids
+        fig.subplots_adjust(
+            left=0.03,
+            right=0.84,
+            top=0.88 if (title or subtitle) else 0.97,
+            bottom=0.10,
         )
 
     return fig
