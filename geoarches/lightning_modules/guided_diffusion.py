@@ -424,9 +424,9 @@ class GuidedFlow(BaseLightningModule):
                 # "UG" is handled by its own sampler (UG_flow), not this dispatch
                 raise ValueError(f"Invalid loss type {guidance_type} -.-")
                 
-
+    # TODO: change or sweep loss
     def DPS_guidance(self, x_hat_t, x_hat_ung, delta_t, mask, z_t):
-        loss_ = self.masked_loss(x_hat_t, x_hat_ung, delta_t, mask)
+        loss_ = self.masked_regularized_loss(x_hat_t, x_hat_ung, delta_t, mask)
         return self.guidance_grad(loss_, z_t)
         
 
@@ -442,6 +442,33 @@ class GuidedFlow(BaseLightningModule):
         ) * (1 + delta_t)
 
         return (term_left - term_right) ** 2
+    
+    def masked_regularized_loss(
+        self,
+        x_hat_t,
+        x_hat_ung,
+        delta_t,
+        mask,
+        beta: float = 1e-3,
+    ):
+        term_left = sum(
+            (mask[k] * x_hat_t[k]).sum()
+            for k in x_hat_t.keys()
+        )
+
+        term_right = sum(
+            (mask[k] * x_hat_ung[k]).sum()
+            for k in x_hat_ung.keys()
+        ) * (1 + delta_t)
+
+        guide_loss = (term_left - term_right) ** 2
+
+        similarity_loss = sum(
+            ((x_hat_t[k] - x_hat_ung[k]) ** 2).mean()
+            for k in x_hat_t.keys()
+        )
+
+        return guide_loss + beta * similarity_loss
 
 
     def LBG_guidance(self, x_hat_t_norm, x_hat_ung, delta_t, mask, z_t):
@@ -476,69 +503,133 @@ class GuidedFlow(BaseLightningModule):
 
     ### flow variant 3 ###
 
-    def UG_flow(self,
+    def UG_flow(
+        self,
         x_cond,
         det_pred: TensorDict,
-        delta_t: torch.Tensor | None = None,
-        mask: TensorDict | None = None,
-        x_hat_ung: TensorDict | None = None,
-        lambda_schedule: list[torch.Tensor] | None = None,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_hat_ung: TensorDict,
+        lambda_schedule: list[torch.Tensor],
         seed: int | None = None,
         S: int = 4,
+        m: int = 5,
+        delta_lr: float = 1e-1,
     ):
-        # Backward universal guidance (Bansal et al.) translated to flow, with per-step
-        # self-recurrence. The loss-minimizing clean-space correction is closed form (the masked
-        # difference to the target), so this sampler is gradient-free -> runs entirely under no_grad.
-        if seed is not None:
-            self.generator.manual_seed(seed)
-
-        z_t = x_cond["state"].apply(
-            lambda x: torch.empty_like(x).normal_(generator=self.generator)
-        )
-        z_t = z_t * self.scale_input_noise
-
+        z_t = self.init_noise(x_cond, seed)
+        timesteps = self.get_timesteps()
         sampling_trace = defaultdict(list)
 
-        timesteps = torch.linspace(self.num_train_timesteps, 1, self.T).to(self.device)
-        with torch.no_grad():
-            for i in tqdm(range(len(timesteps))):
-                t = timesteps[i]
-                s_t = t / self.num_train_timesteps
-                if i < len(timesteps) - 1:
-                    s_next = timesteps[i + 1] / self.num_train_timesteps
-                    h = s_t - s_next
-                else:
-                    s_next = 0.0  # clean level (for the final renoise)
-                    h = s_t
+        for i in tqdm(range(len(timesteps)), desc="UG sampling"):
+            t, s_t, h = self.get_step_factors(i, timesteps)
 
-                time_embedding = self.embedd_time(x_cond, t)
+            if i < len(timesteps) - 1:
+                s_next = timesteps[i + 1] / self.num_train_timesteps
+            else:
+                s_next = torch.tensor(0.0, device=self.device)
 
-                for k in range(S):  # self-recurrence
+            time_embedding = self.embedd_time(x_cond, t)
+
+            for k in range(S):
+                with torch.no_grad():
                     input_state = self.get_velocity_input_state(z_t, x_cond)
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                    x_hat_t_norm = det_pred + (z_t + tensordict_apply(torch.mul, s_t, u_t)) * self.residual_to_pangu_scale
-                    x_hat_t = self.denormalize(x_hat_t_norm)
+                    x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
 
-                    gui_vec = self.UG_guidance(x_hat_t, x_hat_ung, delta_t, mask, s_t)
-                    u_t = tensordict_apply(lambda u, g: u - (lambda_schedule[i]) * g, u_t, gui_vec)
+                delta_x = self.UG_clean_shift(
+                    x_hat_t=x_hat_t,
+                    x_hat_ung=x_hat_ung,
+                    delta_t=delta_t,
+                    mask=mask,
+                    m=m,
+                    lr=delta_lr,
+                )
 
-                    z_next = self.euler_step(z_t, u_t, h)
-                    if k < S - 1:
-                        z_t = self.renoise(z_next, s_t, s_next)  # renoise back up to s_t, repeat
+                gui_vec = self.UG_shift_to_velocity(
+                    delta_x=delta_x,
+                    s_t=s_t,
+                )
 
-                # trace from the final inner iteration (keeps length T)
                 sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                 sampling_trace["grads"].append(gui_vec.detach().cpu())
                 sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
-                sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
 
-                z_t = z_next
+                with torch.no_grad():
+                    u_t = self.guided_velocity(
+                        u_t=u_t,
+                        gui_vec=gui_vec,
+                        lambda_=lambda_schedule[i],
+                    )
 
-                if torch.cuda.is_available() and self.device.type == "cuda":
-                    torch.cuda.empty_cache()
+                    sampling_trace["gui_vfs"].append(
+                        u_t.apply(lambda x: x * s_t).detach().cpu()
+                    )
+
+                    z_next = self.euler_step(z_t, u_t, h)
+
+                    if k < S - 1:
+                        z_t = self.renoise(z_next, s_t, s_next)
+
+            z_t = z_next
 
         return z_t, sampling_trace
+    
+    def UG_clean_shift(
+        self,
+        x_hat_t: TensorDict,
+        x_hat_ung: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        m: int = 5,
+        lr: float = 1e-1,
+    ):
+        delta_x = x_hat_t.apply(
+            lambda x: torch.zeros_like(x, requires_grad=True)
+        )
 
+        optimizer = torch.optim.SGD(
+            [delta_x[k] for k in delta_x.keys()],
+            lr=lr,
+        )
+
+        x_hat_t = x_hat_t.detach()
+        x_hat_ung = x_hat_ung.detach()
+
+        for _ in range(m):
+            optimizer.zero_grad()
+
+            shifted = x_hat_t + delta_x
+
+            loss = self.masked_loss(
+                shifted,
+                x_hat_ung,
+                delta_t,
+                mask,
+            )
+
+            loss.backward()
+            optimizer.step()
+
+            with torch.no_grad():
+                for k in delta_x.keys():
+                    delta_x[k].mul_(mask[k])
+
+        return delta_x.detach()
+    
+
+    def UG_shift_to_velocity(
+        self,
+        delta_x: TensorDict,
+        s_t: torch.Tensor,
+    ):
+        # delta_x is in denormalized data space.
+        # Map: denorm data -> normalized data -> residual space -> velocity space.
+        delta_r = delta_x / (self.data_std * self.residual_to_pangu_scale)
+
+        # guided_velocity does: u - lambda * gui_vec
+        # To apply u + delta_r / s_t, we return negative vector.
+        return delta_r.apply(lambda x: -x / s_t)
+    
 
     def renoise(self, z, s_high, s_low):
         # Self-recurrence renoise: bring a sample at noise level s_low back up to s_high.

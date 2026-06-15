@@ -1499,13 +1499,15 @@ def _(
                         _v_max = max(float(np.nanmax(gradmap_arr)), _v_min + 1e-12)
                     else:
                         _v_min, _v_max = gradmap_mag_vmin, gradmap_mag_vmax
+                    print(_v_min, _v_max)
                     gradmap_figures.append(
                         visualize_map(
                             gradmap_arr,
                             mask_2d=mask,
                             title=gradmap_title,
-                            vmin=_v_min,
-                            vmax=_v_max,
+                            vmin=-1 if _v_min == _v_max else _v_min,
+                            vmax=1 if _v_min == _v_max else _v_max,
+                            center=0.0 if (_v_max!=0.0 and _v_min!=0.0) else np.mean([_v_min,_v_max]),
                             show_mask=show_mask_switch.value,
                             zoom=zoom_slider.value,
                             zoom_center_lon=zoom_centers[0],
@@ -1561,9 +1563,9 @@ def _(
                             sobel_diff_arr,
                             mask_2d=mask,
                             title=sobel_diff_title,
-                            vmin=_v_min,
-                            vmax=_v_max,
-                            center=0.0,
+                            vmin=-1 if _v_min == _v_max else _v_min,
+                            vmax=1 if _v_min == _v_max else _v_max,
+                            center=0.0 if (_v_max!=0.0 and _v_min!=0.0) else np.mean([_v_min,_v_max]),
                             show_mask=show_mask_switch.value,
                             zoom=zoom_slider.value,
                             zoom_center_lon=zoom_centers[0],
