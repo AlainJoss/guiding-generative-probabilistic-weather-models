@@ -851,7 +851,15 @@ class GuidedFlow(BaseLightningModule):
 
             return z_t, z_cache, g_cache
 
+        z_cache = g_cache = None
         for _ in tqdm(range(n_opt), desc="FLOWGRAD lambda optimization"):
+            # release the previous iteration's caches BEFORE cached_forward allocates the
+            # next ones; otherwise both cache sets (each 2*T detached states) coexist for
+            # the duration of the forward and can OOM the GPU.
+            z_cache = g_cache = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
             lambda_win = raw_lambda.detach().clamp_min(0.0)
             lambda_fine = expand(lambda_win)
 
