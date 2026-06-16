@@ -622,9 +622,14 @@ class GuidedFlow(BaseLightningModule):
         delta_lr: float = 1e-1,
         regularized: bool = False,
         beta: float = 1e-4,
-        normalize: bool = False,
+        normalize: bool = False,  # unused by UG (no velocity guidance vector); kept for parity
         eps: float = 1e-8,
     ):
+        # Backward universal guidance (arXiv:2302.07121): per step, optimize a LATENT shift
+        # dz that drives the masked-mean objective, *through the model* (the dz->loss
+        # Jacobian runs through `velocity`, so dz is a full-field, model-consistent shift,
+        # not a mask blob). Apply z_t <- z_t + lambda*dz, then take the normal Euler step.
+        # Self-recurrence (S, renoise) refines the correction at each noise level.
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.get_flow_timesteps()
         sampling_trace = defaultdict(list)
@@ -633,121 +638,104 @@ class GuidedFlow(BaseLightningModule):
             t, s_t, h = self.get_step_factors(i, timesteps)
             s_next = s_t - h  # h == s_t on the final step -> s_next == 0
 
-            time_embedding = self.embedd_time(x_cond, t)
+            # detached: it's a constant w.r.t. the dz optimization and is reused across
+            # the m inner backward passes (otherwise its graph is freed after the first).
+            time_embedding = self.embedd_time(x_cond, t).detach()
 
             # self recurrence at time t
             for k in range(S):
-                with torch.no_grad():
-                    input_state = self.get_velocity_input_state(z_t, x_cond)
-                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                    x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
-
-                delta_x = self.UG_clean_shift(
-                    x_hat_t=x_hat_t,
+                delta_z = self.UG_latent_shift(
+                    z_t=z_t,
+                    x_cond=x_cond,
+                    det_pred=det_pred,
                     x_hat_ung=x_hat_ung,
                     delta_t=delta_t,
                     mask=mask,
+                    time_embedding=time_embedding,
+                    s_t=s_t,
                     m=m,
                     lr=delta_lr,
                     regularized=regularized,
                     beta=beta,
                 )
 
-                gui_vec = self.UG_shift_to_velocity(
-                    delta_x=delta_x,
-                    s_t=s_t,
-                )
-
-                if normalize:
-                    _, residual = self.build_loss(x_hat_t, x_hat_ung, delta_t, mask)
-                    gui_vec = self.normalize_grad(gui_vec, residual, eps=eps)
-
-                if k == S - 1:
-                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
-                    sampling_trace["grads"].append(gui_vec.detach().cpu())
-                    sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
-
                 with torch.no_grad():
-                    u_t = self.guided_velocity(
-                        u_t=u_t,
-                        gui_vec=gui_vec,
-                        lambda_=lambda_schedule[i],
+                    # unguided field at the current latent (trace baseline)
+                    u_pre = self.velocity(
+                        x_cond, time_embedding,
+                        self.get_velocity_input_state(z_t, x_cond), z_t, s_t,
                     )
 
-                    if k == S - 1:
-                        sampling_trace["gui_vfs"].append(
-                            u_t.apply(lambda x: x * s_t).detach().cpu()
-                        )
+                    # apply the backward shift in latent space (lambda anneals it)
+                    z_t = tensordict_apply(
+                        lambda z, d: z + lambda_schedule[i] * d, z_t, delta_z
+                    )
 
+                    # field / clean prediction at the shifted latent, then step
+                    u_t = self.velocity(
+                        x_cond, time_embedding,
+                        self.get_velocity_input_state(z_t, x_cond), z_t, s_t,
+                    )
+                    x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
                     z_next = self.euler_step(z_t, u_t, h)
 
                     if k < S - 1:
                         z_t = self.renoise(z_next, s_t, s_next)
 
+                if k == S - 1:
+                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+                    sampling_trace["vfs"].append(u_pre.apply(lambda x: x * s_t).detach().cpu())
+                    sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
+                    # for UG, "grads" carries the backward latent shift dz (not a loss grad)
+                    sampling_trace["grads"].append(delta_z.detach().cpu())
+
             z_t = z_next
 
         return z_t, sampling_trace
-    
-    def UG_clean_shift(
+
+    def UG_latent_shift(
         self,
-        x_hat_t: TensorDict,
+        z_t: TensorDict,
+        x_cond,
+        det_pred: TensorDict,
         x_hat_ung: TensorDict,
         delta_t: torch.Tensor,
         mask: TensorDict,
+        time_embedding,
+        s_t: torch.Tensor,
         m: int = 5,
         lr: float = 1e-1,
         regularized: bool = False,
         beta: float = 1e-4,
     ):
-        delta_x = x_hat_t.apply(
-            lambda x: torch.zeros_like(x, requires_grad=True)
-        )
+        # Backward guidance: dz = argmin_dz loss(masked_mean(clean_pred(z_t + dz))), via
+        # m-step GD from dz=0. The gradient flows through `velocity` (the backbone), so the
+        # network Jacobian d x_hat / d z_t spreads dz across the whole field -- NOT confined
+        # to the mask. No projection of dz onto the mask.
+        delta_z = z_t.apply(lambda x: torch.zeros_like(x).requires_grad_(True))
+        optimizer = torch.optim.SGD([delta_z[k] for k in delta_z.keys()], lr=lr)
 
-        optimizer = torch.optim.SGD(
-            [delta_x[k] for k in delta_x.keys()],
-            lr=lr,
-        )
-
-        x_hat_t = x_hat_t.detach()
+        z_base = z_t.detach()
         x_hat_ung = x_hat_ung.detach()
 
         for _ in range(m):
             optimizer.zero_grad()
 
-            shifted = x_hat_t + delta_x
+            z_shift = tensordict_apply(lambda z, d: z + d, z_base, delta_z)
 
-            loss, _ = self.build_loss(
-                shifted,
-                x_hat_ung,
-                delta_t,
-                mask,
-                regularized=regularized,
-                beta=beta,
-            )
+            with torch.enable_grad():
+                input_state = self.get_velocity_input_state(z_shift, x_cond)
+                u = self.velocity(x_cond, time_embedding, input_state, z_shift, s_t)
+                x_hat_t = self.clean_prediction(det_pred, z_shift, u, s_t)
+                loss, _ = self.build_loss(
+                    x_hat_t, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+                )
 
             loss.backward()
             optimizer.step()
 
-            # TODO: this is not what we want, in fact the delta should expand to whatever accomplishes the wanted shift
-            with torch.no_grad():
-                for k in delta_x.keys():
-                    delta_x[k].mul_(mask[k])
+        return delta_z.detach()
 
-        return delta_x.detach()
-    
-    def UG_shift_to_velocity(
-        self,
-        delta_x: TensorDict,
-        s_t: torch.Tensor,
-    ):
-        # delta_x is in denormalized data space.
-        # Map: denorm data -> normalized data -> residual space -> velocity space.
-        delta_r = delta_x / (self.data_std * self.residual_to_pangu_scale)
-
-        # guided_velocity does: u - lambda * gui_vec
-        # To apply u + delta_r / s_t, we return negative vector.
-        return delta_r.apply(lambda x: -x / s_t)
-    
 
     def renoise(self, z, s_high, s_low):
         # Self-recurrence renoise: bring a sample at noise level s_low back up to s_high.
@@ -773,7 +761,7 @@ class GuidedFlow(BaseLightningModule):
         lr: float = 1e-2,
         gamma: float = 1e-3,
         init_lambda: float = 0.0,
-        n_lambda: int = 5,
+        n_lambda: int = 4,
         regularized: bool = True,
         beta: float = 1e-4,
         normalize: bool = False,

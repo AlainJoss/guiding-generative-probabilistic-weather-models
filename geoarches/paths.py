@@ -12,4 +12,8 @@ if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
 
 print(f"DATA path: {DATA}")
 STATS_PATH = DATA / "stats"
-MODELSTORE = DATA / "modelstore"
+_fast = os.environ.get("FAST_MODELSTORE")
+if _fast and Path(_fast, "archesweather-m-seed0").exists():
+    MODELSTORE = Path(_fast)
+else:
+    MODELSTORE = DATA / "modelstore"

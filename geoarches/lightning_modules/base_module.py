@@ -76,7 +76,7 @@ class BaseLightningModule(L.LightningModule):
             # sort by date
             path = sorted(paths, key=lambda x: x.stat().st_mtime)[-1]
 
-        sd = torch.load(path, weights_only=False, map_location="cpu")["state_dict"]
+        sd = torch.load(path, weights_only=False, map_location="cpu", mmap=True)["state_dict"]
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -14,12 +15,15 @@ if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
 
 print(f"DATA @ {DATA}")
 
-LOGS = DATA / "logs"
-if Path(ROOT, "modelstore").exists():
-    MODELSTORE = Path(ROOT, "modelstore")
-else:
+_fast = os.environ.get("FAST_MODELSTORE")
+if _fast and Path(_fast, "archesweathergen").exists():
+    MODELSTORE = Path(_fast)
+elif Path(ROOT, "modelstore").exists():
     MODELSTORE = DATA / "modelstore"
+else:
+    MODELSTORE = Path(ROOT, "modelstore")
 print(f"MODELSTORE @ {MODELSTORE}")
+
 DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-seed0",
     MODELSTORE / "archesweather-m-seed1",

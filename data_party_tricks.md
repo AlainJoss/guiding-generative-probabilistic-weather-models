@@ -155,9 +155,11 @@ tmux attach -t rollout
 ```python
 import torch
 
-device = 0
+# device = 0
+# props = torch.cuda.get_device_properties(device)
 
-props = torch.cuda.get_device_properties(device)
+device = torch.device("mps")
+props = torch.mps.get_device_properties(device)
 
 print(f"GPU:        {props.name}")
 print(f"Total RAM:  {props.total_memory / 1024**3:.2f} GB")
