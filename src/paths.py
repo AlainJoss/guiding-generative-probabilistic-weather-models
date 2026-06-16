@@ -19,9 +19,9 @@ _fast = os.environ.get("FAST_MODELSTORE")
 if _fast and Path(_fast, "archesweathergen").exists():
     MODELSTORE = Path(_fast)
 elif Path(ROOT, "modelstore").exists():
-    MODELSTORE = DATA / "modelstore"
-else:
     MODELSTORE = Path(ROOT, "modelstore")
+else:
+    MODELSTORE = DATA / "modelstore"
 print(f"MODELSTORE @ {MODELSTORE}")
 
 DET_MODEL_PATHS = [
