@@ -50,11 +50,10 @@ class RolloutConfig:
     mask_corners: Any | None = None
 
     ### sweep params -> save them in config to use in rollout, but not extracted 
-
+    delta_trajectory: list[torch.Tensor] | None = None
     mask_mode: str | None = None
     guidance_mode: str | None = None
     guidance_reference: str | None = None
-    delta_trajectory: list[torch.Tensor] | None = None
 
     alpha: float | None = None
     w: float | None = None
@@ -163,6 +162,7 @@ class RolloutConfig:
 
     def to_dict_list(self) -> dict[str, Any]:
         return {
+            "delta_trajectory": [self.delta_trajectory],
             "mask_mode": [self.mask_mode],
             "guidance_mode": [self.guidance_mode],
             "guidance_reference": [self.guidance_reference],

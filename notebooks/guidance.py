@@ -208,7 +208,6 @@ def _(
             path = rollout_dir / "config.json"
             # TODO: these are only placeholders
             #       implement version with lists?
-            print("here")
             save_config = RolloutConfig(
                 # common to guided and unguided
                 M=M,
@@ -219,7 +218,18 @@ def _(
                 partition=partition,
                 var=var,
                 mask_corners=mask_corners,
+            )
+            dump_json(save_config.to_dict(), path)
+            print(save_config.to_dict_list())
+            path = rollout_dir / "sweep_params.json"
+            save_config = RolloutConfig(
+                # guided rollout specific params -> can be swept
                 delta_trajectory=delta_trajectory,
+                mask_mode=mask_mode,
+                guidance_mode=guidance_mode_dropdown.value,
+                guidance_reference=guidance_reference,
+                alpha=alpha,
+                w=w,
                 # guidance hyperparameters
                 regularized=regularized_checkbox.value,
                 normalize=normalize_checkbox.value,
@@ -233,17 +243,6 @@ def _(
                 fg_lr=fg_lr_slider.value,
                 fg_gamma=fg_gamma_slider.value,
                 fg_init_lambda=fg_init_lambda_slider.value,
-            )
-            dump_json(save_config.to_dict(), path)
-            print(save_config.to_dict_list())
-            path = rollout_dir / "sweep_params.json"
-            save_config = RolloutConfig(
-                # guided rollout specific params -> can be swept
-                mask_mode=mask_mode,
-                guidance_mode=guidance_mode_dropdown.value,
-                guidance_reference=guidance_reference,
-                alpha=alpha,
-                w=w
             )
             dump_json(save_config.to_dict_list(), path)
     return
