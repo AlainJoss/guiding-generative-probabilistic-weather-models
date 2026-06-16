@@ -132,7 +132,7 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, T, sweep_params):
         # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
         container_ds.to_zarr(save_path, mode="w", compute=False)
 
-T=2
+T=25
 def main() -> None:
     args = parse_args()
 

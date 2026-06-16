@@ -40,9 +40,7 @@ Terminal setup:
 cd guiding-generative-probabilistic-weather-models
 ln -s ../data data
 mkdir modelstore
-cd ..  
-cp -r data/modelstore/* guiding-generative-probabilistic-weather-models/modelstore/
-cd guiding-generative-probabilistic-weather-models
+cp -r data/modelstore/* modelstore/
 # or rsync -av data/modelstore/ guiding-generative-probabilistic-weather-models/modelstore/
 
 # locally
