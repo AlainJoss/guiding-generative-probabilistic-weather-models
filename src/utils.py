@@ -2,7 +2,6 @@
 # setup utils
 ##########################
 
-import logging
 import json
 import functools
 from typing import Any
@@ -13,31 +12,15 @@ import xarray as xr
 import torch
 import numpy as np
 import dask.array as da
-# import zarr
 
-from src.paths import LOGS, ROLLOUTS
-from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS, SPATIAL_COORDS
 from src.paths import ERA5, MODELSTORE, ROLLOUTS
+from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS, SPATIAL_COORDS
 from src.rollout_config import RolloutConfig
 
 from geoarches.lightning_modules import load_module
 from geoarches.dataloaders.era5 import Era5Forecast
 
 from tensordict.tensordict import TensorDict
-
-
-def setup_logging(log_prefix: str = "run") -> None:
-    LOGS.mkdir(parents=True, exist_ok=True)
-    log_file = LOGS / f"{log_prefix}_{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
-    logging.basicConfig(
-        filename=log_file,
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        # handlers=[
-        #     logging.StreamHandler(sys.stdout),
-        # ],
-        force=True,
-    )
 
 
 def get_now_timestamp():
@@ -68,7 +51,7 @@ def get_device():
 
 ##### data and model #####
 
-@functools.lru_cache(maxsize=None)
+# @functools.lru_cache(maxsize=None)
 def get_xr_dataset(year: int):
     if year == 2026:
         path = ERA5 / "arches_era5_26.nc"
@@ -118,7 +101,7 @@ def get_sweep_dict(rollout_id):
     return get_dict_from_json(path)
 
 
-@functools.lru_cache(maxsize=None)
+# @functools.lru_cache(maxsize=None)
 def get_rollout(rollout_type:str, rollout_id:str):
     path = get_rollout_dir(rollout_id) / f"{rollout_type}.zarr"
     rollout = xr.open_zarr(path)
@@ -165,12 +148,14 @@ def create_slice_zarr_container(
     m: int,
     n: int,
     t_dim: bool = False,
+    T: int = 25,
     sweep_params: dict | None = None,
 ) -> xr.Dataset:
     ds = create_full_zarr_container(
         M=1,
         N=1,
         t_dim=t_dim,
+        T=T,  
         sweep_params={
             k: [v]
             for k, v in (sweep_params or {}).items()
@@ -184,14 +169,31 @@ def create_slice_zarr_container(
     )
 
 
+def _is_scalar_axis(values: list) -> bool:
+    """A sweep axis is scalar-labelable iff every candidate is a single non-None
+    value (float, str, bool). Non-scalar axes (e.g. delta_trajectory, a per-step
+    vector) and None-bearing axes (None serializes to NaN, which never compares
+    equal on region auto-detection) are indexed by integer position instead."""
+    return all(v is not None and np.isscalar(v) for v in values)
+
+
+def sweep_coord_label(key: str, value, sweep_params: dict[str, list]):
+    """Map a raw sweep value to its zarr coordinate label: the value itself for a
+    scalar axis, or its integer index along the sweep for a non-scalar axis. Keeps
+    full-container coords and per-slice region writes aligned on the same labels."""
+    if _is_scalar_axis(sweep_params[key]):
+        return value
+    return sweep_params[key].index(value)
+
+
 def create_full_zarr_container(
-    M:int, N:int, t_dim:bool,
-    sweep_params:dict[str,list],
+    M:int, N:int, t_dim:bool, T:int=25,
+    sweep_params:dict[str,list] | None = None,
     lazy:bool=True,
 ) -> xr.Dataset:
     m_steps = range(M)
     n_steps = range(N)
-    t_steps = range(25)
+    t_steps = range(T)
     
     coords = {
         "m": m_steps,
@@ -215,9 +217,21 @@ def create_full_zarr_container(
     surface_dims += ["latitude", "longitude"]
     level_dims += ["level", "latitude", "longitude"]
 
-    coords.update(sweep_params)
-    surface_dims += list(sweep_params.keys())
-    level_dims += list(sweep_params.keys())
+    for key, values in sweep_params.items():
+        if _is_scalar_axis(values):
+            coords[key] = values
+        else:
+            # index an axis by integer position when its values can't be coord
+            # labels (delta_trajectory vectors, or None which serializes to NaN);
+            # keep the real values in a `<key>_value` coordinate. Coordinates are
+            # always written by to_zarr (even compute=False), so they persist; a
+            # dask data_var would be left as NaN metadata. (None -> NaN here.)
+            coords[key] = list(range(len(values)))
+            value_arr = np.asarray(values, dtype=np.float32)
+            value_dims = (key,) if value_arr.ndim == 1 else (key, f"{key}_step")
+            coords[f"{key}_value"] = (value_dims, value_arr)
+        surface_dims.append(key)
+        level_dims.append(key)
 
     data_vars = {}
 
@@ -285,9 +299,40 @@ def append_to_zarr(rollout_dir, name: str, ds_slice: xr.Dataset) -> None:
         region="auto",
     )
 
+
 def dump_json(dict_: dict, path: Path):
     with open(path, "w") as f:
         json.dump(dict_, f, indent=4)
+
+
+DIAGNOSTICS_FILE = "flowgrad_diagnostics.json"
+
+
+def append_diagnostics(rollout_dir, record: dict) -> None:
+    """Append one FlowGrad diagnostics record (learned lambda_star / control norms /
+    optimization-loss curves) to a JSON sidecar. These don't fit the weather-shaped
+    zarr containers, so they live alongside as a list of records keyed by
+    (m, n, guidance_mode, sweep); a re-run of the same point overwrites in place."""
+    path = rollout_dir / DIAGNOSTICS_FILE
+    data = get_dict_from_json(path) if path.exists() else []
+
+    def same(r):
+        return (
+            r["m"] == record["m"]
+            and r["n"] == record["n"]
+            and r["guidance_mode"] == record["guidance_mode"]
+            and r["sweep"] == record["sweep"]
+        )
+
+    data = [r for r in data if not same(r)]
+    data.append(record)
+    dump_json(data, path)
+
+
+def get_diagnostics(rollout_id):
+    """Load the FlowGrad diagnostics sidecar (list of records), or [] if absent."""
+    path = get_rollout_dir(rollout_id) / DIAGNOSTICS_FILE
+    return get_dict_from_json(path) if path.exists() else []
 
 
 ##########################
@@ -376,6 +421,9 @@ def get_timestamps(ds: xr.Dataset):
         timestamps.append(dt)
 
     return timestamps
+
+
+# TODO: should merge these in a lazyable func
 
 
 def get_N_timestamps(timestamp: str, N: int) -> list[datetime]:

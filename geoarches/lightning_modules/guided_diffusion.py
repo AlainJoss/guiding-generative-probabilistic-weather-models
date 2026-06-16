@@ -200,7 +200,7 @@ class GuidedFlow(BaseLightningModule):
         return z_t * self.scale_input_noise
 
 
-    def get_timesteps(self):
+    def get_flow_timesteps(self):
         return torch.linspace(
             self.num_train_timesteps,
             1,
@@ -259,7 +259,62 @@ class GuidedFlow(BaseLightningModule):
             batch_size=z_t.batch_size,
             device=z_t.device,
         )
-    
+
+
+    ### FlowGrad helpers (Jacobian-trick adjoint + coarse schedule) ###
+
+    def _vjp(self, outputs_td, inputs_td, v_td, create_graph: bool = False):
+        # Vector-Jacobian product Jᵀv where J = d(outputs)/d(inputs), evaluated per
+        # TensorDict key. Same None->zeros contract as grad_loss; this is the single
+        # backward pass that the FlowGrad adjoint loop reuses ("two backwards" via vjp).
+        keys = list(inputs_td.keys())
+        inputs = [inputs_td[k] for k in keys]
+        outputs = [outputs_td[k] for k in keys]
+        grad_outputs = [v_td[k] for k in keys]
+
+        grads = torch.autograd.grad(
+            outputs,
+            inputs,
+            grad_outputs=grad_outputs,
+            retain_graph=create_graph,
+            create_graph=create_graph,
+            allow_unused=True,
+        )
+
+        return inputs_td.__class__(
+            {
+                k: torch.zeros_like(inputs_td[k]) if g is None else g
+                for k, g in zip(keys, grads)
+            },
+            batch_size=inputs_td.batch_size,
+            device=inputs_td.device,
+        )
+
+
+    def _td_dot(self, a_td, b_td):
+        # Flat inner product <a, b> summed over every element of every state key.
+        return sum((a_td[k] * b_td[k]).sum() for k in a_td.keys())
+
+
+    def _coarse_windows(self, K: int):
+        # Partition the T fine steps into K contiguous, near-uniform windows.
+        # Returns `windows` = [(start_i, length), ...] (len K) and `win_of` (len T)
+        # mapping each fine step to its window index. Remainder is spread over the
+        # first windows so lengths differ by at most 1.
+        T = self.T
+        K = max(1, min(K, T))
+        base, rem = divmod(T, K)
+        windows = []
+        win_of = [0] * T
+        start = 0
+        for j in range(K):
+            length = base + (1 if j < rem else 0)
+            windows.append((start, length))
+            for i in range(start, start + length):
+                win_of[i] = j
+            start += length
+        return windows, win_of
+
 
     ### used outside to wire guidance type ###
         
@@ -327,6 +382,16 @@ class GuidedFlow(BaseLightningModule):
                 seed=seed,
                 **guidance_kwargs,
             )
+        elif guidance_type == "FLOWGRAD_FREE":
+            z, sampling_trace = self._flowgrad_free_flow(
+                x_cond=x_cond,
+                det_pred=det_pred,
+                delta_t=delta_t,
+                mask=mask,
+                x_hat_ung=x_hat_ung,
+                seed=seed,
+                **guidance_kwargs,
+            )
         else:
             raise ValueError(f"Unknown guidance_type: {guidance_type}")
 
@@ -346,7 +411,7 @@ class GuidedFlow(BaseLightningModule):
         seed: int | None = None,
     ):
         z_t = self.init_noise(x_cond, seed)
-        timesteps = self.get_timesteps()
+        timesteps = self.get_flow_timesteps()
 
         for i in tqdm(range(len(timesteps))):
             t, s_t, h = self.get_step_factors(i, timesteps)
@@ -380,7 +445,7 @@ class GuidedFlow(BaseLightningModule):
         #                 objective stays differentiable w.r.t. lambda_schedule (FLOWGRAD)
         # trace         : record the per-step sampling_trace (skipped for FLOWGRAD inner passes)
         z_t = self.init_noise(x_cond, seed)
-        timesteps = self.get_timesteps()
+        timesteps = self.get_flow_timesteps()
         sampling_trace = defaultdict(list)
 
         if differentiable:
@@ -471,7 +536,7 @@ class GuidedFlow(BaseLightningModule):
         scale = residual.detach().clamp_min(eps)
         return gui_vec.apply(lambda g: g / scale)
 
-
+    # TODO: should be a protocol, so I do not inadvertedly break something
     def dps_guidance(
         self,
         *,
@@ -552,7 +617,7 @@ class GuidedFlow(BaseLightningModule):
         x_hat_ung: TensorDict,
         lambda_schedule: list[torch.Tensor],
         seed: int | None = None,
-        S: int = 4,
+        S: int = 3,
         m: int = 5,
         delta_lr: float = 1e-1,
         regularized: bool = False,
@@ -561,7 +626,7 @@ class GuidedFlow(BaseLightningModule):
         eps: float = 1e-8,
     ):
         z_t = self.init_noise(x_cond, seed)
-        timesteps = self.get_timesteps()
+        timesteps = self.get_flow_timesteps()
         sampling_trace = defaultdict(list)
 
         for i in tqdm(range(len(timesteps)), desc="UG sampling"):
@@ -570,6 +635,7 @@ class GuidedFlow(BaseLightningModule):
 
             time_embedding = self.embedd_time(x_cond, t)
 
+            # self recurrence at time t
             for k in range(S):
                 with torch.no_grad():
                     input_state = self.get_velocity_input_state(z_t, x_cond)
@@ -662,6 +728,7 @@ class GuidedFlow(BaseLightningModule):
             loss.backward()
             optimizer.step()
 
+            # TODO: this is not what we want, in fact the delta should expand to whatever accomplishes the wanted shift
             with torch.no_grad():
                 for k in delta_x.keys():
                     delta_x[k].mul_(mask[k])
@@ -705,20 +772,40 @@ class GuidedFlow(BaseLightningModule):
         n_opt: int = 10,
         lr: float = 1e-2,
         gamma: float = 1e-3,
-        init_lambda: float = -10.0,
+        init_lambda: float = 0.0,
+        n_lambda: int = 5,
         regularized: bool = True,
         beta: float = 1e-4,
         normalize: bool = False,
         eps: float = 1e-8,
     ):
-        # Optimize a per-timestep lambda_schedule by backpropagating an outer
-        # objective through the (differentiable) guided gradient flow, then do a
-        # final, plain pass with the optimized schedule.
+        # FlowGrad-style optimization of a COARSE lambda schedule weighting the DPS
+        # direction g_t (velocity is u_t - lambda_t g_t). The gradient w.r.t. lambda
+        # is obtained with the Jacobian trick: one cached *detached* forward, then a
+        # backward loop of per-step vector-Jacobian products (no full-trajectory
+        # graph). g_t's Jacobian is frozen (first-order), so each step costs one VJP.
+        windows, win_of = self._coarse_windows(n_lambda)
+        K = len(windows)
+        win_of_t = torch.tensor(win_of, device=self.device)
+        lengths = torch.tensor(
+            [length for (_, length) in windows], device=self.device, dtype=mask.dtype
+        )
+
+        # lambda is parametrized DIRECTLY (init_lambda IS the starting lambda, default 0
+        # -> guidance starts off). Non-negativity is enforced by projecting (clamping)
+        # after each optimizer step, which -- unlike a softplus/relu reparametrization --
+        # leaves the gradient intact at lambda=0, so optimization can move off zero.
         raw_lambda = torch.nn.Parameter(
-            torch.full((self.T,), init_lambda, device=self.device)
+            torch.full((K,), init_lambda, device=self.device, dtype=mask.dtype)
         )
         optimizer = torch.optim.Adam([raw_lambda], lr=lr)
         trace = defaultdict(list)
+
+        timesteps = self.get_flow_timesteps()
+
+        def expand(lambda_win):
+            # coarse (K,) -> fine (T,) by piecewise-constant window assignment
+            return lambda_win[win_of_t]
 
         def run_flow(lambda_schedule, *, create_graph, differentiable, do_trace):
             return self._gradient_flow(
@@ -740,43 +827,227 @@ class GuidedFlow(BaseLightningModule):
                 eps=eps,
             )
 
+        def cached_forward(lambda_fine):
+            # Detached Euler forward with the guided velocity; cache the leaf state
+            # z_i and the (detached) guidance direction g_i entering each step.
+            z_t = self.init_noise(x_cond, seed)
+            z_cache, g_cache = [], []
+
+            for i in range(len(timesteps)):
+                t, s_t, h = self.get_step_factors(i, timesteps)
+                z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
+
+                with torch.enable_grad():
+                    time_embedding = self.embedd_time(x_cond, t)
+                    input_state = self.get_velocity_input_state(z_t, x_cond)
+                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                    x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
+                    g_t = self.dps_guidance(
+                        x_hat_t=x_hat_t,
+                        x_hat_ung=x_hat_ung,
+                        delta_t=delta_t,
+                        mask=mask,
+                        z_t=z_t,
+                        regularized=regularized,
+                        beta=beta,
+                        normalize=normalize,
+                        eps=eps,
+                        create_graph=False,
+                    )
+
+                z_cache.append(z_t.detach())
+                g_cache.append(g_t.detach())
+
+                w_t = self.guided_velocity(u_t, g_t, lambda_=lambda_fine[i])
+                z_t = self.euler_step(z_t, w_t, h).detach()
+
+            return z_t, z_cache, g_cache
+
         for _ in tqdm(range(n_opt), desc="FLOWGRAD lambda optimization"):
-            optimizer.zero_grad()
+            lambda_win = raw_lambda.detach().clamp_min(0.0)
+            lambda_fine = expand(lambda_win)
 
-            lambda_schedule = torch.nn.functional.softplus(raw_lambda)
+            z_T, z_cache, g_cache = cached_forward(lambda_fine)
 
-            z_t, _ = run_flow(
-                lambda_schedule,
-                create_graph=True,
-                differentiable=True,
-                do_trace=False,
-            )
+            # adjoint a_T = d(target_loss)/d(z_T)
+            z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
+            with torch.enable_grad():
+                x_hat_gui = self.final_prediction(det_pred, z_T)
+                target_loss, _ = self.build_loss(
+                    x_hat_gui, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+                )
+            a = self.grad_loss(target_loss, z_T)
 
-            x_hat_gui = self.final_prediction(det_pred, z_t)
-            target_loss, _ = self.build_loss(
-                x_hat_gui, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
-            )
-            reg_loss = gamma * (lambda_schedule ** 2).sum()
-            loss = target_loss + reg_loss
+            # backward adjoint loop (Jacobian trick, g frozen -> dz_{i+1}/dz_i = I + h du/dz)
+            dlam_win = torch.zeros(K, device=self.device, dtype=raw_lambda.dtype)
+            for i in range(len(timesteps) - 1, -1, -1):
+                t, s_t, h = self.get_step_factors(i, timesteps)
+                z_i = z_cache[i].detach().apply(lambda x: x.requires_grad_(True))
 
-            loss.backward()
+                with torch.enable_grad():
+                    time_embedding = self.embedd_time(x_cond, t)
+                    input_state = self.get_velocity_input_state(z_i, x_cond)
+                    u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
+
+                # dL/dlambda_i = <a_{i+1}, dz_{i+1}/dlambda_i> = <a, -h g_i>
+                dlam_win[win_of[i]] += -h * self._td_dot(a, g_cache[i])
+
+                vjp = self._vjp(u_i, z_i, a)
+                a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
+
+            # lambda is the parameter directly (no softplus chain); add length-weighted
+            # L2 reg gamma * sum_i lambda_fine_i^2, step, then project to lambda >= 0.
+            reg_grad = 2.0 * gamma * lengths * lambda_win
+            raw_lambda.grad = dlam_win + reg_grad
+
             optimizer.step()
+            with torch.no_grad():
+                raw_lambda.clamp_(min=0.0)  # projected gradient descent: keep lambda >= 0
 
-            trace["loss"].append(loss.detach().cpu())
+            with torch.no_grad():
+                reg_loss = gamma * (lengths * lambda_win ** 2).sum()
+            trace["loss"].append((target_loss.detach() + reg_loss).cpu())
             trace["target_loss"].append(target_loss.detach().cpu())
-            trace["reg_loss"].append(reg_loss.detach().cpu())
-            trace["lambda_schedule"].append(lambda_schedule.detach().cpu())
+            trace["reg_loss"].append(reg_loss.cpu())
+            trace["lambda_schedule"].append(lambda_fine.detach().cpu())
 
-        lambda_star = torch.nn.functional.softplus(raw_lambda).detach()
+        lambda_star_fine = expand(raw_lambda.detach().clamp_min(0.0))
 
         z_t, sampling_trace = run_flow(
-            lambda_star,
+            lambda_star_fine,
             create_graph=False,
             differentiable=False,
             do_trace=True,
         )
 
         sampling_trace["flowgrad"] = trace
-        sampling_trace["lambda_star"] = lambda_star.detach().cpu()
+        sampling_trace["lambda_star"] = lambda_star_fine.detach().cpu()
+
+        return z_t, sampling_trace
+
+
+    ### flow variant 5 — true FlowGrad (free state-space controls, paper-faithful) ###
+
+    def _flowgrad_free_flow(
+        self,
+        x_cond,
+        det_pred,
+        delta_t,
+        mask,
+        x_hat_ung,
+        seed: int,
+        n_opt: int = 10,
+        lr: float = 1e-2,
+        gamma: float = 1e-3,
+        init_lambda: float = 0.0,  # unused (controls init at 0); kept for kwarg parity
+        n_lambda: int = 5,
+        regularized: bool = True,
+        beta: float = 1e-4,
+        normalize: bool = False,
+        eps: float = 1e-8,
+    ):
+        # Paper-faithful FlowGrad: optimize free additive state-space controls u_j at
+        # a coarse set of timesteps (window starts), with NO guidance direction in the
+        # loop. Forward is detached fine Euler; the gradient uses the paper's Jacobian
+        # trick — per control point one VJP through the collapsed block map
+        # func(x) = x + u_j + v(x + u_j, t_j) * Delta_j; since d func/d u_j == d func/d x,
+        # u_j.grad equals the propagated adjoint.
+        windows, _ = self._coarse_windows(n_lambda)
+        K = len(windows)
+        timesteps = self.get_flow_timesteps()
+
+        # per-window block step Delta_j (sum of fine h over the window), start time t_j, s_j
+        block = []
+        for (start, length) in windows:
+            t_j, s_j, _ = self.get_step_factors(start, timesteps)
+            delta_j = sum(
+                self.get_step_factors(i, timesteps)[2] for i in range(start, start + length)
+            )
+            block.append((start, t_j, s_j, delta_j))
+
+        # free controls, one TensorDict of leaf params per window (init 0)
+        z0 = self.init_noise(x_cond, seed)
+        controls, params = [], []
+        for _ in range(K):
+            cj = {}
+            for k in z0.keys():
+                p = torch.zeros_like(z0[k], requires_grad=True)
+                cj[k] = p
+                params.append(p)
+            controls.append(z0.__class__(cj, batch_size=z0.batch_size, device=z0.device))
+        optimizer = torch.optim.Adam(params, lr=lr)
+        trace = defaultdict(list)
+
+        def cached_forward():
+            # detached fine Euler; inject control (detached) at each window start;
+            # cache the state entering each window for the backward block VJP.
+            z_t = self.init_noise(x_cond, seed)
+            state_at = [None] * K
+            win = 0
+            for i in range(len(timesteps)):
+                t, s_t, h = self.get_step_factors(i, timesteps)
+                if win < K and i == windows[win][0]:
+                    state_at[win] = z_t.detach()
+                    z_t = tensordict_apply(lambda zz, cc: zz + cc, z_t, controls[win].detach())
+                    win += 1
+                with torch.no_grad():
+                    time_embedding = self.embedd_time(x_cond, t)
+                    input_state = self.get_velocity_input_state(z_t, x_cond)
+                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                z_t = self.euler_step(z_t, u_t, h).detach()
+            return z_t, state_at
+
+        def block_map(x, j):
+            # collapsed single Euler step over window j with control u_j injected
+            start, t_j, s_j, delta_j = block[j]
+            xu = tensordict_apply(lambda xx, cc: xx + cc, x, controls[j].detach())
+            time_embedding = self.embedd_time(x_cond, t_j)
+            input_state = self.get_velocity_input_state(xu, x_cond)
+            u = self.velocity(x_cond, time_embedding, input_state, xu, s_j)
+            return self.euler_step(xu, u, delta_j)
+
+        for _ in tqdm(range(n_opt), desc="FLOWGRAD_FREE control optimization"):
+            z_T, state_at = cached_forward()
+
+            z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
+            with torch.enable_grad():
+                x_hat_gui = self.final_prediction(det_pred, z_T)
+                target_loss, _ = self.build_loss(
+                    x_hat_gui, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+                )
+            a = self.grad_loss(target_loss, z_T)
+
+            # backward over control points high->low; one VJP each (paper identity)
+            for j in range(K - 1, -1, -1):
+                x_in = state_at[j].detach().apply(lambda x: x.requires_grad_(True))
+                with torch.enable_grad():
+                    out = block_map(x_in, j)
+                a = self._vjp(out, x_in, a)  # = J^T a ; J_x == J_{u_j}
+                for k in controls[j].keys():
+                    controls[j][k].grad = a[k] + 2.0 * gamma * controls[j][k].detach()
+
+            optimizer.step()
+            optimizer.zero_grad()
+
+            with torch.no_grad():
+                reg_loss = gamma * sum(
+                    (controls[j][k] ** 2).sum() for j in range(K) for k in controls[j].keys()
+                )
+            trace["loss"].append((target_loss.detach() + reg_loss).cpu())
+            trace["target_loss"].append(target_loss.detach().cpu())
+            trace["reg_loss"].append(reg_loss.cpu())
+            trace["control_norm"].append(
+                torch.tensor([
+                    float(sum((controls[j][k] ** 2).sum() for k in controls[j].keys()) ** 0.5)
+                    for j in range(K)
+                ])
+            )
+
+        z_t, state_at = cached_forward()
+        sampling_trace = defaultdict(list)
+        sampling_trace["flowgrad"] = trace
+        sampling_trace["control_star"] = [
+            controls[j].detach().cpu() for j in range(K)
+        ]
 
         return z_t, sampling_trace

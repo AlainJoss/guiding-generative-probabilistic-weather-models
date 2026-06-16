@@ -42,7 +42,7 @@ def _():
         visualize_map, get_mask_corners_from_widget, 
         get_mask_from_corners, plot_trajectory, plot_dual_trajectory
     )
-    from funcs import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
+    from schedules import avg_over_mask, get_guidance_trajectory, N_schedule, T_schedule, compute_mean_rollout
     from old_rollout import rollout
     from src.utils.read_write import (
         get_td_dataset, get_model,

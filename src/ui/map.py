@@ -17,7 +17,7 @@ from wigglystuff import ChartPuck
 plt.rcParams["font.family"] = "Menlo"    # INter
 
 
-@functools.lru_cache(maxsize=1)
+# @functools.lru_cache(maxsize=1)
 def _get_world():
     """Coastline geometry, loaded once and shared (read-only) across all map renders."""
     return gpd.read_file(geodatasets.get_path("naturalearth.land"))

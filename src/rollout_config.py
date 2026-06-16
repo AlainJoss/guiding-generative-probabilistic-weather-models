@@ -20,6 +20,7 @@ GUIDANCE_MODES = [
     "UG",
     "LBG",
     "FLOWGRAD",
+    "FLOWGRAD_FREE",
 ]
 
 ##### config class #####
@@ -80,6 +81,7 @@ class RolloutConfig:
     fg_lr: float | None = None
     fg_gamma: float | None = None
     fg_init_lambda: float | None = None
+    fg_n_lambda: int | None = None  # FlowGrad coarse schedule: number of control windows K
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
@@ -119,6 +121,7 @@ class RolloutConfig:
             fg_lr=config.get("fg_lr"),
             fg_gamma=config.get("fg_gamma"),
             fg_init_lambda=config.get("fg_init_lambda"),
+            fg_n_lambda=config.get("fg_n_lambda"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -157,6 +160,7 @@ class RolloutConfig:
             "fg_lr": self.fg_lr,
             "fg_gamma": self.fg_gamma,
             "fg_init_lambda": self.fg_init_lambda,
+            "fg_n_lambda": self.fg_n_lambda,
         }
 
 
@@ -186,4 +190,5 @@ class RolloutConfig:
             "fg_lr": [self.fg_lr],
             "fg_gamma": [self.fg_gamma],
             "fg_init_lambda": [self.fg_init_lambda],
+            "fg_n_lambda": [self.fg_n_lambda],
         }

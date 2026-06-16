@@ -1,5 +1,4 @@
 import argparse
-import logging
 from collections.abc import Iterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -10,11 +9,8 @@ import xarray as xr
 from src.rollout import rollout
 from src.rollout_config import RolloutConfig
 from src.utils import get_model, get_config, get_sweep_dict, get_rollout_dir, ensure_rollout_dir
-from src.utils import get_device, setup_logging
-from src.utils import create_full_zarr_container
-
-
-logger = logging.getLogger(__name__)
+from src.utils import get_device
+from src.utils import create_full_zarr_container, sweep_coord_label
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,7 +49,13 @@ def build_jobs(
             [f"{k}={v}" for k, v in sweep.items()]
         )
 
-        yield RolloutJob(config=config, sweep=sweep, label=label)
+        # config keeps the raw value; the zarr region write uses the coord label
+        # (integer index for non-scalar axes like delta_trajectory).
+        coord_sweep = {
+            k: sweep_coord_label(k, v, sweep_params) for k, v in sweep.items()
+        }
+
+        yield RolloutJob(config=config, sweep=coord_sweep, label=label)
 
 
 def get_container_args(rollout_type):
@@ -73,6 +75,18 @@ def get_container_args(rollout_type):
             return []
 
 
+def written_containers(rollout_type, guidance_mode):
+    """Container types a single sweep point actually fills. FLOWGRAD_FREE has no
+    guidance-direction trace, so it only writes gui/ung_gui; the trace containers
+    stay NaN by design and must not be required when deciding 'filled' on resume."""
+    if rollout_type == "ung":
+        return {"ung"}
+    base = {"gui", "ung_gui"}
+    if guidance_mode == "FLOWGRAD_FREE":
+        return base
+    return base | {"grads", "vfs", "gui_vfs", "clean_preds"}
+
+
 def find_resume_index(rollout_dir, rollout_type, sweep_params):
     """Return the index into the product-ordered sweep list at which to resume.
 
@@ -83,41 +97,46 @@ def find_resume_index(rollout_dir, rollout_type, sweep_params):
     """
     container_args = get_container_args(rollout_type)
 
-    datasets = []
+    datasets = {}
     for (container_type, _) in container_args:
         path = rollout_dir / f"{container_type}.zarr"
         if not path.exists():
             return 0  # missing container -> nothing reliably filled, run all
-        datasets.append(xr.open_zarr(path))
+        datasets[container_type] = xr.open_zarr(path)
 
     sweeps = list(iter_sweeps(sweep_params))
     for i, sweep in enumerate(sweeps):
-        for ds in datasets:
-            probe = ds[list(ds.data_vars)[0]].sel(sweep)
+        coord_sweep = {
+            k: sweep_coord_label(k, v, sweep_params) for k, v in sweep.items()
+        }
+        # only require the containers this sweep point's guidance_mode actually writes
+        expected = written_containers(rollout_type, sweep.get("guidance_mode"))
+        for container_type in expected:
+            ds = datasets[container_type]
+            probe = ds[list(ds.data_vars)[0]].sel(coord_sweep)
             if not bool(probe.notnull().all().compute()):
                 return i  # first not-fully-filled sweep
     return len(sweeps)  # all sweeps already filled
 
 
-def create_zarr_containers(rollout_type, rollout_id, M, N, sweep_params):
+def create_zarr_containers(rollout_type, rollout_id, M, N, T, sweep_params):
     container_args = get_container_args(rollout_type)
 
     ensure_rollout_dir(rollout_id)
 
     for (container_type, t_dim_flag) in container_args:
-        container_ds = create_full_zarr_container(M, N, t_dim_flag, sweep_params)
+        container_ds = create_full_zarr_container(M, N, t_dim_flag, T, sweep_params)
 
         save_path = get_rollout_dir(rollout_id) / f"{container_type}.zarr"
         # compute=False: write only metadata + coords (dask-backed NaN chunks are
         # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
         container_ds.to_zarr(save_path, mode="w", compute=False)
 
-        
+T=2
 def main() -> None:
     args = parse_args()
-    setup_logging()
 
-    logger.info("Loading model")
+    print("Loading model")
     flow_model = get_model(get_device())
 
     config = get_config(args.rollout_id)
@@ -134,7 +153,8 @@ def main() -> None:
             pass
 
     for key, values in sweep_params.items():
-        assert len(values) == len(set(values)), (
+        unique = [v for i, v in enumerate(values) if v not in values[:i]]
+        assert len(values) == len(unique), (
             f"sweep_params['{key}'] has duplicate values {values}; "
             f"each sweep axis must be uniquely valued or the zarr region write fails. "
             f"Fix {get_rollout_dir(args.rollout_id) / 'sweep_params.json'}."
@@ -149,19 +169,19 @@ def main() -> None:
 
     if store_exists:
         resume_idx = find_resume_index(rollout_dir, args.rollout_type, sweep_params)
-        logger.info("Existing store found, resuming sweep at index %d", resume_idx)
+        print("Existing store found, resuming sweep at index %d", resume_idx)
     else:
-        create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, sweep_params)
+        create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, T, sweep_params)
         resume_idx = 0
 
     for i, job in enumerate(build_jobs(config, sweep_params)):
         if i < resume_idx:
-            logger.info("Skipping filled %s", job.label)
+            print("Skipping filled %s", job.label)
             continue
 
-        logger.info("Running %s", job.label)
+        print("Running %s", job.label)
 
-        rollout(rollout_dir, guidance_flag, job.config, flow_model, job.sweep)
+        rollout(rollout_dir, guidance_flag, job.config, flow_model, T, job.sweep)
         
 if __name__ == "__main__":
     main()

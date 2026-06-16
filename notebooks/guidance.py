@@ -31,9 +31,9 @@ def _():
     from src.utils import get_now_timestamp, ensure_rollout_dir
     from src.utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices, get_gt_rollout
     from src.utils import (
-        dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config
+        dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config, sweep_coord_label
     )
-    from src.funcs import N_schedule, delta_schedule, T_schedule, make_hash, safe_abs_limits
+    from src.schedules import N_schedule, delta_schedule, T_schedule
 
     from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma, get_mask_center
     from src.target import get_target_slices
@@ -68,7 +68,7 @@ def _():
         get_var_idx,
         max_day,
         plot_trajectory,
-        safe_abs_limits,
+        sweep_coord_label,
         visualize_map,
     )
 
@@ -163,6 +163,7 @@ def _(
     fg_gamma_slider,
     fg_init_lambda_slider,
     fg_lr_slider,
+    fg_n_lambda_slider,
     fg_n_opt_slider,
     get_now_timestamp,
     guidance_mode_dropdown,
@@ -243,6 +244,7 @@ def _(
                 fg_lr=fg_lr_slider.value,
                 fg_gamma=fg_gamma_slider.value,
                 fg_init_lambda=fg_init_lambda_slider.value,
+                fg_n_lambda=fg_n_lambda_slider.value,
             )
             dump_json(save_config.to_dict_list(), path)
     return
@@ -280,6 +282,7 @@ def _(
                 show_value=True
             )
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
+            delta_trajectory_dropdown = None
             sweep_params_widget = None
 
         case "guided_rollout":
@@ -302,6 +305,7 @@ def _(
                 show_value=True
             )
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
+            delta_trajectory_dropdown = None
             sweep_params_widget = None
 
         case "analyze_rollout":
@@ -314,7 +318,7 @@ def _(
                 label="guidance reference",
             )
 
-            alpha_label = "alpha: " if len(experiment_params["alpha"])>1 else "alpha:\u00A0\u00A0"
+            alpha_label = "alpha: " if len(experiment_params["alpha"])>1 else "alpha:  "
             alpha_slider = mo.ui.slider(
                 steps=experiment_params["alpha"],
                 value=experiment_params["alpha"][0],
@@ -322,7 +326,7 @@ def _(
                 debounce=True,
                 show_value=True
             )
-            w_label = "w: " if len(experiment_params["w"])>1 else "w:\u00A0\u00A0"
+            w_label = "w: " if len(experiment_params["w"])>1 else "w:  "
             w_slider = mo.ui.slider(
                 steps=experiment_params["w"],
                 value=experiment_params["w"][0],
@@ -333,17 +337,31 @@ def _(
 
             mask_mode_dropdown = mo.ui.dropdown(options=experiment_params["mask_mode"], value=experiment_params["mask_mode"][0], label="mask_mode: ")
 
+            # delta_trajectory is a swept axis stored by integer index in the zarr;
+            # the dropdown maps each candidate vector's label -> its index.
+            _dt_candidates = experiment_params["delta_trajectory"]
+            _dt_options = {str(v): i for i, v in enumerate(_dt_candidates)}
+            dt_label = "delta_trajectory: " if len(_dt_candidates) > 1 else "delta_trajectory:  "
+            delta_trajectory_dropdown = mo.ui.dropdown(
+                options=_dt_options,
+                value=next(iter(_dt_options)),
+                label=dt_label,
+            )
+
             sweep_params_widget = mo.vstack([
                 guidance_reference_dropdown, mask_mode_dropdown,
                 alpha_slider,
                 w_slider,
-                guidance_mode_dropdown
+                guidance_mode_dropdown,
+                delta_trajectory_dropdown,
             ])
 
         case _:
             pass
     return (
         alpha_slider,
+        delta_trajectory_dropdown,
+        experiment_params,
         guidance_reference_dropdown,
         mask_mode_dropdown,
         sweep_params_widget,
@@ -500,13 +518,14 @@ def _(
 @app.cell
 def _(
     N,
-    config,
     delta_mode_dropdown,
     delta_peak,
     delta_peak_at_slider,
     delta_schedule,
     delta_shape_slider,
     delta_start_slider,
+    delta_trajectory_dropdown,
+    experiment_params,
     notebook_mode,
     np,
     stop_at_n_checkbox,
@@ -525,7 +544,9 @@ def _(
                 start_value=delta_start_slider.value / 100,
             )[1:]
         case "analyze_rollout":
-            delta_trajectory=config.delta_trajectory
+            # config.delta_trajectory is None under sweeping; the swept vectors live in
+            # experiment_params["delta_trajectory"], picked by the dropdown's index.
+            delta_trajectory = experiment_params["delta_trajectory"][delta_trajectory_dropdown.value]
         case _:
             pass
 
@@ -589,6 +610,11 @@ def _(
         case _:
             pass
     return planned_guidance_trajectories, planned_guidance_trajectory
+
+
+@app.cell
+def _():
+    return
 
 
 @app.cell
@@ -713,9 +739,13 @@ def _(
 @app.cell
 def _(
     alpha_slider,
+    delta_trajectory_dropdown,
+    experiment_params,
     guidance_mode_dropdown,
     guidance_reference_dropdown,
     mask_mode_dropdown,
+    notebook_mode,
+    sweep_coord_label,
     w_slider,
 ):
     sweep_params = {
@@ -723,8 +753,20 @@ def _(
         "alpha": alpha_slider.value,
         "guidance_reference": guidance_reference_dropdown.value,
         "mask_mode": mask_mode_dropdown.value,
-        "guidance_mode": guidance_mode_dropdown.value
+        "guidance_mode": guidance_mode_dropdown.value,
     }
+    # delta_trajectory is an integer-indexed sweep axis in the zarr (real vectors live
+    # in the delta_trajectory_value coord); the dropdown holds the chosen index.
+    if delta_trajectory_dropdown is not None:
+        sweep_params["delta_trajectory"] = delta_trajectory_dropdown.value
+
+    # Every sweep_params key is now a zarr dimension, so .sel must reduce all of them
+    # or singleton dims linger and break the 2D plotters. Widgets drive a handful; the
+    # rest take their sole stored value (sweep_coord_label -> index for eps/non-scalars).
+    if notebook_mode == "analyze_rollout":
+        for _key, _values in experiment_params.items():
+            if _key not in sweep_params:
+                sweep_params[_key] = sweep_coord_label(_key, _values[0], experiment_params)
     return (sweep_params,)
 
 
@@ -956,6 +998,24 @@ def _(M_slider, N_slider, m_slider, mo, n_slider):
 
 
 @app.cell
+def _(mo):
+    T_slider = mo.ui.slider(
+        steps=range(1, 25+1),
+        value=25,
+        label="T: ",
+        debounce=True,
+        show_value=True
+    )
+    return (T_slider,)
+
+
+@app.cell
+def _(T_slider):
+    T=T_slider.value
+    return (T,)
+
+
+@app.cell
 def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
     timestamp_widget=mo.hstack([year_dropdown, month_slider, day_slider, hour_slider], justify="start")
     match notebook_mode:
@@ -974,7 +1034,7 @@ def _(GUIDANCE_MODES, mo):
     return (guidance_mode_dropdown,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo, notebook_mode):
     # guidance hyperparameters (guided_rollout) -> saved into config.json
     regularized_checkbox = mo.ui.checkbox(label="regularized", value=False)
@@ -988,13 +1048,14 @@ def _(mo, notebook_mode):
     fg_n_opt_slider = mo.ui.slider(1, 50, step=1, value=10, label="fg n_opt: ", show_value=True)
     fg_lr_slider = mo.ui.slider(steps=[1e-3, 1e-2, 5e-2], value=1e-2, label="fg lr: ", show_value=True)
     fg_gamma_slider = mo.ui.slider(steps=[1e-4, 1e-3, 1e-2], value=1e-3, label="fg gamma: ", show_value=True)
-    fg_init_lambda_slider = mo.ui.slider(-20, 0, step=1, value=-10, label="fg init_lambda: ", show_value=True)
+    fg_init_lambda_slider = mo.ui.slider(steps=[0.0, 0.1, 0.5, 1.0, 2.0], value=0.0, label="fg init_lambda (lambda_0): ", show_value=True)
+    fg_n_lambda_slider = mo.ui.slider(1, 25, step=1, value=5, label="fg n_lambda (K): ", show_value=True)
 
     hypers_widget = mo.vstack([
         mo.hstack([regularized_checkbox, normalize_checkbox, beta_slider], justify="start"),
         mo.hstack([lbg_n_mc_slider, lbg_r_t_slider], justify="start"),
         mo.hstack([ug_S_slider, ug_m_slider, ug_delta_lr_slider], justify="start"),
-        mo.hstack([fg_n_opt_slider, fg_lr_slider, fg_gamma_slider, fg_init_lambda_slider], justify="start"),
+        mo.hstack([fg_n_opt_slider, fg_lr_slider, fg_gamma_slider, fg_init_lambda_slider, fg_n_lambda_slider], justify="start"),
     ], align="start")
 
     hypers_widget if notebook_mode == "guided_rollout" else None
@@ -1003,6 +1064,7 @@ def _(mo, notebook_mode):
         fg_gamma_slider,
         fg_init_lambda_slider,
         fg_lr_slider,
+        fg_n_lambda_slider,
         fg_n_opt_slider,
         lbg_n_mc_slider,
         lbg_r_t_slider,
@@ -1102,6 +1164,12 @@ def _(
         case _:
             pass
     return inspect_states_widget, mask_widget, trajectory_widget
+
+
+@app.cell
+def _(T_slider):
+    T_slider
+    return
 
 
 @app.cell(hide_code=True)
@@ -1334,6 +1402,23 @@ def _(
         ung_onl_curr,
         ung_prev,
     )
+
+
+@app.cell
+def _(np):
+    def safe_abs_limits(arrays):
+        vmin = min(float(np.nanmin(np.asarray(arr))) for arr in arrays)
+        vmax = max(float(np.nanmax(np.asarray(arr))) for arr in arrays)
+
+        if vmax <= vmin:
+            vmax = vmin + 1e-9
+
+        center = 0.5 * (vmin + vmax)
+        center = min(max(center, vmin + 1e-9), vmax - 1e-9)
+
+        return vmin, vmax, center
+
+    return (safe_abs_limits,)
 
 
 @app.cell
@@ -1990,6 +2075,7 @@ def _(mask, mo, np):
         level_var_dropdown,
         maybe_mask,
         n_traces,
+        plt,
     )
 
 
@@ -2216,7 +2302,7 @@ def _(
     return (diff_gui_ung_gui_plot,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
     color_for,
     cross_ctl,
@@ -2327,10 +2413,10 @@ def _(mo):
 
 
 @app.cell
-def _(T_schedule, alpha_slider, plot_trajectory, t, w_slider):
+def _(T, T_schedule, alpha_slider, plot_trajectory, t, w_slider):
     alpha = alpha_slider.value
     w=w_slider.value
-    lambda_trajectory = T_schedule(alpha, w)
+    lambda_trajectory = T_schedule(T, alpha, w)
     lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "$\\lambda_t$", title="$\\lambda_t$ schedule", step=t, figsize=(22, 6))
     return alpha, lambda_trajectory, lambda_trajectory_plot, w
 
@@ -2392,17 +2478,32 @@ def _(grads_xr, mo, notebook_mode):
 
 
 @app.cell
-def _(alpha_slider, lambda_trajectory_plot, mo, notebook_mode, w_slider):
+def _(
+    alpha_slider,
+    guidance_mode_dropdown,
+    lambda_trajectory_plot,
+    mo,
+    notebook_mode,
+    w_slider,
+):
     match notebook_mode:
         case "unguided_rollout":
             flow_schedule_widget=None
         case "guided_rollout":
-            flow_schedule_widget = mo.vstack([
-                mo.hstack([
-                    alpha_slider, w_slider
-                ], justify="start"),
-                lambda_trajectory_plot,
-            ])
+            if guidance_mode_dropdown.value in ("FLOWGRAD", "FLOWGRAD_FREE"):
+                # lambda is learned (FLOWGRAD) or unused (FLOWGRAD_FREE) -> the fixed
+                # alpha/w T_schedule preview does not apply to these modes.
+                flow_schedule_widget = mo.md(
+                    "_$\\lambda_t$ is **learned** by FlowGrad (FLOWGRAD) or not used "
+                    "(FLOWGRAD_FREE); the fixed $\\alpha$/$w$ schedule does not apply._"
+                )
+            else:
+                flow_schedule_widget = mo.vstack([
+                    mo.hstack([
+                        alpha_slider, w_slider
+                    ], justify="start"),
+                    lambda_trajectory_plot,
+                ])
         case "analyze_rollout":
             flow_schedule_widget=None
     flow_schedule_widget
@@ -2410,13 +2511,28 @@ def _(alpha_slider, lambda_trajectory_plot, mo, notebook_mode, w_slider):
 
 
 @app.cell
-def _(get_rollout, notebook_mode, rollout_id, sweep_params):
+def _(
+    get_rollout,
+    guidance_mode_dropdown,
+    notebook_mode,
+    rollout_id,
+    sweep_params,
+):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
         grads_xr = get_rollout("grads", rollout_id).sel(sweep_params).compute()
         vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params).compute()
         clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params).compute()
         gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
         ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params).compute()
+        # FLOWGRAD_FREE has no guidance direction -> these trace containers are all-NaN.
+        # Fill with 0 so the (not-applicable) trace plots render as flat zero instead of
+        # crashing on NaN axis limits; the learned controls live in the FlowGrad
+        # diagnostics panel. Other modes are untouched.
+        if guidance_mode_dropdown.value == "FLOWGRAD_FREE":
+            grads_xr = grads_xr.fillna(0.0)
+            vfs_xr = vfs_xr.fillna(0.0)
+            clean_preds_xr = clean_preds_xr.fillna(0.0)
+            gui_vfs_xr = gui_vfs_xr.fillna(0.0)
     return clean_preds_xr, grads_xr, gui_vfs_xr, ung_gui_xr, vfs_xr
 
 
@@ -2686,6 +2802,68 @@ def _(flow_widget_make, notebook_mode):
     else:
         flow_widget=None
     flow_widget
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    guidance_mode_dropdown,
+    m_slider,
+    mo,
+    n_slider,
+    notebook_mode,
+    plt,
+    rollout_id,
+    sweep_params,
+):
+    # FlowGrad learned diagnostics (analyze mode): learned lambda*_t / control-norm per
+    # window + the optimization-loss curve. These come from the JSON sidecar written by
+    # the rollout (FlowGrad learns its schedule/controls, so they have no zarr container).
+    if notebook_mode == "analyze_rollout" and guidance_mode_dropdown.value in ("FLOWGRAD", "FLOWGRAD_FREE"):
+        # plt is a notebook-global (imported elsewhere); import get_diagnostics under a
+        # private alias so this cell doesn't introduce a multiply-defined top-level name.
+        from src.utils import get_diagnostics as _get_diagnostics
+
+        _gm = guidance_mode_dropdown.value
+        _mi, _ni = int(m_slider.value), int(n_slider.value)
+        _records = _get_diagnostics(rollout_id)
+
+        _recs = [
+            r for r in _records
+            if r["guidance_mode"] == _gm and r["m"] == _mi and r["n"] == _ni and r["sweep"] == sweep_params
+        ]
+        if not _recs:  # fall back: match on (mode, m, n) only if the sweep dict didn't line up
+            _recs = [r for r in _records if r["guidance_mode"] == _gm and r["m"] == _mi and r["n"] == _ni]
+
+        if not _recs:
+            flowgrad_diag_widget = mo.md(
+                f"_No FlowGrad diagnostics for {_gm}, m={_mi}, n={_ni}. "
+                f"(Sidecar has {len(_records)} record(s).)_"
+            )
+        else:
+            _r = _recs[0]
+            _fig, _axes = plt.subplots(1, 2, figsize=(14, 4))
+            _axes[0].plot(_r["opt_target_loss"], marker="o", label="target loss")
+            _axes[0].plot(_r["opt_loss"], marker=".", label="total loss (+reg)")
+            _axes[0].set_title(f"{_gm} optimization (m={_mi}, n={_ni})")
+            _axes[0].set_xlabel("iteration"); _axes[0].set_ylabel("loss"); _axes[0].legend()
+
+            if _r.get("lambda_star") is not None:
+                _axes[1].plot(_r["lambda_star"], marker="o")
+                _axes[1].set_title(r"learned $\lambda^\star_t$ (coarse, expanded to T)")
+                _axes[1].set_xlabel("flow step $t$"); _axes[1].set_ylabel(r"$\lambda$")
+            elif _r.get("control_norm") is not None:
+                _axes[1].bar(range(len(_r["control_norm"])), _r["control_norm"])
+                _axes[1].set_title("learned control norm per window")
+                _axes[1].set_xlabel("control window"); _axes[1].set_ylabel(r"$\|u_j\|$")
+            _fig.tight_layout()
+            flowgrad_diag_widget = mo.as_html(_fig)
+            plt.close(_fig)
+    else:
+        flowgrad_diag_widget = None
+
+    flowgrad_diag_widget
+
     return
 
 
