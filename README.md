@@ -31,7 +31,7 @@ marimo edit notebooks/guidance.py --watch --no-token
 Experiment runner:
 ```bash
 python -m src.run --rollout_id 2026-06-10_10:21:49 --rollout_type ung
-PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python -m src.run --rollout_id 2026-06-10_10:26:15 --rollout_type gui
+python -m src.run --rollout_id 2026-06-17_14:58:51 --rollout_type ung gui
 ```
 
 Terminal setup:

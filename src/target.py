@@ -47,12 +47,12 @@ def get_reference_rollouts(
     timestamp: datetime | None = None
 ):
     match guidance_reference:
-        case "ground_truth":
+        case "GT":
             reference_rollout = get_gt_rollout(N+1, timestamp)
             # mock dimension for arrays to match shape on ui
             reference_rollout = reference_rollout.expand_dims(member=[m for m in range(M)])
 
-        case "unguided_members":
+        case "UNG":
             reference_rollout = get_rollout("ung", rollout_id)
 
         case _:

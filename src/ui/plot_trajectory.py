@@ -28,9 +28,30 @@ def plot_trajectory(
     color_map: dict | None = None,
     right_percentage: bool = False,
     bands: dict[str, tuple] | None = None,
+    prepend_zero: bool = False,
+    mirror_right_axis: bool = False,
 ):
     trajectory_dict = trajectory if isinstance(trajectory, dict) else {var: trajectory}
     trajectory_dict = {k: np.asarray(v, dtype=float) for k, v in trajectory_dict.items()}
+
+    if prepend_zero:
+        # anchor every line at the origin (0, 0): the value for step i moves to x=i+1,
+        # so x=0 is a baseline and the x-axis index matches the (1-indexed) selected
+        # step instead of being off by one. bands + right-axis lines shift in lockstep.
+        trajectory_dict = {k: np.concatenate([[0.0], v]) for k, v in trajectory_dict.items()}
+        if bands:
+            bands = {
+                k: (np.concatenate([[0.0], np.asarray(lo, dtype=float)]),
+                    np.concatenate([[0.0], np.asarray(hi, dtype=float)]))
+                for k, (lo, hi) in bands.items()
+            }
+        if right_trajectory is not None:
+            if isinstance(right_trajectory, dict):
+                right_trajectory = {k: np.concatenate([[0.0], np.asarray(v, dtype=float)])
+                                    for k, v in right_trajectory.items()}
+            else:
+                right_trajectory = np.concatenate([[0.0], np.asarray(right_trajectory, dtype=float)])
+
     num_steps = max(len(v) for v in trajectory_dict.values())
 
     if num_steps == 0:
@@ -277,6 +298,18 @@ def plot_trajectory(
             handles2, labels2 = ax2.get_legend_handles_labels()
             handles, labels = handles1 + handles2, labels1 + labels2
         else:
+            if mirror_right_axis:
+                # phantom right axis: mirror the left y-ticks as little lines (no
+                # numbers, no data) so plots without a real right axis line up with
+                # the cross-check plots that do have one.
+                ax_mirror = ax.twinx()
+                ax_mirror.set_ylim(ax.get_ylim())
+                ax_mirror.set_yticks(ax.get_yticks())
+                ax_mirror.set_yticklabels([])
+                ax_mirror.set_ylabel("")
+                ax_mirror.spines["top"].set_visible(False)
+                ax_mirror.spines["right"].set_color("#BBBBBB")
+                ax_mirror.tick_params(axis="y", colors=colors["text"], length=4, width=0.8)
             handles, labels = ax.get_legend_handles_labels()
 
         # ------------------------------------------------------------
@@ -285,7 +318,7 @@ def plot_trajectory(
         ax.legend(
             handles, labels,
             loc="center left",
-            bbox_to_anchor=(1.05 if has_right_axis else 1.015, 0.5),
+            bbox_to_anchor=(1.05 if (has_right_axis or mirror_right_axis) else 1.015, 0.5),
             frameon=False,
             handlelength=2.4,
             borderaxespad=0.0,
@@ -316,11 +349,13 @@ def plot_trajectory(
                 color="#555555",
             )
 
-        # fixed margins (not tight_layout) so the axes box is identical with or
-        # without a right axis — keeps vertical lines aligned across plot grids
+        # reserve a fixed-WIDTH strip (in inches) for the right-hand legend rather
+        # than a fixed fraction, so the axes box scales with the figure width: a
+        # narrow figure (few steps) keeps a usable legend without stretching the axes.
+        legend_inches = 3.4 if (has_right_axis or mirror_right_axis) else 3.0
         fig.subplots_adjust(
             left=0.03,
-            right=0.84,
+            right=max(0.55, 1.0 - legend_inches / figsize[0]),
             top=0.88 if (title or subtitle) else 0.97,
             bottom=0.10,
         )

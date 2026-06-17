@@ -7,7 +7,7 @@ from itertools import product
 import xarray as xr
 
 from src.rollout import rollout
-from src.rollout_config import RolloutConfig
+from src.rollout_config import RolloutConfig, MODE_HYPERS
 from src.utils import get_model, get_config, get_sweep_dict, get_rollout_dir, ensure_rollout_dir
 from src.utils import get_device
 from src.utils import create_full_zarr_container, sweep_coord_label
@@ -28,10 +28,33 @@ class RolloutJob:
 
 
 def iter_sweeps(sweep_params: dict[str, list]) -> Iterator[dict]:
-    keys = list(sweep_params)
+    # Mode-restricted product: for each GUIDANCE_MODE value, only that mode's specific
+    # hypers vary; axes that belong to *some* mode but not this one are pinned to their
+    # index-0 value (the GUIDANCE_MODE coord disambiguates the index-0 writes in the
+    # union zarr). Yields full job dicts (every union key present).
+    all_keys = list(sweep_params)
 
-    for values in product(*(sweep_params[k] for k in keys)):
-        yield dict(zip(keys, values))
+    # unguided (no GUIDANCE_MODE axis, e.g. ung sweep_params={}): plain product
+    # (the empty dict yields a single empty job).
+    if "GUIDANCE_MODE" not in sweep_params:
+        for values in product(*(sweep_params[k] for k in all_keys)):
+            yield dict(zip(all_keys, values))
+        return
+
+    specific_axes = set().union(*[set(v) for v in MODE_HYPERS.values()])
+
+    for mode in sweep_params["GUIDANCE_MODE"]:
+        active = MODE_HYPERS[mode]
+        axis_values = []
+        for k in all_keys:
+            if k == "GUIDANCE_MODE":
+                axis_values.append([mode])
+            elif k in specific_axes and k not in active:
+                axis_values.append([sweep_params[k][0]])  # pin to index 0
+            else:
+                axis_values.append(sweep_params[k])
+        for values in product(*axis_values):
+            yield dict(zip(all_keys, values))
 
 
 def build_jobs(
@@ -82,7 +105,7 @@ def written_containers(rollout_type, guidance_mode):
     if rollout_type == "ung":
         return {"ung"}
     base = {"gui", "ung_gui"}
-    if guidance_mode == "FLOWGRAD_FREE":
+    if guidance_mode == "FGF":
         return base
     return base | {"grads", "vfs", "gui_vfs", "clean_preds"}
 
@@ -110,7 +133,7 @@ def find_resume_index(rollout_dir, rollout_type, sweep_params):
             k: sweep_coord_label(k, v, sweep_params) for k, v in sweep.items()
         }
         # only require the containers this sweep point's guidance_mode actually writes
-        expected = written_containers(rollout_type, sweep.get("guidance_mode"))
+        expected = written_containers(rollout_type, sweep.get("GUIDANCE_MODE"))
         for container_type in expected:
             ds = datasets[container_type]
             probe = ds[list(ds.data_vars)[0]].sel(coord_sweep)
@@ -132,7 +155,6 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, T, sweep_params):
         # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
         container_ds.to_zarr(save_path, mode="w", compute=False)
 
-T=25
 def main() -> None:
     args = parse_args()
 
@@ -141,6 +163,10 @@ def main() -> None:
 
     config = get_config(args.rollout_id)
     rollout_dir = get_rollout_dir(args.rollout_id)
+
+    # number of flow/sampling steps comes from the config (set in unguided mode);
+    # fall back to 25 for older configs that predate the T field.
+    T = config.T if config.T is not None else 25
 
     match args.rollout_type:
         case "ung":

@@ -9,11 +9,11 @@ from src.utils import (
     get_var_idx, get_level_idx,
 )
 from src.schedules import T_schedule
-from src.rollout_config import RolloutConfig
+from src.rollout_config import RolloutConfig, MODE_HYPERS
 from src.mask import get_mask_tdict, get_mask_2d
 
 from src.utils import create_slice_zarr_container, tdict_to_xr, append_to_zarr, advance_x_cond
-from src.utils import append_diagnostics
+from src.utils import append_diagnostics, get_gt_rollout, gt_state_to_tdict
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
@@ -27,39 +27,32 @@ from tensordict.tensordict import TensorDict
 TRACE_CONTAINERS = ("clean_preds", "grads", "vfs", "gui_vfs")
 
 
-def build_guidance_kwargs(config: RolloutConfig) -> dict[str, any]:
-    """Select the guidance hyperparameters relevant to config.guidance_mode and
-    drop unset (None) ones so the method defaults in GuidedFlow still apply."""
-    shared = {
-        "regularized": config.regularized,
-        "beta": config.beta,
-        "normalize": config.normalize,
-        "eps": config.eps,
-    }
+# config field (UPPER) -> guided_diffusion kwarg name
+HYPER_TO_KWARG = {
+    "M_MC": "n_mc",
+    "SIGMA_MC": "r_t",
+    "OPTIMIZE_K": "optimize_k",
+    "OPTIMIZE_LR": "optimize_lr",
+    "RENOISE_S": "renoise_s",
+    "SHIFT_INIT": "shift_init",
+    "CONTROL_GAMMA": "control_gamma",
+    "LAMBDA_INIT": "lambda_init",
+    "N_WINDOWS": "n_windows",
+}
 
-    match config.guidance_mode:
-        case "DPS":
-            kwargs = shared
-        case "LBG":
-            kwargs = {**shared, "n_mc": config.lbg_n_mc, "r_t": config.lbg_r_t}
-        case "UG":
-            kwargs = {
-                **shared,
-                "S": config.ug_S,
-                "m": config.ug_m,
-                "delta_lr": config.ug_delta_lr,
-            }
-        case "FLOWGRAD" | "FLOWGRAD_FREE":
-            kwargs = {
-                **shared,
-                "n_opt": config.fg_n_opt,
-                "lr": config.fg_lr,
-                "gamma": config.fg_gamma,
-                "init_lambda": config.fg_init_lambda,
-                "n_lambda": config.fg_n_lambda,
-            }
-        case _:
-            kwargs = {}
+
+def build_guidance_kwargs(config: RolloutConfig) -> dict[str, any]:
+    """Build the guidance kwargs for config.GUIDANCE_MODE: the shared loss controls
+    (LOSS_TYPE derived from GUI_REF, REG_TYPE, BETA_REG) plus this mode's specific
+    hypers from MODE_HYPERS. Drop None so GuidedFlow method defaults still apply."""
+    loss_type = "STATE" if config.GUI_REF == "GT" else "MASKED_AVERAGE"
+    kwargs = {
+        "loss_type": loss_type,
+        "reg_type": config.REG_TYPE,
+        "beta_reg": config.BETA_REG,
+    }
+    for axis in MODE_HYPERS[config.GUIDANCE_MODE]:
+        kwargs[HYPER_TO_KWARG[axis]] = getattr(config, axis)
 
     # drop Nones
     return {k: v for k, v in kwargs.items() if v is not None}
@@ -76,23 +69,27 @@ def rollout(
     # for testing purposes
     flow_model.T=T
     # create objects from config
-    x_cond = get_x_cond(config.timestamp, config.N)
+    x_cond = get_x_cond(config.START_TS, config.N)
     x_cond = batchify_and_move(x_cond, flow_model.device)
 
-    if guidance_flag and config.guidance_reference != "sampled_trajectory":
-        var_idx = get_var_idx(config.partition, config.var)
-        level_idx = get_level_idx(config.partition, config.level)
-        mask_2d = get_mask_2d(config.mask_mode, config.mask_corners)
+    if guidance_flag:
+        var_idx = get_var_idx(config.PARTITION, config.VAR)
+        level_idx = get_level_idx(config.PARTITION, config.LEVEL)
+        mask_2d = get_mask_2d(config.MASK_MODE, config.MASK_CORNERS)
 
-        delta_trajectory = config.delta_trajectory
-        lambda_schedule = T_schedule(T, config.alpha, config.w) 
-        mask_tdict = get_mask_tdict(x_cond["state"], config.partition, var_idx, level_idx, mask_2d)
-        guidance_type = config.guidance_mode
+        delta_trajectory = config.GUIDANCE_DELTA
+        lambda_schedule = T_schedule(T, config.ALPHA, config.W)
+        mask_tdict = get_mask_tdict(x_cond["state"], config.PARTITION, var_idx, level_idx, mask_2d)
+        guidance_type = config.GUIDANCE_MODE
+        # GT reference: ground-truth field per step (member-independent). gt rollout holds
+        # N+1 states (initial + N forecasts); guidance step n's valid time is index n+1.
+        gt_ds = get_gt_rollout(config.N + 1, config.START_TS) if config.GUI_REF == "GT" else None
     else:
         delta_trajectory=None
         lambda_schedule=None
         mask_tdict = None
         guidance_type = None
+        gt_ds = None
 
     guidance_kwargs = build_guidance_kwargs(config) if guidance_flag else {}
 
@@ -114,6 +111,12 @@ def rollout(
             x_hat_curr = x_hat_ung
 
             if guidance_flag:
+                x_ung_field = flow_model.denormalize(x_hat_ung.detach().clone())
+                # data-loss reference: GT field (step n) or the unguided member itself
+                x_ref = (
+                    gt_state_to_tdict(gt_ds, n + 1, flow_model.device)
+                    if config.GUI_REF == "GT" else x_ung_field
+                )
                 x_hat_gui, sampling_trace = flow_model.sample(
                     guidance_flag=True,
                     guidance_type=guidance_type,
@@ -121,7 +124,8 @@ def rollout(
                     guidance_kwargs=guidance_kwargs,
                     delta_t=delta_trajectory[n],
                     mask=mask_tdict,
-                    x_hat_ung=flow_model.denormalize(x_hat_ung.detach().clone()), 
+                    x_hat_ung=x_ung_field,
+                    x_ref=x_ref,
                     lambda_schedule=lambda_schedule,
                     seed = m + 1000 * n,  # + batch_nb * 10**6
                 )
@@ -157,7 +161,7 @@ def rollout(
 
                 # FlowGrad learns its schedule/controls -> persist the small diagnostics
                 # (no weather-shaped container) to a JSON sidecar for the notebook.
-                if guidance_type in ("FLOWGRAD", "FLOWGRAD_FREE"):
+                if guidance_type in ("FG", "FGF"):
                     fg = sampling_trace.get("flowgrad", {})
                     control_norm = fg.get("control_norm")
                     append_diagnostics(rollout_dir, {

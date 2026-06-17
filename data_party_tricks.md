@@ -128,6 +128,12 @@ rm data
 caffeinate -dimsu uv run python script.py
 ```
 
+### Multiple process ids
+
+```bash
+caffeinate ...
+```
+
 ### Persistent terminal sessions
 
 Create session:

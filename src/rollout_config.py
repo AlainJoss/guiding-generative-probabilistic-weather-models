@@ -1,30 +1,46 @@
 from dataclasses import dataclass
-from typing import Any
 from datetime import datetime
+from typing import Any
 
 import torch
 
 ##### guidance constants #####
 
-GUIDANCE_REFERENCES = [
-    "unguided_members",
-    # "ground_truth",
-]
-MASK_MODES = [
-    "bbox", 
-    "normal"
+GUIDANCE_MODES = ["DPS", "LBG", "UG", "FG", "FGF"]
+GUI_REFS = ["UNG", "GT"]
+MASK_MODES = ["BBOX", "GAUSSIAN"]
+REG_TYPES = ["ID", "ACTIVITY", "POWER_SPECTRUM"]
+LOSS_TYPES = ["STATE", "MASKED_AVERAGE"]  # derived from GUI_REF, never swept
+
+# the hyperparameter tree: each guidance mode's own (swept) hypers. OPTIMIZE_K /
+# OPTIMIZE_LR / SHIFT_INIT / CONTROL_GAMMA / N_WINDOWS are single shared fields --
+# the GUIDANCE_MODE axis disambiguates which mode reads them.
+MODE_HYPERS = {
+    "DPS": [],
+    "LBG": ["M_MC", "SIGMA_MC"],
+    "UG": ["OPTIMIZE_K", "OPTIMIZE_LR", "RENOISE_S", "SHIFT_INIT"],
+    "FG": ["OPTIMIZE_K", "OPTIMIZE_LR", "CONTROL_GAMMA", "LAMBDA_INIT", "N_WINDOWS"],
+    "FGF": ["OPTIMIZE_K", "OPTIMIZE_LR", "SHIFT_INIT", "CONTROL_GAMMA", "N_WINDOWS"],
+}
+
+# swept axes shared by every guidance mode (GUIDANCE_MODE drives the tree)
+COMMON_AXES = [
+    "MASK_MODE",
+    "GUIDANCE_DELTA",
+    "GUI_REF",
+    "REG_TYPE",
+    "BETA_REG",
+    "ALPHA",
+    "W",
+    "GUIDANCE_MODE",
 ]
 
-GUIDANCE_MODES = [
-    "DPS",
-    "UG",
-    "LBG",
-    "FLOWGRAD",
-    "FLOWGRAD_FREE",
-]
+# every swept axis written to sweep_params.json (flat union over all modes)
+SWEEP_AXES = COMMON_AXES + sorted({h for hs in MODE_HYPERS.values() for h in hs})
 
 ##### config class #####
 from src.constants import DATETIME_STR_FORMAT
+
 
 def datetime_to_string(timestamp: datetime):
     return datetime.strftime(timestamp, DATETIME_STR_FORMAT)
@@ -34,161 +50,58 @@ def string_to_datetime(timestamp: str):
     return datetime.strptime(timestamp, DATETIME_STR_FORMAT)
 
 
-
 @dataclass
 class RolloutConfig:
 
-    ### fixed params
+    ### fixed params (config.json only, not swept)
 
     M: int | None = None
     N: int | None = None
-    timestamp: str | None = None
+    T: int | None = None  # number of flow/sampling steps (lower = faster, for testing)
+    START_TS: datetime | None = None
 
-    partition: str | None = None
-    level: int | None = None
-    var: str | None = None
+    PARTITION: str | None = None
+    LEVEL: int | None = None
+    VAR: str | None = None
+    MASK_CORNERS: Any | None = None
 
-    mask_corners: Any | None = None
+    ### common swept axes
+    MASK_MODE: str | None = None
+    GUIDANCE_DELTA: list[torch.Tensor] | None = None  # per-step delta target (non-scalar axis)
+    GUI_REF: str | None = None  # UNG -> masked-average loss; GT -> state loss
+    REG_TYPE: str | None = None  # ID | ACTIVITY | POWER_SPECTRUM
+    BETA_REG: float | None = None
+    ALPHA: float | None = None
+    W: float | None = None
+    GUIDANCE_MODE: str | None = None
 
-    ### sweep params -> save them in config to use in rollout, but not extracted 
-    delta_trajectory: list[torch.Tensor] | None = None
-    mask_mode: str | None = None
-    guidance_mode: str | None = None
-    guidance_reference: str | None = None
+    ### mode-specific swept hypers (None -> method default; pinned for irrelevant modes)
 
-    alpha: float | None = None
-    w: float | None = None
+    # LBG
+    M_MC: int | None = None
+    SIGMA_MC: float | None = None
 
-    ### guidance hyperparameters (sweepable; None -> method default is used)
-
-    # shared across guidance types
-    regularized: bool | None = None
-    beta: float | None = None
-    normalize: bool | None = None
-    eps: float | None = None
-
-    # LBG only
-    lbg_n_mc: int | None = None
-    lbg_r_t: float | None = None
-
-    # UG only
-    ug_S: int | None = None
-    ug_m: int | None = None
-    ug_delta_lr: float | None = None
-
-    # FLOWGRAD only
-    fg_n_opt: int | None = None
-    fg_lr: float | None = None
-    fg_gamma: float | None = None
-    fg_init_lambda: float | None = None
-    fg_n_lambda: int | None = None  # FlowGrad coarse schedule: number of control windows K
+    # UG / FG / FGF (OPTIMIZE_K, OPTIMIZE_LR, SHIFT_INIT, CONTROL_GAMMA, N_WINDOWS shared)
+    OPTIMIZE_K: int | None = None      # optimization iterations
+    OPTIMIZE_LR: float | None = None
+    RENOISE_S: int | None = None       # UG self-recurrence steps
+    SHIFT_INIT: float | None = None    # UG dz init / FGF control init
+    CONTROL_GAMMA: float | None = None  # FG/FGF L2 penalty weight
+    LAMBDA_INIT: float | None = None   # FG learned-lambda init
+    N_WINDOWS: int | None = None       # FG/FGF coarse schedule: number of windows K
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
-        return cls(
-            M=config.get("M"),
-            N=config.get("N"),
-            timestamp=string_to_datetime(config.get("timestamp")),
-
-            partition=config.get("partition"),
-            level=config.get("level"),
-            var=config.get("var"),
-    
-            mask_corners=config.get("mask_corners"),
-
-
-            mask_mode=config.get("mask_mode"),
-            guidance_mode=config.get("guidance_mode"),
-            guidance_reference=config.get("guidance_reference"),
-            delta_trajectory=config.get("delta_trajectory"),
-
-            alpha=config.get("alpha"),
-            w=config.get("w"),
-
-            regularized=config.get("regularized"),
-            beta=config.get("beta"),
-            normalize=config.get("normalize"),
-            eps=config.get("eps"),
-
-            lbg_n_mc=config.get("lbg_n_mc"),
-            lbg_r_t=config.get("lbg_r_t"),
-
-            ug_S=config.get("ug_S"),
-            ug_m=config.get("ug_m"),
-            ug_delta_lr=config.get("ug_delta_lr"),
-
-            fg_n_opt=config.get("fg_n_opt"),
-            fg_lr=config.get("fg_lr"),
-            fg_gamma=config.get("fg_gamma"),
-            fg_init_lambda=config.get("fg_init_lambda"),
-            fg_n_lambda=config.get("fg_n_lambda"),
-        )
+        ts = config.get("START_TS")
+        kwargs = {k: config.get(k) for k in cls.__dataclass_fields__ if k != "START_TS"}
+        kwargs["START_TS"] = string_to_datetime(ts) if ts is not None else None
+        return cls(**kwargs)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "M": self.M,
-            "N": self.N,
-            "timestamp": datetime_to_string(self.timestamp) if self.timestamp is not None else None,
-
-            "partition": self.partition,
-            "level": self.level,
-            "var": self.var,
-
-            "mask_corners": self.mask_corners,
-
-            "mask_mode": self.mask_mode,
-            "guidance_mode": self.guidance_mode,
-            "guidance_reference": self.guidance_reference,
-            "delta_trajectory": self.delta_trajectory,
-
-            "alpha": self.alpha,
-            "w": self.w,
-
-            "regularized": self.regularized,
-            "beta": self.beta,
-            "normalize": self.normalize,
-            "eps": self.eps,
-
-            "lbg_n_mc": self.lbg_n_mc,
-            "lbg_r_t": self.lbg_r_t,
-
-            "ug_S": self.ug_S,
-            "ug_m": self.ug_m,
-            "ug_delta_lr": self.ug_delta_lr,
-
-            "fg_n_opt": self.fg_n_opt,
-            "fg_lr": self.fg_lr,
-            "fg_gamma": self.fg_gamma,
-            "fg_init_lambda": self.fg_init_lambda,
-            "fg_n_lambda": self.fg_n_lambda,
-        }
-
+        out = {k: getattr(self, k) for k in self.__dataclass_fields__}
+        out["START_TS"] = datetime_to_string(self.START_TS) if self.START_TS is not None else None
+        return out
 
     def to_dict_list(self) -> dict[str, Any]:
-        return {
-            "delta_trajectory": [self.delta_trajectory],
-            "mask_mode": [self.mask_mode],
-            "guidance_mode": [self.guidance_mode],
-            "guidance_reference": [self.guidance_reference],
-
-            "alpha": [self.alpha],
-            "w": [self.w],
-
-            "regularized": [self.regularized],
-            "beta": [self.beta],
-            "normalize": [self.normalize],
-            "eps": [self.eps],
-
-            "lbg_n_mc": [self.lbg_n_mc],
-            "lbg_r_t": [self.lbg_r_t],
-
-            "ug_S": [self.ug_S],
-            "ug_m": [self.ug_m],
-            "ug_delta_lr": [self.ug_delta_lr],
-
-            "fg_n_opt": [self.fg_n_opt],
-            "fg_lr": [self.fg_lr],
-            "fg_gamma": [self.fg_gamma],
-            "fg_init_lambda": [self.fg_init_lambda],
-            "fg_n_lambda": [self.fg_n_lambda],
-        }
+        # flat union of every swept axis, each wrapped as a single-element list
+        return {axis: [getattr(self, axis)] for axis in SWEEP_AXES}

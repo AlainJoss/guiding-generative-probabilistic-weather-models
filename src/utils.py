@@ -395,6 +395,18 @@ def get_gt_rollout(N, timestamp):
     return get_N_states(ds, N, timestamp)
 
 
+def gt_state_to_tdict(gt_ds: xr.Dataset, time_index: int, device) -> TensorDict:
+    """One ground-truth state (at `time_index` of a gt-rollout Dataset) as a denormalized
+    model TensorDict {surface:(1,4,1,lat,lon), level:(1,6,nlev,lat,lon)}, matching the
+    structure/var-order (VARIABLES_DICT) the guidance loss consumes. Used as the GT data-
+    loss reference (GUI_REF=GT). gt is already in physical units, so no normalization."""
+    sfc = np.stack([gt_ds[v].isel(time=time_index).values for v in VARIABLES_DICT["surface"]])
+    lvl = np.stack([gt_ds[v].isel(time=time_index).values for v in VARIABLES_DICT["level"]])
+    sfc_t = torch.as_tensor(sfc, dtype=torch.float32, device=device)[None, :, None]
+    lvl_t = torch.as_tensor(lvl, dtype=torch.float32, device=device)[None]
+    return TensorDict({"surface": sfc_t, "level": lvl_t}, batch_size=[1], device=device)
+
+
 def get_x_cond(timestamp: datetime, N):
     ds = get_td_dataset(multistep=N, year=timestamp.year)
     timestamp = np.datetime64(timestamp, "ns")

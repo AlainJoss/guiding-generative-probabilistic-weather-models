@@ -84,10 +84,10 @@ def get_mask_2d(
     mask_corners: any
 ):  
     match mask_mode:
-        case "bbox":
+        case "BBOX":
             mask_2d = get_bbox_mask(*mask_corners)
-        case "normal":
+        case "GAUSSIAN":
             mask_2d = get_normal_mask(*mask_corners)
         case _:
-            raise ValueError(f"Invalid mask_params {mask_corners}")
+            raise ValueError(f"Invalid mask_mode {mask_mode!r} (params {mask_corners})")
     return mask_2d

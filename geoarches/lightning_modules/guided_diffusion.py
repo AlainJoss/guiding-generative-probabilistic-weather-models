@@ -326,11 +326,15 @@ class GuidedFlow(BaseLightningModule):
         delta_t: torch.Tensor | None = None,
         mask: TensorDict | None = None,
         x_hat_ung: TensorDict | None = None,
+        x_ref: TensorDict | None = None,
         lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
         guidance_kwargs: dict | None = None,
     ):
         guidance_kwargs = guidance_kwargs or {}
+        # x_ref is the data-loss target (UNG members or GT field); default to UNG.
+        if x_ref is None:
+            x_ref = x_hat_ung
 
         with torch.no_grad():
             det_pred = self.det_model(x_cond)
@@ -357,6 +361,7 @@ class GuidedFlow(BaseLightningModule):
                 delta_t=delta_t,
                 mask=mask,
                 x_hat_ung=x_hat_ung,
+                x_ref=x_ref,
                 lambda_schedule=lambda_schedule,
                 seed=seed,
                 **guidance_kwargs,
@@ -368,27 +373,30 @@ class GuidedFlow(BaseLightningModule):
                 delta_t=delta_t,
                 mask=mask,
                 x_hat_ung=x_hat_ung,
+                x_ref=x_ref,
                 lambda_schedule=lambda_schedule,
                 seed=seed,
                 **guidance_kwargs,
             )
-        elif guidance_type == "FLOWGRAD":
+        elif guidance_type == "FG":
             z, sampling_trace = self._flowgrad_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_t,
                 mask=mask,
                 x_hat_ung=x_hat_ung,
+                x_ref=x_ref,
                 seed=seed,
                 **guidance_kwargs,
             )
-        elif guidance_type == "FLOWGRAD_FREE":
+        elif guidance_type == "FGF":
             z, sampling_trace = self._flowgrad_free_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_t,
                 mask=mask,
                 x_hat_ung=x_hat_ung,
+                x_ref=x_ref,
                 seed=seed,
                 **guidance_kwargs,
             )
@@ -433,6 +441,7 @@ class GuidedFlow(BaseLightningModule):
         delta_t: torch.Tensor,
         mask: TensorDict,
         x_hat_ung: TensorDict,
+        x_ref: TensorDict,
         lambda_schedule: list[torch.Tensor],
         seed: int | None = None,
         create_graph: bool = False,
@@ -473,7 +482,8 @@ class GuidedFlow(BaseLightningModule):
                 gui_vec = guidance_fn(
                     x_hat_t=x_hat_t,
                     x_hat_t_norm=x_hat_t_norm,
-                    x_hat_ung=x_hat_ung,
+                    x_ref=x_ref,
+                    x_ung=x_hat_ung,
                     delta_t=delta_t,
                     mask=mask,
                     z_t=z_t,
@@ -508,33 +518,55 @@ class GuidedFlow(BaseLightningModule):
 
     ### loss + guidance-vector helpers (shared by all guidance types) ###
 
-    def masked_residual(self, x_hat_t, x_hat_ung, delta_t, mask):
+    def masked_residual(self, x_hat_t, x_ref, delta_t, mask):
+        # masked-average match: guide the masked mean toward (1+delta) * reference mean
         pred = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
-        target = sum((mask[k] * x_hat_ung[k]).sum() for k in x_hat_ung.keys())
+        target = sum((mask[k] * x_ref[k]).sum() for k in x_ref.keys())
         target = (1 + delta_t) * target
         return pred - target
 
 
-    def similarity_loss(self, x_hat_t, x_hat_ung):
+    def similarity_loss(self, x_hat_t, x_ung):
         return sum(
-            ((x_hat_t[k] - x_hat_ung[k]) ** 2).mean()
+            ((x_hat_t[k] - x_ung[k]) ** 2).mean()
             for k in x_hat_t.keys()
         )
 
 
-    def build_loss(self, x_hat_t, x_hat_ung, delta_t, mask, regularized=False, beta=1e-4):
-        # single return contract for every guidance type: (loss, |residual|)
-        residual = self.masked_residual(x_hat_t, x_hat_ung, delta_t, mask)
-        loss = residual ** 2
-        if regularized:
-            loss = loss + beta * self.similarity_loss(x_hat_t, x_hat_ung)
-        return loss, residual.abs()
+    def state_loss(self, x_hat_t, x_ref):
+        # whole-field MSE to the reference (no mask, no delta); mean-scaled so BETA_REG
+        # stays comparable across loss types
+        raw = sum(((x_hat_t[k] - x_ref[k]) ** 2).sum() for k in x_hat_t.keys())
+        n = sum(x_hat_t[k].numel() for k in x_hat_t.keys())
+        return raw / n
 
 
-    def normalize_grad(self, gui_vec, residual, eps=1e-8):
-        # divide the guidance vector by the (detached) residual magnitude
-        scale = residual.detach().clamp_min(eps)
-        return gui_vec.apply(lambda g: g / scale)
+    def guidance_loss(
+        self, x_hat_t, x_ref, x_ung, delta_t, mask,
+        loss_type="MASKED_AVERAGE", reg_type=None, beta_reg=1e-4,
+    ):
+        # data term: x_ref is the guidance target (UNG members or GT field)
+        if loss_type == "MASKED_AVERAGE":
+            loss = self.masked_residual(x_hat_t, x_ref, delta_t, mask) ** 2
+        elif loss_type == "STATE":
+            loss = self.state_loss(x_hat_t, x_ref)
+        else:
+            raise ValueError(f"unknown loss_type {loss_type!r}")
+        # regularization term: always relative to the UNGUIDED field
+        if reg_type is not None:
+            if reg_type == "ID":
+                loss = loss + beta_reg * self.similarity_loss(x_hat_t, x_ung)
+            elif reg_type in ("ACTIVITY", "POWER_SPECTRUM"):
+                raise NotImplementedError(f"reg_type {reg_type!r} not implemented yet")
+            else:
+                raise ValueError(f"unknown reg_type {reg_type!r}")
+        return loss
+
+    def normalize_grad(self, gui_vec):
+        # scale the guidance vector to unit L2 norm (single global norm over all keys),
+        # so the lambda schedule -- not the residual magnitude -- controls the step size
+        norm = self._td_dot(gui_vec, gui_vec).sqrt().detach().clamp_min(1e-8)
+        return gui_vec.apply(lambda g: g / norm)
 
     # TODO: should be a protocol, so I do not inadvertedly break something
     def dps_guidance(
@@ -542,26 +574,23 @@ class GuidedFlow(BaseLightningModule):
         *,
         x_hat_t,
         x_hat_t_norm=None,
-        x_hat_ung,
+        x_ref,
+        x_ung,
         delta_t,
         mask,
         z_t,
-        regularized=False,
-        beta=1e-4,
-        normalize=True,
-        eps=1e-8,
+        loss_type="MASKED_AVERAGE",
+        reg_type=None,
+        beta_reg=1e-4,
         create_graph=False,
         **extra,
     ):
-        loss_, residual = self.build_loss(
-            x_hat_t, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+        loss_ = self.guidance_loss(
+            x_hat_t, x_ref, x_ung, delta_t, mask,
+            loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
         )
         gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-
-        if normalize:
-            gui_vec = self.normalize_grad(gui_vec, residual, eps=eps)
-
-        return gui_vec
+        return self.normalize_grad(gui_vec)
 
 
     def lbg_guidance(
@@ -569,14 +598,14 @@ class GuidedFlow(BaseLightningModule):
         *,
         x_hat_t,
         x_hat_t_norm,
-        x_hat_ung,
+        x_ref,
+        x_ung,
         delta_t,
         mask,
         z_t,
-        regularized=False,
-        beta=1e-4,
-        normalize=False,
-        eps=1e-8,
+        loss_type="MASKED_AVERAGE",
+        reg_type=None,
+        beta_reg=1e-4,
         n_mc=4,
         r_t=1.0,
         create_graph=False,
@@ -590,20 +619,16 @@ class GuidedFlow(BaseLightningModule):
             )
             x_i = self.denormalize(x_i_norm)
 
-            loss_i, _ = self.build_loss(
-                x_i, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+            loss_i = self.guidance_loss(
+                x_i, x_ref, x_ung, delta_t, mask,
+                loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
             )
             per_sample_losses.append(loss_i)
 
         losses = torch.stack(per_sample_losses)
         loss_ = math.log(n_mc) - torch.logsumexp(-losses, dim=0)
         gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-
-        if normalize:
-            _, residual = self.build_loss(x_hat_t, x_hat_ung, delta_t, mask)
-            gui_vec = self.normalize_grad(gui_vec, residual, eps=eps)
-
-        return gui_vec
+        return self.normalize_grad(gui_vec)
 
 
     ### flow variant 3 ###
@@ -615,15 +640,16 @@ class GuidedFlow(BaseLightningModule):
         delta_t: torch.Tensor,
         mask: TensorDict,
         x_hat_ung: TensorDict,
+        x_ref: TensorDict,
         lambda_schedule: list[torch.Tensor],
         seed: int | None = None,
-        S: int = 3,
-        m: int = 5,
-        delta_lr: float = 1e-1,
-        regularized: bool = False,
-        beta: float = 1e-4,
-        normalize: bool = False,  # unused by UG (no velocity guidance vector); kept for parity
-        eps: float = 1e-8,
+        renoise_s: int = 3,
+        optimize_k: int = 5,
+        optimize_lr: float = 1e-1,
+        shift_init: float = 0.0,
+        loss_type: str = "MASKED_AVERAGE",
+        reg_type=None,
+        beta_reg: float = 1e-4,
     ):
         # Backward universal guidance (arXiv:2302.07121): per step, optimize a LATENT shift
         # dz that drives the masked-mean objective, *through the model* (the dz->loss
@@ -643,21 +669,28 @@ class GuidedFlow(BaseLightningModule):
             time_embedding = self.embedd_time(x_cond, t).detach()
 
             # self recurrence at time t
-            for k in range(S):
+            for k in range(renoise_s):
                 delta_z = self.UG_latent_shift(
                     z_t=z_t,
                     x_cond=x_cond,
                     det_pred=det_pred,
-                    x_hat_ung=x_hat_ung,
+                    x_ref=x_ref,
+                    x_ung=x_hat_ung,
                     delta_t=delta_t,
                     mask=mask,
                     time_embedding=time_embedding,
                     s_t=s_t,
-                    m=m,
-                    lr=delta_lr,
-                    regularized=regularized,
-                    beta=beta,
+                    optimize_k=optimize_k,
+                    optimize_lr=optimize_lr,
+                    shift_init=shift_init,
+                    loss_type=loss_type,
+                    reg_type=reg_type,
+                    beta_reg=beta_reg,
                 )
+                # unit-normalize the latent shift (same rationale as the DPS/LBG
+                # guidance vector): the inner SGD fixes dz's direction, the fixed
+                # lambda schedule alone controls its magnitude.
+                delta_z = self.normalize_grad(delta_z)
 
                 with torch.no_grad():
                     # unguided field at the current latent (trace baseline)
@@ -679,10 +712,10 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
                     z_next = self.euler_step(z_t, u_t, h)
 
-                    if k < S - 1:
+                    if k < renoise_s - 1:
                         z_t = self.renoise(z_next, s_t, s_next)
 
-                if k == S - 1:
+                if k == renoise_s - 1:
                     sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                     sampling_trace["vfs"].append(u_pre.apply(lambda x: x * s_t).detach().cpu())
                     sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
@@ -698,27 +731,31 @@ class GuidedFlow(BaseLightningModule):
         z_t: TensorDict,
         x_cond,
         det_pred: TensorDict,
-        x_hat_ung: TensorDict,
+        x_ref: TensorDict,
+        x_ung: TensorDict,
         delta_t: torch.Tensor,
         mask: TensorDict,
         time_embedding,
         s_t: torch.Tensor,
-        m: int = 5,
-        lr: float = 1e-1,
-        regularized: bool = False,
-        beta: float = 1e-4,
+        optimize_k: int = 5,
+        optimize_lr: float = 1e-1,
+        shift_init: float = 0.0,
+        loss_type: str = "MASKED_AVERAGE",
+        reg_type=None,
+        beta_reg: float = 1e-4,
     ):
         # Backward guidance: dz = argmin_dz loss(masked_mean(clean_pred(z_t + dz))), via
-        # m-step GD from dz=0. The gradient flows through `velocity` (the backbone), so the
-        # network Jacobian d x_hat / d z_t spreads dz across the whole field -- NOT confined
-        # to the mask. No projection of dz onto the mask.
-        delta_z = z_t.apply(lambda x: torch.zeros_like(x).requires_grad_(True))
-        optimizer = torch.optim.SGD([delta_z[k] for k in delta_z.keys()], lr=lr)
+        # optimize_k-step GD from dz=shift_init. The gradient flows through `velocity` (the
+        # backbone), so the network Jacobian d x_hat / d z_t spreads dz across the whole
+        # field -- NOT confined to the mask. No projection of dz onto the mask.
+        delta_z = z_t.apply(lambda x: torch.full_like(x, shift_init).requires_grad_(True))
+        optimizer = torch.optim.SGD([delta_z[k] for k in delta_z.keys()], lr=optimize_lr)
 
         z_base = z_t.detach()
-        x_hat_ung = x_hat_ung.detach()
+        x_ung = x_ung.detach()
+        x_ref = x_ref.detach()
 
-        for _ in range(m):
+        for _ in range(optimize_k):
             optimizer.zero_grad()
 
             z_shift = tensordict_apply(lambda z, d: z + d, z_base, delta_z)
@@ -727,8 +764,9 @@ class GuidedFlow(BaseLightningModule):
                 input_state = self.get_velocity_input_state(z_shift, x_cond)
                 u = self.velocity(x_cond, time_embedding, input_state, z_shift, s_t)
                 x_hat_t = self.clean_prediction(det_pred, z_shift, u, s_t)
-                loss, _ = self.build_loss(
-                    x_hat_t, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+                loss = self.guidance_loss(
+                    x_hat_t, x_ref, x_ung, delta_t, mask,
+                    loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
                 )
 
             loss.backward()
@@ -756,23 +794,23 @@ class GuidedFlow(BaseLightningModule):
         delta_t,
         mask,
         x_hat_ung,
+        x_ref,
         seed: int,
-        n_opt: int = 10,
-        lr: float = 1e-2,
-        gamma: float = 1e-3,
-        init_lambda: float = 0.0,
-        n_lambda: int = 4,
-        regularized: bool = True,
-        beta: float = 1e-4,
-        normalize: bool = False,
-        eps: float = 1e-8,
+        optimize_k: int = 10,
+        optimize_lr: float = 1e-2,
+        control_gamma: float = 1e-3,
+        lambda_init: float = 0.0,
+        n_windows: int = 4,
+        loss_type: str = "MASKED_AVERAGE",
+        reg_type=None,
+        beta_reg: float = 1e-4,
     ):
         # FlowGrad-style optimization of a COARSE lambda schedule weighting the DPS
         # direction g_t (velocity is u_t - lambda_t g_t). The gradient w.r.t. lambda
         # is obtained with the Jacobian trick: one cached *detached* forward, then a
         # backward loop of per-step vector-Jacobian products (no full-trajectory
         # graph). g_t's Jacobian is frozen (first-order), so each step costs one VJP.
-        windows, win_of = self._coarse_windows(n_lambda)
+        windows, win_of = self._coarse_windows(n_windows)
         K = len(windows)
         win_of_t = torch.tensor(win_of, device=self.device)
         lengths = torch.tensor(
@@ -784,9 +822,9 @@ class GuidedFlow(BaseLightningModule):
         # after each optimizer step, which -- unlike a softplus/relu reparametrization --
         # leaves the gradient intact at lambda=0, so optimization can move off zero.
         raw_lambda = torch.nn.Parameter(
-            torch.full((K,), init_lambda, device=self.device, dtype=mask.dtype)
+            torch.full((K,), lambda_init, device=self.device, dtype=mask.dtype)
         )
-        optimizer = torch.optim.Adam([raw_lambda], lr=lr)
+        optimizer = torch.optim.Adam([raw_lambda], lr=optimize_lr)
         trace = defaultdict(list)
 
         timesteps = self.get_flow_timesteps()
@@ -797,22 +835,22 @@ class GuidedFlow(BaseLightningModule):
 
         def run_flow(lambda_schedule, *, create_graph, differentiable, do_trace):
             return self._gradient_flow(
-                guidance_name="FLOWGRAD",
+                guidance_name="FG",
                 guidance_fn=self.dps_guidance,
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_t,
                 mask=mask,
                 x_hat_ung=x_hat_ung,
+                x_ref=x_ref,
                 lambda_schedule=lambda_schedule,
                 seed=seed,
                 create_graph=create_graph,
                 differentiable=differentiable,
                 trace=do_trace,
-                regularized=regularized,
-                beta=beta,
-                normalize=normalize,
-                eps=eps,
+                loss_type=loss_type,
+                reg_type=reg_type,
+                beta_reg=beta_reg,
             )
 
         def cached_forward(lambda_fine):
@@ -832,14 +870,14 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
                     g_t = self.dps_guidance(
                         x_hat_t=x_hat_t,
-                        x_hat_ung=x_hat_ung,
+                        x_ref=x_ref,
+                        x_ung=x_hat_ung,
                         delta_t=delta_t,
                         mask=mask,
                         z_t=z_t,
-                        regularized=regularized,
-                        beta=beta,
-                        normalize=normalize,
-                        eps=eps,
+                        loss_type=loss_type,
+                        reg_type=reg_type,
+                        beta_reg=beta_reg,
                         create_graph=False,
                     )
 
@@ -852,7 +890,7 @@ class GuidedFlow(BaseLightningModule):
             return z_t, z_cache, g_cache
 
         z_cache = g_cache = None
-        for _ in tqdm(range(n_opt), desc="FLOWGRAD lambda optimization"):
+        for _ in tqdm(range(optimize_k), desc="FG lambda optimization"):
             # release the previous iteration's caches BEFORE cached_forward allocates the
             # next ones; otherwise both cache sets (each 2*T detached states) coexist for
             # the duration of the forward and can OOM the GPU.
@@ -869,8 +907,9 @@ class GuidedFlow(BaseLightningModule):
             z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
             with torch.enable_grad():
                 x_hat_gui = self.final_prediction(det_pred, z_T)
-                target_loss, _ = self.build_loss(
-                    x_hat_gui, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+                target_loss = self.guidance_loss(
+                    x_hat_gui, x_ref, x_hat_ung, delta_t, mask,
+                    loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
                 )
             a = self.grad_loss(target_loss, z_T)
 
@@ -893,7 +932,7 @@ class GuidedFlow(BaseLightningModule):
 
             # lambda is the parameter directly (no softplus chain); add length-weighted
             # L2 reg gamma * sum_i lambda_fine_i^2, step, then project to lambda >= 0.
-            reg_grad = 2.0 * gamma * lengths * lambda_win
+            reg_grad = 2.0 * control_gamma * lengths * lambda_win
             raw_lambda.grad = dlam_win + reg_grad
 
             optimizer.step()
@@ -901,7 +940,7 @@ class GuidedFlow(BaseLightningModule):
                 raw_lambda.clamp_(min=0.0)  # projected gradient descent: keep lambda >= 0
 
             with torch.no_grad():
-                reg_loss = gamma * (lengths * lambda_win ** 2).sum()
+                reg_loss = control_gamma * (lengths * lambda_win ** 2).sum()
             trace["loss"].append((target_loss.detach() + reg_loss).cpu())
             trace["target_loss"].append(target_loss.detach().cpu())
             trace["reg_loss"].append(reg_loss.cpu())
@@ -931,16 +970,16 @@ class GuidedFlow(BaseLightningModule):
         delta_t,
         mask,
         x_hat_ung,
+        x_ref,
         seed: int,
-        n_opt: int = 10,
-        lr: float = 1e-2,
-        gamma: float = 1e-3,
-        init_lambda: float = 0.0,  # unused (controls init at 0); kept for kwarg parity
-        n_lambda: int = 5,
-        regularized: bool = True,
-        beta: float = 1e-4,
-        normalize: bool = False,
-        eps: float = 1e-8,
+        optimize_k: int = 10,
+        optimize_lr: float = 1e-2,
+        control_gamma: float = 1e-3,
+        shift_init: float = 0.0,  # initial value of the free controls
+        n_windows: int = 5,
+        loss_type: str = "MASKED_AVERAGE",
+        reg_type=None,
+        beta_reg: float = 1e-4,
     ):
         # Paper-faithful FlowGrad: optimize free additive state-space controls u_j at
         # a coarse set of timesteps (window starts), with NO guidance direction in the
@@ -948,7 +987,7 @@ class GuidedFlow(BaseLightningModule):
         # trick — per control point one VJP through the collapsed block map
         # func(x) = x + u_j + v(x + u_j, t_j) * Delta_j; since d func/d u_j == d func/d x,
         # u_j.grad equals the propagated adjoint.
-        windows, _ = self._coarse_windows(n_lambda)
+        windows, _ = self._coarse_windows(n_windows)
         K = len(windows)
         timesteps = self.get_flow_timesteps()
 
@@ -961,17 +1000,17 @@ class GuidedFlow(BaseLightningModule):
             )
             block.append((start, t_j, s_j, delta_j))
 
-        # free controls, one TensorDict of leaf params per window (init 0)
+        # free controls, one TensorDict of leaf params per window (init at shift_init)
         z0 = self.init_noise(x_cond, seed)
         controls, params = [], []
         for _ in range(K):
             cj = {}
             for k in z0.keys():
-                p = torch.zeros_like(z0[k], requires_grad=True)
+                p = torch.full_like(z0[k], shift_init).requires_grad_(True)
                 cj[k] = p
                 params.append(p)
             controls.append(z0.__class__(cj, batch_size=z0.batch_size, device=z0.device))
-        optimizer = torch.optim.Adam(params, lr=lr)
+        optimizer = torch.optim.Adam(params, lr=optimize_lr)
         trace = defaultdict(list)
 
         def cached_forward():
@@ -1002,14 +1041,15 @@ class GuidedFlow(BaseLightningModule):
             u = self.velocity(x_cond, time_embedding, input_state, xu, s_j)
             return self.euler_step(xu, u, delta_j)
 
-        for _ in tqdm(range(n_opt), desc="FLOWGRAD_FREE control optimization"):
+        for _ in tqdm(range(optimize_k), desc="FGF control optimization"):
             z_T, state_at = cached_forward()
 
             z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
             with torch.enable_grad():
                 x_hat_gui = self.final_prediction(det_pred, z_T)
-                target_loss, _ = self.build_loss(
-                    x_hat_gui, x_hat_ung, delta_t, mask, regularized=regularized, beta=beta
+                target_loss = self.guidance_loss(
+                    x_hat_gui, x_ref, x_hat_ung, delta_t, mask,
+                    loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
                 )
             a = self.grad_loss(target_loss, z_T)
 
@@ -1020,13 +1060,13 @@ class GuidedFlow(BaseLightningModule):
                     out = block_map(x_in, j)
                 a = self._vjp(out, x_in, a)  # = J^T a ; J_x == J_{u_j}
                 for k in controls[j].keys():
-                    controls[j][k].grad = a[k] + 2.0 * gamma * controls[j][k].detach()
+                    controls[j][k].grad = a[k] + 2.0 * control_gamma * controls[j][k].detach()
 
             optimizer.step()
             optimizer.zero_grad()
 
             with torch.no_grad():
-                reg_loss = gamma * sum(
+                reg_loss = control_gamma * sum(
                     (controls[j][k] ** 2).sum() for j in range(K) for k in controls[j].keys()
                 )
             trace["loss"].append((target_loss.detach() + reg_loss).cpu())
