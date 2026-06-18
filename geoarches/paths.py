@@ -10,7 +10,6 @@ DATA = ROOT / "data"
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
 
-print(f"DATA path: {DATA}")
 STATS_PATH = DATA / "stats"
 _fast = os.environ.get("FAST_MODELSTORE")
 if _fast and Path(_fast, "archesweather-m-seed0").exists():

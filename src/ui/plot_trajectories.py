@@ -49,6 +49,9 @@ def plot_trajectories(
     ylabel: str | None = None,
     ymin_left: float | None = None,
     ymax_left: float | None = None,
+    # multiple delta trajectories (each aligned to the N+1 time points); plotted on
+    # the right axis. Takes precedence over the single delta_trajectory above.
+    delta_trajectories: list[list[float]] | None = None,
 ):
     num_steps = len(timestamps)
     time_values = pd.to_datetime(timestamps)
@@ -603,21 +606,27 @@ def plot_trajectories(
         # ------------------------------------------------------------
         # Optional right axis for percentage trajectory
         # ------------------------------------------------------------
-        has_right_axis = delta_trajectory is not None
+        # one or more delta trajectories on the right axis (delta_trajectories wins)
+        _deltas = delta_trajectories if delta_trajectories is not None else (
+            [delta_trajectory] if delta_trajectory is not None else None
+        )
+        has_right_axis = bool(_deltas)
 
         if has_right_axis:
             ax2 = ax.twinx()
+            _single = len(_deltas) == 1
 
-            ax2.plot(
-                time_values,
-                delta_trajectory,
-                linestyle="-",
-                linewidth=1.6,
-                color=colors["y"],
-                alpha=0.5,
-                label="Percentage change",
-                zorder=4,
-            )
+            for _i, _dt in enumerate(_deltas):
+                ax2.plot(
+                    time_values,
+                    _dt,
+                    linestyle="-",
+                    linewidth=1.6,
+                    color=colors["y"],
+                    alpha=0.5 if _single else 0.7,
+                    label="Percentage change" if _single else f"delta {_i}",
+                    zorder=4,
+                )
 
             ax2.axhline(
                 0.0,
@@ -627,7 +636,8 @@ def plot_trajectories(
                 zorder=0,
             )
 
-            if cumulative_delta_trajectory is not None:
+            if _single and cumulative_delta_trajectory is not None:
+                delta_trajectory = _deltas[0]
                 for i, (t_val, d_val, c_val) in enumerate(
                     zip(time_values, delta_trajectory, cumulative_delta_trajectory)
                 ):
@@ -660,8 +670,9 @@ def plot_trajectories(
             )
 
             left_min, left_max = ax.get_ylim()
-            y_min = float(np.nanmin(delta_trajectory))
-            y_max = float(np.nanmax(delta_trajectory))
+            _all = np.concatenate([np.asarray(_dt, dtype=float) for _dt in _deltas])
+            y_min = float(np.nanmin(_all))
+            y_max = float(np.nanmax(_all))
 
             if y_min == y_max:
                 y_min -= 1.0

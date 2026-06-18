@@ -44,6 +44,12 @@ Rollouts:
 - implement hydra experiment for automatic logging instead of bash script?
 
 Analysis:
+- write dist bands dropdown or show multiple lines somehow or show something on right and something on left
+- make menu to select the notebook type instead of the stupid dropdown
+- remove flowgrad bullshit plots
+- change of var should not change map in mask section
+- add clim to the plots
+- compute differences in terms of percentages? Computing differences in normalized space seem to be susceptible to the variance of the variables itself.
 - Cross-check variables distribution 
 - how to compare parameters on the same plots?
 - visualize unguided from guided at n so we can always know what the guidance is producing compared to the unguided model
@@ -53,8 +59,11 @@ Analysis:
     - gradients
     - vector fields
 - make checkboxes for things to plot or not in analyze part
+- try out 3d viz for maps difference
+- removed unused vars from era5 files
 
 Guidance:
+- should probably rewrite data interface
 - for final evaluation rehabilitate det model with all 4 submodels
 - sweep var to test how model function reacts: see whether guided percentage corresponds in untargeted guided version. 
 For instance t2m-mslp and mslp-t2m
@@ -68,6 +77,7 @@ For instance t2m-mslp and mslp-t2m
 - as baseline run the same eval_pipeline on guided and unguided ensembles in ground truth version and different experimental settings
 - swap rollout_dist_plot with newer version present in analyze.py
 - implement sampling algorithms (AI+RES and FK+S)
+- how to define a realistic mask for the event of interest? lets say, el nino?
 
 What we do not do:
 - experiment with multiple variables (and masks correspondingly)

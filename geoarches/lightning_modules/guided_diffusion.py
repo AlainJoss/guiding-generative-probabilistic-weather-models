@@ -224,14 +224,18 @@ class GuidedFlow(BaseLightningModule):
 
     def clean_prediction(self, det_pred, z_t, u_t, s_t):
         x_hat_t_norm = det_pred + (
-            z_t + tensordict_apply(torch.mul, s_t, u_t)
+            z_t + tensordict_apply(  # hat(r_T)_t
+                torch.mul, 
+                s_t, 
+                u_t
+            )
         ) * self.residual_to_pangu_scale
 
         return self.denormalize(x_hat_t_norm)
         
 
     def final_prediction(self, det_pred, z_t):
-        x_hat_norm = det_pred + tensordict_apply(
+        x_hat_norm = det_pred + tensordict_apply( # r_T
             torch.mul,
             z_t,
             self.residual_to_pangu_scale,
@@ -260,60 +264,9 @@ class GuidedFlow(BaseLightningModule):
             device=z_t.device,
         )
 
-
-    ### FlowGrad helpers (Jacobian-trick adjoint + coarse schedule) ###
-
-    def _vjp(self, outputs_td, inputs_td, v_td, create_graph: bool = False):
-        # Vector-Jacobian product Jᵀv where J = d(outputs)/d(inputs), evaluated per
-        # TensorDict key. Same None->zeros contract as grad_loss; this is the single
-        # backward pass that the FlowGrad adjoint loop reuses ("two backwards" via vjp).
-        keys = list(inputs_td.keys())
-        inputs = [inputs_td[k] for k in keys]
-        outputs = [outputs_td[k] for k in keys]
-        grad_outputs = [v_td[k] for k in keys]
-
-        grads = torch.autograd.grad(
-            outputs,
-            inputs,
-            grad_outputs=grad_outputs,
-            retain_graph=create_graph,
-            create_graph=create_graph,
-            allow_unused=True,
-        )
-
-        return inputs_td.__class__(
-            {
-                k: torch.zeros_like(inputs_td[k]) if g is None else g
-                for k, g in zip(keys, grads)
-            },
-            batch_size=inputs_td.batch_size,
-            device=inputs_td.device,
-        )
-
-
     def _td_dot(self, a_td, b_td):
         # Flat inner product <a, b> summed over every element of every state key.
         return sum((a_td[k] * b_td[k]).sum() for k in a_td.keys())
-
-
-    def _coarse_windows(self, K: int):
-        # Partition the T fine steps into K contiguous, near-uniform windows.
-        # Returns `windows` = [(start_i, length), ...] (len K) and `win_of` (len T)
-        # mapping each fine step to its window index. Remainder is spread over the
-        # first windows so lengths differ by at most 1.
-        T = self.T
-        K = max(1, min(K, T))
-        base, rem = divmod(T, K)
-        windows = []
-        win_of = [0] * T
-        start = 0
-        for j in range(K):
-            length = base + (1 if j < rem else 0)
-            windows.append((start, length))
-            for i in range(start, start + length):
-                win_of[i] = j
-            start += length
-        return windows, win_of
 
 
     ### used outside to wire guidance type ###
@@ -339,7 +292,8 @@ class GuidedFlow(BaseLightningModule):
         with torch.no_grad():
             det_pred = self.det_model(x_cond)
             x_cond["pred_state"] = det_pred
-
+        
+        # TODO: check that next is actually there in our repo
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k}
 
         gradient_guidance = {
@@ -403,6 +357,7 @@ class GuidedFlow(BaseLightningModule):
         else:
             raise ValueError(f"Unknown guidance_type: {guidance_type}")
 
+        # x_det + r*sigma_r
         x_hat_norm = det_pred + tensordict_apply(
             torch.mul,
             z,
@@ -518,12 +473,13 @@ class GuidedFlow(BaseLightningModule):
 
     ### loss + guidance-vector helpers (shared by all guidance types) ###
 
-    def masked_residual(self, x_hat_t, x_ref, delta_t, mask):
+    # TODO: the loss should be 1/2 and squared at the end ow the direction of the difference plays a role!
+    def masked_loss(self, x_hat_t, x_ref, delta_t, mask):
         # masked-average match: guide the masked mean toward (1+delta) * reference mean
         pred = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
         target = sum((mask[k] * x_ref[k]).sum() for k in x_ref.keys())
         target = (1 + delta_t) * target
-        return pred - target
+        return (pred - target) ** 2
 
 
     def similarity_loss(self, x_hat_t, x_ung):
@@ -543,23 +499,23 @@ class GuidedFlow(BaseLightningModule):
 
     def guidance_loss(
         self, x_hat_t, x_ref, x_ung, delta_t, mask,
-        loss_type="MASKED_AVERAGE", reg_type=None, beta_reg=1e-4,
+        loss_type="MASKED_AVERAGE", reg_type="ID", beta_reg=1e-4,
     ):
         # data term: x_ref is the guidance target (UNG members or GT field)
         if loss_type == "MASKED_AVERAGE":
-            loss = self.masked_residual(x_hat_t, x_ref, delta_t, mask) ** 2
+            loss = self.masked_loss(x_hat_t, x_ref, delta_t, mask)
         elif loss_type == "STATE":
             loss = self.state_loss(x_hat_t, x_ref)
         else:
             raise ValueError(f"unknown loss_type {loss_type!r}")
-        # regularization term: always relative to the UNGUIDED field
-        if reg_type is not None:
-            if reg_type == "ID":
-                loss = loss + beta_reg * self.similarity_loss(x_hat_t, x_ung)
-            elif reg_type in ("ACTIVITY", "POWER_SPECTRUM"):
-                raise NotImplementedError(f"reg_type {reg_type!r} not implemented yet")
-            else:
-                raise ValueError(f"unknown reg_type {reg_type!r}")
+        
+        # regularization: always relative to ung_gui field
+        if reg_type == "ID":
+            loss = loss + beta_reg * self.similarity_loss(x_hat_t, x_ung)
+        elif reg_type in ("ACTIVITY", "POWER_SPECTRUM"):
+            raise NotImplementedError(f"reg_type {reg_type!r} not implemented yet")
+        else:
+            raise ValueError(f"unknown reg_type {reg_type!r}")
         return loss
 
     def normalize_grad(self, gui_vec):
@@ -580,7 +536,7 @@ class GuidedFlow(BaseLightningModule):
         mask,
         z_t,
         loss_type="MASKED_AVERAGE",
-        reg_type=None,
+        reg_type="ID",
         beta_reg=1e-4,
         create_graph=False,
         **extra,
@@ -604,7 +560,7 @@ class GuidedFlow(BaseLightningModule):
         mask,
         z_t,
         loss_type="MASKED_AVERAGE",
-        reg_type=None,
+        reg_type="ID",
         beta_reg=1e-4,
         n_mc=4,
         r_t=1.0,
@@ -648,7 +604,7 @@ class GuidedFlow(BaseLightningModule):
         optimize_lr: float = 1e-1,
         shift_init: float = 0.0,
         loss_type: str = "MASKED_AVERAGE",
-        reg_type=None,
+        reg_type="ID",
         beta_reg: float = 1e-4,
     ):
         # Backward universal guidance (arXiv:2302.07121): per step, optimize a LATENT shift
@@ -741,7 +697,7 @@ class GuidedFlow(BaseLightningModule):
         optimize_lr: float = 1e-1,
         shift_init: float = 0.0,
         loss_type: str = "MASKED_AVERAGE",
-        reg_type=None,
+        reg_type="ID",
         beta_reg: float = 1e-4,
     ):
         # Backward guidance: dz = argmin_dz loss(masked_mean(clean_pred(z_t + dz))), via
@@ -802,7 +758,7 @@ class GuidedFlow(BaseLightningModule):
         lambda_init: float = 0.0,
         n_windows: int = 4,
         loss_type: str = "MASKED_AVERAGE",
-        reg_type=None,
+        reg_type="ID",
         beta_reg: float = 1e-4,
     ):
         # FlowGrad-style optimization of a COARSE lambda schedule weighting the DPS
@@ -978,7 +934,7 @@ class GuidedFlow(BaseLightningModule):
         shift_init: float = 0.0,  # initial value of the free controls
         n_windows: int = 5,
         loss_type: str = "MASKED_AVERAGE",
-        reg_type=None,
+        reg_type="ID",
         beta_reg: float = 1e-4,
     ):
         # Paper-faithful FlowGrad: optimize free additive state-space controls u_j at
@@ -1087,3 +1043,51 @@ class GuidedFlow(BaseLightningModule):
         ]
 
         return z_t, sampling_trace
+    
+    ### FlowGrad helpers (Jacobian-trick adjoint + coarse schedule) ###
+
+    def _vjp(self, outputs_td, inputs_td, v_td, create_graph: bool = False):
+        # Vector-Jacobian product Jᵀv where J = d(outputs)/d(inputs), evaluated per
+        # TensorDict key. Same None->zeros contract as grad_loss; this is the single
+        # backward pass that the FlowGrad adjoint loop reuses ("two backwards" via vjp).
+        keys = list(inputs_td.keys())
+        inputs = [inputs_td[k] for k in keys]
+        outputs = [outputs_td[k] for k in keys]
+        grad_outputs = [v_td[k] for k in keys]
+
+        grads = torch.autograd.grad(
+            outputs,
+            inputs,
+            grad_outputs=grad_outputs,
+            retain_graph=create_graph,
+            create_graph=create_graph,
+            allow_unused=True,
+        )
+
+        return inputs_td.__class__(
+            {
+                k: torch.zeros_like(inputs_td[k]) if g is None else g
+                for k, g in zip(keys, grads)
+            },
+            batch_size=inputs_td.batch_size,
+            device=inputs_td.device,
+        )
+
+    def _coarse_windows(self, K: int):
+        # Partition the T fine steps into K contiguous, near-uniform windows.
+        # Returns `windows` = [(start_i, length), ...] (len K) and `win_of` (len T)
+        # mapping each fine step to its window index. Remainder is spread over the
+        # first windows so lengths differ by at most 1.
+        T = self.T
+        K = max(1, min(K, T))
+        base, rem = divmod(T, K)
+        windows = []
+        win_of = [0] * T
+        start = 0
+        for j in range(K):
+            length = base + (1 if j < rem else 0)
+            windows.append((start, length))
+            for i in range(start, start + length):
+                win_of[i] = j
+            start += length
+        return windows, win_of

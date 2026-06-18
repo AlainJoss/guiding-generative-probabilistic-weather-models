@@ -20,7 +20,7 @@ def get_target_slices(
     delta_trajectory,
     m,
 ):
-    reference_rollout = get_reference_rollouts(guidance_reference, rollout_id, N, M, timestamp)
+    reference_rollout = _get_reference_rollouts(guidance_reference, rollout_id, N, M, timestamp)
     # reference_rollout = reference_rollout.sel(m=m)
 
     target = reference_rollout.copy(deep=True)
@@ -39,7 +39,7 @@ def get_target_slices(
     return slices
 
 
-def get_reference_rollouts(
+def _get_reference_rollouts(
     guidance_reference: str,
     rollout_id: str,
     N: int | None = None,

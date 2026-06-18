@@ -38,9 +38,9 @@ COMMON_AXES = [
 # every swept axis written to sweep_params.json (flat union over all modes)
 SWEEP_AXES = COMMON_AXES + sorted({h for hs in MODE_HYPERS.values() for h in hs})
 
-##### config class #####
-from src.constants import DATETIME_STR_FORMAT
 
+##### config class #####
+DATETIME_STR_FORMAT = "%Y-%m-%dT%H:%M:%S"
 
 def datetime_to_string(timestamp: datetime):
     return datetime.strftime(timestamp, DATETIME_STR_FORMAT)

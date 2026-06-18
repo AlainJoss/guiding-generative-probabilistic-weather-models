@@ -30,8 +30,10 @@ marimo edit notebooks/guidance.py --watch --no-token
 
 Experiment runner:
 ```bash
-python -m src.run --rollout_id 2026-06-10_10:21:49 --rollout_type ung
+python -m src.run --rollout_id 2026-06-18_10:17:52 --rollout_type gui
+python -m src.run --rollout_id 2026-06-18_09:39:05 --rollout_type gui
 python -m src.run --rollout_id 2026-06-17_14:58:51 --rollout_type ung gui
+
 ```
 
 Terminal setup:

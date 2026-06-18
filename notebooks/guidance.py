@@ -48,7 +48,6 @@ def _():
         RolloutConfig,
         T_schedule,
         VARIABLES_DICT,
-        delta_schedule,
         dump_json,
         ensure_rollout_dir,
         get_N_timestamps,
@@ -154,7 +153,7 @@ def _(
     T,
     compute_axis_values,
     config,
-    delta_trajectory,
+    delta_trajectories,
     dump_json,
     ensure_rollout_dir,
     get_now_timestamp,
@@ -202,7 +201,7 @@ def _(
                 "GUI_REF": list(gui_ref_select.value),
                 "MASK_MODE": list(mask_mode_select.value),
                 "REG_TYPE": list(reg_type_select.value),
-                "GUIDANCE_DELTA": [delta_trajectory],
+                "GUIDANCE_DELTA": delta_trajectories,
                 **{ax: compute_axis_values(ax, _rv) for ax in NUMERIC_AXES},
             }
             if all(sweep[a] for a in ("GUIDANCE_MODE", "GUI_REF", "MASK_MODE", "REG_TYPE")):
@@ -521,32 +520,19 @@ def _(
 
 @app.cell
 def _(
-    N,
-    delta_mode_dropdown,
-    delta_peak,
-    delta_peak_at_slider,
-    delta_schedule,
-    delta_shape_slider,
-    delta_start_slider,
+    delta_trajectories,
     delta_trajectory_dropdown,
     experiment_params,
     notebook_mode,
     np,
-    stop_at_n_checkbox,
-    stop_at_n_slider,
 ):
     # delta schedule
     match notebook_mode:
         case "unguided_rollout":
             delta_trajectory=None
         case "guided_rollout":
-            stop_n = stop_at_n_slider.value if stop_at_n_checkbox.value else None
-            delta_trajectory = delta_schedule(
-                N, delta_mode_dropdown.value, delta_peak,
-                peak_at_n=delta_peak_at_slider.value, stop_at_n=stop_n,
-                flatness=delta_shape_slider.value,
-                start_value=delta_start_slider.value / 100,
-            )[1:]
+            # first authored delta (preview); the full set lives in delta_trajectories
+            delta_trajectory = delta_trajectories[0]
         case "analyze_rollout":
             # config.GUIDANCE_DELTA is None under sweeping; the swept vectors live in
             # experiment_params["GUIDANCE_DELTA"], picked by the dropdown's index.
@@ -905,77 +891,61 @@ def _(M, N, mo):
 
 @app.cell
 def _(mo):
-    delta_bounds_slider = mo.ui.slider(
-        steps=[5, 10, 25, 50, 100], value=10, label="bounds (%): ", show_value=True
-    )
-    delta_granularity_slider = mo.ui.slider(
-        steps=[0.1, 0.5, 1, 2, 5],
-        value=1,
-        label="granularity (%): ",
-        show_value=True,
-        debounce=True,
-    )
-    return delta_bounds_slider, delta_granularity_slider
+    # number of linear delta trajectories to author (each a sweep value of GUIDANCE_DELTA)
+    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="delta trajectories", show_value=True)
+    return (n_deltas_slider,)
 
 
 @app.cell
-def _(N, delta_bounds_slider, delta_granularity_slider, mo):
-    delta_shape_slider = mo.ui.slider(
-        start=0.5,
-        stop=10.0,
-        step=0.5,
-        value=0.5,
-        label="shape: ",
-        show_value=True,
-        debounce=True,
-    )
-    delta_peak_at_slider = mo.ui.slider(
-        start=1,
-        stop=N,
-        step=1,
-        value=N // 2 if N >1 else 1,
-        label="delta_peak @ n: ",
-        show_value=True,
-        debounce=True,
-    )
-    delta_peak_slider = mo.ui.slider(
-        -delta_bounds_slider.value,
-        delta_bounds_slider.value,
-        value=0,
-        step=delta_granularity_slider.value,
-        label="peak (%): ",
-        show_value=True,
-        debounce=True,
-    )
-
-    delta_start_slider = mo.ui.slider(
-        -delta_bounds_slider.value,
-        delta_bounds_slider.value,
-        value=0,
-        step=delta_granularity_slider.value,
-        label="start@ (%): ",
-        show_value=True,
-        debounce=True,
-    )
-
-    delta_mode_dropdown = mo.ui.dropdown(["linear", "sinusoidal"], value="sinusoidal", label="delta_mode: ")
-    stop_at_n_slider = mo.ui.slider(1, N, step=1, value=N, label="stop @ n: ", show_value=True, debounce=True)
-    stop_at_n_checkbox = mo.ui.checkbox(label="stop at n", value=False)
-    return (
-        delta_mode_dropdown,
-        delta_peak_at_slider,
-        delta_peak_slider,
-        delta_shape_slider,
-        delta_start_slider,
-        stop_at_n_checkbox,
-        stop_at_n_slider,
-    )
+def _(N, mo, n_deltas_slider, notebook_mode):
+    # per-delta linear params: start % , peak % , start@n , stop@n  (K rows)
+    if notebook_mode == "guided_rollout":
+        _dc = {}
+        for _i in range(n_deltas_slider.value):
+            _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label="start %")
+            _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %")
+            _dc[f"{_i}.start_at"] = mo.ui.slider(1, N, step=1, value=1, label="start@n", show_value=True)
+            _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, N, step=1, value=N, label="stop@n", show_value=True)
+        delta_controls = mo.ui.dictionary(_dc)
+    else:
+        delta_controls = mo.ui.dictionary({})
+    return (delta_controls,)
 
 
-@app.cell
-def _(delta_peak_slider):
-    delta_peak = delta_peak_slider.value / 100
-    return (delta_peak,)
+@app.cell(hide_code=True)
+def _(N, delta_controls, mo, n_deltas_slider, notebook_mode):
+    # linear (ramp-only) delta trajectories: 0 before start@n, ramp start%->peak% over
+    # [start@n, stop@n], 0 after stop@n.
+    def _linear_delta(N, start_pct, peak_pct, start_at, stop_at):
+        start, peak = start_pct / 100, peak_pct / 100
+        out = []
+        for _n in range(1, N + 1):                      # rollout steps 1..N
+            if start_at <= _n <= stop_at:
+                frac = (_n - start_at) / (stop_at - start_at) if stop_at > start_at else 1.0
+                out.append(start + (peak - start) * frac)
+            else:
+                out.append(0.0)
+        return out
+
+    if notebook_mode == "guided_rollout":
+        _dv = delta_controls.value
+        delta_trajectories = [
+            _linear_delta(N, _dv[f"{_i}.start"], _dv[f"{_i}.peak"],
+                          int(_dv[f"{_i}.start_at"]), int(_dv[f"{_i}.stop_at"]))
+            for _i in range(n_deltas_slider.value)
+        ]
+        # controls only; the trajectories are drawn on the rollout-trajectories chart's right axis
+        _rows = [
+            mo.hstack([mo.md(f"delta {_i}: "), delta_controls[f"{_i}.start"], delta_controls[f"{_i}.peak"],
+                       delta_controls[f"{_i}.start_at"], delta_controls[f"{_i}.stop_at"]],
+                      justify="start", align="center")
+            for _i in range(n_deltas_slider.value)
+        ]
+        delta_widget = mo.vstack([n_deltas_slider, *_rows], align="start")
+    else:
+        delta_trajectories = []
+        delta_widget = None
+    return delta_trajectories, delta_widget
 
 
 @app.cell
@@ -1016,8 +986,10 @@ def _(mo):
 
 
 @app.cell
-def _(T_slider):
-    T=T_slider.value
+def _(T_slider, config, notebook_mode):
+    # T (flow/sampling steps): the slider drives NEW unguided rollouts; in guided/analyze
+    # mode it must be the loaded rollout's T (config.T), which the data was generated with.
+    T = T_slider.value if notebook_mode == "unguided_rollout" else config.T
     return (T,)
 
 
@@ -1111,7 +1083,7 @@ def _(
     _rv = sweep_ranges.value
     def _sweep_row(ax):
         return mo.hstack(
-            [mo.md(f"`{ax}`"), sweep_ranges[f"{ax}.start"], sweep_ranges[f"{ax}.stop"],
+            [mo.md(f"`{ax}`:"), sweep_ranges[f"{ax}.start"], sweep_ranges[f"{ax}.stop"],
              sweep_ranges[f"{ax}.n"], sweep_ranges[f"{ax}.log"], mo.md(f"-> `{compute_axis_values(ax, _rv)}`")],
             justify="start", align="center",
         )
@@ -1120,12 +1092,12 @@ def _(
     _mode_num = list(dict.fromkeys(h for _m in _selected_modes for h in _MODE_HYPERS[_m] if h in NUMERIC_AXES))
 
     hypers_widget = mo.vstack([
-        mo.md("### Sweep authoring"),
-        mo.md("**Categorical** (multiselect):"),
+        mo.md("## Sweep"),
+        mo.md("**Common categorical**:"),
         mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, reg_type_select], justify="start"),
-        mo.md("**Common numeric** (start / stop / n):"),
+        mo.md("**Common numeric**:"),
         *[_sweep_row(ax) for ax in _COMMON_NUM],
-        mo.md(f"**Mode hypers** (union of {_selected_modes or 'none'}):"),
+        mo.md(f"**Specific**:"),
         *([_sweep_row(ax) for ax in _mode_num] if _mode_num else [mo.md("_none_")]),
     ], align="start")
 
@@ -1137,13 +1109,7 @@ def _(
 def _(
     M_N_widget,
     T_slider,
-    delta_bounds_slider,
-    delta_granularity_slider,
-    delta_mode_dropdown,
-    delta_peak_at_slider,
-    delta_peak_slider,
-    delta_shape_slider,
-    delta_start_slider,
+    delta_widget,
     guidance_reference_dropdown,
     inspect_states_widget_make,
     lambda_trajectory_plot,
@@ -1154,8 +1120,6 @@ def _(
     mo,
     notebook_mode,
     partition_dropdown,
-    stop_at_n_checkbox,
-    stop_at_n_slider,
     sweep_params_widget,
     traj_checks,
     trajectories_plot,
@@ -1176,17 +1140,6 @@ def _(
     mask_widget = mo.vstack([
         mask_mode_dropdown,
         mask_widget_controls, mask_widget_maps], align="start")
-    delta_widget = mo.hstack([
-        delta_mode_dropdown,
-        delta_start_slider,
-        delta_peak_slider,
-        delta_granularity_slider,
-        delta_bounds_slider,
-        delta_shape_slider,
-        delta_peak_at_slider,
-        stop_at_n_slider,
-        stop_at_n_checkbox,
-    ], justify="start")
 
     match notebook_mode:
         case "unguided_rollout":
@@ -1252,7 +1205,8 @@ def _(mo):
 def _(
     config,
     dpi_slider,
-    gt_N_slices,
+    get_slices,
+    gt_rollout,
     level,
     map_interactive,
     mask_corners,
@@ -1265,32 +1219,23 @@ def _(
     var,
     visualize_map,
 ):
-    weather_partition = (
-        partition
-        if notebook_mode in ("guided_rollout", "unguided_rollout")
-        else config.PARTITION
-    )
+    # the mask section shows the guided variable: guided/analyze pin (partition, var,
+    # level) to the loaded config; only the authoring (unguided) mode follows the
+    # browsing widgets. The other maps stay widget-driven via the global partition/var/level.
+    if notebook_mode == "unguided_rollout":
+        mask_partition, mask_var, mask_level = partition, var, level
+    else:
+        mask_partition, mask_var, mask_level = config.PARTITION, config.VAR, config.LEVEL
 
-    weather_var = (
-        var
-        if notebook_mode in ("guided_rollout", "unguided_rollout")
-        else config.VAR
-    )
-
-    weather_level = (
-        level
-        if notebook_mode in ("guided_rollout", "unguided_rollout")
-        else config.LEVEL
-    )
-
+    weather_slices = get_slices(gt_rollout, mask_partition, mask_var, mask_level)
     weather_map = visualize_map(
-        gt_N_slices[n],
+        weather_slices[n],
         suptitle=f"{timestamps[n]}",
-        title=f"partition={weather_partition} | var={weather_var} | level={weather_level}",
+        title=f"partition={mask_partition} | var={mask_var} | level={mask_level}",
         interactive=map_interactive,
-        vmin=np.min(gt_N_slices),
-        vmax=np.max(gt_N_slices),
-        center=np.mean(gt_N_slices),
+        vmin=np.min(weather_slices),
+        vmax=np.max(weather_slices),
+        center=np.mean(weather_slices),
         # mask_corners=mask_corners, # TODO: simplify to this
         rectangle_x=(mask_corners[0], mask_corners[1]),
         rectangle_y=(mask_corners[2], mask_corners[3]),
@@ -1304,24 +1249,24 @@ def _(
             ),
             names=["x", "y"],
         )
-    return (weather_map,)
+    return mask_level, mask_partition, mask_var, weather_map
 
 
 @app.cell
 def _(
     dpi_slider,
-    level,
     mask,
     mask_corners,
+    mask_level,
+    mask_partition,
+    mask_var,
     np,
-    partition,
-    var,
     visualize_map,
 ):
     mask_map = visualize_map(
         mask,
         suptitle="mask",
-        title=f"partition={partition} | var={var} | level={level}",
+        title=f"partition={mask_partition} | var={mask_var} | level={mask_level}",
         interactive=False,
         vmin=np.min(mask) if np.min(mask) < np.max(mask) else -0.001,
         vmax=np.max(mask) if np.min(mask) < np.max(mask) else 0.001,
@@ -1993,6 +1938,7 @@ def _():
 def _(
     config,
     cumulative_delta_trajectory,
+    delta_trajectories,
     delta_trajectory,
     dpi_slider,
     gt_trajectory,
@@ -2016,7 +1962,10 @@ def _(
 
     var_check = (var==config.VAR if notebook_mode in ("guided_rollout", "analyze_rollout") else False)
 
-    trajectories_plot = plot_trajectories(
+    import importlib as _importlib
+    import src.ui.plot_trajectories as _ptm
+    _importlib.reload(_ptm)
+    trajectories_plot = _ptm.plot_trajectories(
         timestamps=timestamps,
         var=var,
         m=m,
@@ -2031,7 +1980,11 @@ def _(
         target_trajectory=planned_guidance_trajectory if (traj_checks["planned_guidance"].value and var_check) else None,
         target_guidance_trajectory=target_guidance_trajectory if (traj_checks["target_guidance"].value and var_check) else None,
         ground_truth=gt_trajectory,
-        delta_trajectory=[0] +delta_trajectory if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
+        delta_trajectories=(
+            ([[0] + list(_t) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
+             else [[0] + list(delta_trajectory)])
+            if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
+        ),
         cumulative_delta_trajectory=[0] + list(cumulative_delta_trajectory) if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
         show_guided_mean=False,
         show_unguided_mean=False,
@@ -2215,13 +2168,14 @@ def _(
 
 
 @app.cell
-def _(gt_rollout, guided_xr, notebook_mode, ung_gui_xr):
+def _(gt_rollout, guided_xr, notebook_mode):
     from src.normalization import XarrayNormalizer
     if notebook_mode == "analyze_rollout":
         xnorm = XarrayNormalizer()
-        normalized_gui_xr = xnorm.normalize(guided_xr)
-        normalized_ung_gui_xr = xnorm.normalize(ung_gui_xr)
-        normalized_gt_xr = xnorm.normalize(
+        # raw (un-normalized) gt aligned to rollout coords. Normalization is deferred
+        # until AFTER the spatial reduction in the `red` cell: the affine, per-(var,level)
+        # normalization commutes with the spatial mean, so we never build a full-cube copy.
+        gt_n_xr = (
             gt_rollout.isel(time=slice(1, None))
             .rename({"time": "n"})
             # gt coords differ from rollout coords in float precision; assign exact
@@ -2233,42 +2187,46 @@ def _(gt_rollout, guided_xr, notebook_mode, ung_gui_xr):
                 level=guided_xr.level,
             )
         )
-    return normalized_gt_xr, normalized_gui_xr, normalized_ung_gui_xr, xnorm
+    return gt_n_xr, xnorm
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(
     aggregate_spatially_dropdown,
     clean_preds_xr,
     grads_xr,
+    gt_n_xr,
     gui_vfs_xr,
+    guided_xr,
     maybe_mask,
-    normalized_gt_xr,
-    normalized_gui_xr,
-    normalized_ung_gui_xr,
     notebook_mode,
+    ung_gui_xr,
     vfs_xr,
     xnorm,
 ):
-    # spatially-reduced cubes: heavy reductions happen here ONCE per data/mask change;
-    # sliders (m, n, t, k, variable, Δ, abs, bands) then only index these tiny arrays
+    # spatially-reduced cubes: built LAZILY on the dask-backed cubes, then computed in
+    # one fused pass -> dask streams chunks and never materializes a full cube. Sliders
+    # (m, n, t, k, variable, Δ, abs, bands) then only index these tiny arrays.
     if notebook_mode == "analyze_rollout":
+        import dask
+
         _sp = ("latitude", "longitude")
         _msk = lambda ds: maybe_mask(ds, aggregate_spatially_dropdown.value)
-        _sq = lambda ds: (_msk(ds).astype(float) ** 2).sum(dim=_sp)   # squared sums; sqrt after folding
+        _sq = lambda ds: (_msk(ds) ** 2).sum(dim=_sp)        # squared sum; sqrt after folding
         _mn = lambda ds: _msk(ds).mean(dim=_sp)
-        _dvf_full = gui_vfs_xr - vfs_xr
+        _nmn = lambda ds: xnorm.normalize(_mn(ds))           # normalize commutes with the spatial mean
+        _dvf = gui_vfs_xr - vfs_xr
         red = {
             "grads_l2": _sq(grads_xr),
             "vfs_l2": _sq(vfs_xr),
             "gui_vfs_l2": _sq(gui_vfs_xr),
-            "dvf_l2": _sq(_dvf_full),
-            "dvf_mean": _mn(_dvf_full),
-            "gui_ung_gui_mean": _mn(normalized_gui_xr - normalized_ung_gui_xr),
-            "gui_gt_mean": _mn(normalized_gui_xr - normalized_gt_xr),
-            # normalization is affine, so it commutes with the spatial mean
-            "clean_gt_mean": xnorm.normalize(_mn(clean_preds_xr)) - _mn(normalized_gt_xr),
+            "dvf_l2": _sq(_dvf),
+            "dvf_mean": _mn(_dvf),
+            "gui_ung_gui_mean": _nmn(guided_xr) - _nmn(ung_gui_xr),
+            "gui_gt_mean": _nmn(guided_xr) - _nmn(gt_n_xr),
+            "clean_gt_mean": _nmn(clean_preds_xr) - _nmn(gt_n_xr),
         }
+        red = dict(zip(red, dask.compute(*red.values())))    # fused: each cube read once
     else:
         red = None
     return (red,)
@@ -2595,11 +2553,15 @@ def _(
     sweep_params,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        grads_xr = get_rollout("grads", rollout_id).sel(sweep_params).compute()
-        vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params).compute()
-        clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params).compute()
-        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params).compute()
-        ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params).compute()
+        # Keep the heavy per-flow-step cubes LAZY: only `.sel` the sweep point here.
+        # The `red` cell reduces them and computes the tiny result, and the map cells
+        # materialize a single var/level via get_slices -> neither ever holds the full
+        # (m, n, t, level, lat, lon) cube in RAM.
+        grads_xr = get_rollout("grads", rollout_id).sel(sweep_params)
+        vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params)
+        clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params)
+        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params)
+        ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params)
         # FLOWGRAD_FREE has no guidance direction -> these trace containers are all-NaN.
         # Fill with 0 so the (not-applicable) trace plots render as flat zero instead of
         # crashing on NaN axis limits; the learned controls live in the FlowGrad
@@ -2956,6 +2918,8 @@ def _(
 @app.cell(hide_code=True)
 def _(
     N,
+    T,
+    clean_preds_slices,
     config,
     gt_N_slices,
     gt_curr,
@@ -2974,125 +2938,110 @@ def _(
     partition,
     plt,
     sweep_params_widget,
+    t,
+    t_slider,
     ung_M_N_slices,
     ung_curr,
     ung_gui_M_N_slices,
     ung_onl_curr,
     var,
 ):
-    # Power spectrum of single state slices (analyze mode), plus the spectral
-    # distance to gt over the rollout step n. Top panel: per-degree power ratio to
-    # gt at the selected n (gt flat at 1). Bottom panel: log-spectral distance to gt
-    # vs n for ung / ung_gui / gui. Reuses src.spectrum (private aliases).
+    # ===== Physical realism: power spectra + spectral distance + activity, over n and over t =====
     if notebook_mode == "analyze_rollout":
         from src.spectrum import (
-            power_spectrum as _power_spectrum,
-            log_spectral_distance as _lsd,
-            activity as _activity,
-            climatology_slice as _climatology_slice,
+            power_spectrum as _ps, log_spectral_distance as _lsd,
+            activity as _activity, climatology_slice as _climslice,
         )
+        from pathlib import Path as _Path
+        from datetime import timedelta as _timedelta
+        from src.paths import CLIM
+        import xarray as _xr
 
         _lat = gt_rollout.latitude.values
         _styles = {"gt": ("-", 2.4), "ung": ("--", 1.6), "ung_gui": (":", 2.0), "gui": ("-.", 1.6)}
+        _hdr = f"{var} @ lvl {level} (m={m}, n={n})"
 
-        # --- top: power spectrum (ratio to gt) at the selected n ---
-        _series = {
-            "gt": np.asarray(gt_curr),
-            "ung": np.asarray(ung_curr),
-            "ung_gui": np.asarray(ung_onl_curr),
-            "gui": np.asarray(gui_curr),
-        }
-        _spec = {k: _power_spectrum(v, _lat)[1] for k, v in _series.items()}
-        _deg = _power_spectrum(_series["gt"], _lat)[0]
-        _ref = _spec["gt"]
-
-        _fig, _ax = plt.subplots(figsize=(9, 5))
-        for _k in _series:
-            _ls, _lw = _styles[_k]
-            _ax.loglog(_deg[1:], _spec[_k][1:] / _ref[1:], _ls, lw=_lw, alpha=0.8, label=_k)
-        _ax.axhline(1.0, color="grey", lw=0.8, alpha=0.5)
-        _ax.set_xlabel(r"spherical-harmonic degree $l$")
-        _ax.set_ylabel("power / gt power")
-        _ax.set_title(f"Power spectrum (ratio to gt) - {var} @ level {level}  (m={m}, n={n})")
-        _ax.legend()
-        _ax.grid(True, which="both", alpha=0.3)
-        _fig.tight_layout()
-
-        # --- bottom: log-spectral distance to gt over n (for fixed m) ---
-        _ns = list(range(N))
-        _lsd_over_n = {"ung": [], "ung_gui": [], "gui": []}
-        for _ni in _ns:
-            _gt_spec = _power_spectrum(np.asarray(gt_N_slices[_ni]), _lat)[1]
-            _fields_n = {
-                "ung": ung_M_N_slices[m][_ni],
-                "ung_gui": ung_gui_M_N_slices[m][_ni],
-                "gui": gui_M_N_slices[m][_ni],
-            }
-            for _k, _f in _fields_n.items():
-                _lsd_over_n[_k].append(_lsd(_power_spectrum(np.asarray(_f), _lat)[1], _gt_spec))
-
-        _fig2, _ax2 = plt.subplots(figsize=(9, 4))
-        for _k, _vals in _lsd_over_n.items():
-            _ls, _lw = _styles[_k]
-            _ax2.plot(_ns, _vals, _ls, lw=_lw, marker="o", label=_k)
-        _ax2.set_xlabel("rollout step $n$")
-        _ax2.set_ylabel("LSD vs gt")
-        _ax2.set_title(f"Spectral distance to gt over n - {var} @ level {level}  (m={m})")
-        _ax2.set_xticks(_ns)
-        _ax2.legend()
-        _ax2.grid(True, alpha=0.3)
-        _fig2.tight_layout()
-
-        # --- activity over n (latitude-weighted spatial std of the climatology-removed
-        # forecast). Uses the real ERA5 climatology (era5_240_clim.nc) when present,
-        # else falls back to the zonal-mean (eddy) proxy. ---
-        from pathlib import Path as _Path
-        from datetime import timedelta as _timedelta
-        from src.paths import DATA as _DATA
-        import xarray as _xr
-        _clim_path = _Path(_DATA) / "era5_240_clim.nc"
-        _clim = _xr.open_dataset(_clim_path) if _clim_path.exists() else None
+        _clim = _xr.open_dataset(CLIM) if CLIM.exists() else None
         _clim_level = level if partition == "level" else None
+        def _clim_at(_ni):
+            return (_climslice(_clim, var, config.START_TS + _timedelta(days=_ni), _lat, level=_clim_level)
+                    if _clim is not None else None)
+        _act_src = "ERA5 clim" if _clim is not None else "zonal proxy"
 
-        _act_over_n = {"gt": [], "ung": [], "ung_gui": [], "gui": []}
-        for _ni in _ns:
-            _clim_slice = (
-                _climatology_slice(_clim, var, config.START_TS + _timedelta(days=_ni), _lat, level=_clim_level)
-                if _clim is not None else None
-            )
-            _fields_act = {
-                "gt": gt_N_slices[_ni],
-                "ung": ung_M_N_slices[m][_ni],
-                "ung_gui": ung_gui_M_N_slices[m][_ni],
-                "gui": gui_M_N_slices[m][_ni],
-            }
-            for _k, _f in _fields_act.items():
-                _act_over_n[_k].append(_activity(np.asarray(_f), _lat, climatology=_clim_slice))
+        _deg = _ps(np.asarray(gt_N_slices[0]), _lat)[0]
+        _gt_spec = {_ni: _ps(np.asarray(gt_N_slices[_ni]), _lat)[1] for _ni in range(N)}
+        _ns, _ts = list(range(N)), list(range(T))
 
-        _fig3, _ax3 = plt.subplots(figsize=(9, 4))
-        for _k, _vals in _act_over_n.items():
+        def _html(_fig):
+            _fig.tight_layout(); _h = mo.as_html(_fig); plt.close(_fig); return _h
+
+        # ---------- power spectrum ratio to gt: @ step n  |  @ flow step t ----------
+        _fig, _ax = plt.subplots(figsize=(8, 4.5))
+        _refn = _gt_spec[n]
+        for _k, _f in {"gt": gt_curr, "ung": ung_curr, "ung_gui": ung_onl_curr, "gui": gui_curr}.items():
             _ls, _lw = _styles[_k]
-            _ax3.plot(_ns, _vals, _ls, lw=_lw, marker="o", label=_k)
-        _ax3.set_xlabel("rollout step $n$")
-        _ax3.set_ylabel("activity (std of anomaly)")
-        _act_src = "ERA5 clim" if _clim is not None else "zonal-mean proxy"
-        _ax3.set_title(f"Activity over n [{_act_src}] - {var} @ level {level}  (m={m})")
-        _ax3.set_xticks(_ns)
-        _ax3.legend()
-        _ax3.grid(True, alpha=0.3)
-        _fig3.tight_layout()
+            _ax.loglog(_deg[1:], _ps(np.asarray(_f), _lat)[1][1:] / _refn[1:], _ls, lw=_lw, alpha=0.8, label=_k)
+        _ax.axhline(1.0, color="grey", lw=0.8, alpha=0.5)
+        _ax.set_xlabel(r"degree $l$"); _ax.set_ylabel("power / gt"); _ax.set_title(f"Spectrum ratio @ step n - {_hdr}")
+        _ax.legend(); _ax.grid(True, which="both", alpha=0.3)
+        _spec_n = _html(_fig)
+
+        _fig, _ax = plt.subplots(figsize=(8, 4.5))
+        _ax.loglog(_deg[1:], _ps(np.asarray(gui_curr), _lat)[1][1:] / _refn[1:], "-.", lw=1.6, alpha=0.7, label="gui (final)")
+        _ax.loglog(_deg[1:], _ps(np.asarray(clean_preds_slices[m][n][t]), _lat)[1][1:] / _refn[1:],
+                   "-", lw=2.0, color="crimson", alpha=0.9, label=f"gui clean pred @ t={t}")
+        _ax.axhline(1.0, color="grey", lw=0.8, alpha=0.5)
+        _ax.set_xlabel(r"degree $l$"); _ax.set_ylabel("power / gt"); _ax.set_title(f"Spectrum ratio @ flow t={t} - {_hdr}")
+        _ax.legend(); _ax.grid(True, which="both", alpha=0.3)
+        _spec_t = _html(_fig)
+
+        # ---------- spectral distance (LSD) to gt: over n  |  over t ----------
+        _fig, _ax = plt.subplots(figsize=(8, 4))
+        for _k, _sl in {"ung": ung_M_N_slices, "ung_gui": ung_gui_M_N_slices, "gui": gui_M_N_slices}.items():
+            _ls, _lw = _styles[_k]
+            _ax.plot(_ns, [_lsd(_ps(np.asarray(_sl[m][_ni]), _lat)[1], _gt_spec[_ni]) for _ni in _ns], _ls, lw=_lw, marker="o", label=_k)
+        _ax.set_xlabel("rollout step $n$"); _ax.set_ylabel("LSD vs gt"); _ax.set_title(f"Spectral distance over n - {_hdr}")
+        _ax.set_xticks(_ns); _ax.legend(); _ax.grid(True, alpha=0.3)
+        _lsd_n = _html(_fig)
+
+        _fig, _ax = plt.subplots(figsize=(8, 4))
+        _ax.plot(_ts, [_lsd(_ps(np.asarray(clean_preds_slices[m][n][_ti]), _lat)[1], _gt_spec[n]) for _ti in _ts],
+                 "-", color="crimson", marker=".", label="gui clean pred")
+        _ax.set_xlabel("flow step $t$"); _ax.set_ylabel("LSD vs gt"); _ax.set_title(f"Spectral distance over t - {_hdr}")
+        _ax.legend(); _ax.grid(True, alpha=0.3)
+        _lsd_t = _html(_fig)
+
+        # ---------- activity (eddy spatial std): over n  |  over t ----------
+        _clim_n = _clim_at(n)
+        _fig, _ax = plt.subplots(figsize=(8, 4))
+        for _k in ["gt", "ung", "ung_gui", "gui"]:
+            _ls, _lw = _styles[_k]
+            _vals = []
+            for _ni in _ns:
+                _f = gt_N_slices[_ni] if _k == "gt" else {"ung": ung_M_N_slices, "ung_gui": ung_gui_M_N_slices, "gui": gui_M_N_slices}[_k][m][_ni]
+                _vals.append(_activity(np.asarray(_f), _lat, climatology=_clim_at(_ni)))
+            _ax.plot(_ns, _vals, _ls, lw=_lw, marker="o", label=_k)
+        _ax.set_xlabel("rollout step $n$"); _ax.set_ylabel("activity"); _ax.set_title(f"Activity over n [{_act_src}] - {_hdr}")
+        _ax.set_xticks(_ns); _ax.legend(); _ax.grid(True, alpha=0.3)
+        _act_n = _html(_fig)
+
+        _fig, _ax = plt.subplots(figsize=(8, 4))
+        _ax.plot(_ts, [_activity(np.asarray(clean_preds_slices[m][n][_ti]), _lat, climatology=_clim_n) for _ti in _ts],
+                 "-", color="crimson", marker=".", label="gui clean pred")
+        _ax.axhline(_activity(np.asarray(gt_N_slices[n]), _lat, climatology=_clim_n), color="black", ls="--", lw=1.2, label="gt")
+        _ax.set_xlabel("flow step $t$"); _ax.set_ylabel("activity"); _ax.set_title(f"Activity over t [{_act_src}] - {_hdr}")
+        _ax.legend(); _ax.grid(True, alpha=0.3)
+        _act_t = _html(_fig)
 
         power_spectrum_widget = mo.vstack([
+            mo.md("## Physical realism"),
             sweep_params_widget,
             mask_widget_controls,
-            mo.hstack([m_slider, n_slider], justify="start"),
-            mo.as_html(_fig),
-            mo.as_html(_fig2),
-            mo.as_html(_fig3),
+            mo.hstack([m_slider, n_slider, t_slider], justify="start"),
+            mo.hstack([_spec_n, _spec_t], justify="start"),
+            mo.hstack([_lsd_n, _lsd_t], justify="start"),
+            mo.hstack([_act_n, _act_t], justify="start"),
         ], align="start")
-        plt.close(_fig)
-        plt.close(_fig2)
-        plt.close(_fig3)
     else:
         power_spectrum_widget = None
 

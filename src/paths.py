@@ -1,27 +1,26 @@
-import os
 from pathlib import Path
 
-
+# repo
 ROOT = Path(__file__).parent.parent.resolve()
 print(f"ROOT @ {ROOT}")
 
-DATA = ROOT / "data"
-
-# TODO: how can I define multiple sources and route to the correct one?
-
+SWITCHDRIVE_DATA = ROOT / "data"
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
-    DATA = Path("~", "switchdrive").expanduser()
-    # DATA = ROOT / "local_data"
+    SWITCHDRIVE_DATA = Path("~", "switchdrive").expanduser()
 
-print(f"DATA @ {DATA}")
+# local root for heavy stuff: ground-truth ERA5 + climatology
+LOCAL_DATA = ROOT / "local_data"
 
-_fast = os.environ.get("FAST_MODELSTORE")
-if _fast and Path(_fast, "archesweathergen").exists():
-    MODELSTORE = Path(_fast)
-elif Path(ROOT, "modelstore").exists():
+ERA5 = LOCAL_DATA / "era5"
+CLIM = LOCAL_DATA / "stats" / "era5_240_clim.nc"
+
+ROLLOUTS = SWITCHDRIVE_DATA / "rollouts"
+print(f"DATA @ {SWITCHDRIVE_DATA}  |  GT_DATA @ {LOCAL_DATA}  |  CLIM @ {CLIM}")
+
+if Path(ROOT, "modelstore").exists():
     MODELSTORE = Path(ROOT, "modelstore")
 else:
-    MODELSTORE = DATA / "modelstore"
+    MODELSTORE = SWITCHDRIVE_DATA / "modelstore"
 print(f"MODELSTORE @ {MODELSTORE}")
 
 DET_MODEL_PATHS = [
@@ -31,5 +30,3 @@ DET_MODEL_PATHS = [
     MODELSTORE / "archesweather-m-skip-seed1",
 ]
 GEN_MODEL_PATH = MODELSTORE / "archesweathergen"
-ROLLOUTS = DATA / "rollouts"
-ERA5 = DATA / "era5"

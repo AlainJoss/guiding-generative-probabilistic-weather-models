@@ -69,8 +69,10 @@ def rollout(
     # for testing purposes
     flow_model.T=T
     # create objects from config
-    x_cond = get_x_cond(config.START_TS, config.N)
-    x_cond = batchify_and_move(x_cond, flow_model.device)
+    # the initial condition is shared by every member; advance_x_cond returns fresh
+    # dicts and never mutates it, so we keep it and reset x_cond to it per member.
+    x_cond_init = get_x_cond(config.START_TS, config.N)
+    x_cond_init = batchify_and_move(x_cond_init, flow_model.device)
 
     if guidance_flag:
         var_idx = get_var_idx(config.PARTITION, config.VAR)
@@ -79,7 +81,7 @@ def rollout(
 
         delta_trajectory = config.GUIDANCE_DELTA
         lambda_schedule = T_schedule(T, config.ALPHA, config.W)
-        mask_tdict = get_mask_tdict(x_cond["state"], config.PARTITION, var_idx, level_idx, mask_2d)
+        mask_tdict = get_mask_tdict(x_cond_init["state"], config.PARTITION, var_idx, level_idx, mask_2d)
         guidance_type = config.GUIDANCE_MODE
         # GT reference: ground-truth field per step (member-independent). gt rollout holds
         # N+1 states (initial + N forecasts); guidance step n's valid time is index n+1.
@@ -95,6 +97,7 @@ def rollout(
 
     # run
     for m in range(config.M):
+        x_cond = x_cond_init  # reset to the initial condition at the start of every member
         for n in range(config.N):
             print(f"m={m} - n={n}")
             # runs both if guidance
@@ -106,29 +109,36 @@ def rollout(
                 mask=None,
                 x_hat_ung=None, 
                 lambda_schedule=None,
-                seed= m + 1000 * n,  # + batch_nb * 10**6
+                seed= m + 1000 * n,  # + batch_nb * 10**6
             )
             x_hat_curr = x_hat_ung
 
             if guidance_flag:
-                x_ung_field = flow_model.denormalize(x_hat_ung.detach().clone())
-                # data-loss reference: GT field (step n) or the unguided member itself
-                x_ref = (
-                    gt_state_to_tdict(gt_ds, n + 1, flow_model.device)
-                    if config.GUI_REF == "GT" else x_ung_field
-                )
-                x_hat_gui, sampling_trace = flow_model.sample(
-                    guidance_flag=True,
-                    guidance_type=guidance_type,
-                    x_cond=x_cond,
-                    guidance_kwargs=guidance_kwargs,
-                    delta_t=delta_trajectory[n],
-                    mask=mask_tdict,
-                    x_hat_ung=x_ung_field,
-                    x_ref=x_ref,
-                    lambda_schedule=lambda_schedule,
-                    seed = m + 1000 * n,  # + batch_nb * 10**6
-                )
+                delta_n = delta_trajectory[n]
+                if float(delta_n) == 0.0:
+                    # δ=0 -> no guidance: don't produce a guided state, just copy the
+                    # unguided online sample into gui (no second sampling pass, no traces)
+                    x_hat_gui = x_hat_ung
+                    sampling_trace = {}
+                else:
+                    x_ung_field = flow_model.denormalize(x_hat_ung.detach().clone())
+                    # data-loss reference: GT field (step n) or the unguided member itself
+                    x_ref = (
+                        gt_state_to_tdict(gt_ds, n + 1, flow_model.device)
+                        if config.GUI_REF == "GT" else x_ung_field
+                    )
+                    x_hat_gui, sampling_trace = flow_model.sample(
+                        guidance_flag=True,
+                        guidance_type=guidance_type,
+                        x_cond=x_cond,
+                        guidance_kwargs=guidance_kwargs,
+                        delta_t=delta_n,
+                        mask=mask_tdict,
+                        x_hat_ung=x_ung_field,
+                        x_ref=x_ref,
+                        lambda_schedule=lambda_schedule,
+                        seed = m + 1000 * n,  # + batch_nb * 10**6
+                    )
                 x_hat_curr = x_hat_gui
                 
             if guidance_flag:
@@ -161,7 +171,7 @@ def rollout(
 
                 # FlowGrad learns its schedule/controls -> persist the small diagnostics
                 # (no weather-shaped container) to a JSON sidecar for the notebook.
-                if guidance_type in ("FG", "FGF"):
+                if guidance_type in ("FG", "FGF") and sampling_trace:
                     fg = sampling_trace.get("flowgrad", {})
                     control_norm = fg.get("control_norm")
                     append_diagnostics(rollout_dir, {

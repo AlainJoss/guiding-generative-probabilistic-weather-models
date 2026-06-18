@@ -234,10 +234,10 @@ def _(level, surface):
 
 @app.cell
 def _():
-    from src.paths import DATA
+    from src.paths import SWITCHDRIVE_DATA
     from pathlib import Path
 
-    return DATA, Path
+    return SWITCHDRIVE_DATA, Path
 
 
 @app.cell(disabled=True)
