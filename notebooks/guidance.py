@@ -949,8 +949,10 @@ def _(N, delta_controls, mo, n_deltas_slider, notebook_mode):
 
 
 @app.cell
-def _(mask_mode_dropdown):
-    mask_mode=mask_mode_dropdown.value
+def _(config, mask_mode_dropdown, notebook_mode):
+    # guided/analyze use the loaded rollout's mask, so mask_mode is pinned to config
+    # (the dropdown is hidden in those modes); only authoring (unguided) reads the widget.
+    mask_mode = mask_mode_dropdown.value if notebook_mode == "unguided_rollout" else config.MASK_MODE
     return (mask_mode,)
 
 
@@ -1137,6 +1139,9 @@ def _(
         justify="start",
         align="start",
     )
+    # authoring (unguided) exposes the mask coord controls; guided/analyze show only the
+    # static, config-pinned mask map (the partition/var/level controls live in the
+    # inspect-states / physical-realism sections for browsing the other maps).
     mask_widget = mo.vstack([
         mask_mode_dropdown,
         mask_widget_controls, mask_widget_maps], align="start")
@@ -1155,21 +1160,19 @@ def _(
         case "guided_rollout":
             trajectory_widget=mo.vstack([
                 guidance_reference_dropdown,
-                mask_mode_dropdown,
-                mask_widget_controls,
                 m_n_widget,
                 delta_widget,
                 mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot], justify="start", align="start")
             ], align="start")
+            mask_widget = mask_widget_maps
             inspect_states_widget=inspect_states_widget_make
-        case "analyze_rollout":   
+        case "analyze_rollout":
             trajectory_widget=mo.vstack([
                 sweep_params_widget,
-                mask_widget_controls,
                 m_n_widget,
                 mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot, lambda_trajectory_plot], justify="start", align="start")
             ], align="start")
-            mask_widget = mo.vstack([sweep_params_widget, mo.hstack([weather_map, mask_map], justify="start")], align="start")
+            mask_widget = mo.vstack([sweep_params_widget, mask_widget_maps], align="start")
             inspect_states_widget=inspect_states_widget_make
         case _:
             pass

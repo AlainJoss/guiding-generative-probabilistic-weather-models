@@ -13,7 +13,7 @@ import torch
 import numpy as np
 import dask.array as da
 
-from src.paths import ERA5, MODELSTORE, ROLLOUTS
+from src.paths import ERA5, MODELSTORE, ROLLOUTS, GT
 from src.dimensions import VARIABLES_DICT, LEVELS_DICT, PARTITIONS, SPATIAL_COORDS
 from src.rollout_config import RolloutConfig
 
@@ -54,10 +54,10 @@ def get_device():
 # @functools.lru_cache(maxsize=None)
 def get_xr_dataset(year: int):
     if year == 2026:
-        path = ERA5 / "arches_era5_26.nc"
+        path = GT / "arches_era5_26.nc"
         ds = xr.open_dataset(path)
         return ds
-    path = ERA5 / "arches_era5.nc"
+    path = GT / "arches_era5.nc"
     ds = xr.open_dataset(path)
     return ds
 
