@@ -442,6 +442,7 @@ class GuidedFlow(BaseLightningModule):
                     delta_t=delta_t,
                     mask=mask,
                     z_t=z_t,
+                    s_t=s_t,  # flow noise level; LBG anneals its MC cloud as r_t * s_t (DPS ignores)
                     create_graph=create_graph,
                     **guidance_kwargs,
                 )
@@ -546,7 +547,11 @@ class GuidedFlow(BaseLightningModule):
             loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
         )
         gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-        return self.normalize_grad(gui_vec)
+        # gradient normalization disabled (DPS/LBG): return the raw, residual-proportional
+        # gradient so the step self-brakes as the masked-mean nears the target -- tune lambda
+        # for this raw-gradient scale. Re-enable by uncommenting the line below.
+        # return self.normalize_grad(gui_vec)
+        return gui_vec
 
 
     def lbg_guidance(
@@ -564,14 +569,19 @@ class GuidedFlow(BaseLightningModule):
         beta_reg=1e-4,
         n_mc=4,
         r_t=1.0,
+        s_t=1.0,
         create_graph=False,
         **extra,
     ):
+        # anneal the MC cloud with the flow noise level: effective sigma = r_t * s_t.
+        # SIGMA_MC (=r_t) is now a dimensionless multiplier (~1), and the cloud shrinks
+        # as the clean prediction sharpens (s_t -> 0), matching the posterior std of x0|x_t.
+        sigma_t = r_t * s_t
         per_sample_losses = []
 
         for _ in range(n_mc):
             x_i_norm = x_hat_t_norm.apply(
-                lambda x: x + r_t * torch.empty_like(x).normal_(generator=self.generator)
+                lambda x: x + sigma_t * torch.empty_like(x).normal_(generator=self.generator)
             )
             x_i = self.denormalize(x_i_norm)
 
@@ -584,7 +594,11 @@ class GuidedFlow(BaseLightningModule):
         losses = torch.stack(per_sample_losses)
         loss_ = math.log(n_mc) - torch.logsumexp(-losses, dim=0)
         gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-        return self.normalize_grad(gui_vec)
+        # gradient normalization disabled (DPS/LBG): return the raw, residual-proportional
+        # gradient so the step self-brakes as the masked-mean nears the target -- tune lambda
+        # for this raw-gradient scale. Re-enable by uncommenting the line below.
+        # return self.normalize_grad(gui_vec)
+        return gui_vec
 
 
     ### flow variant 3 ###
@@ -643,10 +657,10 @@ class GuidedFlow(BaseLightningModule):
                     reg_type=reg_type,
                     beta_reg=beta_reg,
                 )
-                # unit-normalize the latent shift (same rationale as the DPS/LBG
-                # guidance vector): the inner SGD fixes dz's direction, the fixed
-                # lambda schedule alone controls its magnitude.
-                delta_z = self.normalize_grad(delta_z)
+                # keep the inner SGD's own magnitude (NOT unit-normalized): the converged
+                # dz shrinks as the masked-mean approaches the target, so the correction
+                # self-brakes instead of overshooting. lambda_schedule is now a gain on
+                # that true-magnitude shift (set alpha=0, w=1 for a flat gain of 1).
 
                 with torch.no_grad():
                     # unguided field at the current latent (trace baseline)
@@ -655,7 +669,7 @@ class GuidedFlow(BaseLightningModule):
                         self.get_velocity_input_state(z_t, x_cond), z_t, s_t,
                     )
 
-                    # apply the backward shift in latent space (lambda anneals it)
+                    # apply the backward shift in latent space (lambda scales it)
                     z_t = tensordict_apply(
                         lambda z, d: z + lambda_schedule[i] * d, z_t, delta_z
                     )

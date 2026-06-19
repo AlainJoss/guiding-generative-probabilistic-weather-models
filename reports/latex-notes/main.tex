@@ -490,6 +490,28 @@ Because the optimized term can be computed in closed form (due to the $f:=\text{
 This is of course not what we want, since $r_{\text{guide}}$ is not physically meaningful, and the procedure itself is just a hack to make guidance more reliable than the first version.
 
 
+\section{our approach}
+
+Sampling the generative flow draws from the prior $p(x)$ — sharp, physically consistent states. Guidance turns this into posterior sampling:
+
+$$p(x\mid y)\ \propto\ \underbrace{p(x)}{\text{prior}};\underbrace{p(y\mid x)}{\text{likelihood (your target)}}$$
+
+The reverse ODE/SDE needs the posterior score, which decomposes exactly:
+
+$$\nabla_{x_t}\log p_t(x_t\mid y);=;\underbrace{\nabla_{x_t}\log p_t(x_t)}{\text{the velocity field}};+;\underbrace{\nabla{x_t}\log p(y\mid x_t)}_{\text{the guidance gradient}}$$
+
+So the velocity field is the prior score, and DPS/LBG/UG inject the likelihood score on top. You're not fighting the vector field — you're completing it into the posterior. That's why it's "gradients against the velocity": both are scores, added.
+
+$\lambda$ is there because the second term is approximated. You don't have $\nabla\log p(y\mid x_t)$ in closed form; DPS uses $\nabla\log p(y\mid \hat x_0(x_t))$ via the clean prediction (Tweedie). That approximation has the right direction but an uncalibrated magnitude that varies with noise level —$\lambda$ calibrates it so the likelihood pull balances the prior at each step. Tune it wrong → either ignore the target or overshoot off-manifold. It's annoying, but it's calibrating an approximation, not an arbitrary hack.
+
+There is a way to do honest gradient descent toward the target — but on the generative process, not the output:
+
+$$\min_{u}; \mathcal L\big(\Phi(z, u),,\text{target}\big);+;\gamma\lVert u\rVert^2,\qquad \Phi=\text{flow ODE}$$
+
+optimize the latent/controls $u$, backpropagating through the whole flow $\Phi$, so the final sample hits the target while remaining a generative output. That's exactly your FG (CONTROL GAMMA is the $\gamma$ keeping controls small - on-manifold; no per-step $\lambda$). So your intuition is right — it's just that "directly" has to mean through the generative map, not on the pixels.
+
+
+
 % \bibliographystyle{plain}
 % \bibliography{refs}
 

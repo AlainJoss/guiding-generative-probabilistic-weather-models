@@ -949,10 +949,11 @@ def _(N, delta_controls, mo, n_deltas_slider, notebook_mode):
 
 
 @app.cell
-def _(config, mask_mode_dropdown, notebook_mode):
-    # guided/analyze use the loaded rollout's mask, so mask_mode is pinned to config
-    # (the dropdown is hidden in those modes); only authoring (unguided) reads the widget.
-    mask_mode = mask_mode_dropdown.value if notebook_mode == "unguided_rollout" else config.MASK_MODE
+def _(mask_mode_dropdown):
+    # mask_mode comes from the dropdown in every mode: authoring selection in
+    # unguided/guided, and the sweep selector in analyze. (MASK_MODE is a swept axis,
+    # so the scalar config.MASK_MODE is None -- don't read it here.)
+    mask_mode = mask_mode_dropdown.value
     return (mask_mode,)
 
 
@@ -2617,6 +2618,9 @@ def _(
         guided_vfs_slice = guided_vfs_slices[m][n][t]
         vfs_slice = vfs_slices[m][n][t]
         vf_gui_prev_diff_slice = vfs_slice - (guided_vfs_slices[m][n][t-1] if t>0 else guided_vfs_slices[m][n][t])
+        # velocity-field evolution between consecutive flow steps (base vs guided)
+        vf_prev_diff_slice = vfs_slice - (vfs_slices[m][n][t-1] if t>0 else vfs_slices[m][n][t])
+        guided_vf_prev_diff_slice = guided_vfs_slice - (guided_vfs_slices[m][n][t-1] if t>0 else guided_vfs_slices[m][n][t])
     return (
         clean_preds_diff_slice,
         clean_preds_slices,
@@ -2624,9 +2628,11 @@ def _(
         diff_gt_clean_pred_slice,
         diff_gt_ung_onl_slice,
         grads_slice,
+        guided_vf_prev_diff_slice,
         guided_vfs_slice,
         ung_onl_clean_diff_slice,
         vf_gui_prev_diff_slice,
+        vf_prev_diff_slice,
         vfs_slice,
     )
 
@@ -2647,6 +2653,7 @@ def _(
     dpi_slider,
     grads_slice,
     gt_curr,
+    guided_vf_prev_diff_slice,
     guided_vfs_slice,
     m,
     mask,
@@ -2659,6 +2666,7 @@ def _(
     ung_onl_clean_diff_slice,
     ung_onl_curr,
     vf_gui_prev_diff_slice,
+    vf_prev_diff_slice,
     vfs_slice,
     visualize_map,
     zoom_centers,
@@ -2681,6 +2689,8 @@ def _(
             ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
             ("diff_vfs_map", diff_vfs_slice, r"$\text{vf}^{\text{gui}}_t - \text{vf}_t$", -0.001, 0.001),
             ("vf_gui_prev_diff_map", vf_gui_prev_diff_slice, r"$\text{vf}_t - \text{vf}^{\text{gui}}_{t-1}$", -0.001, 0.001),
+            ("vf_prev_diff_map", vf_prev_diff_slice, r"$\text{vf}_t - \text{vf}_{t-1}$", -0.001, 0.001),
+            ("guided_vf_prev_diff_map", guided_vf_prev_diff_slice, r"$\text{vf}^{\text{gui}}_t - \text{vf}^{\text{gui}}_{t-1}$", -0.001, 0.001),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
         ]
 
@@ -2722,6 +2732,8 @@ def _(
         diff_vfs_map = maps["diff_vfs_map"]
         vf_gui_prev_diff_map = maps["vf_gui_prev_diff_map"]
         diff_grads_map = maps["diff_grads_map"]
+        vf_prev_diff_map = maps["vf_prev_diff_map"]
+        guided_vf_prev_diff_map = maps["guided_vf_prev_diff_map"]
     return (
         clean_pred_map,
         diff_grads_map,
@@ -2729,11 +2741,13 @@ def _(
         diff_vfs_map,
         grads_map,
         gt_state_map,
+        guided_vf_prev_diff_map,
         guided_vfs_map,
         ung_onl_clean_diff_map,
         ung_onl_map,
         ung_state_map,
         vf_gui_prev_diff_map,
+        vf_prev_diff_map,
         vfs_map,
     )
 
@@ -2741,7 +2755,7 @@ def _(
 @app.cell
 def _(mo):
     flow_checks = mo.ui.dictionary({n: mo.ui.checkbox(label=n, value=True) for n in (
-        "gt & ung states", "gui states", "gui_t diffs", "grads", "vfs", "vf diffs",
+        "gt & ung states", "gui states", "gui_t diffs", "grads", "vfs", "vf diffs", "vf evolution",
     )})
     return (flow_checks,)
 
@@ -2767,6 +2781,7 @@ def _(
     flow_checks,
     grads_map,
     gt_state_map,
+    guided_vf_prev_diff_map,
     guided_vfs_map,
     level_slider,
     m_slider,
@@ -2782,6 +2797,7 @@ def _(
     ung_state_map,
     var_dropdown,
     vf_gui_prev_diff_map,
+    vf_prev_diff_map,
     vfs_map,
     zoom_slider,
 ):
@@ -2825,6 +2841,7 @@ def _(
             ("grads", [grads_map, diff_grads_map]),
             ("vfs", [vfs_map, guided_vfs_map]),
             ("vf diffs", [vf_gui_prev_diff_map, diff_vfs_map]),
+            ("vf evolution", [vf_prev_diff_map, guided_vf_prev_diff_map]),
         ]
 
         flow_widget_make = mo.vstack(

@@ -11,6 +11,7 @@ sigmoud or poisson shape --> reach it in 10 days and have a function that impose
 define extremes
 start much prior to heatwave
 there are regions that have era5 anomalies
+how do vf and gui_vec interplay and is there a rule?
 
 Done:
 - Order variables in legend
@@ -32,18 +33,18 @@ Experiment runner:
 ```bash
 python -m src.run --rollout_id 2026-06-18_10:17:52 --rollout_type gui
 python -m src.run --rollout_id 2026-06-18_09:39:05 --rollout_type gui
-python -m src.run --rollout_id 2026-06-17_14:58:51 --rollout_type ung gui
+python -m src.run --rollout_id 2026-06-19_11:36:43 --rollout_type ung gui
 
 ```
 
 Terminal setup:
 ```bash
-# on Renku
+# on Renku only once after creating the session 
 cd guiding-generative-probabilistic-weather-models
-ln -s ../data data
-mkdir modelstore
+ln -s ../data data 
+mkdir modelstore stats
 cp -r data/modelstore/* modelstore/
-# or rsync -av data/modelstore/ guiding-generative-probabilistic-weather-models/modelstore/
+cp -r data/stats/* stats/
 
 # locally
 ln -s ~/switchdrive data

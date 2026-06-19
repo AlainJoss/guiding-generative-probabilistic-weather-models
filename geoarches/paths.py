@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent.resolve()
@@ -10,9 +9,14 @@ DATA = ROOT / "data"
 if ROOT.parents[0] == Path("/Users/alain/Desktop/master-thesis"):
     DATA = Path("~", "switchdrive").expanduser()
 
-STATS_PATH = DATA / "stats"
-_fast = os.environ.get("FAST_MODELSTORE")
-if _fast and Path(_fast, "archesweather-m-seed0").exists():
-    MODELSTORE = Path(_fast)
+# prefer a fast local copy at ROOT/stats, else the data mount
+if Path(ROOT, "stats").exists():
+    STATS_PATH = Path(ROOT, "stats")
+else:
+    STATS_PATH = DATA / "stats"
+
+# prefer a fast local copy at ROOT/modelstore (mirrors src/paths.py), else the data mount
+if Path(ROOT, "modelstore").exists():
+    MODELSTORE = Path(ROOT, "modelstore")
 else:
     MODELSTORE = DATA / "modelstore"

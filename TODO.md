@@ -24,10 +24,21 @@ Experiments:
 - add flow grad to guidance modes
 
 Communicate:
+- marimo app tour and all the explanations with math formulas
+- visualization of the pipeline
 - serve one experiment on some cloud machine for them to access and play around with
 - explain pipeline and code base visually
+- report time and memory complexity of algos
 
 Rollouts:
+- enable absolute values on the maps and add own scale dropdown to all widgets
+- compare in and outside mask and also all other possible comparisons
+- enable collapsing markdown cells
+- implement the spherical gaussian 
+- altair plots instead?
+- make analyzer for historical weather data and search for final experiments of interest -> use clim data
+- set better defaults for the sweep
+- Keep rollout to less than 14 days ow it just explodes
 - Assess likelihood of gui vs ung_gui
 - Guide full slice of temperature and observe what happens
 - Guide both entire states (can define guidance at variable level and state level)
@@ -44,6 +55,7 @@ Rollouts:
 - implement hydra experiment for automatic logging instead of bash script?
 
 Analysis:
+- color pixels that are 0 in white if matplotlib is the library we use
 - write dist bands dropdown or show multiple lines somehow or show something on right and something on left
 - make menu to select the notebook type instead of the stupid dropdown
 - remove flowgrad bullshit plots
