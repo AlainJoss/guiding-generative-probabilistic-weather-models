@@ -1162,6 +1162,10 @@ def _(
             trajectory_widget=mo.vstack([
                 guidance_reference_dropdown,
                 m_n_widget,
+                mo.hstack(
+                    [partition_dropdown, var_dropdown, level_slider],
+                    justify="start",
+                ),
                 delta_widget,
                 mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot], justify="start", align="start")
             ], align="start")
@@ -1171,6 +1175,10 @@ def _(
             trajectory_widget=mo.vstack([
                 sweep_params_widget,
                 m_n_widget,
+                mo.hstack(
+                    [partition_dropdown, var_dropdown, level_slider],
+                    justify="start",
+                ),
                 mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot, lambda_trajectory_plot], justify="start", align="start")
             ], align="start")
             mask_widget = mo.vstack([sweep_params_widget, mask_widget_maps], align="start")

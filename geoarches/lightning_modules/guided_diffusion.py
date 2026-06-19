@@ -101,8 +101,6 @@ class GuidedFlow(BaseLightningModule):
             level=pangu_stats["level_std"],
         )
 
-        print("initialized GuidedFlow")
-
 
     ### utils ###
 
@@ -112,6 +110,7 @@ class GuidedFlow(BaseLightningModule):
         self.data_mean = self.data_mean.to(self.device)
         self.data_std = self.data_std.to(self.device)
         self.generator = torch.Generator(self.device)
+        print("initialized GuidedFlow")
 
 
     def denormalize(self, batch):
@@ -447,16 +446,21 @@ class GuidedFlow(BaseLightningModule):
                     **guidance_kwargs,
                 )
 
+            # velocity-relative trust region: cap the guidance step at a fraction
+            # (lambda_schedule[i] -- i.e. W with alpha=0) of the local vf norm ||u_t*s_t||
+            # (the plotted, linearly-decaying vf). Raw-grad self-braking holds below the cap;
+            # bounded above so we never deviate too far from the flow; auto-decays with the
+            # vf and vanishes when the vf or the gradient die late in the flow.
+            vf = u_t.apply(lambda x: x * s_t)
+            vf_norm = self._td_dot(vf, vf).sqrt().detach()
+            gui_step = self.clip_to_norm(gui_vec, lambda_schedule[i] * vf_norm)
+
             if trace:
                 sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
-                sampling_trace["grads"].append(gui_vec.detach().cpu())
-                sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
+                sampling_trace["grads"].append(gui_step.detach().cpu())  # the APPLIED (capped) guidance
+                sampling_trace["vfs"].append(vf.detach().cpu())
 
-            u_t = self.guided_velocity(
-                u_t=u_t,
-                gui_vec=gui_vec,
-                lambda_=lambda_schedule[i],
-            )
+            u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
 
             if trace:
                 sampling_trace["gui_vfs"].append(
@@ -524,6 +528,15 @@ class GuidedFlow(BaseLightningModule):
         # so the lambda schedule -- not the residual magnitude -- controls the step size
         norm = self._td_dot(gui_vec, gui_vec).sqrt().detach().clamp_min(1e-8)
         return gui_vec.apply(lambda g: g / norm)
+
+    def clip_to_norm(self, gui_vec, max_norm):
+        # cap the global L2 norm at max_norm, but keep the raw vector when it is already
+        # below the cap. Identity if ||gui_vec|| <= max_norm, else scaled down to max_norm.
+        # Used as a velocity-relative trust region: max_norm = rho * ||vf|| bounds how far
+        # guidance deviates from the flow while preserving raw-gradient self-braking.
+        norm = self._td_dot(gui_vec, gui_vec).sqrt().detach().clamp_min(1e-8)
+        scale = (max_norm / norm).clamp(max=1.0)
+        return gui_vec.apply(lambda g: g * scale)
 
     # TODO: should be a protocol, so I do not inadvertedly break something
     def dps_guidance(
