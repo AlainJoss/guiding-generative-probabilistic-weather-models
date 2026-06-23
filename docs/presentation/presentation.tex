@@ -1,0 +1,1130 @@
+\documentclass[10pt]{beamer}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{pgf}
+\usepackage{beamerthemesplit}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+
+\newcommand{\paperref}[1]{
+\vfill
+{\tiny\color{gray}#1}
+}
+
+% KU green colors from the original blog
+\definecolor{kugreen}{RGB}{50,93,61}
+\definecolor{kugreenlys}{RGB}{132,158,139}
+\definecolor{kugreenlyslys}{RGB}{173,190,177}
+\definecolor{kugreenlyslyslys}{RGB}{214,223,216}
+
+\mode<presentation>
+{
+  \usetheme[numbers,totalnumber,compress,sidebarshades]{PaloAlto}
+  \usecolortheme[named=kugreen]{structure}
+  \useinnertheme{circles}
+  \usefonttheme[onlymath]{serif}
+  \setbeamercovered{transparent}
+  \setbeamertemplate{blocks}[rounded][shadow=true]
+  \setbeamertemplate{footline}[frame number]
+}
+
+% Optional logo, upload logo.pdf/png to Overleaf first
+% \logo{\includegraphics[width=1.5cm]{logo}}
+
+\title{Guiding Generative Probabilistic Weather Models}
+\author[]{Alain Joss}
+\institute{SDSC}
+\date{\today}
+
+% Section title slide before each new section
+\AtBeginSection[]
+{
+  \begin{frame}[plain]
+    \centering
+    \vfill
+    {\Huge \insertsection}
+    \vfill
+  \end{frame}
+}
+\begin{document}
+
+\frame{\titlepage}
+
+\section{Introduction}
+
+\frame{
+\frametitle{Motivation}
+
+\begin{block}{Starting Question}
+Can we steer generative probabilistic weather models to generate extreme, physically realistic weather events?
+\end{block}
+
+\begin{enumerate}
+    \item \textbf{Steer}
+    \begin{itemize}
+        \item Sampling-based guidance
+        \item Guidance-based modification of the generation process
+    \end{itemize}
+
+    \item \textbf{Extreme}
+    \begin{itemize}
+        \item Defined for a target region and variable(s)
+        \item Evaluated relative to the forecast distribution
+    \end{itemize}
+
+    \item \textbf{Physically Realistic}
+    \begin{itemize}
+        \item Realism encouraged by the steering design
+        \item Assessed using realism-related metrics
+    \end{itemize}
+\end{enumerate}
+
+\vspace{0.3cm}
+
+\textbf{Goal}: Scenario generation for downstream tasks.
+
+}
+
+\frame{
+\frametitle{Approach}
+
+\begin{enumerate}
+    \item \textbf{Steering}
+    \begin{itemize}
+        \item ArchesWeather as the generative probabilistic weather model
+        \item Guidance-based methods adapted from the image domain
+    \end{itemize}
+
+    \item \textbf{Extreme}
+    \begin{itemize}
+        \item Mask defines the target region and forcing variable
+        \item Change trajectory relative to the unguided forecast distribution
+        \item Focus on heatwave scenarios
+    \end{itemize}
+
+    \item \textbf{Physically Realistic}
+    \begin{itemize}
+        \item Guidance is constrained or regularized
+        \item Assessment through:
+        \begin{itemize}
+            \item Visual checks
+            \item Distributional checks using power spectrum
+        \end{itemize}
+    \end{itemize}
+\end{enumerate}
+
+}
+
+\frame{
+\frametitle{Example}
+
+\centering
+
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/region.png}
+
+    \small Target variable
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/mask.png}
+
+    \small Target region
+\end{minipage}
+
+\vspace{0.4cm}
+
+\begin{minipage}{0.75\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/plot.png}
+
+    \small Guidance signal
+\end{minipage}
+
+}
+
+\section{Background}
+\frame{
+\frametitle{Model: ArchesWeather}
+
+\begin{block}{Forecast decomposition}
+\[
+x_{n+1}
+=
+\mathbb{E}
+\left[
+x_{n+1}
+\mid
+x_n,x_{n-1},n
+\right]
++
+r_{n+1}
+\]
+\end{block}
+
+\begin{itemize}
+    \item Deterministic model predicts the expected next weather state.
+    \item Residual flow model generates the stochastic residual $r_{n+1}$.
+    \item Time information includes month and time of day.
+    \item Spec:
+\end{itemize}
+
+\begin{center}
+\begin{tabular}{ll}
+Dataset & ERA5 \\
+Forecast step & 24h \\
+Grid & global $1.5^\circ$, $121 \times 240$ cells \\
+Variables & 4 surface, 6 pressure-level variables \\
+Pressure levels & 13 levels, 50--1000 hPa \\
+\end{tabular}
+\end{center}
+
+}
+
+\frame{
+\frametitle{Flow Matching}
+
+\begin{itemize}
+    \item Learned vector field $u_\theta(X_t,t)$ transports noise to data:
+    \[
+    \frac{d}{dt}X_t = u_\theta(X_t,t)
+    \]
+    \item s.t. sampling generates residuals:
+    \[
+    r_{n+1} \sim p_{\mathrm{data}}
+    \]
+\end{itemize}
+
+\vspace{-0.2cm}
+
+\begin{algorithm}[H]
+\caption{Euler Sampling}
+\begin{algorithmic}[1]
+\Require Vector field $u_\theta$, number of steps $T$
+\State Sample $X_0 \sim p_{\mathrm{init}}$
+\State $h \gets 1/T$
+\For{$i=0,\dots,T-1$}
+    \State $t \gets i/T$
+    \State $X_{t+h} \gets X_t + h\,u_\theta(X_t,t)$
+\EndFor
+\State \Return $X_1$
+\end{algorithmic}
+\end{algorithm}
+
+}
+
+\section{Weather-guidance design}
+
+\frame{
+\frametitle{Guidance Design}
+
+\begin{itemize}
+    \item Guidance modifies the sampling process to favor samples with a desired property $y$.
+
+    \item In our case, $y$ corresponds to an extreme weather scenario:
+    \begin{itemize}
+        \item target variable,
+        \item target region,
+        \item desired change over the unguided forecast.
+    \end{itemize}
+
+    \item All guidance methods use this information to modify the vector field:
+    \[
+    u_t(z_t)
+    \quad \longrightarrow \quad
+    \tilde{u}_t(z_t)
+    \]
+
+    \item The central design choice is therefore:
+\end{itemize}
+
+\vspace{0.2cm}
+
+\begin{block}{Question}
+How do we define the guidance objective $y$ for weather trajectories?
+\end{block}
+
+}
+
+\frame{
+\frametitle{Weather Guidance Objective}
+
+\begin{itemize}
+    \item We guide the generated state toward a prescribed change relative to the unguided forecast.
+
+    \item The target is defined through a masked spatial average:
+\end{itemize}
+
+\begin{block}{Weather Guidance Loss}
+\[
+\mathcal{L}_n^\mathrm{target}
+=
+\left\|
+\frac{\sum_i m_i \hat{x}_{n,i}}{\sum_i m_i}
+-
+(1+\delta_n)
+\frac{\sum_i m_i \hat{x}^\mathrm{ung}_{n,i}}{\sum_i m_i}
+\right\|^2
+\]
+\end{block}
+
+\begin{itemize}
+    \item $\mathbf{m}$: mask selecting target region and variable
+    \item $\hat{x}_n$: current guided clean-state estimate
+    \item $\hat{x}_{n}^\mathrm{ung}$: unguided prediction
+    \item $\delta_n$: desired relative change at rollout step $n$
+\end{itemize}
+
+\begin{block}{Loss evaluation}
+The loss is evaluated at different stages during guided sampling depending on the adopted method.
+\end{block}
+}
+
+
+\frame{
+\frametitle{Loss Regularization}
+
+\begin{itemize}
+    \item The guidance loss can be regularized to discourage unrealistic deviations from the unguided forecast as follows:
+    \[
+    \mathcal{L}_n^{\mathrm{total}}
+    =
+    \mathcal{L}_n^{\mathrm{target}}
+    +
+    \lambda \mathcal{R}
+    \]
+    where $\mathcal{R}$ is the chosen regularization term.
+\end{itemize}
+
+\begin{block}{Regularization Choices}
+\[
+\mathcal{R}_{\mathrm{ID}}
+=
+\left\|
+\hat{x}_n
+-
+\hat{x}_{n}^\mathrm{ung}
+\right\|^2
+\]
+\[
+\mathcal{R}_{\mathrm{PS}}
+=
+\left\|
+\mathrm{PS}(\hat{x}_n)
+-
+\mathrm{PS}(\hat{x}_{n}^\mathrm{ung})
+\right\|^2
+\]
+\[
+\mathcal{R}_{\mathrm{A}}
+=
+\left\|
+\mathrm{A}(\hat{x}_n)
+-
+\mathrm{A}(\hat{x}_{n}^\mathrm{ung})
+\right\|^2
+\]
+\end{block}
+
+\begin{itemize}
+    \item $\mathcal{R}_{\mathrm{ID}}$: keeps the full guided state close to the unguided forecast.
+    \item $\mathcal{R}_{\mathrm{PS}}$: preserves the spatial power spectrum.
+    \item $\mathcal{R}_{\mathrm{A}}$: preserves activity-related structure.
+\end{itemize}
+
+}
+
+\frame{
+\frametitle{Guiding Weather Rollouts}
+
+\begin{itemize}
+    \item Unlike image generation, weather generation evolves over multiple forecast steps.
+
+    \item The desired change is therefore defined as a trajectory:
+    \[
+    \delta_1,\delta_2,\dots,\delta_N
+    \]
+
+    \item At each rollout step $n$, the guidance objective becomes
+    \[
+    \mathcal{L}_n
+    =
+    \mathcal{L}
+    \left(
+    \hat{x}_n,
+    \hat{x}_{n}^\mathrm{ung},
+    \delta_n,
+    \mathbf{m}
+    \right)
+    \]
+
+    \item This allows us to prescribe how the extreme event should develop over time.
+    \item We may play with different schemes to define $\{\delta\}_{n=1}^N$.
+\end{itemize}
+
+}
+
+\frame{
+\frametitle{Notation summary}
+
+At rollout step $n$ and flow time $t$:
+
+\begin{center}
+\begin{tikzpicture}[x=0.9cm,y=0.9cm]
+    \def\L{3.4}
+    \def\M{25}
+
+    \draw[-{Latex[length=3mm]}] (0,0) -- (10.8,0);
+
+    \foreach \j in {0,1,2} {
+        \foreach \i in {1,...,24} {
+            \draw[line width=0.3pt]
+                ({\j*\L + \i*\L/\M}, -0.10) -- ({\j*\L + \i*\L/\M}, 0.10);
+        }
+    }
+
+    \foreach \x/\lab in {
+        0/{n=0},
+        3.4/{n=1},
+        6.8/{\cdots},
+        10.2/{n=N}
+    }{
+        \draw[line width=1pt] (\x,-0.28) -- (\x,0.28);
+        \node[below=6pt] at (\x,-0.28) {\scriptsize $\lab$};
+    }
+
+    \node[above] at (1.7,0.35) {\scriptsize $T=25$ flow steps};
+\end{tikzpicture}
+\end{center}
+
+\begin{itemize}
+    \item $z_t$: current flow state
+    \item $\hat{x}_{n}$: clean estimate at rollout step $n$ at flow time $t$
+    \item $\mathcal{L}_n^{\mathrm{total}}$: target loss plus optional regularization
+\end{itemize}
+
+\begin{block}{Guidance Gradient}
+\[
+g_{n,t}
+=
+-\nabla_{z_t}
+\mathcal{L}_n^{\mathrm{total}}
+\left(
+\hat{x}_{n},
+y
+\right)
+\]
+\end{block}
+
+\begin{itemize}
+    \item All methods below use this gradient, but inject it into $\tilde{u}_t^\theta$ using different schemes.
+\end{itemize}
+
+}
+
+\section{Guidance methods}
+
+\frame{
+\frametitle{LBG: Loss-Based Guidance}
+
+\textbf{Idea:} modify the vector field using the gradient of a target likelihood.
+
+\[
+p(x|y) \propto p(y|x)p(x)
+\]
+
+\[
+\nabla_x\log p(x|y)
+=
+\nabla_x\log p(x)
++
+\nabla_x\log p(y|x)
+\]
+
+\begin{block}{Guided Vector Field}
+\[
+\tilde{u}_t(z_t|y)
+=
+u_t(z_t)
++
+w\,a_t\,\nabla_{z_t}\log p(y|z_t)
+\]
+\end{block}
+
+Using the weather loss:
+
+\[
+\nabla_{z_t}\log p(y|z_t)
+=
+-\nabla_{z_t}\mathcal{L}_n(\hat{x}_{n},y)
+=
+g_{n,t}
+\]
+
+\begin{itemize}
+    \item For linear probability paths: $a_t=\frac{1-t}{t}$
+    \item $w$ controls guidance strength
+    \item For $w\neq 1$, the exact probabilistic interpretation is lost
+    \item Limitation: ignores uncertainty in $x_1|z_t$.
+\end{itemize}
+
+\paperref{Dhariwal \& Nichol, Diffusion Models Beat GANs on Image Synthesis, NeurIPS 2021.}
+% \paperref{Chung et al., Diffusion Posterior Sampling for General Noisy Inverse Problems, ICLR 2023.}
+}
+
+
+\frame{
+\frametitle{LBG-MC: Loss-Based Guidance Monte Carlo}
+
+\textbf{Idea:} avoid guiding only through the point estimate $\hat{x}_{n}$.
+
+\begin{itemize}
+    \item The guidance likelihood should account for uncertainty in the clean state:
+    \[
+    p(y|z_t)
+    =
+    \mathbb{E}_{\hat{x}_{n}|z_t}
+    \left[
+    \exp\!\left(-\mathcal{L}_n(\hat{x}_{n}, y)\right)
+    \right]
+    \]
+
+    \item Equivalently:
+    \[
+    p(y|z_t)
+    =
+    \int
+    p(\hat{x}_{n}|z_t)
+    \exp\!\left(-\mathcal{L}_n(\hat{x}_{n},y)\right)
+    \,dx
+    \]
+
+    \item Since the true posterior $p(\hat{x}_{n}|z_t)$ is intractable, approximate it by
+    \[
+    q(\hat{x}_{n}|z_t)
+    =
+    \mathcal{N}
+    \left(
+    \hat{x}_{n},
+    \sigma_t^2 I
+    \right)
+    \]
+
+    \item In our implementation:
+    \[
+    \sigma_t = R\,a_t
+    \]
+\end{itemize}
+
+\paperref{Song et al., Loss-Guided Diffusion Models for Plug-and-Play Controllable Generation, ICML 2023.}
+}
+
+\frame{
+\frametitle{LBG-MC: Loss-Based Guidance Monte Carlo}
+
+Sample clean-state candidates:
+\[
+x^{(i)}
+=
+\hat{x}_{n}
++
+\sigma_t \varepsilon^{(i)},
+\qquad
+\varepsilon^{(i)} \sim \mathcal{N}(0,I),
+\qquad
+\sigma_t = R\,a_t
+\]
+
+Approximate the guidance likelihood:
+\[
+p(y|z_t)
+\approx
+\frac{1}{N_{\mathrm{MC}}}
+\sum_{i=1}^{N_{\mathrm{MC}}}
+\exp\!\left(
+-\mathcal{L}_n(x^{(i)},y)
+\right)
+\]
+\[
+\nabla_{z_t} \log p(y|z_t)
+\approx
+\nabla_{z_t} \log
+\frac{1}{N_{\mathrm{MC}}}
+\sum_{i=1}^{N_{\mathrm{MC}}}
+\exp\!\left(
+-\mathcal{L}_n(x^{(i)},y)
+\right)
+\]
+
+\begin{block}{Monte-Carlo Loss}
+\[
+\tilde{\mathcal{L}}_n
+=
+\log N_{\mathrm{MC}}
+-
+\operatorname{logsumexp}_{i}
+\left(
+-\mathcal{L}_n(x^{(i)},y)
+\right)
+\]
+\end{block}
+
+\begin{itemize}
+    \item $N_{\mathrm{MC}}$: number of Monte-Carlo samples
+    \item $R$: spread magnitude; $a_t$ shrinks the cloud over the flow
+    % \item $N_{\mathrm{MC}}=1$ and $R=0$ recovers the LBG point-estimate loss.
+    \item Limitation: Gaussian posterior approximation
+\end{itemize}
+
+\paperref{Song et al., Loss-Guided Diffusion Models for Plug-and-Play Controllable Generation, ICML 2023.}
+}
+
+
+\frame{
+\frametitle{UG: Universal Guidance}
+
+\textbf{Idea:} optimize noisy state before taking the generative step.
+
+\begin{block}{Inner Optimization}
+\[
+\Delta z_t^*
+=
+\arg\min_{\Delta z}
+\;
+\mathcal{L}_n
+\left(
+\hat{x}_{n,t}(z_t+\Delta z),
+y
+\right)
+\]
+\end{block}
+
+In practice, approximate $\Delta z_t^*$ with $K$ gradient steps:
+
+\[
+\Delta z_t
+\leftarrow
+\Delta z_t
+-
+\eta
+\nabla_{\Delta z}
+\mathcal{L}_n
+\left(
+\hat{x}_{n,t}(z_t+\Delta z),
+y
+\right)
+\]
+
+Then apply the optimized correction:
+
+\[
+z_t^{\mathrm{gui}}
+=
+z_t
++
+w\,a_t\,\Delta z_t
+\]
+
+Strong correction may leave the data manifold $\rightarrow$ re-inject noise.
+
+\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
+}
+
+\frame{
+\frametitle{UG: Universal Guidance}
+
+\textbf{Idea:} repeat guidance at the same flow time $t$ before moving to $t+h$, in a self recurrent fashion.
+
+\begin{block}{One Self-Recurrence Step}
+\[
+z_t^{(s)}
+\;\xrightarrow{\text{guide}}\;
+z_t^{(s),\mathrm{gui}}
+=
+z_t^{(s)}
++
+w\,a_t\,\Delta z_t^{(s)}
+\]
+\[
+z_t^{(s),\mathrm{gui}}
+\;\xrightarrow{\text{Euler}}\;
+z_{t+h}^{(s)}
+=
+z_t^{(s),\mathrm{gui}}
++
+h\,u_t\!\left(z_t^{(s),\mathrm{gui}}\right)
+\]
+\[
+z_{t+h}^{(s)}
+\;\xrightarrow{\text{renoise}}\;
+z_t^{(s+1)}
+\]
+\end{block}
+
+\begin{itemize}
+    \item Repeat this loop for $s=1,\dots,S$ at the same flow time $t$.
+    \item Re-noising brings the sample back to the same flow level after a "trial" step.
+    \item After the last recurrence, keep the Euler step and move to $t+h$.
+    \item Hyperparameters: $K$ inner optimization steps, $S$ recurrence steps, guidance strength $w$, learning rate $\eta$
+\end{itemize}
+
+\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
+}
+
+
+\begin{frame}[fragile]
+\frametitle{Universal Guidance: Algorithm}
+
+\scriptsize
+
+\begin{algorithm}[H]
+\caption{Universal Guidance with Self-Recurrence}
+\begin{algorithmic}[1]
+\Require Vector field $u_\theta$, loss $\mathcal{L}_n$, clean predictor $\hat{x}_{n,t}$,
+         steps $T$, inner steps $K$, recurrences $S$
+\State Sample $z_0 \sim p_{\mathrm{init}}$
+\State $h \gets 1/T$
+
+\For{$j=0,\dots,T-1$}
+    \State $t \gets j/T$
+
+    \For{$s=1,\dots,S$}
+        \State $\Delta z_t \gets 0$
+
+        \For{$k=1,\dots,K$}
+            \State $\Delta z_t \gets \Delta z_t
+            -
+            \eta
+            \nabla_{\Delta z_t}
+            \mathcal{L}_n
+            \left(
+            \hat{x}_{n,t}(z_t+\Delta z_t),
+            y
+            \right)$
+        \EndFor
+
+        \State $z_t^{\mathrm{gui}}
+        \gets
+        z_t
+        +
+        w\,a_t\,\Delta z_t$
+
+        \State $z_{t+h}
+        \gets
+        z_t^{\mathrm{gui}}
+        +
+        h\,u_\theta(z_t^{\mathrm{gui}},t)$
+
+        \If{$s<S$}
+            \State $z_t \gets \operatorname{renoise}(z_{t+h},\,t+h \rightarrow t)$
+        \EndIf
+    \EndFor
+
+    \State $z_t \gets z_{t+h}$
+\EndFor
+
+\State \Return $z_1$
+\end{algorithmic}
+\end{algorithm}
+
+\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
+
+\end{frame}
+
+
+
+\frame{
+\frametitle{FlowGrad (FG)}
+
+}
+
+\frame{
+\frametitle{FlowGrad-free (FGF)}
+
+}
+
+\frame{
+\frametitle{Methods Overview}
+
+\begin{center}
+\begin{tabular}{lll}
+\textbf{Method} & \textbf{Mechanism} & \textbf{Cost / flow step} \\
+\hline
+LBG  & loss gradient at $\hat{x}_{n}$              & 1 backward \\
+LBG-MC  & MC-averaged likelihood gradient              & $S$ backward \\
+UG   & inner-loop latent shift $\Delta z_t$          & $K \times S$ backward \\
+FG   & optimized schedule $\lambda_t$ on $g_{n,t}$   & backprop through ODE \\
+FGF  & free controls $c_t$                           & backprop through ODE \\
+\end{tabular}
+\end{center}
+
+\vspace{0.4cm}
+
+\begin{itemize}
+    \item \textbf{Score-based}: LBG and LBG-MC add a guidance gradient to the vector field.
+    \item \textbf{Optimization-based}: UG, FG, and FGF optimize correction variables during sampling.
+\end{itemize}
+
+}
+
+
+\frame{
+\frametitle{Method-Specific Hyperparameters}
+
+\begin{center}
+\begin{tabular}{lll}
+\textbf{Symbol} & \textbf{Meaning} & \textbf{Used in} \\
+\hline
+$w$ & guidance strength & LBG, LBG-MC, UG \\
+$a_t$ & flow-time guidance scaling & LBG, LBG-MC, UG \\
+$N_{\mathrm{MC}}$ & Monte-Carlo samples & LBG-MC \\
+$R$ & posterior spread magnitude & LBG-MC \\
+$K$ & inner optimization steps & UG \\
+$S$ & self-recurrence steps & UG \\
+$\eta$ & learning rate & UG
+\end{tabular}
+\end{center}
+}
+\section{Experiments}
+
+\frame{
+\frametitle{Experimental Setup}
+
+\begin{center}
+\begin{tabular}{ll}
+\textbf{Parameter} & \textbf{Meaning} \\
+\hline
+Start time & input-state timestamp at $n=0$ \\
+$M$ & number of ensemble members \\
+$N$ & number of rollout steps \\
+$T$ & number of flow steps per rollout step \\
+Reference & unguided forecast \\
+$\{\delta_n\}_{n=1}^{N}$ & prescribed target change trajectory \\
+$\lambda$ & regularization strength \\
+$\mathcal{R}$ & regularization type \\
+Mask & target region and variable \\
+Mask mode & BBOX or Gaussian mask \\
+\end{tabular}
+\end{center}
+
+}
+
+
+\frame{
+\frametitle{Hyperparameter tuning}
+
+}
+
+\section{Results}
+
+\frame{
+\frametitle{...}
+
+}
+
+\frame{
+\frametitle{Physical Realism}
+
+}
+
+\frame{
+\frametitle{Conclusion}
+}
+
+\frame{
+\centering
+\Huge QA
+}
+
+
+%%%%%
+
+\appendix
+
+\begin{frame}[plain]
+    \centering
+    \vfill
+    {\fontsize{50}{60}\selectfont Appendix}
+    \vfill
+\end{frame}
+
+\section{Background}
+\frame{
+\frametitle{Flow Matching}
+
+\begin{itemize}
+    \item Assume observations are samples from a data distribution
+    \[
+    p_{\mathrm{data}}
+    \]
+
+    \item Generation corresponds to sampling from this distribution
+
+    \item Start from a simple distribution
+    \[
+    p_{\mathrm{init}}
+    \]
+
+    \item Learn a transformation
+    \[
+    p_{\mathrm{init}}
+    \longrightarrow
+    p_{\mathrm{data}}
+    \]
+\end{itemize}
+
+}
+
+\frame{
+\frametitle{Representing the Transformation}
+
+\begin{itemize}
+
+    \item The transformation is represented by a \textbf{vector field}
+    \[
+    (t,x) \mapsto u_t(x)
+    \]
+
+    \item The vector field defines a trajectory
+    \[
+    t \mapsto x_t
+    \]
+
+    \item Through the ODE
+    \[
+    \frac{d}{dt}x_t = u_t(x_t)
+    \]
+
+    \item Solving the ODE induces a flow
+    \[
+    x_t = \phi_t(x_0)
+    \]
+
+\end{itemize}
+
+}
+
+\frame{
+\frametitle{Sampling}
+
+\begin{itemize}
+    \item Learn a neural vector field
+    \[
+    u_\theta(x_t,t)
+    \]
+
+    \item Solving
+    \[
+    \frac{d}{dt}x_t=u_\theta(x_t,t)
+    \]
+    transports samples from
+    \[
+    p_{\mathrm{init}}
+    \rightarrow
+    p_{\mathrm{data}}
+    \]
+
+    \item The solution is generally not available in closed form.
+
+    \item Numerical integration is therefore required.
+\end{itemize}
+
+}
+
+
+\frame{
+\frametitle{Euler Integration}
+
+\begin{algorithm}[H]
+\caption{Sampling from a Flow Model}
+\begin{algorithmic}[1]
+\Require Vector field $u_\theta$, number of steps $T$
+\State Sample $X_0 \sim p_{\mathrm{init}}$
+\State $h \gets 1/T$
+\For{$i=0,\dots,T-1$}
+    \State $t \gets i/T$
+    \State $X_{t+h} \gets X_t + h\,u_\theta(X_t,t)$
+\EndFor
+\State \Return $X_1$
+\end{algorithmic}
+\end{algorithm}
+}
+
+\frame{
+\frametitle{From Sampling to Training}
+
+\begin{itemize}
+    \item During sampling, the learned ODE transports
+    \[
+    X_0 \sim p_{\mathrm{init}}
+    \quad \longrightarrow \quad
+    X_1 \sim p_{\mathrm{data}}
+    \]
+
+    \item To train the vector field, we prescribe how intermediate samples should look:
+    \[
+    p_0
+    =
+    p_{\mathrm{init}}
+    \quad \longrightarrow \quad
+    p_t
+    \quad \longrightarrow \quad
+    p_1
+    =
+    p_{\mathrm{data}}
+    \]
+
+    \item This family of intermediate distributions is the \textbf{probability path}.
+
+    \item Flow matching trains $u_\theta$ to match the velocity of this path.
+\end{itemize}
+
+}
+
+\frame{
+\frametitle{Training Flow Matching}
+
+\begin{itemize}
+    \item Define a Gaussian probability path conditioned on a sample $x_1$:
+    \[
+    p_t(x \mid x_1)
+    =
+    \mathcal{N}\!\left(x;\, t x_1,\,(1-t)^2 I\right)
+    \]
+
+    \item Equivalently, sample along this path using
+    \[
+    x_t = (1-t)x_0 + t x_1,
+    \qquad
+    x_0 \sim \mathcal{N}(0,I),
+    \quad
+    x_1 \sim p_{\mathrm{data}}
+    \]
+
+    \item The target velocity along this path is
+    \[
+    u_t^*(x_t)
+    =
+    \frac{d}{dt}x_t
+    =
+    x_1 - x_0
+    \]
+
+    \item Train $u_\theta$ to match this velocity:
+\end{itemize}
+
+\vspace{-0.1cm}
+
+\[
+\mathcal{L}_{FM}(\theta)
+=
+\mathbb{E}_{t,x_0,x_1}
+\Big[
+\|u_\theta(x_t,t) - (x_1-x_0)\|^2
+\Big]
+\]
+
+}
+
+
+\frame{
+\frametitle{From Loss to Guidance Gradient}
+
+\begin{itemize}
+    \item Once the target and regularization terms are chosen, the total loss defines the guidance signal:
+    \[
+    \mathcal{L}_n^{\mathrm{total}}
+    =
+    \mathcal{L}_n^{\mathrm{target}}
+    +
+    \lambda\mathcal{R}
+    \]
+
+    \item We define the guidance likelihood through this loss:
+    \[
+    p(y|z_t)
+    =
+    \exp\!\left(
+    -
+    \mathcal{L}_n^{\mathrm{total}}
+    \left(
+    \hat{x}_{n,t},
+    y
+    \right)
+    \right)
+    \]
+
+    \item Therefore, the guidance gradient is:
+    \[
+    \nabla_{z_t}\log p(y|z_t)
+    =
+    -
+    \nabla_{z_t}
+    \mathcal{L}_n^{\mathrm{total}}
+    \left(
+    \hat{x}_{n,t},
+    y
+    \right)
+    \]
+\end{itemize}
+
+\begin{block}{Guidance Signal}
+\[
+g_{n,t}
+=
+-
+\nabla_{z_t}
+\mathcal{L}_n^{\mathrm{total}}
+\left(
+\hat{x}_{n,t},
+y
+\right)
+\]
+\end{block}
+
+}
+
+
+\frame{
+\frametitle{LBG: Loss-Based Guidance}
+
+\textbf{Idea:} same loss-gradient guidance as classifier guidance, but with a normalized guidance scale.
+
+\begin{block}{LBG Update}
+\[
+\tilde{u}_t(z_t)
+=
+u_t(z_t)
++
+\psi_t\,g_{n,t},
+\qquad
+g_{n,t}
+=
+-\nabla_{z_t}\mathcal{L}_n(\hat{x}_{n,t},y)
+\]
+\[
+\psi_t
+=
+\frac{w\,a_t}{\|g_{n,t}\|+\varepsilon}
+\]
+\end{block}
+
+\begin{itemize}
+    \item Hyperparameters: guidance strength $w$.
+    \item $\hat{x}_{n,t}$ is treated as a point estimate of the clean state.
+    \item Normalization stabilizes guidance magnitude across flow steps.
+    \item Limitation: ignores uncertainty in $x_1|z_t$.
+\end{itemize}
+
+\paperref{Chung et al., Diffusion Posterior Sampling for General Noisy Inverse Problems, ICLR 2023.}
+}
+
+
+\end{document}

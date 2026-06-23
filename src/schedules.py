@@ -74,7 +74,3 @@ def delta_schedule(
         values.append(v)
 
     return values
-
-
-def T_schedule(T:int, alpha: float, w: float):
-    return [w * (math.sin(math.pi * t / (T - 1)) ** alpha) for t in range(T)] 

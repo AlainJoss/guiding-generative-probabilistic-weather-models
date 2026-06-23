@@ -172,7 +172,8 @@ The conditional vector field can be written in terms of the conditional score as
 \begin{align*}
      u_t(z_t \mid y) = u_t(z_t) + \alpha_t \nabla_{z_t} \log p_t(y \mid z_t),
 \end{align*}
-where $\alpha_t$ is a time-dependent scaling term determined by the noise schedule.
+where $\alpha_t$ is a time-dependent scaling term determined by the noise schedule:
+$$\alpha_t = \frac{1-t}{t} = \frac{s_t}{1-s_t} $$
 
 We are free to choose a convenient form for $p_t(y \mid z_t)$, and we define it through the loss:
 \begin{align*}

@@ -8,7 +8,6 @@ from src.utils import (
     batchify_and_move,
     get_var_idx, get_level_idx,
 )
-from src.schedules import T_schedule
 from src.rollout_config import RolloutConfig, MODE_HYPERS
 from src.mask import get_mask_tdict, get_mask_2d
 
@@ -29,11 +28,16 @@ TRACE_CONTAINERS = ("clean_preds", "grads", "vfs", "gui_vfs")
 
 # config field (UPPER) -> guided_diffusion kwarg name
 HYPER_TO_KWARG = {
-    "M_MC": "n_mc",
-    "SIGMA_MC": "r_t",
+    # LBG-MC
+    "N_MC": "n_mc",
+    "R": "r",
+    # UG
+    "K": "optimize_k",
+    "ETA": "optimize_lr",
+    "S": "renoise_s",
+    # FG / FGF (legacy field names, not finalized)
     "OPTIMIZE_K": "optimize_k",
     "OPTIMIZE_LR": "optimize_lr",
-    "RENOISE_S": "renoise_s",
     "SHIFT_INIT": "shift_init",
     "CONTROL_GAMMA": "control_gamma",
     "LAMBDA_INIT": "lambda_init",
@@ -52,6 +56,8 @@ def build_guidance_kwargs(config: RolloutConfig) -> dict[str, any]:
         "beta_reg": config.BETA_REG,
     }
     for axis in MODE_HYPERS[config.GUIDANCE_MODE]:
+        if axis == "W":
+            continue  # guidance strength w is applied via lambda_schedule, not a sample() kwarg
         kwargs[HYPER_TO_KWARG[axis]] = getattr(config, axis)
 
     # drop Nones
@@ -80,7 +86,8 @@ def rollout(
         mask_2d = get_mask_2d(config.MASK_MODE, config.MASK_CORNERS)
 
         delta_trajectory = config.GUIDANCE_DELTA
-        lambda_schedule = T_schedule(T, config.ALPHA, config.W)
+        # W is the constant guidance strength w applied at every flow step; no schedule.
+        lambda_schedule = [config.W] * T
         mask_tdict = get_mask_tdict(x_cond_init["state"], config.PARTITION, var_idx, level_idx, mask_2d)
         guidance_type = config.GUIDANCE_MODE
         # GT reference: ground-truth field per step (member-independent). gt rollout holds

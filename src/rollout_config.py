@@ -6,32 +6,34 @@ import torch
 
 ##### guidance constants #####
 
-GUIDANCE_MODES = ["DPS", "LBG", "UG", "FG", "FGF"]
+GUIDANCE_MODES = ["LBG", "LBG-MC", "UG", "FG", "FGF"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "GAUSSIAN"]
 REG_TYPES = ["ID", "ACTIVITY", "POWER_SPECTRUM"]
 LOSS_TYPES = ["STATE", "MASKED_AVERAGE"]  # derived from GUI_REF, never swept
 
-# the hyperparameter tree: each guidance mode's own (swept) hypers. OPTIMIZE_K /
-# OPTIMIZE_LR / SHIFT_INIT / CONTROL_GAMMA / N_WINDOWS are single shared fields --
-# the GUIDANCE_MODE axis disambiguates which mode reads them.
+# the hyperparameter tree: each guidance mode's own (swept) hypers. Symbols match the
+# presentation (W, R, S, K, ETA, N_MC). W (guidance strength w) is mode-specific: it
+# applies only to LBG / LBG-MC / UG -- FG learns its own lambda schedule and FGF has no
+# guidance direction, so neither uses W. FG/FGF are not finalized yet, so they keep the
+# old OPTIMIZE_K / OPTIMIZE_LR / SHIFT_INIT / CONTROL_GAMMA / N_WINDOWS fields -- the
+# GUIDANCE_MODE axis disambiguates which mode reads which field.
 MODE_HYPERS = {
-    "DPS": [],
-    "LBG": ["M_MC", "SIGMA_MC"],
-    "UG": ["OPTIMIZE_K", "OPTIMIZE_LR", "RENOISE_S", "SHIFT_INIT"],
+    "LBG": ["W"],
+    "LBG-MC": ["W", "N_MC", "R"],
+    "UG": ["W", "K", "ETA", "S"],
     "FG": ["OPTIMIZE_K", "OPTIMIZE_LR", "CONTROL_GAMMA", "LAMBDA_INIT", "N_WINDOWS"],
     "FGF": ["OPTIMIZE_K", "OPTIMIZE_LR", "SHIFT_INIT", "CONTROL_GAMMA", "N_WINDOWS"],
 }
 
-# swept axes shared by every guidance mode (GUIDANCE_MODE drives the tree)
+# swept axes shared by every guidance mode (GUIDANCE_MODE drives the tree).
+# W is NOT here -- it is mode-specific (see MODE_HYPERS).
 COMMON_AXES = [
     "MASK_MODE",
     "GUIDANCE_DELTA",
     "GUI_REF",
     "REG_TYPE",
     "BETA_REG",
-    "ALPHA",
-    "W",
     "GUIDANCE_MODE",
 ]
 
@@ -71,21 +73,25 @@ class RolloutConfig:
     GUI_REF: str | None = None  # UNG -> masked-average loss; GT -> state loss
     REG_TYPE: str | None = None  # ID | ACTIVITY | POWER_SPECTRUM
     BETA_REG: float | None = None
-    ALPHA: float | None = None
-    W: float | None = None
+    W: float | None = None  # guidance strength w: applied as w * a_t * unit(grad) per flow step
     GUIDANCE_MODE: str | None = None
 
     ### mode-specific swept hypers (None -> method default; pinned for irrelevant modes)
 
-    # LBG
-    M_MC: int | None = None
-    SIGMA_MC: float | None = None
+    # LBG-MC
+    N_MC: int | None = None    # number of Monte-Carlo samples
+    R: float | None = None     # posterior spread magnitude (cloud std sigma_t = R * a_t)
 
-    # UG / FG / FGF (OPTIMIZE_K, OPTIMIZE_LR, SHIFT_INIT, CONTROL_GAMMA, N_WINDOWS shared)
+    # UG
+    K: int | None = None       # inner optimization steps
+    ETA: float | None = None   # inner-optimization learning rate
+    S: int | None = None       # self-recurrence steps
+
+    # FG / FGF (not finalized: keep legacy field names; OPTIMIZE_K/OPTIMIZE_LR/SHIFT_INIT/
+    # CONTROL_GAMMA/N_WINDOWS shared between FG and FGF)
     OPTIMIZE_K: int | None = None      # optimization iterations
     OPTIMIZE_LR: float | None = None
-    RENOISE_S: int | None = None       # UG self-recurrence steps
-    SHIFT_INIT: float | None = None    # UG dz init / FGF control init
+    SHIFT_INIT: float | None = None    # FGF control init
     CONTROL_GAMMA: float | None = None  # FG/FGF L2 penalty weight
     LAMBDA_INIT: float | None = None   # FG learned-lambda init
     N_WINDOWS: int | None = None       # FG/FGF coarse schedule: number of windows K

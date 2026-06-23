@@ -58,9 +58,9 @@ class GuidedFlow(BaseLightningModule):
         self.cond_dim=256
         self.T = 25
 
-        # LBG (Monte-Carlo loss-based guidance) hyperparameters (tunable)
-        # n_mc: number of MC samples; r_t: std of the Gaussian q(x0|xt)=N(x_hat_t, r_t^2 I)
-        # drawn in normalized space. n_mc=1, r_t=0 makes LBG reduce to DPS.
+        # LBG-MC (Monte-Carlo loss-based guidance) hyperparameters (tunable)
+        # n_mc: number of MC samples; R: spread magnitude of q(x0|xt)=N(x_hat_t, sigma_t^2 I)
+        # with sigma_t = R * a_t, drawn in normalized space. n_mc=1, R=0 recovers LBG.
 
         self.cfg = cfg
         self.backbone = instantiate(cfg.backbone)  # necessary to put it on device
@@ -296,8 +296,8 @@ class GuidedFlow(BaseLightningModule):
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k}
 
         gradient_guidance = {
-            "DPS": self.dps_guidance,
             "LBG": self.lbg_guidance,
+            "LBG-MC": self.lbgmc_guidance,
         }
 
         if not guidance_flag:
@@ -433,6 +433,8 @@ class GuidedFlow(BaseLightningModule):
 
                 x_hat_t = self.denormalize(x_hat_t_norm)
 
+                a_t = self.guidance_scale(s_t)
+
                 gui_vec = guidance_fn(
                     x_hat_t=x_hat_t,
                     x_hat_t_norm=x_hat_t_norm,
@@ -441,24 +443,23 @@ class GuidedFlow(BaseLightningModule):
                     delta_t=delta_t,
                     mask=mask,
                     z_t=z_t,
-                    s_t=s_t,  # flow noise level; LBG anneals its MC cloud as r_t * s_t (DPS ignores)
+                    a_t=a_t,  # flow-time scaling; LBG-MC sizes its MC cloud as R * a_t (LBG ignores)
                     create_graph=create_graph,
                     **guidance_kwargs,
                 )
 
-            # velocity-relative trust region: cap the guidance step at a fraction
-            # (lambda_schedule[i] -- i.e. W with alpha=0) of the local vf norm ||u_t*s_t||
-            # (the plotted, linearly-decaying vf). Raw-grad self-braking holds below the cap;
-            # bounded above so we never deviate too far from the flow; auto-decays with the
-            # vf and vanishes when the vf or the gradient die late in the flow.
-            vf = u_t.apply(lambda x: x * s_t)
-            vf_norm = self._td_dot(vf, vf).sqrt().detach()
-            gui_step = self.clip_to_norm(gui_vec, lambda_schedule[i] * vf_norm)
+            # main-slide application scheme: gui_step = w * a_t * g (RAW gradient, NOT
+            # normalized). lambda_schedule[i] carries w (FG drives a learned schedule). The
+            # raw masked-loss gradient is residual-proportional, so the step self-brakes as
+            # the masked mean approaches the target.
+            gui_step = gui_vec.apply(
+                lambda g: g * (lambda_schedule[i] * a_t)
+            )
 
             if trace:
                 sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
-                sampling_trace["grads"].append(gui_step.detach().cpu())  # the APPLIED (capped) guidance
-                sampling_trace["vfs"].append(vf.detach().cpu())
+                sampling_trace["grads"].append(gui_step.detach().cpu())  # the APPLIED guidance
+                sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
 
             u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
 
@@ -523,23 +524,22 @@ class GuidedFlow(BaseLightningModule):
             raise ValueError(f"unknown reg_type {reg_type!r}")
         return loss
 
-    def normalize_grad(self, gui_vec):
-        # scale the guidance vector to unit L2 norm (single global norm over all keys),
-        # so the lambda schedule -- not the residual magnitude -- controls the step size
-        norm = self._td_dot(gui_vec, gui_vec).sqrt().detach().clamp_min(1e-8)
-        return gui_vec.apply(lambda g: g / norm)
+    def guidance_scale(self, s_t):
+        # MIT notes use tau: 0=noise, 1=data.
+        # Your code uses s_t: 1=noise, 0=data.
+        # Therefore tau = 1 - s_t and a_t = (1 - tau) / tau = s_t / (1 - s_t).
+        # Clamp (1 - s_t) at one grid spacing ds so the first step (s_t = 1, tau = 0)
+        # caps a_t at the value of the next grid point instead of diverging.
+        ds = (self.num_train_timesteps - 1) / (
+            self.num_train_timesteps * (self.T - 1)
+        )
 
-    def clip_to_norm(self, gui_vec, max_norm):
-        # cap the global L2 norm at max_norm, but keep the raw vector when it is already
-        # below the cap. Identity if ||gui_vec|| <= max_norm, else scaled down to max_norm.
-        # Used as a velocity-relative trust region: max_norm = rho * ||vf|| bounds how far
-        # guidance deviates from the flow while preserving raw-gradient self-braking.
-        norm = self._td_dot(gui_vec, gui_vec).sqrt().detach().clamp_min(1e-8)
-        scale = (max_norm / norm).clamp(max=1.0)
-        return gui_vec.apply(lambda g: g * scale)
+        denom = (1.0 - s_t).clamp_min(ds)
+        return s_t / denom
 
     # TODO: should be a protocol, so I do not inadvertedly break something
-    def dps_guidance(
+    # LBG: point-estimate loss-based guidance (no MC cloud).
+    def lbg_guidance(
         self,
         *,
         x_hat_t,
@@ -560,14 +560,12 @@ class GuidedFlow(BaseLightningModule):
             loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
         )
         gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-        # gradient normalization disabled (DPS/LBG): return the raw, residual-proportional
-        # gradient so the step self-brakes as the masked-mean nears the target -- tune lambda
-        # for this raw-gradient scale. Re-enable by uncommenting the line below.
-        # return self.normalize_grad(gui_vec)
+        # return the raw, residual-proportional gradient; _gradient_flow scales it by w * a_t.
         return gui_vec
 
 
-    def lbg_guidance(
+    # LBG-MC: Monte-Carlo loss-based guidance.
+    def lbgmc_guidance(
         self,
         *,
         x_hat_t,
@@ -581,15 +579,14 @@ class GuidedFlow(BaseLightningModule):
         reg_type="ID",
         beta_reg=1e-4,
         n_mc=4,
-        r_t=1.0,
-        s_t=1.0,
+        r=1.0,
+        a_t=1.0,
         create_graph=False,
         **extra,
     ):
-        # anneal the MC cloud with the flow noise level: effective sigma = r_t * s_t.
-        # SIGMA_MC (=r_t) is now a dimensionless multiplier (~1), and the cloud shrinks
-        # as the clean prediction sharpens (s_t -> 0), matching the posterior std of x0|x_t.
-        sigma_t = r_t * s_t
+        # MC cloud std follows the presentation: sigma_t = R * a_t, with a_t = (1-t)/t.
+        # R (~1) is a dimensionless spread magnitude; a_t shrinks the cloud over the flow.
+        sigma_t = r * a_t
         per_sample_losses = []
 
         for _ in range(n_mc):
@@ -607,10 +604,7 @@ class GuidedFlow(BaseLightningModule):
         losses = torch.stack(per_sample_losses)
         loss_ = math.log(n_mc) - torch.logsumexp(-losses, dim=0)
         gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-        # gradient normalization disabled (DPS/LBG): return the raw, residual-proportional
-        # gradient so the step self-brakes as the masked-mean nears the target -- tune lambda
-        # for this raw-gradient scale. Re-enable by uncommenting the line below.
-        # return self.normalize_grad(gui_vec)
+        # return the raw gradient; _gradient_flow scales it by w * a_t.
         return gui_vec
 
 
@@ -646,6 +640,7 @@ class GuidedFlow(BaseLightningModule):
         for i in tqdm(range(len(timesteps)), desc="UG sampling"):
             t, s_t, h = self.get_step_factors(i, timesteps)
             s_next = s_t - h  # h == s_t on the final step -> s_next == 0
+            a_t = self.guidance_scale(s_t)  # flow-time scaling, shift applied as w * a_t * dz
 
             # detached: it's a constant w.r.t. the dz optimization and is reused across
             # the m inner backward passes (otherwise its graph is freed after the first).
@@ -682,9 +677,9 @@ class GuidedFlow(BaseLightningModule):
                         self.get_velocity_input_state(z_t, x_cond), z_t, s_t,
                     )
 
-                    # apply the backward shift in latent space (lambda scales it)
+                    # apply the backward shift in latent space (w * a_t scales it)
                     z_t = tensordict_apply(
-                        lambda z, d: z + lambda_schedule[i] * d, z_t, delta_z
+                        lambda z, d: z + lambda_schedule[i] * a_t * d, z_t, delta_z
                     )
 
                     # field / clean prediction at the shifted latent, then step
@@ -788,7 +783,7 @@ class GuidedFlow(BaseLightningModule):
         reg_type="ID",
         beta_reg: float = 1e-4,
     ):
-        # FlowGrad-style optimization of a COARSE lambda schedule weighting the DPS
+        # FlowGrad-style optimization of a COARSE lambda schedule weighting the LBG
         # direction g_t (velocity is u_t - lambda_t g_t). The gradient w.r.t. lambda
         # is obtained with the Jacobian trick: one cached *detached* forward, then a
         # backward loop of per-step vector-Jacobian products (no full-trajectory
@@ -819,7 +814,7 @@ class GuidedFlow(BaseLightningModule):
         def run_flow(lambda_schedule, *, create_graph, differentiable, do_trace):
             return self._gradient_flow(
                 guidance_name="FG",
-                guidance_fn=self.dps_guidance,
+                guidance_fn=self.lbg_guidance,
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_t,
@@ -851,7 +846,7 @@ class GuidedFlow(BaseLightningModule):
                     input_state = self.get_velocity_input_state(z_t, x_cond)
                     u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
                     x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
-                    g_t = self.dps_guidance(
+                    g_t = self.lbg_guidance(
                         x_hat_t=x_hat_t,
                         x_ref=x_ref,
                         x_ung=x_hat_ung,

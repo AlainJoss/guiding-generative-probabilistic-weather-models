@@ -33,7 +33,7 @@ def _():
     from src.utils import (
         dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config, sweep_coord_label
     )
-    from src.schedules import N_schedule, delta_schedule, T_schedule
+    from src.schedules import N_schedule, delta_schedule
 
     from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma, get_mask_center
     from src.target import get_target_slices
@@ -46,7 +46,6 @@ def _():
         PARTITIONS,
         REG_TYPES,
         RolloutConfig,
-        T_schedule,
         VARIABLES_DICT,
         dump_json,
         ensure_rollout_dir,
@@ -222,24 +221,16 @@ def _(
     rollout_id,
     sweep_coord_label,
 ):
-    w_defaults = [5, 10, 20, 50, 100]
+    w_defaults = [0.1, 0.5, 1.0, 2.0, 5.0]
     match notebook_mode:
         case "unguided_rollout":
             guidance_reference_dropdown = mo.ui.dropdown(
                 GUI_REFS, value=GUI_REFS[0], label="guidance reference: "
             )
-            alpha_defaults = [0, 1, 2]
-            alpha_slider = mo.ui.slider(
-                steps=alpha_defaults,
-                value=alpha_defaults[-1],
-                label="alpha: ",
-                debounce=True,
-                show_value=True
-            )
             w_slider = mo.ui.slider(
                 steps=w_defaults,
                 value=w_defaults[0],
-                label="w: ",
+                label="w (guidance strength): ",
                 debounce=True,
                 show_value=True
             )
@@ -253,18 +244,10 @@ def _(
             guidance_reference_dropdown = mo.ui.dropdown(
                 GUI_REFS, value=GUI_REFS[0], label="guidance reference: "
             )
-            alpha_defaults = [0, 1, 2]
-            alpha_slider = mo.ui.slider(
-                steps=alpha_defaults,
-                value=alpha_defaults[-1],
-                label="alpha: ",
-                debounce=True,
-                show_value=True
-            )
             w_slider = mo.ui.slider(
                 steps=w_defaults,
                 value=w_defaults[0],
-                label="w: ",
+                label="w (guidance strength): ",
                 debounce=True,
                 show_value=True
             )
@@ -286,17 +269,10 @@ def _(
                 value=experiment_params["GUI_REF"][0],
                 label="guidance_reference: ",
             )
-            alpha_slider = mo.ui.slider(
-                steps=experiment_params["ALPHA"],
-                value=experiment_params["ALPHA"][0],
-                label="alpha: ",
-                debounce=True,
-                show_value=True,
-            )
             w_slider = mo.ui.slider(
                 steps=experiment_params["W"],
                 value=experiment_params["W"][0],
-                label="w: ",
+                label="w (guidance strength): ",
                 debounce=True,
                 show_value=True,
             )
@@ -327,7 +303,6 @@ def _(
                 "GUIDANCE_MODE": guidance_mode_dropdown,
                 "MASK_MODE": mask_mode_dropdown,
                 "GUI_REF": guidance_reference_dropdown,
-                "ALPHA": alpha_slider,
                 "W": w_slider,
                 "GUIDANCE_DELTA": delta_trajectory_dropdown,
             }
@@ -360,7 +335,6 @@ def _(
         case _:
             pass
     return (
-        alpha_slider,
         delta_trajectory_dropdown,
         experiment_params,
         guidance_mode_dropdown,
@@ -374,7 +348,6 @@ def _(
 
 @app.cell
 def _(
-    alpha_slider,
     guidance_reference_dropdown,
     mask_mode_dropdown,
     notebook_mode,
@@ -387,7 +360,6 @@ def _(
             hash_params = {
                 "guidance_reference": guidance_reference_dropdown.value,
                 "mask_mode": mask_mode_dropdown.value,
-                "alpha": alpha_slider.value,
                 "w": w_slider.value,
             }
         case _:
@@ -725,7 +697,6 @@ def _(
 
 @app.cell
 def _(
-    alpha_slider,
     delta_trajectory_dropdown,
     experiment_params,
     guidance_mode_dropdown,
@@ -738,7 +709,6 @@ def _(
 ):
     sweep_params = {
         "W": w_slider.value,
-        "ALPHA": alpha_slider.value,
         "GUI_REF": guidance_reference_dropdown.value,
         "MASK_MODE": mask_mode_dropdown.value,
         "GUIDANCE_MODE": guidance_mode_dropdown.value,
@@ -1012,21 +982,25 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 @app.cell
 def _(GUIDANCE_MODES, GUI_REFS, MASK_MODES, REG_TYPES, mo, np):
     # ===== sweep authoring widgets (guided_rollout) =====
-    guidance_mode_select = mo.ui.multiselect(GUIDANCE_MODES, value=["DPS"], label="GUIDANCE_MODE")
+    guidance_mode_select = mo.ui.multiselect(GUIDANCE_MODES, value=["LBG"], label="GUIDANCE_MODE")
     gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF")
     mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE")
     reg_type_select = mo.ui.multiselect(REG_TYPES, value=["ID"], label="REG_TYPE")
 
     # numeric axes -> (start, stop, log_scale, integer)
     NUMERIC_AXES = {
-        "ALPHA":         (2.0,  2.0,   False, False),
-        "W":             (5.0,  100.0, False, False),
+        "W":             (0.1,  5.0,   False, False),
         "BETA_REG":      (1e-4, 1e-2,  True,  False),
-        "M_MC":          (4,    16,    False, True),
-        "SIGMA_MC":      (1.0,  2.0,   False, False),
+        # LBG-MC
+        "N_MC":          (4,    16,    False, True),
+        "R":             (0.1,  1.0,   False, False),
+        # UG
+        "K":             (10,   50,    False, True),
+        "ETA":           (1e-2, 1e-1,  True,  False),
+        "S":             (4,    8,     False, True),
+        # FG / FGF (legacy, not finalized)
         "OPTIMIZE_K":    (10,   50,    False, True),
         "OPTIMIZE_LR":   (1e-2, 1e-1,  True,  False),
-        "RENOISE_S":     (4,    8,     False, True),
         "SHIFT_INIT":    (0.0,  1.0,   False, False),
         "CONTROL_GAMMA": (1e-3, 1e-2,  True,  False),
         "LAMBDA_INIT":   (0.0,  2.0,   False, False),
@@ -1079,9 +1053,15 @@ def _(
     reg_type_select,
     sweep_ranges,
 ):
+
     # ===== sweep authoring panel (guided_rollout) =====
-    from src.rollout_config import MODE_HYPERS as _MODE_HYPERS
-    _COMMON_NUM = ["ALPHA", "W", "BETA_REG"]
+    # reload so MODE_HYPERS reflects the latest src/rollout_config.py (W is now mode-specific,
+    # shown only for the modes that use it: LBG / LBG-MC / UG).
+    import importlib as _importlib
+    import src.rollout_config as _rc_mod
+    _importlib.reload(_rc_mod)
+    _MODE_HYPERS = _rc_mod.MODE_HYPERS
+    _COMMON_NUM = ["BETA_REG"]
 
     _rv = sweep_ranges.value
     def _sweep_row(ax):
@@ -1105,6 +1085,57 @@ def _(
     ], align="start")
 
     hypers_widget if notebook_mode == "guided_rollout" else None
+
+    return
+
+
+@app.cell(hide_code=True)
+def wa_schedule(
+    compute_axis_values,
+    guidance_mode_select,
+    mo,
+    notebook_mode,
+    np,
+    plot_trajectory,
+    sweep_ranges,
+    w_slider,
+):
+
+    # Per-step guidance weight w * a_t across the flow (LBG / LBG-MC / UG), drawn with the
+    # project's plot_trajectory styling (same look as the other trajectory charts).
+    # a_t = (1 - t)/t is the CondOT score->vector-field conversion (MIT notes); mirrors
+    # GuidedFlow.guidance_scale: s_t = 1 - t is the noise level, a_t = s_t / max(1 - s_t, ds).
+    if notebook_mode == "guided_rollout":
+        import matplotlib.pyplot as _plt
+
+        _T, _N = 25, 1000                       # mirror GuidedFlow.T / num_train_timesteps
+        _ds = (_N - 1) / (_N * (_T - 1))
+        _s = np.linspace(_N, 1, _T) / _N        # code's s_t (1 = noise -> 0 = data)
+        _a_t = _s / np.maximum(1 - _s, _ds)     # a_t = (1 - t)/t, clamped at the first step
+
+        _ws = compute_axis_values("W", sweep_ranges.value) or [float(w_slider.value)]
+        _traj = {f"w={_w:g}": (_w * _a_t).tolist() for _w in _ws}
+
+        _modes = list(guidance_mode_select.value)
+        _applies = [m for m in _modes if m in ("LBG", "LBG-MC", "UG")]
+        _sub = (
+            r"$a_t=(1-t)/t$, clamped at the first step — applies to "
+            + (", ".join(_applies) if _applies else "LBG / LBG-MC / UG")
+        )
+
+        _fig = plot_trajectory(
+            _traj,
+            var=r"$w\,a_t$",
+            title="Guidance weight schedule",
+            subtitle=_sub,
+            xlabel=r"$t$",
+        )
+        wa_schedule_widget = mo.as_html(_fig)
+        _plt.close(_fig)
+    else:
+        wa_schedule_widget = mo.md("_guidance weight schedule is shown in guided_rollout mode_")
+    wa_schedule_widget
+
     return
 
 
@@ -1115,7 +1146,6 @@ def _(
     delta_widget,
     guidance_reference_dropdown,
     inspect_states_widget_make,
-    lambda_trajectory_plot,
     level_slider,
     m_n_widget,
     mask_map,
@@ -1179,7 +1209,7 @@ def _(
                     [partition_dropdown, var_dropdown, level_slider],
                     justify="start",
                 ),
-                mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot, lambda_trajectory_plot], justify="start", align="start")
+                mo.hstack([mo.vstack(list(traj_checks.values())), trajectories_plot], justify="start", align="start")
             ], align="start")
             mask_widget = mo.vstack([sweep_params_widget, mask_widget_maps], align="start")
             inspect_states_widget=inspect_states_widget_make
@@ -2403,7 +2433,6 @@ def _(
     delta_trajectory,
     dist_bands_checkbox,
     get_masked_mean,
-    lambda_trajectory,
     m,
     mask,
     n,
@@ -2448,13 +2477,9 @@ def _(
             color_map={"realized − target": "#B7950B"},
             right_trajectory={
                 r"$\Delta$(realized $-$ target)": _delta_diff_t,
-                r"$\lambda_t$ (scaled)": np.asarray(lambda_trajectory, dtype=float)
-                    / max(float(np.max(np.abs(lambda_trajectory))), 1e-12)
-                    * max(float(np.max(np.abs(_delta_diff_t))), 1e-12),
             },
             right_color={
                 r"$\Delta$(realized $-$ target)": "#2E86C1",
-                r"$\lambda_t$ (scaled)": "#8A2BE2",
             },
             figsize=(_wt, 6),
             prepend_zero=True,
@@ -2468,15 +2493,6 @@ def _(mo):
     ## Flow analysis
     """)
     return
-
-
-@app.cell
-def _(T, T_schedule, alpha_slider, plot_trajectory, t, w_slider):
-    alpha = alpha_slider.value
-    w=w_slider.value
-    lambda_trajectory = T_schedule(T, alpha, w)
-    lambda_trajectory_plot = plot_trajectory(lambda_trajectory, "$\\lambda_t$", title="$\\lambda_t$ schedule", step=t, figsize=(22, 6))
-    return lambda_trajectory, lambda_trajectory_plot
 
 
 @app.cell
@@ -2524,34 +2540,21 @@ def _(grads_xr, mo, notebook_mode):
 
 
 @app.cell
-def _(
-    alpha_slider,
-    guidance_mode_dropdown,
-    lambda_trajectory_plot,
-    mo,
-    notebook_mode,
-    w_slider,
-):
+def _(guidance_mode_dropdown, mo, notebook_mode, w_slider):
     match notebook_mode:
         case "unguided_rollout":
-            flow_schedule_widget=None
+            flow_schedule_widget = None
         case "guided_rollout":
             if guidance_mode_dropdown.value in ("FG", "FGF"):
-                # lambda is learned (FLOWGRAD) or unused (FLOWGRAD_FREE) -> the fixed
-                # alpha/w T_schedule preview does not apply to these modes.
+                # lambda is learned (FG) or unused (FGF) -> the guidance-% knob does not apply.
                 flow_schedule_widget = mo.md(
-                    "_$\\lambda_t$ is **learned** by FlowGrad (FLOWGRAD) or not used "
-                    "(FLOWGRAD_FREE); the fixed $\\alpha$/$w$ schedule does not apply._"
+                    "_$\\lambda_t$ is **learned** by FlowGrad (FG) or not used "
+                    "(FGF); the guidance-% knob $W$ does not apply to these modes._"
                 )
             else:
-                flow_schedule_widget = mo.vstack([
-                    mo.hstack([
-                        alpha_slider, w_slider
-                    ], justify="start"),
-                    lambda_trajectory_plot,
-                ])
+                flow_schedule_widget = w_slider
         case "analyze_rollout":
-            flow_schedule_widget=None
+            flow_schedule_widget = None
     flow_schedule_widget
     return
 

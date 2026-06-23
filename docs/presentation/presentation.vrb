@@ -1,0 +1,56 @@
+\frametitle{Universal Guidance: Algorithm}
+
+\scriptsize
+
+\begin{algorithm}[H]
+\caption{Universal Guidance with Self-Recurrence}
+\begin{algorithmic}[1]
+\Require Vector field $u_\theta$, loss $\mathcal{L}_n$, clean predictor $\hat{x}_{n,t}$,
+         steps $T$, inner steps $K$, recurrences $S$
+\State Sample $z_0 \sim p_{\mathrm{init}}$
+\State $h \gets 1/T$
+
+\For{$j=0,\dots,T-1$}
+    \State $t \gets j/T$
+
+    \For{$s=1,\dots,S$}
+        \State $\Delta z_t \gets 0$
+
+        \For{$k=1,\dots,K$}
+            \State $\Delta z_t \gets \Delta z_t
+            -
+            \eta
+            \nabla_{\Delta z_t}
+            \mathcal{L}_n
+            \left(
+            \hat{x}_{n,t}(z_t+\Delta z_t),
+            y
+            \right)$
+        \EndFor
+
+        \State $z_t^{\mathrm{gui}}
+        \gets
+        z_t
+        +
+        w\,a_t\,\Delta z_t$
+
+        \State $z_{t+h}
+        \gets
+        z_t^{\mathrm{gui}}
+        +
+        h\,u_\theta(z_t^{\mathrm{gui}},t)$
+
+        \If{$s<S$}
+            \State $z_t \gets \operatorname{renoise}(z_{t+h},\,t+h \rightarrow t)$
+        \EndIf
+    \EndFor
+
+    \State $z_t \gets z_{t+h}$
+\EndFor
+
+\State \Return $z_1$
+\end{algorithmic}
+\end{algorithm}
+
+\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
+
