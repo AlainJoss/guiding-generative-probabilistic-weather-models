@@ -34,6 +34,24 @@ def N_schedule(
     return values
 
 
+def guidance_weight_schedule(
+    T: int,
+    w_values: list[float],
+    num_train_timesteps: int = 1000,
+) -> dict[str, list[float]]:
+    """Per-flow-step guidance weight {f"w={w}": w * a_t} for a T-step Euler schedule.
+
+    Mirrors GuidedFlow.guidance_scale / get_flow_timesteps: s_t is the noise level running
+    1 -> 1/num_train_timesteps over T steps, and a_t = (1 - t)/t = s_t / (1 - s_t), clamped
+    at the first step (s_t = 1) to one grid spacing so it stays finite. num_train_timesteps
+    is GuidedFlow's fixed flow-noise grid.
+    """
+    s = np.linspace(num_train_timesteps, 1, T) / num_train_timesteps
+    ds = (num_train_timesteps - 1) / (num_train_timesteps * (T - 1))
+    a_t = s / np.maximum(1 - s, ds)
+    return {f"w={w:g}": (w * a_t).tolist() for w in w_values}
+
+
 def delta_schedule(
     N: int,
     mode: str,

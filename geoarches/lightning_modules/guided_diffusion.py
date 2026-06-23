@@ -282,6 +282,7 @@ class GuidedFlow(BaseLightningModule):
         lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
         guidance_kwargs: dict | None = None,
+        trace_unguided: bool = False,
     ):
         guidance_kwargs = guidance_kwargs or {}
         # x_ref is the data-loss target (UNG members or GT field); default to UNG.
@@ -303,7 +304,9 @@ class GuidedFlow(BaseLightningModule):
         if not guidance_flag:
             z, sampling_trace = self.unguided_flow(
                 x_cond=x_cond,
+                det_pred=det_pred,
                 seed=seed,
+                trace=trace_unguided,
             )
         elif guidance_type in gradient_guidance:
             z, sampling_trace = self._gradient_flow(
@@ -370,10 +373,15 @@ class GuidedFlow(BaseLightningModule):
     def unguided_flow(
         self,
         x_cond: dict,
+        det_pred: TensorDict,
         seed: int | None = None,
+        trace: bool = False,
     ):
+        # trace: record the per-flow-step clean-state estimate (same quantity as the
+        # guided clean_preds), so the unguided pass yields a full-t trajectory -> ung_gui.
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.get_flow_timesteps()
+        sampling_trace = defaultdict(list) if trace else None
 
         for i in tqdm(range(len(timesteps))):
             t, s_t, h = self.get_step_factors(i, timesteps)
@@ -382,9 +390,12 @@ class GuidedFlow(BaseLightningModule):
                 time_embedding = self.embedd_time(x_cond, t)
                 input_state = self.get_velocity_input_state(z_t, x_cond)
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                if trace:
+                    x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
+                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                 z_t = self.euler_step(z_t, u_t, h)
 
-        return z_t, None
+        return z_t, sampling_trace
 
     def _gradient_flow(
         self,

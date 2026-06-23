@@ -92,7 +92,7 @@ def get_container_args(rollout_type):
                 ("gui_vfs", True),
                 ("clean_preds", True),
                 ("gui", False),
-                ("ung_gui", False)
+                ("ung_gui", True)
             ]
         case _:
             return []

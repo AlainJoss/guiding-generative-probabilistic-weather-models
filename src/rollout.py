@@ -108,15 +108,18 @@ def rollout(
         for n in range(config.N):
             print(f"m={m} - n={n}")
             # runs both if guidance
-            x_hat_ung, _ = flow_model.sample(
+            x_hat_ung, ung_trace = flow_model.sample(
                 guidance_flag=False,
                 guidance_type=None,
                 x_cond=x_cond,
                 delta_t=None,
                 mask=None,
-                x_hat_ung=None, 
+                x_hat_ung=None,
                 lambda_schedule=None,
                 seed= m + 1000 * n,  # + batch_nb * 10**6
+                # guided rollouts save ung_gui as a full-t trajectory; standalone ung only
+                # needs the final state, so it skips the trace.
+                trace_unguided=guidance_flag,
             )
             x_hat_curr = x_hat_ung
 
@@ -157,11 +160,14 @@ def rollout(
                 )
                 append_to_zarr(rollout_dir, "gui", save_state)
 
-                save_state = flow_model.denormalize(x_hat_ung).cpu()
+                # ung_gui is the unguided clean-prediction trajectory over flow steps t
+                # (last slice == final unguided state). Mirrors clean_preds for the guided
+                # pass; clean_prediction already denormalizes, so this is in physical units.
+                ung_traj = torch.stack(ung_trace["clean_preds"], dim=0)
                 save_state = tdict_to_xr(
-                    create_slice_zarr_container(m, n, t_dim=False, sweep_params=sweep_params),
-                    save_state,
-                    t_dim=False
+                    create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params=sweep_params),
+                    ung_traj,
+                    t_dim=True
                 )
                 append_to_zarr(rollout_dir, "ung_gui", save_state)
 

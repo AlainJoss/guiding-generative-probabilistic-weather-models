@@ -29,8 +29,12 @@ def plot_trajectory(
     right_percentage: bool = False,
     bands: dict[str, tuple] | None = None,
     prepend_zero: bool = False,
+    start_index: int = 0,
     mirror_right_axis: bool = False,
 ):
+    # start_index: x-axis index of the first data point (default 0). Set to 1 for a
+    # 1-indexed axis (e.g. "over t" plots that start at t=1) without prepend_zero's
+    # artificial (0, 0) anchor point.
     trajectory_dict = trajectory if isinstance(trajectory, dict) else {var: trajectory}
     trajectory_dict = {k: np.asarray(v, dtype=float) for k, v in trajectory_dict.items()}
 
@@ -57,7 +61,7 @@ def plot_trajectory(
     if num_steps == 0:
         raise ValueError("trajectory must contain at least one value")
 
-    x = np.arange(num_steps)
+    x = np.arange(num_steps) + start_index
 
     colors = {
         "line": "#7B2CBF",
@@ -160,7 +164,7 @@ def plot_trajectory(
         # ------------------------------------------------------------
         # Axis styling
         # ------------------------------------------------------------
-        ax.set_xlim(0, max(num_steps - 1, 1))
+        ax.set_xlim(start_index, start_index + max(num_steps - 1, 1))
         ax.set_xticks(x)
 
         ax.set_xlabel(xlabel)
