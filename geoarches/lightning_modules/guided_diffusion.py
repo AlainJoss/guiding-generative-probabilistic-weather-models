@@ -397,6 +397,7 @@ class GuidedFlow(BaseLightningModule):
 
         return z_t, sampling_trace
 
+
     def _gradient_flow(
         self,
         guidance_name: str,

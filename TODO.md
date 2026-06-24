@@ -24,6 +24,7 @@ Experiments:
 - add flow grad to guidance modes
 
 Communicate:
+- visualize hypers tree
 - marimo app tour and all the explanations with math formulas
 - visualization of the pipeline
 - serve one experiment on some cloud machine for them to access and play around with
@@ -31,6 +32,7 @@ Communicate:
 - report time and memory complexity of algos
 
 Rollouts:
+- problem: duplicated runs -> for instance lambda_reg = 0 produces same results for all reg types
 - enable absolute values on the maps and add own scale dropdown to all widgets
 - compare in and outside mask and also all other possible comparisons
 - enable collapsing markdown cells

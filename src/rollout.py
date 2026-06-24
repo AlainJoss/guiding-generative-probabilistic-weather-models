@@ -64,6 +64,27 @@ def build_guidance_kwargs(config: RolloutConfig) -> dict[str, any]:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+def _finite_stats(name, td):
+    """Debug: per-key finiteness + value range of a (surface/level) TensorDict, to
+    locate where NaNs first appear along input -> unguided sample -> guided sample ->
+    saved state. Prints anyNaN/allFinite and the min/max over the finite entries."""
+    msgs = []
+    for k in td.keys():
+        v = td[k]
+        if not torch.is_tensor(v):
+            continue
+        fin = torch.isfinite(v)
+        if bool(fin.any()):
+            vmin, vmax = float(v[fin].min()), float(v[fin].max())
+        else:
+            vmin = vmax = float("nan")
+        msgs.append(
+            f"{k}[finite={bool(fin.all())} anyNaN={bool(torch.isnan(v).any())} "
+            f"range=({vmin:.4g}, {vmax:.4g})]"
+        )
+    print(f"  [stats] {name}: " + "  ".join(msgs), flush=True)
+
+
 def rollout(
     rollout_dir: Path,
     guidance_flag: bool,
@@ -106,7 +127,8 @@ def rollout(
     for m in range(config.M):
         x_cond = x_cond_init  # reset to the initial condition at the start of every member
         for n in range(config.N):
-            print(f"m={m} - n={n}")
+            print(f"m={m} - n={n}", flush=True)
+            _finite_stats("x_cond.state (input to sampler)", x_cond["state"])
             # runs both if guidance
             x_hat_ung, ung_trace = flow_model.sample(
                 guidance_flag=False,
@@ -121,6 +143,7 @@ def rollout(
                 # needs the final state, so it skips the trace.
                 trace_unguided=guidance_flag,
             )
+            _finite_stats("x_hat_ung (unguided sample, normalized)", x_hat_ung)
             x_hat_curr = x_hat_ung
 
             if guidance_flag:
@@ -149,8 +172,9 @@ def rollout(
                         lambda_schedule=lambda_schedule,
                         seed = m + 1000 * n,  # + batch_nb * 10**6
                     )
+                _finite_stats("x_hat_gui (guided sample, normalized)", x_hat_gui)
                 x_hat_curr = x_hat_gui
-                
+
             if guidance_flag:
                 save_state = flow_model.denormalize(x_hat_gui).cpu()
                 save_state = tdict_to_xr(
@@ -204,6 +228,7 @@ def rollout(
 
             else:
                 save_state = flow_model.denormalize(x_hat_ung).cpu()
+                _finite_stats("ung save_state (denormalized, pre-write)", save_state)
                 save_state = tdict_to_xr(
                     create_slice_zarr_container(m, n, t_dim=False, sweep_params={}),
                     save_state,

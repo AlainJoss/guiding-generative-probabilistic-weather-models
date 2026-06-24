@@ -193,13 +193,20 @@ def plot_trajectories(
             ens_mean = np.nanmean(ensemble, axis=1)
 
             if selected_member is not None:
+                if not np.isfinite(ensemble).any():
+                    raise ValueError(
+                        f"{label_prefix.lower()} ensemble is all-NaN — the rollout store is "
+                        f"incomplete or not fully synced yet (data chunks missing). Wait for "
+                        f"the sync to finish or re-generate the run."
+                    )
                 if not np.all(
                     (selected_member >= ens_min - 1e-10)
                     & (selected_member <= ens_max + 1e-10)
                 ):
                     raise ValueError(
-                        f"{label_prefix.lower()} selected member is outside the "
-                        f"{label_prefix.lower()} ensemble range. Check timestamp/member alignment."
+                        f"{label_prefix.lower()} selected member falls outside the "
+                        f"{label_prefix.lower()} ensemble [min, max] — likely NaN/incomplete "
+                        f"data for this sweep point."
                     )
 
             ax.fill_between(
