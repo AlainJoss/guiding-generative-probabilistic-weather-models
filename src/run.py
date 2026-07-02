@@ -7,7 +7,7 @@ from itertools import product
 import xarray as xr
 
 from src.rollout import rollout
-from src.rollout_config import RolloutConfig, MODE_HYPERS
+from src.rollout_config import RolloutConfig, GUIDANCE_METHOD_HYPERS
 from src.utils import get_model, get_config, get_sweep_dict, get_rollout_dir, ensure_rollout_dir
 from src.utils import get_device
 from src.utils import create_full_zarr_container, sweep_coord_label
@@ -27,6 +27,7 @@ class RolloutJob:
     label: str
 
 
+# TODO: correct and check this
 def iter_sweeps(sweep_params: dict[str, list]) -> Iterator[dict]:
     # Mode-restricted product: for each GUIDANCE_MODE value, only that mode's specific
     # hypers vary; axes that belong to *some* mode but not this one are pinned to their
@@ -41,10 +42,10 @@ def iter_sweeps(sweep_params: dict[str, list]) -> Iterator[dict]:
             yield dict(zip(all_keys, values))
         return
 
-    specific_axes = set().union(*[set(v) for v in MODE_HYPERS.values()])
+    specific_axes = set().union(*[set(v) for v in GUIDANCE_METHOD_HYPERS.values()])
 
     for mode in sweep_params["GUIDANCE_MODE"]:
-        active = MODE_HYPERS[mode]
+        active = GUIDANCE_METHOD_HYPERS[mode]
         axis_values = []
         for k in all_keys:
             if k == "GUIDANCE_MODE":
@@ -68,12 +69,11 @@ def build_jobs(
         for key, value in sweep.items():
             setattr(config, key, value)
 
+        # TODO: only keep the parameters that are being swepts as sweep
         label = ", ".join(
             [f"{k}={v}" for k, v in sweep.items()]
         )
 
-        # config keeps the raw value; the zarr region write uses the coord label
-        # (integer index for non-scalar axes like delta_trajectory).
         coord_sweep = {
             k: sweep_coord_label(k, v, sweep_params) for k, v in sweep.items()
         }
@@ -82,6 +82,7 @@ def build_jobs(
 
 
 def get_container_args(rollout_type):
+    # tuples: (file type, t_dim_flag)
     match rollout_type:
         case "ung":
             return [("ung", False)]
@@ -97,7 +98,7 @@ def get_container_args(rollout_type):
         case _:
             return []
 
-
+# TODO: check, this 
 def written_containers(rollout_type, guidance_mode):
     """Container types a single sweep point actually fills. FLOWGRAD_FREE has no
     guidance-direction trace, so it only writes gui/ung_gui; the trace containers

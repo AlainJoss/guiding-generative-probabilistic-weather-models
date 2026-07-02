@@ -1,7 +1,6 @@
 \beamer@sectionintoc {1}{Introduction}{2}{0}{1}
-\beamer@sectionintoc {2}{Background}{6}{0}{2}
-\beamer@sectionintoc {3}{Weather-guidance design}{9}{0}{3}
-\beamer@sectionintoc {4}{Guidance methods}{15}{0}{4}
-\beamer@sectionintoc {5}{Experiments}{26}{0}{5}
-\beamer@sectionintoc {6}{Results}{29}{0}{6}
-\beamer@sectionintoc {7}{Background}{35}{1}{7}
+\beamer@sectionintoc {2}{Background}{7}{0}{2}
+\beamer@sectionintoc {3}{Weather-guidance design}{10}{0}{3}
+\beamer@sectionintoc {4}{Guidance methods}{16}{0}{4}
+\beamer@sectionintoc {5}{Experiments}{27}{0}{5}
+\beamer@sectionintoc {6}{Background}{37}{1}{6}

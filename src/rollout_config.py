@@ -4,33 +4,32 @@ from typing import Any
 
 
 # hyperparameter tree
-MODE_HYPERS = {
-    "LBG": ["W"],
-    "LBG-MC": ["W", "N_MC", "R"],
-    "UG": ["W", "K", "ETA", "S"],
-    "FG": ["OPTIMIZE_K", "OPTIMIZE_LR", "CONTROL_GAMMA", "LAMBDA_INIT", "N_WINDOWS"],
-    "FGF": ["OPTIMIZE_K", "OPTIMIZE_LR", "SHIFT_INIT", "CONTROL_GAMMA", "N_WINDOWS"],
+# hyper names equal the guidance-fn kwarg names so build_guidance_kwargs is a straight
+# pass-through (no map). w is flow-level (-> lambda_schedule) and is skipped there.
+# UG/FG/FGF optimizer hypers are method-namespaced so each method's lr/steps can be swept
+# independently even though the flow fns share a generic optimizer.
+GUIDANCE_METHOD_HYPERS = {
+    "LBG": ["w"],
+    "LBG-MC": ["w", "n_mc", "r"],
+    "UG": ["w", "ug_k", "ug_lr", "ug_s"],
+    "FG": ["fg_k", "fg_lr", "fg_gamma", "fg_lambda_init", "fg_n_windows"],
+    "FGF": ["fgf_k", "fgf_lr", "fgf_shift_init", "fgf_gamma", "fgf_n_windows"],
 }
 
 # common hypers 
-GUIDANCE_MODES = ["LBG", "LBG-MC", "UG", "FG", "FGF"]
+GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "GAUSSIAN"]
-REG_TYPES = ["ID", "ACTIVITY", "POWER_SPECTRUM"]
-LOSS_TYPES = ["STATE", "MASKED_AVERAGE"]  # derived from GUI_REF, never swept
 
 COMMON_AXES = [
     "MASK_MODE",
     "GUIDANCE_DELTA",
     "GUI_REF",
-    "REG_TYPE",
-    "BETA_REG",
     "GUIDANCE_MODE",
 ]
 
 # union over all modes
-SWEEP_AXES = COMMON_AXES + sorted({h for hs in MODE_HYPERS.values() for h in hs})
-
+SWEEP_AXES = COMMON_AXES + sorted({h for hs in GUIDANCE_METHOD_HYPERS.values() for h in hs})
 
 ##### config class #####
 DATETIME_STR_FORMAT = "%Y-%m-%dT%H:%M:%S"
@@ -45,9 +44,7 @@ def string_to_datetime(timestamp: str):
 
 @dataclass
 class RolloutConfig:
-
     ### fixed params (config.json only, not swept)
-
     M: int | None = None
     N: int | None = None
     T: int | None = None  # number of flow/sampling steps (lower = faster, for testing)
@@ -62,31 +59,36 @@ class RolloutConfig:
     MASK_MODE: str | None = None
     GUIDANCE_DELTA: list[float] | None = None  # per-step delta target (non-scalar axis)
     GUI_REF: str | None = None  # UNG -> TODO: remove if guiding towards gt is not of interest
-    REG_TYPE: str | None = None  # ID | ACTIVITY | POWER_SPECTRUM
-    BETA_REG: float | None = None
     GUIDANCE_MODE: str | None = None
 
     ### mode-specific swept hypers (None -> method default; pinned for irrelevant modes)
-    
+    # names match the guidance-fn kwargs (see GUIDANCE_METHOD_HYPERS)
+
     # LBG, LBG-MC, UG
-    W: float | None = None  # guidance strength w: applied as w * a_t * unit(grad) per flow step
+    w: float | None = None  # guidance strength: applied as w * a_t * unit(grad) per flow step
 
     # LBG-MC
-    N_MC: int | None = None    # number of Monte-Carlo samples
-    R: float | None = None     # posterior spread magnitude (cloud std sigma_t = R * a_t)
+    n_mc: int | None = None    # number of Monte-Carlo samples
+    r: float | None = None     # posterior spread magnitude (cloud std sigma_t = r * a_t)
 
     # UG
-    K: int | None = None       # inner optimization steps
-    ETA: float | None = None   # inner-optimization learning rate
-    S: int | None = None       # self-recurrence steps
+    ug_k: int | None = None    # inner optimization steps
+    ug_lr: float | None = None  # inner-optimization learning rate
+    ug_s: int | None = None    # self-recurrence steps
 
-    # FG / FGF 
-    OPTIMIZE_K: int | None = None      # optimization iterations
-    OPTIMIZE_LR: float | None = None
-    SHIFT_INIT: float | None = None    # FGF control init
-    CONTROL_GAMMA: float | None = None  # FG/FGF L2 penalty weight
-    LAMBDA_INIT: float | None = None   # FG learned-lambda init
-    N_WINDOWS: int | None = None       # FG/FGF coarse schedule: number of windows K
+    # FG
+    fg_k: int | None = None            # optimization iterations
+    fg_lr: float | None = None
+    fg_gamma: float | None = None      # L2 penalty weight
+    fg_lambda_init: float | None = None  # learned-lambda init
+    fg_n_windows: int | None = None    # coarse schedule: number of windows
+
+    # FGF
+    fgf_k: int | None = None           # optimization iterations
+    fgf_lr: float | None = None
+    fgf_shift_init: float | None = None  # free-control init
+    fgf_gamma: float | None = None     # L2 penalty weight
+    fgf_n_windows: int | None = None   # coarse schedule: number of windows
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 

@@ -242,7 +242,7 @@ class GuidedFlow(BaseLightningModule):
         return self.denormalize(x_hat_norm)
 
             
-    def grad_loss(self, loss_, z_t, create_graph: bool = False):
+    def masked_loss_grad(self, loss_, z_t, create_graph: bool = False):
         keys = list(z_t.keys())
         tensors = [z_t[k] for k in keys]
 
@@ -262,38 +262,49 @@ class GuidedFlow(BaseLightningModule):
             batch_size=z_t.batch_size,
             device=z_t.device,
         )
+    
 
-    def _td_dot(self, a_td, b_td):
-        # Flat inner product <a, b> summed over every element of every state key.
-        return sum((a_td[k] * b_td[k]).sum() for k in a_td.keys())
+    def masked_loss(self, x_hat_t, x_ref, delta_t, mask):
+        # masked-average match: guide the masked mean toward (1+delta) * reference mean
+        pred = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
+        target = sum((mask[k] * x_ref[k]).sum() for k in x_ref.keys())
+        target = (1 + delta_t) * target
+        return (pred - target) ** 2
+    
+
+    def guidance_scale(self, s_t):
+        # MIT notes use tau: 0=noise, 1=data.
+        # Your code uses s_t: 1=noise, 0=data.
+        # Therefore tau = 1 - s_t and a_t = (1 - tau) / tau = s_t / (1 - s_t).
+        # Clamp (1 - s_t) at one grid spacing ds so the first step (s_t = 1, tau = 0)
+        # caps a_t at the value of the next grid point instead of diverging.
+        ds = (self.num_train_timesteps - 1) / (
+            self.num_train_timesteps * (self.T - 1)
+        )
+
+        denom = (1.0 - s_t).clamp_min(ds)
+        return s_t / denom
 
 
     ### used outside to wire guidance type ###
-        
+    # TODO: make the guidance methods protocols such that I can just select the guidance method from the name and pass the parameters once
     def sample(
         self,
         guidance_flag: bool,
         guidance_type: str,
         x_cond: dict,
-        delta_t: torch.Tensor | None = None,
+        delta_n: torch.Tensor | None = None,
         mask: TensorDict | None = None,
-        x_hat_ung: TensorDict | None = None,
         x_ref: TensorDict | None = None,
         lambda_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
         guidance_kwargs: dict | None = None,
-        trace_unguided: bool = False,
     ):
-        guidance_kwargs = guidance_kwargs or {}
-        # x_ref is the data-loss target (UNG members or GT field); default to UNG.
-        if x_ref is None:
-            x_ref = x_hat_ung
-
         with torch.no_grad():
             det_pred = self.det_model(x_cond)
             x_cond["pred_state"] = det_pred
         
-        # TODO: check that next is actually there in our repo
+        # TODO: check that next is actually there in my case
         x_cond = {k: v for k, v in x_cond.items() if "next" not in k}
 
         gradient_guidance = {
@@ -306,17 +317,16 @@ class GuidedFlow(BaseLightningModule):
                 x_cond=x_cond,
                 det_pred=det_pred,
                 seed=seed,
-                trace=trace_unguided,
             )
+
         elif guidance_type in gradient_guidance:
             z, sampling_trace = self._gradient_flow(
                 guidance_name=guidance_type,
                 guidance_fn=gradient_guidance[guidance_type],
                 x_cond=x_cond,
                 det_pred=det_pred,
-                delta_t=delta_t,
+                delta_n=delta_n,
                 mask=mask,
-                x_hat_ung=x_hat_ung,
                 x_ref=x_ref,
                 lambda_schedule=lambda_schedule,
                 seed=seed,
@@ -326,9 +336,8 @@ class GuidedFlow(BaseLightningModule):
             z, sampling_trace = self._ug_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
-                delta_t=delta_t,
+                delta_t=delta_n,
                 mask=mask,
-                x_hat_ung=x_hat_ung,
                 x_ref=x_ref,
                 lambda_schedule=lambda_schedule,
                 seed=seed,
@@ -338,9 +347,8 @@ class GuidedFlow(BaseLightningModule):
             z, sampling_trace = self._flowgrad_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
-                delta_t=delta_t,
+                delta_t=delta_n,
                 mask=mask,
-                x_hat_ung=x_hat_ung,
                 x_ref=x_ref,
                 seed=seed,
                 **guidance_kwargs,
@@ -349,9 +357,8 @@ class GuidedFlow(BaseLightningModule):
             z, sampling_trace = self._flowgrad_free_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
-                delta_t=delta_t,
+                delta_t=delta_n,
                 mask=mask,
-                x_hat_ung=x_hat_ung,
                 x_ref=x_ref,
                 seed=seed,
                 **guidance_kwargs,
@@ -375,13 +382,12 @@ class GuidedFlow(BaseLightningModule):
         x_cond: dict,
         det_pred: TensorDict,
         seed: int | None = None,
-        trace: bool = False,
     ):
         # trace: record the per-flow-step clean-state estimate (same quantity as the
         # guided clean_preds), so the unguided pass yields a full-t trajectory -> ung_gui.
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.get_flow_timesteps()
-        sampling_trace = defaultdict(list) if trace else None
+        sampling_trace = defaultdict(list) 
 
         for i in tqdm(range(len(timesteps))):
             t, s_t, h = self.get_step_factors(i, timesteps)
@@ -390,9 +396,8 @@ class GuidedFlow(BaseLightningModule):
                 time_embedding = self.embedd_time(x_cond, t)
                 input_state = self.get_velocity_input_state(z_t, x_cond)
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                if trace:
-                    x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
-                    sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+                x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
+                sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                 z_t = self.euler_step(z_t, u_t, h)
 
         return z_t, sampling_trace
@@ -404,15 +409,13 @@ class GuidedFlow(BaseLightningModule):
         guidance_fn,
         x_cond: dict,
         det_pred: TensorDict,
-        delta_t: torch.Tensor,
+        delta_n: torch.Tensor,
         mask: TensorDict,
-        x_hat_ung: TensorDict,
         x_ref: TensorDict,
         lambda_schedule: list[torch.Tensor],
         seed: int | None = None,
-        create_graph: bool = False,
-        differentiable: bool = False,
-        trace: bool = True,
+        # TODO: not sure whether I actually need these -> maybe flowgradn needs them
+        differentiable_flag: bool = False,
         **guidance_kwargs,
     ):
         # create_graph : keep higher-order graph through the guidance gradient
@@ -423,13 +426,13 @@ class GuidedFlow(BaseLightningModule):
         timesteps = self.get_flow_timesteps()
         sampling_trace = defaultdict(list)
 
-        if differentiable:
+        if differentiable_flag:
             z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
 
         for i in tqdm(range(len(timesteps)), desc=f"{guidance_name} sampling"):
             t, s_t, h = self.get_step_factors(i, timesteps)
 
-            if not differentiable:
+            if not differentiable_flag:
                 z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
 
             with torch.enable_grad():
@@ -451,36 +454,28 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_t=x_hat_t,
                     x_hat_t_norm=x_hat_t_norm,
                     x_ref=x_ref,
-                    x_ung=x_hat_ung,
-                    delta_t=delta_t,
+                    delta_t=delta_n,
                     mask=mask,
                     z_t=z_t,
                     a_t=a_t,  # flow-time scaling; LBG-MC sizes its MC cloud as R * a_t (LBG ignores)
-                    create_graph=create_graph,
                     **guidance_kwargs,
                 )
 
-            # main-slide application scheme: gui_step = w * a_t * g (RAW gradient, NOT
-            # normalized). lambda_schedule[i] carries w (FG drives a learned schedule). The
-            # raw masked-loss gradient is residual-proportional, so the step self-brakes as
-            # the masked mean approaches the target.
             gui_step = gui_vec.apply(
                 lambda g: g * (lambda_schedule[i] * a_t)
             )
 
-            if trace:
-                sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
-                sampling_trace["grads"].append(gui_step.detach().cpu())  # the APPLIED guidance
-                sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
+            sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+            sampling_trace["grads"].append(gui_step.detach().cpu())  # the APPLIED guidance
+            sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
 
             u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
 
-            if trace:
-                sampling_trace["gui_vfs"].append(
-                    u_t.apply(lambda x: x * s_t).detach().cpu()
-                )
+            sampling_trace["gui_vfs"].append(
+                u_t.apply(lambda x: x * s_t).detach().cpu()
+            )
 
-            if differentiable:
+            if differentiable_flag:
                 z_t = self.euler_step(z_t, u_t, h)
             else:
                 with torch.no_grad():
@@ -489,92 +484,21 @@ class GuidedFlow(BaseLightningModule):
         return z_t, sampling_trace
 
 
-    ### loss + guidance-vector helpers (shared by all guidance types) ###
-
-    # TODO: the loss should be 1/2 and squared at the end ow the direction of the difference plays a role!
-    def masked_loss(self, x_hat_t, x_ref, delta_t, mask):
-        # masked-average match: guide the masked mean toward (1+delta) * reference mean
-        pred = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
-        target = sum((mask[k] * x_ref[k]).sum() for k in x_ref.keys())
-        target = (1 + delta_t) * target
-        return (pred - target) ** 2
-
-
-    def similarity_loss(self, x_hat_t, x_ung):
-        return sum(
-            ((x_hat_t[k] - x_ung[k]) ** 2).mean()
-            for k in x_hat_t.keys()
-        )
-
-
-    def state_loss(self, x_hat_t, x_ref):
-        # whole-field MSE to the reference (no mask, no delta); mean-scaled so BETA_REG
-        # stays comparable across loss types
-        raw = sum(((x_hat_t[k] - x_ref[k]) ** 2).sum() for k in x_hat_t.keys())
-        n = sum(x_hat_t[k].numel() for k in x_hat_t.keys())
-        return raw / n
-
-
-    def guidance_loss(
-        self, x_hat_t, x_ref, x_ung, delta_t, mask,
-        loss_type="MASKED_AVERAGE", reg_type="ID", beta_reg=1e-4,
-    ):
-        # data term: x_ref is the guidance target (UNG members or GT field)
-        if loss_type == "MASKED_AVERAGE":
-            loss = self.masked_loss(x_hat_t, x_ref, delta_t, mask)
-        elif loss_type == "STATE":
-            loss = self.state_loss(x_hat_t, x_ref)
-        else:
-            raise ValueError(f"unknown loss_type {loss_type!r}")
-        
-        # regularization: always relative to ung_gui field
-        if reg_type == "ID":
-            loss = loss + beta_reg * self.similarity_loss(x_hat_t, x_ung)
-        elif reg_type in ("ACTIVITY", "POWER_SPECTRUM"):
-            raise NotImplementedError(f"reg_type {reg_type!r} not implemented yet")
-        else:
-            raise ValueError(f"unknown reg_type {reg_type!r}")
-        return loss
-
-    def guidance_scale(self, s_t):
-        # MIT notes use tau: 0=noise, 1=data.
-        # Your code uses s_t: 1=noise, 0=data.
-        # Therefore tau = 1 - s_t and a_t = (1 - tau) / tau = s_t / (1 - s_t).
-        # Clamp (1 - s_t) at one grid spacing ds so the first step (s_t = 1, tau = 0)
-        # caps a_t at the value of the next grid point instead of diverging.
-        ds = (self.num_train_timesteps - 1) / (
-            self.num_train_timesteps * (self.T - 1)
-        )
-
-        denom = (1.0 - s_t).clamp_min(ds)
-        return s_t / denom
-
     # TODO: should be a protocol, so I do not inadvertedly break something
     # LBG: point-estimate loss-based guidance (no MC cloud).
     def lbg_guidance(
         self,
         *,
         x_hat_t,
-        x_hat_t_norm=None,
+        x_hat_t_norm,
         x_ref,
-        x_ung,
         delta_t,
         mask,
         z_t,
-        loss_type="MASKED_AVERAGE",
-        reg_type="ID",
-        beta_reg=1e-4,
-        create_graph=False,
-        **extra,
+        a_t
     ):
-        loss_ = self.guidance_loss(
-            x_hat_t, x_ref, x_ung, delta_t, mask,
-            loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
-        )
-        gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-        # return the raw, residual-proportional gradient; _gradient_flow scales it by w * a_t.
-        return gui_vec
-
+        loss_ = self.masked_loss(x_hat_t, x_ref, delta_t, mask)
+        return self.masked_loss_grad(loss_, z_t, create_graph=False)
 
     # LBG-MC: Monte-Carlo loss-based guidance.
     def lbgmc_guidance(
@@ -583,21 +507,14 @@ class GuidedFlow(BaseLightningModule):
         x_hat_t,
         x_hat_t_norm,
         x_ref,
-        x_ung,
         delta_t,
         mask,
         z_t,
-        loss_type="MASKED_AVERAGE",
-        reg_type="ID",
-        beta_reg=1e-4,
-        n_mc=4,
-        r=1.0,
-        a_t=1.0,
-        create_graph=False,
-        **extra,
+        a_t,
+        n_mc,
+        r,
     ):
-        # MC cloud std follows the presentation: sigma_t = R * a_t, with a_t = (1-t)/t.
-        # R (~1) is a dimensionless spread magnitude; a_t shrinks the cloud over the flow.
+        # TODO: how to set a good sigma_t -> derivation and hyperparam search
         sigma_t = r * a_t
         per_sample_losses = []
 
@@ -606,19 +523,12 @@ class GuidedFlow(BaseLightningModule):
                 lambda x: x + sigma_t * torch.empty_like(x).normal_(generator=self.generator)
             )
             x_i = self.denormalize(x_i_norm)
-
-            loss_i = self.guidance_loss(
-                x_i, x_ref, x_ung, delta_t, mask,
-                loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
-            )
+            loss_i = self.masked_loss(x_i, x_ref, delta_t, mask)
             per_sample_losses.append(loss_i)
 
         losses = torch.stack(per_sample_losses)
         loss_ = math.log(n_mc) - torch.logsumexp(-losses, dim=0)
-        gui_vec = self.grad_loss(loss_, z_t, create_graph=create_graph)
-        # return the raw gradient; _gradient_flow scales it by w * a_t.
-        return gui_vec
-
+        return self.masked_loss_grad(loss_, z_t, create_graph=False)
 
     ### flow variant 3 ###
 
@@ -632,13 +542,10 @@ class GuidedFlow(BaseLightningModule):
         x_ref: TensorDict,
         lambda_schedule: list[torch.Tensor],
         seed: int | None = None,
-        renoise_s: int = 3,
-        optimize_k: int = 5,
-        optimize_lr: float = 1e-1,
+        ug_s: int = 3,
+        ug_k: int = 5,
+        ug_lr: float = 1e-1,
         shift_init: float = 0.0,
-        loss_type: str = "MASKED_AVERAGE",
-        reg_type="ID",
-        beta_reg: float = 1e-4,
     ):
         # Backward universal guidance (arXiv:2302.07121): per step, optimize a LATENT shift
         # dz that drives the masked-mean objective, *through the model* (the dz->loss
@@ -659,7 +566,7 @@ class GuidedFlow(BaseLightningModule):
             time_embedding = self.embedd_time(x_cond, t).detach()
 
             # self recurrence at time t
-            for k in range(renoise_s):
+            for k in range(ug_s):
                 delta_z = self.UG_latent_shift(
                     z_t=z_t,
                     x_cond=x_cond,
@@ -670,12 +577,9 @@ class GuidedFlow(BaseLightningModule):
                     mask=mask,
                     time_embedding=time_embedding,
                     s_t=s_t,
-                    optimize_k=optimize_k,
-                    optimize_lr=optimize_lr,
-                    shift_init=shift_init,
-                    loss_type=loss_type,
-                    reg_type=reg_type,
-                    beta_reg=beta_reg,
+                    optimize_k=ug_k,
+                    optimize_lr=ug_lr,
+                    shift_init=shift_init
                 )
                 # keep the inner SGD's own magnitude (NOT unit-normalized): the converged
                 # dz shrinks as the masked-mean approaches the target, so the correction
@@ -702,10 +606,10 @@ class GuidedFlow(BaseLightningModule):
                     x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
                     z_next = self.euler_step(z_t, u_t, h)
 
-                    if k < renoise_s - 1:
+                    if k < ug_s - 1:
                         z_t = self.renoise(z_next, s_t, s_next)
 
-                if k == renoise_s - 1:
+                if k == ug_s - 1:
                     sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
                     sampling_trace["vfs"].append(u_pre.apply(lambda x: x * s_t).detach().cpu())
                     sampling_trace["gui_vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
@@ -754,10 +658,7 @@ class GuidedFlow(BaseLightningModule):
                 input_state = self.get_velocity_input_state(z_shift, x_cond)
                 u = self.velocity(x_cond, time_embedding, input_state, z_shift, s_t)
                 x_hat_t = self.clean_prediction(det_pred, z_shift, u, s_t)
-                loss = self.guidance_loss(
-                    x_hat_t, x_ref, x_ung, delta_t, mask,
-                    loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
-                )
+                loss = self.masked_loss(x_hat_t, x_ref, delta_t, mask)
 
             loss.backward()
             optimizer.step()
@@ -786,11 +687,11 @@ class GuidedFlow(BaseLightningModule):
         x_hat_ung,
         x_ref,
         seed: int,
-        optimize_k: int = 10,
-        optimize_lr: float = 1e-2,
-        control_gamma: float = 1e-3,
-        lambda_init: float = 0.0,
-        n_windows: int = 4,
+        fg_k: int = 10,
+        fg_lr: float = 1e-2,
+        fg_gamma: float = 1e-3,
+        fg_lambda_init: float = 0.0,
+        fg_n_windows: int = 4,
         loss_type: str = "MASKED_AVERAGE",
         reg_type="ID",
         beta_reg: float = 1e-4,
@@ -800,7 +701,7 @@ class GuidedFlow(BaseLightningModule):
         # is obtained with the Jacobian trick: one cached *detached* forward, then a
         # backward loop of per-step vector-Jacobian products (no full-trajectory
         # graph). g_t's Jacobian is frozen (first-order), so each step costs one VJP.
-        windows, win_of = self._coarse_windows(n_windows)
+        windows, win_of = self._coarse_windows(fg_n_windows)
         K = len(windows)
         win_of_t = torch.tensor(win_of, device=self.device)
         lengths = torch.tensor(
@@ -812,9 +713,9 @@ class GuidedFlow(BaseLightningModule):
         # after each optimizer step, which -- unlike a softplus/relu reparametrization --
         # leaves the gradient intact at lambda=0, so optimization can move off zero.
         raw_lambda = torch.nn.Parameter(
-            torch.full((K,), lambda_init, device=self.device, dtype=mask.dtype)
+            torch.full((K,), fg_lambda_init, device=self.device, dtype=mask.dtype)
         )
-        optimizer = torch.optim.Adam([raw_lambda], lr=optimize_lr)
+        optimizer = torch.optim.Adam([raw_lambda], lr=fg_lr)
         trace = defaultdict(list)
 
         timesteps = self.get_flow_timesteps()
@@ -829,15 +730,14 @@ class GuidedFlow(BaseLightningModule):
                 guidance_fn=self.lbg_guidance,
                 x_cond=x_cond,
                 det_pred=det_pred,
-                delta_t=delta_t,
+                delta_n=delta_t,
                 mask=mask,
                 x_hat_ung=x_hat_ung,
                 x_ref=x_ref,
                 lambda_schedule=lambda_schedule,
                 seed=seed,
-                create_graph=create_graph,
-                differentiable=differentiable,
-                trace=do_trace,
+                create_graph_flag=create_graph,
+                differentiable_flag=differentiable,
                 loss_type=loss_type,
                 reg_type=reg_type,
                 beta_reg=beta_reg,
@@ -862,13 +762,9 @@ class GuidedFlow(BaseLightningModule):
                         x_hat_t=x_hat_t,
                         x_ref=x_ref,
                         x_ung=x_hat_ung,
-                        delta_t=delta_t,
+                        delta_n=delta_t,
                         mask=mask,
                         z_t=z_t,
-                        loss_type=loss_type,
-                        reg_type=reg_type,
-                        beta_reg=beta_reg,
-                        create_graph=False,
                     )
 
                 z_cache.append(z_t.detach())
@@ -880,7 +776,7 @@ class GuidedFlow(BaseLightningModule):
             return z_t, z_cache, g_cache
 
         z_cache = g_cache = None
-        for _ in tqdm(range(optimize_k), desc="FG lambda optimization"):
+        for _ in tqdm(range(fg_k), desc="FG lambda optimization"):
             # release the previous iteration's caches BEFORE cached_forward allocates the
             # next ones; otherwise both cache sets (each 2*T detached states) coexist for
             # the duration of the forward and can OOM the GPU.
@@ -897,11 +793,8 @@ class GuidedFlow(BaseLightningModule):
             z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
             with torch.enable_grad():
                 x_hat_gui = self.final_prediction(det_pred, z_T)
-                target_loss = self.guidance_loss(
-                    x_hat_gui, x_ref, x_hat_ung, delta_t, mask,
-                    loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
-                )
-            a = self.grad_loss(target_loss, z_T)
+                target_loss = self.masked_loss(x_hat_gui, x_ref, delta_t, mask)
+            a = self.masked_loss_grad(target_loss, z_T)
 
             # backward adjoint loop (Jacobian trick, g frozen -> dz_{i+1}/dz_i = I + h du/dz)
             dlam_win = torch.zeros(K, device=self.device, dtype=raw_lambda.dtype)
@@ -915,14 +808,14 @@ class GuidedFlow(BaseLightningModule):
                     u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
 
                 # dL/dlambda_i = <a_{i+1}, dz_{i+1}/dlambda_i> = <a, -h g_i>
-                dlam_win[win_of[i]] += -h * self._td_dot(a, g_cache[i])
+                dlam_win[win_of[i]] += -h * sum((a[k] * g_cache[i][k]).sum() for k in a.keys())
 
                 vjp = self._vjp(u_i, z_i, a)
                 a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
 
             # lambda is the parameter directly (no softplus chain); add length-weighted
             # L2 reg gamma * sum_i lambda_fine_i^2, step, then project to lambda >= 0.
-            reg_grad = 2.0 * control_gamma * lengths * lambda_win
+            reg_grad = 2.0 * fg_gamma * lengths * lambda_win
             raw_lambda.grad = dlam_win + reg_grad
 
             optimizer.step()
@@ -930,7 +823,7 @@ class GuidedFlow(BaseLightningModule):
                 raw_lambda.clamp_(min=0.0)  # projected gradient descent: keep lambda >= 0
 
             with torch.no_grad():
-                reg_loss = control_gamma * (lengths * lambda_win ** 2).sum()
+                reg_loss = fg_gamma * (lengths * lambda_win ** 2).sum()
             trace["loss"].append((target_loss.detach() + reg_loss).cpu())
             trace["target_loss"].append(target_loss.detach().cpu())
             trace["reg_loss"].append(reg_loss.cpu())
@@ -962,11 +855,11 @@ class GuidedFlow(BaseLightningModule):
         x_hat_ung,
         x_ref,
         seed: int,
-        optimize_k: int = 10,
-        optimize_lr: float = 1e-2,
-        control_gamma: float = 1e-3,
-        shift_init: float = 0.0,  # initial value of the free controls
-        n_windows: int = 5,
+        fgf_k: int = 10,
+        fgf_lr: float = 1e-2,
+        fgf_gamma: float = 1e-3,
+        fgf_shift_init: float = 0.0,  # initial value of the free controls
+        fgf_n_windows: int = 5,
         loss_type: str = "MASKED_AVERAGE",
         reg_type="ID",
         beta_reg: float = 1e-4,
@@ -977,7 +870,7 @@ class GuidedFlow(BaseLightningModule):
         # trick — per control point one VJP through the collapsed block map
         # func(x) = x + u_j + v(x + u_j, t_j) * Delta_j; since d func/d u_j == d func/d x,
         # u_j.grad equals the propagated adjoint.
-        windows, _ = self._coarse_windows(n_windows)
+        windows, _ = self._coarse_windows(fgf_n_windows)
         K = len(windows)
         timesteps = self.get_flow_timesteps()
 
@@ -996,11 +889,11 @@ class GuidedFlow(BaseLightningModule):
         for _ in range(K):
             cj = {}
             for k in z0.keys():
-                p = torch.full_like(z0[k], shift_init).requires_grad_(True)
+                p = torch.full_like(z0[k], fgf_shift_init).requires_grad_(True)
                 cj[k] = p
                 params.append(p)
             controls.append(z0.__class__(cj, batch_size=z0.batch_size, device=z0.device))
-        optimizer = torch.optim.Adam(params, lr=optimize_lr)
+        optimizer = torch.optim.Adam(params, lr=fgf_lr)
         trace = defaultdict(list)
 
         def cached_forward():
@@ -1031,17 +924,14 @@ class GuidedFlow(BaseLightningModule):
             u = self.velocity(x_cond, time_embedding, input_state, xu, s_j)
             return self.euler_step(xu, u, delta_j)
 
-        for _ in tqdm(range(optimize_k), desc="FGF control optimization"):
+        for _ in tqdm(range(fgf_k), desc="FGF control optimization"):
             z_T, state_at = cached_forward()
 
             z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
             with torch.enable_grad():
                 x_hat_gui = self.final_prediction(det_pred, z_T)
-                target_loss = self.guidance_loss(
-                    x_hat_gui, x_ref, x_hat_ung, delta_t, mask,
-                    loss_type=loss_type, reg_type=reg_type, beta_reg=beta_reg,
-                )
-            a = self.grad_loss(target_loss, z_T)
+                target_loss = self.masked_loss(x_hat_gui, x_ref, delta_t, mask)
+            a = self.masked_loss_grad(target_loss, z_T)
 
             # backward over control points high->low; one VJP each (paper identity)
             for j in range(K - 1, -1, -1):
@@ -1050,13 +940,13 @@ class GuidedFlow(BaseLightningModule):
                     out = block_map(x_in, j)
                 a = self._vjp(out, x_in, a)  # = J^T a ; J_x == J_{u_j}
                 for k in controls[j].keys():
-                    controls[j][k].grad = a[k] + 2.0 * control_gamma * controls[j][k].detach()
+                    controls[j][k].grad = a[k] + 2.0 * fgf_gamma * controls[j][k].detach()
 
             optimizer.step()
             optimizer.zero_grad()
 
             with torch.no_grad():
-                reg_loss = control_gamma * sum(
+                reg_loss = fgf_gamma * sum(
                     (controls[j][k] ** 2).sum() for j in range(K) for k in controls[j].keys()
                 )
             trace["loss"].append((target_loss.detach() + reg_loss).cpu())

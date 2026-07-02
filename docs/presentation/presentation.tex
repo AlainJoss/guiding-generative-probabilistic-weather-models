@@ -9,6 +9,7 @@
 \usepackage{algpseudocode}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta}
+\usepackage{amsmath,amssymb}
 
 
 \newcommand{\paperref}[1]{
@@ -59,6 +60,14 @@
 
 \frame{
 \frametitle{Motivation}
+
+Extreme events ...
+
+}
+
+
+\frame{
+\frametitle{Starting Question}
 
 \begin{block}{Starting Question}
 Can we steer generative probabilistic weather models to generate extreme, physically realistic weather events?
@@ -161,20 +170,42 @@ x_{n+1}
 \mathbb{E}
 \left[
 x_{n+1}
-\mid
-x_n,x_{n-1},n
+\mid x_n,x_{n-1},n
 \right]
 +
 r_{n+1}
 \]
 \end{block}
 
+\vspace{-0.1cm}
+
+\begin{block}{Implementation}
+\[
+\hat{x}^{\mathrm{norm}}_{n+1}
+=
+\hat{x}^{\mathrm{det}}_{n+1}
++
+\sigma^{\mathrm{res}} \hat{r}_{n+1}
+\]
+\[
+\hat{x}_{n+1}
+=
+\bar{x}^{\mathrm{data}}
++
+\sigma^{\mathrm{data}}
+\hat{x}^{\mathrm{norm}}_{n+1}
+\]
+\end{block}
+
+\vspace{-0.1cm}
+
 \begin{itemize}
-    \item Deterministic model predicts the expected next weather state.
-    \item Residual flow model generates the stochastic residual $r_{n+1}$.
-    \item Time information includes month and time of day.
-    \item Spec:
+    \item The deterministic model predicts the conditional mean.
+    \item The flow model generates a residual around this forecast.
+    \item Month, hour, and rollout step are used as time conditioning.
 \end{itemize}
+
+\vspace{-0.1cm}
 
 \begin{center}
 \begin{tabular}{ll}
@@ -185,7 +216,6 @@ Variables & 4 surface, 6 pressure-level variables \\
 Pressure levels & 13 levels, 50--1000 hPa \\
 \end{tabular}
 \end{center}
-
 }
 
 \frame{
@@ -472,39 +502,32 @@ g_{n,t}
     \item For linear probability paths: $a_t=\frac{1-t}{t}$
     \item $w$ controls guidance strength
     \item For $w\neq 1$, the exact probabilistic interpretation is lost
-    \item Limitation: ignores uncertainty in $x_1|z_t$.
+    \item Unlike DPS paper, we do not rescale $w\,a_t$ by $\|\nabla_{z_t}\|$.
 \end{itemize}
 
 \paperref{Dhariwal \& Nichol, Diffusion Models Beat GANs on Image Synthesis, NeurIPS 2021.}
 % \paperref{Chung et al., Diffusion Posterior Sampling for General Noisy Inverse Problems, ICLR 2023.}
 }
 
-
 \frame{
 \frametitle{LBG-MC: Loss-Based Guidance Monte Carlo}
 
-\textbf{Idea:} avoid guiding only through the point estimate $\hat{x}_{n}$.
+\textbf{Idea:} avoid guiding only through the point estimate $\hat{x}_{n}:=x(\hat{z_0})$.
 
 \begin{itemize}
-    \item The guidance likelihood should account for uncertainty in the clean state:
-    \[
+    \item Account for uncertainty in the clean state:
+    \begin{align*}
     p(y|z_t)
-    =
-    \mathbb{E}_{\hat{x}_{n}|z_t}
+    &=
+    \int
+    p(y|\hat{x}_{n})
+    p(\hat{x}_{n}|z_t)
+    \,d\hat{x}_{n} \\
+    &= \mathbb{E}_{\hat{x}_{n}|z_t}
     \left[
     \exp\!\left(-\mathcal{L}_n(\hat{x}_{n}, y)\right)
-    \right]
-    \]
-
-    \item Equivalently:
-    \[
-    p(y|z_t)
-    =
-    \int
-    p(\hat{x}_{n}|z_t)
-    \exp\!\left(-\mathcal{L}_n(\hat{x}_{n},y)\right)
-    \,dx
-    \]
+    \right]        
+    \end{align*}
 
     \item Since the true posterior $p(\hat{x}_{n}|z_t)$ is intractable, approximate it by
     \[
@@ -521,6 +544,7 @@ g_{n,t}
     \[
     \sigma_t = R\,a_t
     \]
+    and we perturb $\hat{x}_{n}^\text{norm}$ instead of $\hat{x}_{n}$ directly.
 \end{itemize}
 
 \paperref{Song et al., Loss-Guided Diffusion Models for Plug-and-Play Controllable Generation, ICML 2023.}
@@ -751,7 +775,7 @@ z_t^{(s+1)}
 }
 
 \frame{
-\frametitle{Methods Overview}
+\frametitle{Runtime Overview}
 
 \begin{center}
 \begin{tabular}{lll}
@@ -775,23 +799,52 @@ FGF  & free controls $c_t$                           & backprop through ODE \\
 }
 
 
+% \frame{
+% \frametitle{Method-Specific Hyperparameters}
+
+% \begin{center}
+% \begin{tabular}{lll}
+% \textbf{Symbol} & \textbf{Meaning} & \textbf{Used in} \\
+% \hline
+% $w$ & guidance strength & LBG, LBG-MC, UG \\
+% $a_t$ & flow-time guidance scaling & LBG, LBG-MC, UG \\
+% $N_{\mathrm{MC}}$ & Monte-Carlo samples & LBG-MC \\
+% $R$ & posterior spread magnitude & LBG-MC \\
+% $K$ & inner optimization steps & UG \\
+% $S$ & self-recurrence steps & UG \\
+% $\eta$ & learning rate & UG
+% \end{tabular}
+% \end{center}
+% }
+
 \frame{
 \frametitle{Method-Specific Hyperparameters}
 
 \begin{center}
-\begin{tabular}{lll}
-\textbf{Symbol} & \textbf{Meaning} & \textbf{Used in} \\
-\hline
-$w$ & guidance strength & LBG, LBG-MC, UG \\
-$a_t$ & flow-time guidance scaling & LBG, LBG-MC, UG \\
-$N_{\mathrm{MC}}$ & Monte-Carlo samples & LBG-MC \\
-$R$ & posterior spread magnitude & LBG-MC \\
-$K$ & inner optimization steps & UG \\
-$S$ & self-recurrence steps & UG \\
-$\eta$ & learning rate & UG
-\end{tabular}
+\scalebox{1.2}{
+\begin{tikzpicture}[
+    level distance=1.15cm,
+    sibling distance=3.2cm,
+    every node/.style={
+        align=center,
+        rounded corners,
+        draw,
+        inner sep=3.5pt,
+        font=\scriptsize
+    },
+    edge from parent/.style={draw, -latex}
+]
+
+\node {\textbf{Guidance}\\ shared: $w$, $a_t$}
+    child {node {\textbf{LBG}\\ no extra}}
+    child {node {\textbf{LBG-MC}\\ $N_{\mathrm{MC}}$: samples\\ $R$: spread}}
+    child {node {\textbf{UG}\\ $K$: inner steps\\ $S$: recurrence\\ $\eta$: learning rate}};
+
+\end{tikzpicture}
+}
 \end{center}
 }
+
 \section{Experiments}
 
 \frame{
@@ -816,31 +869,143 @@ Mask mode & BBOX or Gaussian mask \\
 
 }
 
+\frame{
+\frametitle{Evaluation framework}
+
+For each guidance method, we report following:
+
+\begin{itemize}
+    \item \textbf{Best hyperparameter setting:} the setting that best balances target achievement and physical realism.
+    \item \textbf{Target achievement:} how closely the guided rollout follows the prescribed $\delta_n$ trajectory.
+    \item \textbf{Realism cost:} how much the rollout deviates from the unguided forecast distribution.
+    \item \textbf{Stability:} whether the method produces smooth and stable rollouts across forecast steps.
+    \item \textbf{Runtime cost:} the additional computational cost compared to unguided sampling.
+    \item \textbf{Findings:} trade-off between target achievement and realism, or optimal guidance schedule.
+\end{itemize}
+}
+
 
 \frame{
-\frametitle{Hyperparameter tuning}
+\frametitle{Evaluation Metrics}
+
+We evaluate the guidance methods using two main questions:
+
+\begin{itemize}
+    \item Can the method achieve the prescribed guidance target?
+    \item Are the resulting guided rollouts physically meaningful?
+\end{itemize}
+
+\vspace{0.2cm}
+
+We quantify these questions with two main metrics:
+
+\begin{itemize}
+    \item \textbf{Target error:} distance between the realized guided change and the prescribed target trajectory.
+    \item \textbf{Spectral deviation:} distance between the guided- and the unguided power spectrum.
+\end{itemize}
+
+\vspace{0.2cm}
+
+In addition, we inspect the guided rollouts qualitatively through:
+
+\begin{itemize}
+    \item final weather maps,
+    \item guidance gradients,
+    \item modified vector fields,
+    \item ...
+\end{itemize}
+}
+
+\frame{
+\frametitle{Power Spectrum: Spherical-Harmonic Expansion}
+
+We compute the \textbf{spherical harmonics} for each variable slice $x_n^{v}(\theta,\varphi)$
+
+\begin{block}{Spherical-harmonic expansion}
+\[
+x_n^{v}(\theta,\varphi)
+=
+\sum_{\ell=0}^{L}\sum_{m=-\ell}^{\ell}
+a_{\ell m}^{v}\,Y_{\ell m}(\theta,\varphi)
+\]
+\end{block}
+
+\begin{itemize}
+    \item $x_n^{v}$: a single $(\theta,\varphi)$ field --- a surface variable or one pressure level.
+    \item $Y_{\ell m}$: spherical harmonic of degree $\ell$, order $m$ --- the orthonormal basis on the sphere.
+    \item $a_{\ell m}^{v}$: expansion coefficient, the projection of $x_n^{v}$ onto $Y_{\ell m}$.
+    \item Each degree $\ell$ carries $2\ell+1$ orders $m=-\ell,\dots,\ell$ (the orientations of that scale).
+    \item $L=59$: max degree for our $120\times240$ grid ($\ell=0,\dots,59$).
+\end{itemize}
 
 }
 
-\section{Results}
-
 \frame{
-\frametitle{...}
+\frametitle{Spectral Realism Metrics}
+
+Per slice $x_n^{v}$, we compare the guided spectrum $\mathrm{PS}^{\mathrm{gui}}_n(\ell)$
+to a reference $\mathrm{PS}^{\mathrm{ref}}_n(\ell)$ (unguided forecast or ground truth),
+over the $L$ degrees $\ell \ge 1$ ($\ell=0$, the field mean, is dropped).
+
+\begin{block}{Log-spectral distance --- magnitude of mismatch}
+\[
+\mathrm{LSD}_n
+=
+\sqrt{
+\frac{1}{L}
+\sum_{\ell\ge1}
+\left(
+\ln \mathrm{PS}^{\mathrm{gui}}_n(\ell)
+-
+\ln \mathrm{PS}^{\mathrm{ref}}_n(\ell)
+\right)^2
+}
+\]
+\end{block}
+
+\begin{block}{Spectral bias --- signed direction}
+\[
+\mathrm{bias}_n
+=
+\frac{1}{L}
+\sum_{\ell\ge1}
+\ln\frac{\mathrm{PS}^{\mathrm{gui}}_n(\ell)}{\mathrm{PS}^{\mathrm{ref}}_n(\ell)}
+\qquad
+\begin{cases}
+<0 & \text{too smooth}\\[-1pt]
+>0 & \text{too rough}
+\end{cases}
+\]
+\end{block}
+
+\begin{block}{Total power --- structure magnitude}
+\[
+P_n = \sum_{\ell\ge1} \mathrm{PS}_n(\ell)
+\]
+\end{block}
+
+\begin{itemize}
+    \item The log-ratio weights every scale equally (raw $|P-Q|$ is dominated by low $\ell$).
+\end{itemize}
 
 }
 
 \frame{
-\frametitle{Physical Realism}
+\frametitle{Results}
 
-}
-
-\frame{
-\frametitle{Conclusion}
 }
 
 \frame{
 \centering
 \Huge QA
+}
+
+\frame{
+\centering
+\Huge Ideas
+\begin{itemize}
+    \item Explain why not just do M-step GD on the deterministic prediction.
+\end{itemize}
 }
 
 

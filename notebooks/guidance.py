@@ -20,7 +20,7 @@ def _():
 @app.cell
 def _():
     from src.paths import ROLLOUTS
-    from src.rollout_config import MASK_MODES, RolloutConfig, GUIDANCE_MODES, GUI_REFS, REG_TYPES
+    from src.rollout_config import MASK_MODES, RolloutConfig, GUIDANCE_METHODS, GUI_REFS
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
@@ -39,12 +39,11 @@ def _():
     from src.target import get_target_slices
 
     return (
-        GUIDANCE_MODES,
+        GUIDANCE_METHODS,
         GUI_REFS,
         LEVELS_DICT,
         MASK_MODES,
         PARTITIONS,
-        REG_TYPES,
         RolloutConfig,
         VARIABLES_DICT,
         dump_json,
@@ -164,7 +163,6 @@ def _(
     mask_mode_select,
     notebook_mode,
     partition,
-    reg_type_select,
     rollout_id,
     save_config_button,
     sweep_ranges,
@@ -200,11 +198,10 @@ def _(
                 "GUIDANCE_MODE": list(guidance_mode_select.value),
                 "GUI_REF": list(gui_ref_select.value),
                 "MASK_MODE": list(mask_mode_select.value),
-                "REG_TYPE": list(reg_type_select.value),
                 "GUIDANCE_DELTA": delta_trajectories,
                 **{ax: compute_axis_values(ax, _rv) for ax in NUMERIC_AXES},
             }
-            if all(sweep[a] for a in ("GUIDANCE_MODE", "GUI_REF", "MASK_MODE", "REG_TYPE")):
+            if all(sweep[a] for a in ("GUIDANCE_MODE", "GUI_REF", "MASK_MODE")):
                 dump_json(sweep, rollout_dir / "sweep_params.json")
             else:
                 print("each categorical axis needs at least one value")
@@ -213,7 +210,7 @@ def _(
 
 @app.cell
 def _(
-    GUIDANCE_MODES,
+    GUIDANCE_METHODS,
     GUI_REFS,
     MASK_MODES,
     NUMERIC_AXES,
@@ -237,7 +234,7 @@ def _(
                 show_value=True
             )
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
-            guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_MODES, value=GUIDANCE_MODES[0], label="guidance_mode: ")
+            guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="guidance_mode: ")
             delta_trajectory_dropdown = None
             sweep_extra_dropdowns = mo.ui.dictionary({})
             sweep_params_widget = None
@@ -254,7 +251,7 @@ def _(
                 show_value=True
             )
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
-            guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_MODES, value=GUIDANCE_MODES[0], label="guidance_mode: ")
+            guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="guidance_mode: ")
             delta_trajectory_dropdown = None
             sweep_extra_dropdowns = mo.ui.dictionary({})
             sweep_params_widget = None
@@ -272,8 +269,8 @@ def _(
                 label="guidance_reference: ",
             )
             w_slider = mo.ui.slider(
-                steps=experiment_params["W"],
-                value=experiment_params["W"][0],
+                steps=experiment_params["w"],
+                value=experiment_params["w"][0],
                 label="w: ",
                 debounce=True,
                 show_value=True,
@@ -305,7 +302,7 @@ def _(
                 "GUIDANCE_MODE": guidance_mode_dropdown,
                 "MASK_MODE": mask_mode_dropdown,
                 "GUI_REF": guidance_reference_dropdown,
-                "W": w_slider,
+                "w": w_slider,
                 "GUIDANCE_DELTA": delta_trajectory_dropdown,
             }
             _extra = {}
@@ -482,7 +479,6 @@ def config_cell(get_config, notebook_mode, rollout_id):
             config = get_config(rollout_id)
         case _:
             config = None
-
     return (config,)
 
 
@@ -502,7 +498,6 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
             guided_xr = get_rollout("gui", rollout_id).sel(sweep_params).compute()
         case _:
             pass
-
     return guided_xr, unguided_xr
 
 
@@ -748,7 +743,7 @@ def _(
     w_slider,
 ):
     sweep_params = {
-        "W": w_slider.value,
+        "w": w_slider.value,
         "GUI_REF": guidance_reference_dropdown.value,
         "MASK_MODE": mask_mode_dropdown.value,
         "GUIDANCE_MODE": guidance_mode_dropdown.value,
@@ -904,30 +899,29 @@ def _(mo):
     # number of delta trajectories to author (each a sweep value of GUIDANCE_DELTA)
     n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="delta trajectories", show_value=True)
     # how each delta is shaped: hand-drawn linear ramp, or relative to the unguided ensemble
-    # spread  delta_n = k * std_n / |mean_n|  (k is a per-candidate multiplier)
-    delta_mode_dropdown = mo.ui.dropdown(["linear", "std-based"], value="linear", label="delta mode: ")
-
+    # band  delta_n = k * sigma_band_n / |mean_n|,  sigma_band_n = (max_n - min_n)/2  (k per candidate;
+    # k=1 pushes the masked mean to the top edge of the unguided ensemble band).
+    delta_mode_dropdown = mo.ui.dropdown(["linear", "band-based"], value="linear", label="delta mode: ")
     return delta_mode_dropdown, n_deltas_slider
 
 
 @app.cell
 def _(N, delta_mode_dropdown, mo, n_deltas_slider, notebook_mode):
-    # per-delta params. linear: start% / peak% / start@n / stop@n. std-based: one multiplier
-    # k per candidate (delta_n = k * std_n/|mean_n|).
+    # per-delta params. linear: start% / peak% / start@n / stop@n. band-based: one multiplier
+    # k per candidate (delta_n = k * sigma_band_n/|mean_n|, sigma_band_n = (max-min)/2 of the ensemble).
     if notebook_mode == "guided_rollout":
         _dc = {}
         for _i in range(n_deltas_slider.value):
-            if delta_mode_dropdown.value == "std-based":
-                _dc[f"{_i}.k"] = mo.ui.number(value=1.0, label="k (\u00d7 std)")
+            if delta_mode_dropdown.value == "band-based":
+                _dc[f"{_i}.k"] = mo.ui.number(value=1.0, label="k (× band)")
             else:
                 _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label="start %")
                 _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %")
-                _dc[f"{_i}.start_at"] = mo.ui.slider(1, N, step=1, value=1, label="start@n", show_value=True)
+                _dc[f"{_i}.start_at"] = mo.ui.slider(0, N, step=1, value=0, label="start@n", show_value=True)
                 _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, N, step=1, value=N, label="stop@n", show_value=True)
         delta_controls = mo.ui.dictionary(_dc)
     else:
         delta_controls = mo.ui.dictionary({})
-
     return (delta_controls,)
 
 
@@ -942,19 +936,19 @@ def delta_std_base(
     unguided_xr,
 ):
     # unguided ensemble spread at the guidance coords (config var/level + authoring mask):
-    # rel_std_n = std_n / |mean_n| over the M members' masked-average -> the std-based delta base.
+    # sigma_band_n = (max_n - min_n)/2 over the M members' masked-average; rel_band_n = sigma_band_n/|mean_n|
+    # is the band-based delta base (k=1 -> target reaches the top edge of the unguided band).
     # NOTE: MASK_MODE is a separate swept axis but one delta vector is shared across mask modes;
-    # the relative CV is fairly mask-mode robust, so we use the authoring mask. Needs M > 1.
+    # the relative ratio is fairly mask-mode robust, so we use the authoring mask. Needs M > 1.
     if notebook_mode == "guided_rollout":
         _base = get_masked_mean(
             get_slices(unguided_xr, config.PARTITION, config.VAR, config.LEVEL), mask)  # (M, N)
-        delta_std_n = _base.std(axis=0)                                       # (N,) ensemble std
-        delta_mean_n = _base.mean(axis=0)                                     # (N,)
-        delta_rel_std_n = delta_std_n / np.maximum(np.abs(delta_mean_n), 1e-8)  # (N,) CV; guards mean~0
+        delta_band_n = (_base.max(axis=0) - _base.min(axis=0)) / 2.0            # (N,) half band-width
+        delta_mean_n = _base.mean(axis=0)                                       # (N,)
+        delta_rel_band_n = delta_band_n / np.maximum(np.abs(delta_mean_n), 1e-8)  # (N,); guards mean~0
     else:
-        delta_rel_std_n = None
-
-    return (delta_rel_std_n,)
+        delta_rel_band_n = None
+    return (delta_rel_band_n,)
 
 
 @app.cell
@@ -962,13 +956,13 @@ def _(
     N,
     delta_controls,
     delta_mode_dropdown,
-    delta_rel_std_n,
+    delta_rel_band_n,
     mo,
     n_deltas_slider,
     notebook_mode,
 ):
     # delta trajectories. linear: 0 before start@n, ramp start%->peak% over [start@n, stop@n],
-    # 0 after. std-based: delta_n = k * rel_std_n (k per candidate). Both return length-N lists
+    # 0 after. band-based: delta_n = k * rel_band_n (k per candidate). Both return length-N lists
     # indexed by rollout step n (aligned with delta_trajectory[n] in rollout.py).
     def _linear_delta(N, start_pct, peak_pct, start_at, stop_at):
         start, peak = start_pct / 100, peak_pct / 100
@@ -983,9 +977,9 @@ def _(
 
     if notebook_mode == "guided_rollout":
         _dv = delta_controls.value
-        if delta_mode_dropdown.value == "std-based":
+        if delta_mode_dropdown.value == "band-based":
             delta_trajectories = [
-                [float(_dv[f"{_i}.k"] * delta_rel_std_n[_n]) for _n in range(N)]
+                [float(_dv[f"{_i}.k"] * delta_rel_band_n[_n]) for _n in range(N)]
                 for _i in range(n_deltas_slider.value)
             ]
             _rows = [
@@ -1009,7 +1003,6 @@ def _(
     else:
         delta_trajectories = []
         delta_widget = None
-
     return delta_trajectories, delta_widget
 
 
@@ -1075,31 +1068,35 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 
 
 @app.cell
-def _(GUIDANCE_MODES, GUI_REFS, MASK_MODES, REG_TYPES, mo, np):
+def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     # ===== sweep authoring widgets (guided_rollout) =====
-    guidance_mode_select = mo.ui.multiselect(GUIDANCE_MODES, value=["LBG"], label="GUIDANCE_MODE")
+    guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["LBG"], label="GUIDANCE_MODE")
     gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF")
     mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE")
-    reg_type_select = mo.ui.multiselect(REG_TYPES, value=["ID"], label="REG_TYPE")
 
     # numeric axes -> (start, stop, log_scale, integer)
+    # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
     NUMERIC_AXES = {
-        "W":             (0.1,  5.0,   False, False),
-        "BETA_REG":      (1e-4, 1e-2,  True,  False),
+        "w":              (0.1,  5.0,   False, False),
         # LBG-MC
-        "N_MC":          (4,    16,    False, True),
-        "R":             (0.1,  1.0,   False, False),
+        "n_mc":           (4,    16,    False, True),
+        "r":              (0.1,  1.0,   False, False),
         # UG
-        "K":             (10,   50,    False, True),
-        "ETA":           (1e-2, 1e-1,  True,  False),
-        "S":             (4,    8,     False, True),
-        # FG / FGF (legacy, not finalized)
-        "OPTIMIZE_K":    (10,   50,    False, True),
-        "OPTIMIZE_LR":   (1e-2, 1e-1,  True,  False),
-        "SHIFT_INIT":    (0.0,  1.0,   False, False),
-        "CONTROL_GAMMA": (1e-3, 1e-2,  True,  False),
-        "LAMBDA_INIT":   (0.0,  2.0,   False, False),
-        "N_WINDOWS":     (5,    25,    False, True),
+        "ug_k":           (10,   50,    False, True),
+        "ug_lr":          (1e-2, 1e-1,  True,  False),
+        "ug_s":           (4,    8,     False, True),
+        # FG (legacy, not finalized)
+        "fg_k":           (10,   50,    False, True),
+        "fg_lr":          (1e-2, 1e-1,  True,  False),
+        "fg_gamma":       (1e-3, 1e-2,  True,  False),
+        "fg_lambda_init": (0.0,  2.0,   False, False),
+        "fg_n_windows":   (5,    25,    False, True),
+        # FGF (legacy, not finalized)
+        "fgf_k":          (10,   50,    False, True),
+        "fgf_lr":         (1e-2, 1e-1,  True,  False),
+        "fgf_shift_init": (0.0,  1.0,   False, False),
+        "fgf_gamma":      (1e-3, 1e-2,  True,  False),
+        "fgf_n_windows":  (5,    25,    False, True),
     }
 
     _rc = {}
@@ -1131,7 +1128,6 @@ def _(GUIDANCE_MODES, GUI_REFS, MASK_MODES, REG_TYPES, mo, np):
         gui_ref_select,
         guidance_mode_select,
         mask_mode_select,
-        reg_type_select,
         sweep_ranges,
     )
 
@@ -1145,15 +1141,13 @@ def _(
     mask_mode_select,
     mo,
     notebook_mode,
-    reg_type_select,
     sweep_ranges,
 ):
     # shown only for the modes that use it: LBG / LBG-MC / UG).
     import importlib as _importlib
     import src.rollout_config as _rc_mod
     _importlib.reload(_rc_mod)
-    _MODE_HYPERS = _rc_mod.MODE_HYPERS
-    _COMMON_NUM = ["BETA_REG"]
+    _MODE_HYPERS = _rc_mod.GUIDANCE_METHOD_HYPERS
 
     _rv = sweep_ranges.value
     def _sweep_row(ax):
@@ -1169,15 +1163,12 @@ def _(
     hypers_widget = mo.vstack([
         mo.md("## Sweep"),
         mo.md("**Common categorical**:"),
-        mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, reg_type_select], justify="start"),
-        mo.md("**Common numeric**:"),
-        *[_sweep_row(ax) for ax in _COMMON_NUM],
+        mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select], justify="start"),
         mo.md(f"**Specific**:"),
         *([_sweep_row(ax) for ax in _mode_num] if _mode_num else [mo.md("_none_")]),
     ], align="start")
 
     hypers_widget if notebook_mode == "guided_rollout" else None
-
     return
 
 
@@ -1200,10 +1191,10 @@ def wa_schedule(
     # mirrors GuidedFlow.guidance_scale (see src/schedules.py).
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
-        w_choices = compute_axis_values("W", sweep_ranges.value)
+        w_choices = compute_axis_values("w", sweep_ranges.value)
     elif notebook_mode == "analyze_rollout":
         selected_modes = [guidance_mode_dropdown.value]
-        w_choices = list(experiment_params["W"])
+        w_choices = list(experiment_params["w"])
     else:
         selected_modes = []
         w_choices = []
@@ -1222,7 +1213,6 @@ def wa_schedule(
         )
     else:
         wa_schedule_widget = None
-
     return (wa_schedule_widget,)
 
 
@@ -2830,7 +2820,6 @@ def _(
         diff_vfs_map = maps["diff_vfs_map"]
         vf_gui_next_diff_map = maps["vf_gui_next_diff_map"]
         diff_grads_map = maps["diff_grads_map"]
-
     return (
         diff_grads_map,
         diff_gt_clean_pred_map,
@@ -2957,9 +2946,8 @@ def _(flow_widget_make, notebook_mode):
 def pr_ctl(mo):
     # physical-realism row toggles (mirrors cross_row_checks)
     pr_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "spectral distance", "spectral bias", "total power",
+        "spectral distance", "spectral bias", "total power", "distributional skill",
     )})
-
     return (pr_row_checks,)
 
 
@@ -3009,28 +2997,42 @@ def pr_data(
             "power": {"gui": [float(np.sum(_clean_specs[_ti][1:])) for _ti in range(T)],
                       "gt":  [float(np.sum(_gt_spec[n][1:]))] * T},
         }
-    else:
-        pr_n = pr_t = None
 
-    return pr_n, pr_t
+        # distributional skill: the spatial value distribution of the selected var/level slice
+        # at the chosen (m, n) for each source -> overlaid histograms (gt / ung / ung_gui / gui).
+        pr_dist = {
+            "gt":      np.asarray(gt_N_slices[n]).ravel(),
+            "ung":     np.asarray(ung_M_N_slices[m][n]).ravel(),
+            "ung_gui": np.asarray(ung_gui_M_N_slices[m][n]).ravel(),
+            "gui":     np.asarray(gui_M_N_slices[m][n]).ravel(),
+        }
+    else:
+        pr_n = pr_t = pr_dist = None
+    return pr_dist, pr_n, pr_t
 
 
 @app.cell
 def _(
     N,
     T,
+    level,
+    m,
     m_slider,
     mask_widget_controls,
     mo,
     n,
     n_slider,
     notebook_mode,
+    np,
+    partition,
+    pr_dist,
     pr_n,
     pr_row_checks,
     pr_t,
     sweep_params_widget,
     t,
     t_slider,
+    var,
 ):
     # ===== Physical realism: spectral-realism plots, cross-var-check style =====
     if notebook_mode == "analyze_rollout":
@@ -3038,6 +3040,7 @@ def _(
         import src.ui.plot_trajectory as _ptmod
         _importlib.reload(_ptmod)
         _pt = _ptmod.plot_trajectory
+        import matplotlib.pyplot as _plt
 
         _src_colors = {"gt": "#222222", "ung": "#1f77b4", "ung_gui": "#2ca02c", "gui": "#d62728"}
         _wn = min(22.0, max(8.0, 3.4 + 0.78 * N))
@@ -3053,18 +3056,53 @@ def _(
                 mirror_right_axis=True,
             )
 
+        # value-distribution histogram at the selected (m, n): overlaid densities per source
+        def _dist_plot(dist):
+            _order = [s for s in ("gt", "ung", "ung_gui", "gui") if s in dist]
+            _fin = {s: dist[s][np.isfinite(dist[s])] for s in _order}
+            _present = [s for s in _order if _fin[s].size]
+            _lvl = f" @ {level} hPa" if partition == "level" else ""
+            with _plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
+                _fig, _ax = _plt.subplots(figsize=(_wn, 6), dpi=130)
+                if _present:
+                    _allv = np.concatenate([_fin[s] for s in _present])
+                    _bins = np.linspace(float(_allv.min()), float(_allv.max()), 41)
+                    for s in _present:
+                        # curve histogram: stepped outline only, no filled bars
+                        _ax.hist(_fin[s], bins=_bins, density=True, histtype="step",
+                                 linewidth=1.9, color=_src_colors[s], label=s, zorder=3)
+                _ax.set_xlabel(f"{var}{_lvl} value")
+                _ax.set_ylabel("density")
+                _ax.set_title(f"Value distribution — {var}{_lvl}  (m={m}, n={n})",
+                              loc="left", fontweight="bold")
+                for _sp in ("top", "right"):
+                    _ax.spines[_sp].set_visible(False)
+                _ax.legend(frameon=False, loc="upper right")
+                _fig.tight_layout()
+            return _fig
+
         _pr_rows = {
             "spectral distance": [
-                _pr_plot(pr_n["lsd"],  r"Spectral distance (LSD vs gt) over $n$", r"$\mathrm{LSD}(\mathrm{PS},\,\mathrm{PS}^{\mathrm{gt}})$", "n"),
-                _pr_plot(pr_t["lsd"],  r"Spectral distance (LSD vs gt) over $t$", r"$\mathrm{LSD}(\mathrm{PS}_t,\,\mathrm{PS}^{\mathrm{gt}}_n)$", "t"),
+                _pr_plot(pr_n["lsd"],  r"Log-spectral distance (LSD) over $n$",
+                         r"$\mathrm{LSD}_n=\sqrt{\frac{1}{L}\sum_{\ell\geq1}\left(\ln\mathrm{PS}_n(\ell)-\ln\mathrm{PS}^{\mathrm{gt}}_n(\ell)\right)^2}$", "n"),
+                _pr_plot(pr_t["lsd"],  r"Log-spectral distance (LSD) over $t$",
+                         r"$\mathrm{LSD}_t=\sqrt{\frac{1}{L}\sum_{\ell\geq1}\left(\ln\mathrm{PS}_t(\ell)-\ln\mathrm{PS}^{\mathrm{gt}}_n(\ell)\right)^2}$", "t"),
             ],
             "spectral bias": [
-                _pr_plot(pr_n["bias"], r"Spectral bias (vs gt) over $n$", r"$\mathrm{mean}_\ell\,\ln(\mathrm{PS}/\mathrm{PS}^{\mathrm{gt}})$", "n"),
-                _pr_plot(pr_t["bias"], r"Spectral bias (vs gt) over $t$", r"$\mathrm{mean}_\ell\,\ln(\mathrm{PS}_t/\mathrm{PS}^{\mathrm{gt}}_n)$", "t"),
+                _pr_plot(pr_n["bias"], r"Spectral bias over $n$",
+                         r"$\mathrm{bias}_n=\frac{1}{L}\sum_{\ell\geq1}\ln\frac{\mathrm{PS}_n(\ell)}{\mathrm{PS}^{\mathrm{gt}}_n(\ell)}$", "n"),
+                _pr_plot(pr_t["bias"], r"Spectral bias over $t$",
+                         r"$\mathrm{bias}_t=\frac{1}{L}\sum_{\ell\geq1}\ln\frac{\mathrm{PS}_t(\ell)}{\mathrm{PS}^{\mathrm{gt}}_n(\ell)}$", "t"),
             ],
             "total power": [
-                _pr_plot(pr_n["power"], r"Total power over $n$", r"$\sum_{\ell\geq1}\mathrm{PS}_\ell$", "n"),
-                _pr_plot(pr_t["power"], r"Total power over $t$", r"$\sum_{\ell\geq1}\mathrm{PS}_\ell$", "t"),
+                _pr_plot(pr_n["power"], r"Total power over $n$",
+                         r"$P_n=\sum_{\ell\geq1}\mathrm{PS}_n(\ell)$", "n"),
+                _pr_plot(pr_t["power"], r"Total power over $t$",
+                         r"$P_t=\sum_{\ell\geq1}\mathrm{PS}_t(\ell)$", "t"),
+            ],
+            # distributional skill: spatial value distribution at the selected (m, n), all sources.
+            "distributional skill": [
+                _dist_plot(pr_dist),
             ],
         }
 
@@ -3084,32 +3122,6 @@ def _(
     else:
         power_spectrum_widget = None
     power_spectrum_widget
-
-    return
-
-
-@app.cell(hide_code=True)
-def pr_formulas(mo, notebook_mode):
-    mo.md(r"""
-    ### Physical realism — formulas
-
-    Every metric compares the **spherical-harmonic power spectrum** $\mathrm{PS}_\ell$ of a field
-    (degree $\ell$, one value per 2D lat–lon slice, via pyshtools) to the ground-truth spectrum
-    $\mathrm{PS}^{\mathrm{gt}}_\ell$. Sums run over $\ell \ge 1$ — the $\ell=0$ term (the field mean) is dropped.
-
-    **Spectral distance (LSD)** — scale-aware *magnitude* of the mismatch (RMS log-ratio over degrees):
-    $$\mathrm{LSD}=\sqrt{\tfrac{1}{L}\sum_{\ell\ge1}\big(\ln \mathrm{PS}_\ell-\ln \mathrm{PS}^{\mathrm{gt}}_\ell\big)^2}$$
-
-    **Spectral bias** — *signed* direction of the mismatch (mean log-ratio); $<0$ = under-powered (too smooth), $>0$ = over-powered (too rough):
-    $$\mathrm{bias}=\tfrac{1}{L}\sum_{\ell\ge1}\ln\frac{\mathrm{PS}_\ell}{\mathrm{PS}^{\mathrm{gt}}_\ell}$$
-
-    **Total power** — overall spatial variance / structure magnitude (over-smoothed fields lose power):
-    $$P=\sum_{\ell\ge1}\mathrm{PS}_\ell$$
-
-    **Over $n$**: one line per source — $\mathrm{ung}$ / $\mathrm{ung\_gui}$ / $\mathrm{gui}$ — each vs gt at rollout step $n$.
-    **Over $t$**: the guided clean-prediction trajectory $\mathrm{PS}_t$ vs gt at the selected step $n$ (total power also draws the gt reference).
-    """) if notebook_mode == "analyze_rollout" else None
-
     return
 
 

@@ -305,36 +305,6 @@ def dump_json(dict_: dict, path: Path):
         json.dump(dict_, f, indent=4)
 
 
-DIAGNOSTICS_FILE = "flowgrad_diagnostics.json"
-
-
-def append_diagnostics(rollout_dir, record: dict) -> None:
-    """Append one FlowGrad diagnostics record (learned lambda_star / control norms /
-    optimization-loss curves) to a JSON sidecar. These don't fit the weather-shaped
-    zarr containers, so they live alongside as a list of records keyed by
-    (m, n, guidance_mode, sweep); a re-run of the same point overwrites in place."""
-    path = rollout_dir / DIAGNOSTICS_FILE
-    data = get_dict_from_json(path) if path.exists() else []
-
-    def same(r):
-        return (
-            r["m"] == record["m"]
-            and r["n"] == record["n"]
-            and r["guidance_mode"] == record["guidance_mode"]
-            and r["sweep"] == record["sweep"]
-        )
-
-    data = [r for r in data if not same(r)]
-    data.append(record)
-    dump_json(data, path)
-
-
-def get_diagnostics(rollout_id):
-    """Load the FlowGrad diagnostics sidecar (list of records), or [] if absent."""
-    path = get_rollout_dir(rollout_id) / DIAGNOSTICS_FILE
-    return get_dict_from_json(path) if path.exists() else []
-
-
 ##########################
 # converters
 ##########################

@@ -85,17 +85,22 @@ def plot_trajectories(
         if values.ndim != 2:
             raise ValueError(f"{name} must be 2D, got shape {values.shape}")
 
+        # Ensembles are forecast-only (members x N steps, N = num_steps - 1); the
+        # initial point is prepended from gt0. Check this orientation FIRST: when the
+        # member count happens to equal num_steps (e.g. M=2, N=1 -> num_steps=2), the
+        # bare `shape[0] == num_steps` test below would misread the member axis as the
+        # step axis, orient the array wrong, and the band/selected-member check fails.
+        if gt0 is not None and num_steps - 1 in values.shape:
+            if values.shape[1] == num_steps - 1:
+                values = values.T  # (members, steps) -> (steps, members)
+            num_members = values.shape[1]
+            return np.vstack([np.full((1, num_members), gt0), values])
+
         if values.shape[0] == num_steps:
             return values
 
         if values.shape[1] == num_steps:
             return values.T
-
-        if gt0 is not None and num_steps - 1 in values.shape:
-            if values.shape[1] == num_steps - 1:
-                values = values.T
-            num_members = values.shape[1]
-            return np.vstack([np.full((1, num_members), gt0), values])
 
         raise ValueError(
             f"{name} must have one dimension equal to num_steps={num_steps}. "
