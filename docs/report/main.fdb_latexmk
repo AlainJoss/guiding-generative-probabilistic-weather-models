@@ -1,6 +1,6 @@
 # Fdb version 4
-["pdflatex"] 1782116892 "/Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/reports/latex-notes/main.tex" "main.pdf" "main" 1782116893 0
-  "/Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/reports/latex-notes/main.tex" 1782116892 22881 ee1df67b2d804dafe3fba6d67cd8937a ""
+["pdflatex"] 1783077634 "/Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/docs/report/main.tex" "main.pdf" "main" 1783077635 0
+  "/Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/docs/report/main.tex" 1783077634 22881 ee1df67b2d804dafe3fba6d67cd8937a ""
   "/usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-ec.enc" 1254269338 2375 baa924870cfb487815765f9094cf3728 ""
   "/usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-mathex.enc" 1202520719 3486 c7eadf5dcc57b3b2d11736679f6636ba ""
   "/usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/lm/lm-mathit.enc" 1202520719 2405 5dcf2c1b967ee25cc46c58cd52244aed ""
@@ -203,9 +203,9 @@
   "/usr/local/texlive/2023/texmf-var/fonts/map/pdftex/updmap/pdftex.map" 1700728905 4623355 b8cad38412faebe1ce5b780a45db67bd ""
   "/usr/local/texlive/2023/texmf-var/web2c/pdftex/pdflatex.fmt" 1700728860 7883460 b8dab8510c409d46376bf9c2a6de7563 ""
   "/usr/local/texlive/2023/texmf.cnf" 1678822455 577 1b2b1af17af2508fb20dd85783af4050 ""
-  "main.aux" 1782116893 4805 67c9fdba5de14045a5363380b4dc375a "pdflatex"
-  "main.out" 1782116893 4930 5e09d7a27611adfa0259c05580256dc1 "pdflatex"
-  "main.tex" 1782116892 22881 ee1df67b2d804dafe3fba6d67cd8937a ""
+  "main.aux" 1783077635 4805 67c9fdba5de14045a5363380b4dc375a "pdflatex"
+  "main.out" 1783077635 4930 5e09d7a27611adfa0259c05580256dc1 "pdflatex"
+  "main.tex" 1783077634 22881 ee1df67b2d804dafe3fba6d67cd8937a ""
   "preamble.tex" 1775032617 928 eec4259a25bb1faa229a02260d0c7089 ""
   (generated)
   "main.aux"

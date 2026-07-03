@@ -1016,7 +1016,7 @@ class GuidedFlow(BaseLightningModule):
 
             for i in range(T):
                 t, s_t, h = self.get_step_factors(i, timesteps)
-                a_t = self.guidance_scale(s_t)
+                a_t = self.a_t(s_t)
                 z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
 
                 with torch.enable_grad():

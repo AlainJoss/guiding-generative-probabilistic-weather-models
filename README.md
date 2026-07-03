@@ -29,8 +29,3 @@ ln -s ~/switchdrive data
 git push
 git pull
 ```
-
-Idea:
-My Idea now is the following:
-Would it be possible to implement the naive version of flowgrad with only the scalar w to optimize?
-Let's write it as a new function FGW
