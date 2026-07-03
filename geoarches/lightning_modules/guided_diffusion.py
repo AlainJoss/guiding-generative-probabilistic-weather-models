@@ -210,6 +210,7 @@ class GuidedFlow(BaseLightningModule):
 
     def get_step_factors(self, i, timesteps):
         t = timesteps[i]
+
         s_t = t / self.num_train_timesteps
 
         if i < len(timesteps) - 1:
@@ -217,6 +218,8 @@ class GuidedFlow(BaseLightningModule):
             h = s_t - s_next
         else:
             h = s_t
+
+        print("t, s_t, h", t, s_t, h)
 
         return t, s_t, h
  
@@ -271,19 +274,19 @@ class GuidedFlow(BaseLightningModule):
         target = (1 + delta_t) * target
         return (pred - target) ** 2
     
+    
+    def a_t(self, s_t, lambda0=1.0, c=5.0):
+        ds = 1.0 / self.num_train_timesteps
 
-    def guidance_scale(self, s_t):
-        # MIT notes use tau: 0=noise, 1=data.
-        # Your code uses s_t: 1=noise, 0=data.
-        # Therefore tau = 1 - s_t and a_t = (1 - tau) / tau = s_t / (1 - s_t).
-        # Clamp (1 - s_t) at one grid spacing ds so the first step (s_t = 1, tau = 0)
-        # caps a_t at the value of the next grid point instead of diverging.
-        ds = (self.num_train_timesteps - 1) / (
-            self.num_train_timesteps * (self.T - 1)
+        s_eff = (s_t - ds).clamp(
+            min=0.0,
+            max=1.0 - ds,
         )
 
-        denom = (1.0 - s_t).clamp_min(ds)
-        return s_t / denom
+        a = s_eff / (1.0 - s_eff)
+
+        # Bounded version: approaches lambda0 but never explodes
+        return lambda0 * a / (a + c)
 
 
     ### used outside to wire guidance type ###
@@ -355,6 +358,16 @@ class GuidedFlow(BaseLightningModule):
             )
         elif guidance_type == "FGF":
             z, sampling_trace = self._flowgrad_free_flow(
+                x_cond=x_cond,
+                det_pred=det_pred,
+                delta_t=delta_n,
+                mask=mask,
+                x_ref=x_ref,
+                seed=seed,
+                **guidance_kwargs,
+            )
+        elif guidance_type == "FGW":
+            z, sampling_trace = self._fgw_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_n,
@@ -448,7 +461,7 @@ class GuidedFlow(BaseLightningModule):
 
                 x_hat_t = self.denormalize(x_hat_t_norm)
 
-                a_t = self.guidance_scale(s_t)
+                a_t = self.a_t(h)
 
                 gui_vec = guidance_fn(
                     x_hat_t=x_hat_t,
@@ -559,7 +572,7 @@ class GuidedFlow(BaseLightningModule):
         for i in tqdm(range(len(timesteps)), desc="UG sampling"):
             t, s_t, h = self.get_step_factors(i, timesteps)
             s_next = s_t - h  # h == s_t on the final step -> s_next == 0
-            a_t = self.guidance_scale(s_t)  # flow-time scaling, shift applied as w * a_t * dz
+            a_t = self.a_t(s_t)  # flow-time scaling, shift applied as w * a_t * dz
 
             # detached: it's a constant w.r.t. the dz optimization and is reused across
             # the m inner backward passes (otherwise its graph is freed after the first).
@@ -967,7 +980,137 @@ class GuidedFlow(BaseLightningModule):
         ]
 
         return z_t, sampling_trace
-    
+
+    ### flow variant 6 — naive FlowGrad on the scalar guidance strength w (FGW) ###
+
+    def _fgw_flow(
+        self,
+        x_cond,
+        det_pred: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_ref: TensorDict,
+        seed: int,
+        fgw_k: int = 10,
+        fgw_lr: float = 10.0,
+        fgw_w_init: float = 100.0,
+    ):
+        # Naive FlowGrad: optimize the SINGLE scalar guidance strength w, applied exactly
+        # like LBG (gui_step = w * a_t * g_t at every flow step), against the final masked
+        # loss. Same first-order Jacobian trick as FG (g_t frozen, one VJP per step), but
+        # the control space is one scalar:
+        #   z_{i+1} = z_i + h_i u_i - h_i w a_t_i g_i
+        #   dL/dw   = sum_i <a_{i+1}, -h_i a_t_i g_i>,  a = adjoint dL/dz.
+        # w >= 0 is enforced by projection (clamping) after each optimizer step, like FG.
+        timesteps = self.get_flow_timesteps()
+        T = len(timesteps)
+
+        raw_w = torch.nn.Parameter(torch.tensor(float(fgw_w_init), device=self.device))
+        optimizer = torch.optim.Adam([raw_w], lr=fgw_lr)
+
+        def cached_forward(w):
+            # Detached Euler forward with the LBG application scheme; cache the leaf
+            # state z_i, the (detached) guidance direction g_i and (h_i, a_t_i).
+            z_t = self.init_noise(x_cond, seed)
+            z_cache, g_cache, fac_cache = [], [], []
+
+            for i in range(T):
+                t, s_t, h = self.get_step_factors(i, timesteps)
+                a_t = self.guidance_scale(s_t)
+                z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
+
+                with torch.enable_grad():
+                    time_embedding = self.embedd_time(x_cond, t)
+                    input_state = self.get_velocity_input_state(z_t, x_cond)
+                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                    x_hat_t_norm = det_pred + self.euler_step(
+                        z_t, u_t, s_t
+                    ) * self.residual_to_pangu_scale
+                    x_hat_t = self.denormalize(x_hat_t_norm)
+                    g_t = self.lbg_guidance(
+                        x_hat_t=x_hat_t,
+                        x_hat_t_norm=x_hat_t_norm,
+                        x_ref=x_ref,
+                        delta_t=delta_t,
+                        mask=mask,
+                        z_t=z_t,
+                        a_t=a_t,
+                    )
+
+                z_cache.append(z_t.detach())
+                g_cache.append(g_t.detach())
+                fac_cache.append((h, a_t))
+
+                gui_step = g_t.apply(lambda g: g * (w * a_t))
+                u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
+                z_t = self.euler_step(z_t, u_t, h).detach()
+
+            return z_t, z_cache, g_cache, fac_cache
+
+        trace = defaultdict(list)
+        z_cache = g_cache = None
+        for _ in tqdm(range(fgw_k), desc="FGW w optimization"):
+            # release the previous iteration's caches BEFORE cached_forward allocates
+            # the next ones (see _flowgrad_flow: both cache sets coexisting can OOM).
+            z_cache = g_cache = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            w = float(raw_w.detach().clamp_min(0.0))
+            z_T, z_cache, g_cache, fac_cache = cached_forward(w)
+
+            # adjoint a_T = d(target_loss)/d(z_T)
+            z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
+            with torch.enable_grad():
+                x_hat_gui = self.final_prediction(det_pred, z_T)
+                target_loss = self.masked_loss(x_hat_gui, x_ref, delta_t, mask)
+            a = self.masked_loss_grad(target_loss, z_T)
+
+            # backward adjoint loop (g frozen -> dz_{i+1}/dz_i = I + h du/dz)
+            dw = torch.zeros((), device=self.device)
+            for i in range(T - 1, -1, -1):
+                t, s_t, h = self.get_step_factors(i, timesteps)
+                h_i, a_t_i = fac_cache[i]
+                # dL/dw contribution of step i (uses a = a_{i+1}, BEFORE propagation)
+                dw = dw - h_i * a_t_i * sum((a[k] * g_cache[i][k]).sum() for k in a.keys())
+
+                z_i = z_cache[i].detach().apply(lambda x: x.requires_grad_(True))
+                with torch.enable_grad():
+                    time_embedding = self.embedd_time(x_cond, t)
+                    input_state = self.get_velocity_input_state(z_i, x_cond)
+                    u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
+
+                vjp = self._vjp(u_i, z_i, a)
+                a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
+
+            raw_w.grad = dw.detach()
+            optimizer.step()
+            with torch.no_grad():
+                raw_w.clamp_(min=0.0)  # projected gradient descent: keep w >= 0
+
+            trace["loss"].append(float(target_loss.detach().cpu()))
+            trace["w"].append(w)
+            print(f"FGW iter: w={w:.4f} loss={trace['loss'][-1]:.6f}", flush=True)
+
+        w_star = float(raw_w.detach().clamp_min(0.0))
+        print(f"FGW w*={w_star:.4f} (loss trajectory: {trace['loss']})", flush=True)
+
+        # final pass through the standard LBG flow with the optimized constant w:
+        # identical application scheme, and yields the standard stackable traces
+        # (clean_preds/grads/vfs/gui_vfs) that the rollout zarr saving expects.
+        z_t, sampling_trace = self._gradient_flow(
+            guidance_name="FGW",
+            guidance_fn=self.lbg_guidance,
+            x_cond=x_cond,
+            det_pred=det_pred,
+            delta_n=delta_t,
+            mask=mask,
+            x_ref=x_ref,
+            lambda_schedule=[w_star] * T,
+            seed=seed,
+        )
+        return z_t, sampling_trace
+
     ### FlowGrad helpers (Jacobian-trick adjoint + coarse schedule) ###
 
     def _vjp(self, outputs_td, inputs_td, v_td, create_graph: bool = False):

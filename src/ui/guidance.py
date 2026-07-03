@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.23.9"
+__generated_with = "0.23.13"
 app = marimo.App(width="full")
 
 
@@ -805,7 +805,7 @@ def _(var_dropdown):
 
 @app.cell
 def _(n_slider):
-    n=n_slider.value-1
+    n=n_slider.value
     return (n,)
 
 
@@ -872,11 +872,11 @@ def _(mo):
 @app.cell
 def _(M, N, mo):
     n_slider = mo.ui.slider(
-        start=1, 
-        stop=N,
+        start=0, 
+        stop=N-1,
         step=1,
         label="n: ",
-        value=1,
+        value=0,
         debounce=True,
         show_value=True
     )
@@ -1097,6 +1097,10 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         "fgf_shift_init": (0.0,  1.0,   False, False),
         "fgf_gamma":      (1e-3, 1e-2,  True,  False),
         "fgf_n_windows":  (5,    25,    False, True),
+        # FGW (naive FlowGrad on the scalar w)
+        "fgw_k":          (5,    30,    False, True),
+        "fgw_lr":         (1.0,  50.0,  True,  False),
+        "fgw_w_init":     (50.0, 500.0, False, False),
     }
 
     _rc = {}
@@ -1187,27 +1191,35 @@ def wa_schedule(
 ):
 
     # Guidance weight schedule w * a_t over the flow, placed beside the rollout trajectories
-    # plot. Shown only when a w-using method (LBG / LBG-MC / UG) is active. The schedule
+    # plot. Shown only when a w-using method (LBG / LBG-MC / UG / FGW) is active. The schedule
     # mirrors GuidedFlow.guidance_scale (see src/schedules.py).
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
         w_choices = compute_axis_values("w", sweep_ranges.value)
+        fgw_w_choices = compute_axis_values("fgw_w_init", sweep_ranges.value)
     elif notebook_mode == "analyze_rollout":
         selected_modes = [guidance_mode_dropdown.value]
         w_choices = list(experiment_params["w"])
+        fgw_w_choices = list(experiment_params.get("fgw_w_init") or [])
     else:
         selected_modes = []
         w_choices = []
+        fgw_w_choices = []
 
-    w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG")]
+    w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG", "FGW")]
 
     if w_modes:
-        w_values = w_choices or [float(w_slider.value)]
+        if w_modes == ["FGW"]:
+            # FGW learns w; preview the schedule at its starting value(s) fgw_w_init
+            w_values = fgw_w_choices or w_choices or [float(w_slider.value)]
+        else:
+            w_values = w_choices or [float(w_slider.value)]
         wa_schedule_widget = plot_trajectory(
             guidance_weight_schedule(T, w_values),
             var=r"$w\,a_t$",
             title="Guidance weight schedule",
-            subtitle="$a_t=(1-t)/t$ — applies to " + ", ".join(w_modes),
+            subtitle="$a_t=(1-t)/t$ — applies to " + ", ".join(w_modes)
+                     + (" (FGW: w learned, shown at fgw_w_init)" if "FGW" in w_modes else ""),
             xlabel="$t$",
             figsize=(10, 6),
         )
@@ -1491,9 +1503,10 @@ def _(
 ):
     if notebook_mode =="guided_rollout":
         ung_curr = ung_M_N_slices[m][n]
-        gt_curr = gt_N_slices[n]
+        # forecast step n is valid at day n+1; gt_N_slices holds days 0..N
+        gt_curr = gt_N_slices[n+1]
         ung_prev = ung_M_N_slices[m][n-1] if n>0 else ung_M_N_slices[m][n]
-        gt_prev = gt_N_slices[n-1] if n>0 else gt_N_slices[n]
+        gt_prev = gt_N_slices[n]
 
         gt_gt = gt_curr - gt_prev
         gt_ung = gt_curr - ung_curr
@@ -1501,10 +1514,11 @@ def _(
     if notebook_mode =="analyze_rollout":
         ung_curr = ung_M_N_slices[m][n]
         gui_curr = gui_M_N_slices[m][n]
-        gt_curr = gt_N_slices[n]
+        # forecast step n is valid at day n+1; gt_N_slices holds days 0..N
+        gt_curr = gt_N_slices[n+1]
         # ung_prev = ung_M_N_slices[m][n-1] if n>0 else ung_M_N_slices[m][n]
         gui_prev = gui_M_N_slices[m][n-1] if n>0 else gui_M_N_slices[m][n]
-        gt_prev = gt_N_slices[n-1] if n>0 else gt_N_slices[n]
+        gt_prev = gt_N_slices[n]
 
         ung_onl_slice = get_slices(ung_gui_final_xr, partition, var, level)
         ung_onl_curr = ung_onl_slice[m][n]
@@ -2150,7 +2164,7 @@ def _(mask, mo, np):
     aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
     dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
     cross_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "gt_diffs", "ung_gui_gt_diffs", "ung_gui_diffs", "grad_norms", "gui_vf_norms", "vf_norms", "deflections", "convergence",
+        "gt_diffs", "ung_gui_gt_diffs", "ung_gui_diffs", "grad_norms", "gui_vf_norms", "vf_norms", "deflections", "convergence", "informativeness",
     )})
     differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
     abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$", value=True)
@@ -2193,8 +2207,11 @@ def _(mask, mo, np):
         if mode not in ("mask", "!mask"):
             return ds
         import xarray as _xr
+        # boolean region at half-maximum: BBOX (0/1) is unchanged; GAUSSIAN is
+        # nonzero everywhere (astype(bool) would be all-True -> "!mask" all-NaN),
+        # and its peak is ~1/sum, so the threshold must be relative to max.
         _m = _xr.DataArray(
-            mask.astype(bool),
+            mask >= 0.5 * mask.max(),
             dims=("latitude", "longitude"),
             coords={"latitude": ds.latitude, "longitude": ds.longitude},
         )
@@ -2379,6 +2396,7 @@ def _(
     cross_row_checks,
     diff_gui_ung_gui_plot,
     dist_bands_checkbox,
+    grad_informativeness_plot,
     grad_norms_n_plot,
     grad_norms_plot,
     gui_gt_diff_n_plot,
@@ -2421,6 +2439,7 @@ def _(
                             ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
                             ("deflections", [vf_deflection_n_plot, vf_deflection_t_plot]),
                             ("convergence", [guidance_convergence_plot, guidance_convergence_t_plot]),
+                            ("informativeness", [grad_informativeness_plot]),
                         ]
                         if cross_row_checks[_key].value
                     ],
@@ -2443,7 +2462,7 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
         import importlib as _importlib
         import src.ui.plot_trajectory as _ptmod
         _importlib.reload(_ptmod)
-        _traces, _bands = cross_traces(red["grads_l2"].isel(n=n-1), "t", "l2", m, **cross_ctl)
+        _traces, _bands = cross_traces(red["grads_l2"].isel(n=n), "t", "l2", m, **cross_ctl)
         _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _traces.values()), default=1)))
         grad_norms_plot = _ptmod.plot_trajectory(_traces, title="Grad norms over $t$",
             subtitle=r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial}}$", step=t + 1, color_map=color_for(_traces), bands=_bands,
@@ -2470,7 +2489,8 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red):
             color_map=color_for(_raw),
             bands=_bands,
             figsize=(_w, 6),
-            prepend_zero=True,
+            prepend_zero=False,
+            start_index=1,
             mirror_right_axis=True,
         )
         # diff_gui_ung_gui_plot
@@ -2498,21 +2518,21 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
             return _plot_trajectory(
                 _tr, title=title, subtitle=subtitle, xlabel=f"${axis}$",
                 step=(n + 1 if axis == "n" else t + 1), color_map=color_for(_tr), bands=_bands,
-                figsize=(_w, 6), prepend_zero=not _is_t, start_index=1 if _is_t else 0,
+                figsize=(_w, 6), prepend_zero=False, start_index=1,
                 mirror_right_axis=True,
             )
 
         gui_gt_diff_n_plot = _plot("Diff (gui − gt) over $n$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{n} - \tilde{x}^{\,\mathrm{gt}}_{n})$  ($\tilde{x}$: normalized $x$)", red["gui_gt_mean"], "n", "mean")
-        gui_gt_diff_t_plot = _plot("Diff (gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["clean_gt_mean"].isel(n=n-1), "t", "mean")
+        gui_gt_diff_t_plot = _plot("Diff (gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["clean_gt_mean"].isel(n=n), "t", "mean")
         ung_gui_gt_n_plot = _plot("Diff (ung_gui − gt) over $n$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{n} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["ung_gui_gt_mean"], "n", "mean")
-        ung_gui_gt_t_plot = _plot("Diff (ung_gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["ung_gui_gt_t_mean"].isel(n=n-1), "t", "mean")
-        gui_ung_gui_t_plot = _plot("Diff (gui − ung_gui) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{ung\_gui}}_{n})$", red["clean_ung_gui_mean"].isel(n=n-1), "t", "mean")
+        ung_gui_gt_t_plot = _plot("Diff (ung_gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["ung_gui_gt_t_mean"].isel(n=n), "t", "mean")
+        gui_ung_gui_t_plot = _plot("Diff (gui − ung_gui) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{ung\_gui}}_{n})$", red["clean_ung_gui_mean"].isel(n=n), "t", "mean")
         grad_norms_n_plot = _plot("Grad norms over $n$", r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["grads_l2"], "n", "l2")
         vf_deflection_n_plot = _plot("Vf deflection (gui − ung_gui) over $n$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["dvf_l2"], "n", "l2")
-        vf_deflection_t_plot = _plot("Vf deflection (gui − ung_gui) over $t$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$", red["dvf_l2"].isel(n=n-1), "t", "l2")
+        vf_deflection_t_plot = _plot("Vf deflection (gui − ung_gui) over $t$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$", red["dvf_l2"].isel(n=n), "t", "l2")
         gui_vf_norms_n_plot = _plot("Gui vf norms over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["gui_vfs_l2"], "n", "l2")
         vf_norms_n_plot = _plot("Vf norms over $n$", r"$\|\mathrm{vf}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["vfs_l2"], "n", "l2")
-        diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n-1), "t", "mean")
+        diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n), "t", "mean")
     else:
         grad_norms_n_plot = vf_deflection_n_plot = vf_deflection_t_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = gui_gt_diff_n_plot = gui_gt_diff_t_plot = gui_ung_gui_t_plot = ung_gui_gt_n_plot = ung_gui_gt_t_plot = None
     return (
@@ -2566,7 +2586,8 @@ def _(
             right_color="#8A2BE2",
             right_percentage=True,
             figsize=(_wn, 6),
-            prepend_zero=True,
+            prepend_zero=False,
+            start_index=1,
         )
         _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
         _diff_per_t = _all_per_t[m]
@@ -2595,6 +2616,109 @@ def _(
 
 
 @app.cell
+def _(config, dist_bands_checkbox, grads_xr, m, mask, n, notebook_mode, np, t):
+    # ===== Gradient informativeness over t (saliency-style pattern metrics) =====
+    # All metrics operate on the NORMALIZED gradient energy distribution
+    # p_g = g_t^2 / sum(g_t^2) on the guided (var, level) channel: the stored grads are the
+    # applied step (raw grad x w*a_t) and the raw LBG grad is residual-proportional, so
+    # per-(m,n,t) normalization removes every scalar factor -> pure spatial pattern.
+    # Metrics follow the saliency-benchmark taxonomy (Bylinskii et al., arXiv:1604.03605):
+    #   IMEF skill  - in-mask energy fraction, skill-normalized vs mask area (0=random, 1=perfect)
+    #   JSD align   - 1 - JSD(p_g || p_m)/ln2 vs the mask density (bounded [0,1], zero-safe)
+    #   eff. active area - exp(H(p_g))/N: fraction of grid the gradient effectively occupies
+    #                      (mask-independent sharpening; the mask's own EAA is drawn as a
+    #                      reference -- the gradient can be SHARPER than the mask, so the
+    #                      informativeness gain over t is mass RELOCATION, not sharpening)
+    #   NSS (right axis) - mean z-score of g^2 inside the half-max mask region
+    if notebook_mode == "analyze_rollout":
+        import importlib as _importlib
+        import xarray as _xr
+        import dask as _dask
+        import src.ui.plot_trajectory as _ptmod
+        _importlib.reload(_ptmod)
+
+        _sp = ("latitude", "longitude")
+        _g = grads_xr[config.VAR]
+        if config.PARTITION == "level":
+            _g = _g.sel(level=config.LEVEL)
+        _G = _g ** 2
+        _tot = _G.sum(dim=_sp)
+        _pg = _G / _tot.where(_tot > 0)
+
+        _pm_np = mask / mask.sum()
+        _coords = {"latitude": _g.latitude, "longitude": _g.longitude}
+        _pm = _xr.DataArray(_pm_np, dims=_sp, coords=_coords)
+        _R = _xr.DataArray(mask >= 0.5 * mask.max(), dims=_sp, coords=_coords)
+        _A = float(_R.values.mean())
+        _Ncells = float(mask.size)
+
+        def _plogq(p, q):
+            # p*log(p/q) with the 0*log(0) = 0 convention
+            return _xr.where(p > 0, p * np.log(p / q), 0.0)
+
+        # 1. in-mask energy fraction, skill-normalized vs mask area
+        _imef_skill = (_pg.where(_R).sum(dim=_sp) - _A) / (1.0 - _A)
+
+        # 2. Jensen-Shannon alignment with the mask density
+        _mavg = 0.5 * (_pg + _pm)
+        _jsd = 0.5 * _plogq(_pg, _mavg).sum(dim=_sp) + 0.5 * _plogq(_pm, _mavg).sum(dim=_sp)
+        _jsd_align = 1.0 - _jsd / np.log(2.0)
+
+        # 3. effective active area (spatial perplexity / N)
+        _H = -_plogq(_pg, 1.0).sum(dim=_sp)
+        _eaa = np.exp(_H) / _Ncells
+        _Hm = float(-np.where(_pm_np > 0, _pm_np * np.log(_pm_np), 0.0).sum())
+        _eaa_floor = float(np.exp(_Hm) / _Ncells)
+
+        # 4. NSS: mean z-score of gradient energy inside the mask region
+        _z = (_G - _G.mean(dim=_sp)) / _G.std(dim=_sp)
+        _nss = _z.where(_R).mean(dim=_sp)
+
+        _imef_skill, _jsd_align, _eaa, _nss = _dask.compute(_imef_skill, _jsd_align, _eaa, _nss)
+
+        def _sel(da):
+            return np.atleast_2d(da.isel(n=n).values)  # (m, t)
+
+        _curves = {
+            "IMEF skill": _sel(_imef_skill),
+            "JSD align": _sel(_jsd_align),
+            "eff. active area": _sel(_eaa),
+        }
+        _T_len = next(iter(_curves.values())).shape[1]
+        _traces = {_k: _v[m] for _k, _v in _curves.items()}
+        _traces["mask EAA (ref)"] = np.full(_T_len, _eaa_floor)
+        _bands = (
+            {_k: (_v.min(axis=0), _v.max(axis=0)) for _k, _v in _curves.items()}
+            if dist_bands_checkbox.value else None
+        )
+        _wt = min(22.0, max(8.0, 3.4 + 0.78 * _T_len))
+        grad_informativeness_plot = _ptmod.plot_trajectory(
+            _traces,
+            bands=_bands,
+            title="Gradient informativeness over $t$",
+            subtitle=(r"pattern metrics of the normalized gradient energy "
+                      r"$p_g = g_t^2/\Sigma\, g_t^2$ vs mask "
+                      r"(IMEF skill | $1-\mathrm{JSD}(p_g\Vert p_m)/\ln 2$ | $\exp(H(p_g))/N$; right: NSS)"),
+            xlabel="$t$",
+            step=t + 1,
+            color_map={
+                "IMEF skill": "#0072B2",
+                "JSD align": "#D55E00",
+                "eff. active area": "#009E73",
+                "mask EAA (ref)": "#9AA0A6",
+            },
+            right_trajectory={"NSS": _sel(_nss)[m]},
+            right_label="NSS",
+            figsize=(_wt, 6),
+            prepend_zero=False,
+            start_index=1,
+        )
+    else:
+        grad_informativeness_plot = None
+    return (grad_informativeness_plot,)
+
+
+@app.cell
 def _(mo):
     mo.md(r"""
     ## Flow analysis
@@ -2608,7 +2732,7 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
         import importlib as _importlib
         import src.ui.plot_trajectory as _ptmod
         _importlib.reload(_ptmod)
-        _vf_traces, _bands = cross_traces(red["vfs_l2"].isel(n=n-1), "t", "l2", m, **cross_ctl)
+        _vf_traces, _bands = cross_traces(red["vfs_l2"].isel(n=n), "t", "l2", m, **cross_ctl)
         _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _vf_traces.values()), default=1)))
         vf_norms_plot = _ptmod.plot_trajectory(_vf_traces, title="Vf norms over $t$",
             subtitle=r"$\|\mathrm{vf}_t\|_{\mathrm{spatial}}$", step=t + 1, color_map=color_for(_vf_traces), bands=_bands,
@@ -2624,7 +2748,7 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
         import importlib as _importlib
         import src.ui.plot_trajectory as _ptmod
         _importlib.reload(_ptmod)
-        _gvf_traces, _bands = cross_traces(red["gui_vfs_l2"].isel(n=n-1), "t", "l2", m, **cross_ctl)
+        _gvf_traces, _bands = cross_traces(red["gui_vfs_l2"].isel(n=n), "t", "l2", m, **cross_ctl)
         _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _gvf_traces.values()), default=1)))
         guided_vf_norms_plot = _ptmod.plot_trajectory(_gvf_traces, title="Gui vf norms over $t$",
             subtitle=r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|_{\mathrm{spatial}}$", step=t + 1, color_map=color_for(_gvf_traces), bands=_bands,
@@ -2979,7 +3103,8 @@ def pr_data(
         def _spec(_f):
             return _ps(np.asarray(_f), _lat)[1]
 
-        _gt_spec = {_ni: _spec(gt_N_slices[_ni]) for _ni in range(N)}
+        # forecast step _ni is valid at day _ni+1; gt_N_slices holds days 0..N
+        _gt_spec = {_ni: _spec(gt_N_slices[_ni + 1]) for _ni in range(N)}
         _src_slices = {"ung": ung_M_N_slices, "ung_gui": ung_gui_M_N_slices, "gui": gui_M_N_slices}
 
         pr_n = {"lsd": {}, "bias": {}, "power": {}}
@@ -3001,7 +3126,7 @@ def pr_data(
         # distributional skill: the spatial value distribution of the selected var/level slice
         # at the chosen (m, n) for each source -> overlaid histograms (gt / ung / ung_gui / gui).
         pr_dist = {
-            "gt":      np.asarray(gt_N_slices[n]).ravel(),
+            "gt":      np.asarray(gt_N_slices[n+1]).ravel(),
             "ung":     np.asarray(ung_M_N_slices[m][n]).ravel(),
             "ung_gui": np.asarray(ung_gui_M_N_slices[m][n]).ravel(),
             "gui":     np.asarray(gui_M_N_slices[m][n]).ravel(),

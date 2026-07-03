@@ -14,10 +14,12 @@ GUIDANCE_METHOD_HYPERS = {
     "UG": ["w", "ug_k", "ug_lr", "ug_s"],
     "FG": ["fg_k", "fg_lr", "fg_gamma", "fg_lambda_init", "fg_n_windows"],
     "FGF": ["fgf_k", "fgf_lr", "fgf_shift_init", "fgf_gamma", "fgf_n_windows"],
+    # FGW learns the scalar w itself, so it has no "w" hyper -- only the optimizer's
+    "FGW": ["fgw_k", "fgw_lr", "fgw_w_init"],
 }
 
-# common hypers 
-GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF"]
+# common hypers
+GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF", "FGW"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "GAUSSIAN"]
 
@@ -89,6 +91,11 @@ class RolloutConfig:
     fgf_shift_init: float | None = None  # free-control init
     fgf_gamma: float | None = None     # L2 penalty weight
     fgf_n_windows: int | None = None   # coarse schedule: number of windows
+
+    # FGW (naive FlowGrad on the scalar w; w itself is learned, not a hyper)
+    fgw_k: int | None = None       # optimization iterations
+    fgw_lr: float | None = None    # Adam lr on the scalar w
+    fgw_w_init: float | None = None  # starting w
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 

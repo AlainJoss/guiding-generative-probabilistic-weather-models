@@ -5,12 +5,12 @@ Resources:
 
 Analysis notebook:
 ```bash
-uv run marimo edit notebooks/guidance.py --watch --no-token
+uv run marimo edit src/ui/guidance.py --watch --no-token
 ```
 
 Experiment runner:
 ```bash
-python -m src.run --rollout_id 2026-07-02_12:13:27 --rollout_type ung
+python -m src.run --rollout_id 2026-07-03_10:28:29 --rollout_type ung
 python -m src.run --rollout_id 2026-07-02_12:18:10 --rollout_type gui
 
 ```
@@ -29,3 +29,8 @@ ln -s ~/switchdrive data
 git push
 git pull
 ```
+
+Idea:
+My Idea now is the following:
+Would it be possible to implement the naive version of flowgrad with only the scalar w to optimize?
+Let's write it as a new function FGW

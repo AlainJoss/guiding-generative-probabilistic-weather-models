@@ -76,7 +76,7 @@ def rollout(
                 x_cond=x_cond,
                 delta_n=None,
                 mask=None,
-                x_hat_ung=None,
+                x_ref=None,
                 lambda_schedule=None,
                 seed= m + 1000 * n,  # + batch_nb * 10**6
             )
