@@ -1185,29 +1185,42 @@ def _(
 def wa_schedule(
     T,
     compute_axis_values,
+    delta_trajectory,
     experiment_params,
     guidance_mode_dropdown,
     guidance_mode_select,
     guidance_weight_schedule,
     notebook_mode,
     plot_trajectory,
+    rollout_id,
+    sweep_params,
     sweep_ranges,
     w_slider,
 ):
 
     # Guidance weight schedule w * a_t over the flow, placed beside the rollout trajectories
-    # plot. Shown only when a w-using method (LBG / LBG-MC / UG / FGW) is active. The schedule
-    # mirrors GuidedFlow.guidance_scale (see src/schedules.py).
+    # plot. Shown only when a w-using method (LBG / LBG-MC / UG / FGW / FGWNOLR) is active.
+    # The schedule mirrors GuidedFlow.a_t (bounded; see src/schedules.py). For optimized
+    # methods, w comes from the run's w_star.json sidecar when available.
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
         w_choices = compute_axis_values("w", sweep_ranges.value)
         fgw_w_choices = (compute_axis_values("fgw_w_init", sweep_ranges.value)
                          + compute_axis_values("fgwnolr_w_init", sweep_ranges.value))
+        fgw_w_from_star = False
     elif notebook_mode == "analyze_rollout":
         selected_modes = [guidance_mode_dropdown.value]
         w_choices = list(experiment_params["w"])
-        fgw_w_choices = (list(experiment_params.get("fgw_w_init") or [])
-                         + list(experiment_params.get("fgwnolr_w_init") or []))
+        # optimized w* recorded by FGW/FGWNOLR runs; fall back to the w_init axes
+        import importlib as _importlib
+        import src.utils as _utils
+        _importlib.reload(_utils)
+        _sweep_sel = {k: (delta_trajectory if k == "GUIDANCE_DELTA" else v) for k, v in sweep_params.items()}
+        _wstar_recs = _utils.get_w_star(rollout_id, _sweep_sel)
+        fgw_w_from_star = bool(_wstar_recs)
+        fgw_w_choices = sorted({r["w_star"] for r in _wstar_recs}) or (
+            list(experiment_params.get("fgw_w_init") or [])
+            + list(experiment_params.get("fgwnolr_w_init") or []))
     else:
         selected_modes = []
         w_choices = []
@@ -1225,8 +1238,9 @@ def wa_schedule(
             guidance_weight_schedule(T, w_values),
             var=r"$w\,a_t$",
             title="Guidance weight schedule",
-            subtitle="$a_t=(1-t)/t$ — applies to " + ", ".join(w_modes)
-                     + (" (FGW/FGWNOLR: w learned, shown at w_init)" if ("FGW" in w_modes or "FGWNOLR" in w_modes) else ""),
+            subtitle=r"$a_t=\lambda_0\,\frac{a}{a+c}$, $a=\frac{s_{\mathrm{eff}}}{1-s_{\mathrm{eff}}}$ — applies to " + ", ".join(w_modes)
+                     + (((" (w = optimized $w^*$)" if fgw_w_from_star else " (w learned, shown at w_init)"))
+                        if ("FGW" in w_modes or "FGWNOLR" in w_modes) else ""),
             xlabel="$t$",
             figsize=(10, 6),
         )
@@ -2564,11 +2578,15 @@ def _(
     delta_trajectory,
     dist_bands_checkbox,
     get_masked_mean,
+    guidance_mode_dropdown,
     guidance_weight_schedule,
     m,
     mask,
     n,
     notebook_mode,
+    np,
+    rollout_id,
+    sweep_params,
     t,
     w_slider,
 ):
@@ -2577,7 +2595,9 @@ def _(
         import src.ui.plot_trajectory as _ptmod
         _importlib.reload(_ptmod)
         _all_per_n = get_masked_mean(cfg_clean_preds_slices[:, :, -1], mask).astype(float) - cfg_target_guidance_M_N_trajectories
-        _all_per_n[:, 0] = 0.0
+        # δ=0 steps run no guided pass (gui copies ung, no clean_preds trace) -> the
+        # target is trivially met; zero exactly those steps, not a blanket step 0
+        _all_per_n[:, np.asarray(delta_trajectory, dtype=float) == 0.0] = 0.0
         _diff_per_n = _all_per_n[m]
         _wn = min(22.0, max(8.0, 3.4 + 0.78 * len(_diff_per_n)))
         guidance_convergence_plot = _ptmod.plot_trajectory(
@@ -2599,6 +2619,17 @@ def _(
         _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
         _diff_per_t = _all_per_t[m]
         _w_sel = float(w_slider.value)  # currently selected guidance strength
+        _w_label = rf"$w\,a_t$  ($w={_w_sel:g}$)"
+        if guidance_mode_dropdown.value in ("FGW", "FGWNOLR"):
+            # these methods learn w; use the recorded w* for the selected (sweep, m, n)
+            import importlib as _importlib2
+            import src.utils as _utils2
+            _importlib2.reload(_utils2)
+            _sweep_sel = {k: (delta_trajectory if k == "GUIDANCE_DELTA" else v) for k, v in sweep_params.items()}
+            _recs = _utils2.get_w_star(rollout_id, _sweep_sel, m=m, n=n)
+            if _recs:
+                _w_sel = float(_recs[0]["w_star"])
+                _w_label = rf"$w^*\,a_t$  ($w^*={_w_sel:g}$, m={m}, n={n})"
         _wa_line = next(iter(guidance_weight_schedule(T, [_w_sel]).values()))  # w * a_t over t
         _wt = min(22.0, max(8.0, 3.4 + 0.78 * len(_diff_per_t)))
         guidance_convergence_t_plot = _ptmod.plot_trajectory(
@@ -2609,12 +2640,8 @@ def _(
             xlabel="$t$",
             step=t + 1,
             color_map={"realized − target": "#B7950B"},
-            right_trajectory={
-                rf"$w\,a_t$  ($w={_w_sel:g}$)": _wa_line,
-            },
-            right_color={
-                rf"$w\,a_t$  ($w={_w_sel:g}$)": "#C0392B",
-            },
+            right_trajectory={_w_label: _wa_line},
+            right_color={_w_label: "#C0392B"},
             figsize=(_wt, 6),
             prepend_zero=False,
             start_index=1,

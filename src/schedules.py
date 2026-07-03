@@ -38,17 +38,22 @@ def guidance_weight_schedule(
     T: int,
     w_values: list[float],
     num_train_timesteps: int = 1000,
+    lambda0: float = 1.0,
+    c: float = 5.0,
 ) -> dict[str, list[float]]:
     """Per-flow-step guidance weight {f"w={w}": w * a_t} for a T-step Euler schedule.
 
-    Mirrors GuidedFlow.guidance_scale / get_flow_timesteps: s_t is the noise level running
-    1 -> 1/num_train_timesteps over T steps, and a_t = (1 - t)/t = s_t / (1 - s_t), clamped
-    at the first step (s_t = 1) to one grid spacing so it stays finite. num_train_timesteps
-    is GuidedFlow's fixed flow-noise grid.
+    Mirrors GuidedFlow.a_t / get_flow_timesteps EXACTLY (the bounded version):
+      s_t   = noise level running 1 -> 1/num_train_timesteps over T steps
+      s_eff = clip(s_t - ds, 0, 1 - ds),  ds = 1/num_train_timesteps
+      a     = s_eff / (1 - s_eff)
+      a_t   = lambda0 * a / (a + c)   # approaches lambda0, never explodes; 0 at the last step
     """
     s = np.linspace(num_train_timesteps, 1, T) / num_train_timesteps
-    ds = (num_train_timesteps - 1) / (num_train_timesteps * (T - 1))
-    a_t = s / np.maximum(1 - s, ds)
+    ds = 1.0 / num_train_timesteps
+    s_eff = np.clip(s - ds, 0.0, 1.0 - ds)
+    a = s_eff / (1.0 - s_eff)
+    a_t = lambda0 * a / (a + c)
     return {f"w={w:g}": (w * a_t).tolist() for w in w_values}
 
 

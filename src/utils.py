@@ -101,6 +101,54 @@ def get_sweep_dict(rollout_id):
     return get_dict_from_json(path)
 
 
+def append_w_star(rollout_dir, sweep_params: dict, m: int, n: int, w_star: float):
+    """Persist an optimized guidance strength (FGW/FGWNOLR) for one (sweep point, m, n).
+
+    Stored in <rollout_dir>/w_star.json as a list of records; an existing record for
+    the same (sweep, m, n) is replaced (resume-safe). sweep values are the ACTUAL job
+    params (GUIDANCE_DELTA as the vector)."""
+    path = Path(rollout_dir) / "w_star.json"
+    records = json.loads(path.read_text()) if path.exists() else []
+    sweep = dict(sweep_params or {})
+    records = [
+        r for r in records
+        if not (r["m"] == m and r["n"] == n and r["sweep"] == sweep)
+    ]
+    records.append({"sweep": sweep, "m": m, "n": n, "w_star": float(w_star)})
+    path.write_text(json.dumps(records, indent=2))
+
+
+def get_w_star(rollout_id, sweep_sel: dict | None = None, m: int | None = None, n: int | None = None):
+    """w_star records matching a sweep selection (loose float compare; lists compared
+    elementwise). sweep_sel uses ACTUAL values (GUIDANCE_DELTA as the vector, not its
+    zarr index). Returns [] if no sidecar exists (pre-FGW rollouts)."""
+    path = get_rollout_dir(rollout_id) / "w_star.json"
+    if not path.exists():
+        return []
+
+    def _match(sel_v, rec_v):
+        if isinstance(sel_v, (list, tuple)) or isinstance(rec_v, (list, tuple)):
+            try:
+                a, b = np.asarray(sel_v, float), np.asarray(rec_v, float)
+                return a.shape == b.shape and bool(np.allclose(a, b))
+            except (TypeError, ValueError):
+                return sel_v == rec_v
+        if isinstance(sel_v, (int, float)) and isinstance(rec_v, (int, float)):
+            return bool(np.isclose(float(sel_v), float(rec_v)))
+        return sel_v == rec_v
+
+    out = []
+    for r in json.loads(path.read_text()):
+        if m is not None and r["m"] != m:
+            continue
+        if n is not None and r["n"] != n:
+            continue
+        if sweep_sel and not all(_match(v, r["sweep"].get(k)) for k, v in sweep_sel.items()):
+            continue
+        out.append(r)
+    return out
+
+
 # @functools.lru_cache(maxsize=None)
 def get_rollout(rollout_type:str, rollout_id:str):
     path = get_rollout_dir(rollout_id) / f"{rollout_type}.zarr"

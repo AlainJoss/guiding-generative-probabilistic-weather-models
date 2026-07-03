@@ -466,7 +466,7 @@ class GuidedFlow(BaseLightningModule):
 
                 x_hat_t = self.denormalize(x_hat_t_norm)
 
-                a_t = self.a_t(h)
+                a_t = self.a_t(s_t)
 
                 gui_vec = guidance_fn(
                     x_hat_t=x_hat_t,
@@ -992,7 +992,7 @@ class GuidedFlow(BaseLightningModule):
         # final pass through the standard LBG flow with the optimized constant w:
         # identical application scheme, and yields the standard stackable traces
         # (clean_preds/grads/vfs/gui_vfs) that the rollout zarr saving expects.
-        return self._gradient_flow(
+        z_t, sampling_trace = self._gradient_flow(
             guidance_name=guidance_name,
             guidance_fn=self.lbg_guidance,
             x_cond=x_cond,
@@ -1003,6 +1003,10 @@ class GuidedFlow(BaseLightningModule):
             lambda_schedule=[w_star] * self.T,
             seed=seed,
         )
+        # scalar sidecar for analysis (rollout.py pops this before stacking the traces
+        # and persists it to w_star.json; see src/utils.append_w_star)
+        sampling_trace["w_star"] = float(w_star)
+        return z_t, sampling_trace
 
     def _fgwnolr_flow(
         self,

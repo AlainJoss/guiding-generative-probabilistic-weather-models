@@ -12,7 +12,7 @@ from src.rollout_config import RolloutConfig, GUIDANCE_METHOD_HYPERS
 from src.mask import get_mask_tdict, get_mask_2d
 
 from src.utils import create_slice_zarr_container, tdict_to_xr, append_to_zarr, advance_x_cond
-from src.utils import get_gt_rollout, gt_state_to_tdict
+from src.utils import get_gt_rollout, gt_state_to_tdict, append_w_star
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
@@ -110,6 +110,12 @@ def rollout(
                 x_hat_curr = x_hat_gui
 
             if guidance_flag:
+                # FGW/FGWNOLR attach the optimized scalar w* to the trace; pop it before
+                # the stacking loop (it is not a per-t tensor) and persist it as a sidecar.
+                w_star = sampling_trace.pop("w_star", None)
+                if w_star is not None:
+                    append_w_star(rollout_dir, sweep_params, m, n, w_star)
+
                 save_state = flow_model.denormalize(x_hat_gui).cpu()
                 save_state = tdict_to_xr(
                     create_slice_zarr_container(m, n, t_dim=False, sweep_params=sweep_params),

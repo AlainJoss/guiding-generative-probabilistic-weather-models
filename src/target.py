@@ -24,16 +24,16 @@ def get_target_slices(
     # reference_rollout = reference_rollout.sel(m=m)
 
     target = reference_rollout.copy(deep=True)
-    
+
     delta = np.array(delta_trajectory).reshape((-1, 1, 1))
 
+    # (1 + delta) * ref -- matching GuidedFlow.masked_loss, which targets
+    # (1 + delta) * sum(mask * ref) with NO abs. The previous "ref + delta*|ref|"
+    # diverged from the loss wherever the field is negative inside the mask.
     if partition == "level":
-        target[var].loc[{"level": level}] = (
-            target[var].sel(level=level)
-            + delta * abs(target[var].sel(level=level))
-        )
+        target[var].loc[{"level": level}] = target[var].sel(level=level) * (1 + delta)
     else:
-        target[var] = target[var] + delta * abs(target[var])
+        target[var] = target[var] * (1 + delta)
 
     slices = get_slices(target, partition, var, level)
     return slices
