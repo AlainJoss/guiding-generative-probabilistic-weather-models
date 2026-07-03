@@ -16,10 +16,12 @@ GUIDANCE_METHOD_HYPERS = {
     "FGF": ["fgf_k", "fgf_lr", "fgf_shift_init", "fgf_gamma", "fgf_n_windows"],
     # FGW learns the scalar w itself, so it has no "w" hyper -- only the optimizer's
     "FGW": ["fgw_k", "fgw_lr", "fgw_w_init"],
+    # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate at all
+    "FGWNOLR": ["fgwnolr_k", "fgwnolr_w_init"],
 }
 
 # common hypers
-GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF", "FGW"]
+GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF", "FGW", "FGWNOLR"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "GAUSSIAN"]
 
@@ -94,8 +96,12 @@ class RolloutConfig:
 
     # FGW (naive FlowGrad on the scalar w; w itself is learned, not a hyper)
     fgw_k: int | None = None       # optimization iterations
-    fgw_lr: float | None = None    # Adam lr on the scalar w
+    fgw_lr: float | None = None    # Adam lr on the scalar w (= w-units per iteration)
     fgw_w_init: float | None = None  # starting w
+
+    # FGWNOLR (secant on the exact scalar dL/dw; no learning rate)
+    fgwnolr_k: int | None = None       # total loss/grad evaluations
+    fgwnolr_w_init: float | None = None  # starting w
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 

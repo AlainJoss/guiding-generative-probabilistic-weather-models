@@ -805,13 +805,15 @@ def _(var_dropdown):
 
 @app.cell
 def _(n_slider):
-    n=n_slider.value
+    # slider is 1-based (1..N); n is the 0-based index
+    n=n_slider.value-1
     return (n,)
 
 
 @app.cell
 def _(m_slider):
-    m=m_slider.value
+    # slider is 1-based (1..M); m is the 0-based index
+    m=m_slider.value-1
     return (m,)
 
 
@@ -872,22 +874,22 @@ def _(mo):
 @app.cell
 def _(M, N, mo):
     n_slider = mo.ui.slider(
-        start=0, 
-        stop=N-1,
+        start=1, 
+        stop=N,
         step=1,
         label="n: ",
-        value=0,
+        value=1,
         debounce=True,
         show_value=True
     )
 
     m_slider_label = "m:\u00A0\u00A0" if M==1 else "m: "
     m_slider = mo.ui.slider(
-        start=0, 
-        stop=M-1,
+        start=1, 
+        stop=M,
         step=1,
         label=m_slider_label,
-        value=0,
+        value=1,
         debounce=True,
         show_value=True
     )
@@ -1097,10 +1099,13 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         "fgf_shift_init": (0.0,  1.0,   False, False),
         "fgf_gamma":      (1e-3, 1e-2,  True,  False),
         "fgf_n_windows":  (5,    25,    False, True),
-        # FGW (naive FlowGrad on the scalar w)
+        # FGW (naive FlowGrad on the scalar w; fgw_lr = w-units per Adam iteration)
         "fgw_k":          (5,    30,    False, True),
-        "fgw_lr":         (1.0,  50.0,  True,  False),
-        "fgw_w_init":     (50.0, 500.0, False, False),
+        "fgw_lr":         (10.0, 100.0, True,  False),
+        "fgw_w_init":     (100.0, 400.0, False, False),
+        # FGWNOLR (secant on the exact scalar dL/dw; no learning rate)
+        "fgwnolr_k":      (3,    10,    False, True),
+        "fgwnolr_w_init": (100.0, 400.0, False, False),
     }
 
     _rc = {}
@@ -1196,20 +1201,22 @@ def wa_schedule(
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
         w_choices = compute_axis_values("w", sweep_ranges.value)
-        fgw_w_choices = compute_axis_values("fgw_w_init", sweep_ranges.value)
+        fgw_w_choices = (compute_axis_values("fgw_w_init", sweep_ranges.value)
+                         + compute_axis_values("fgwnolr_w_init", sweep_ranges.value))
     elif notebook_mode == "analyze_rollout":
         selected_modes = [guidance_mode_dropdown.value]
         w_choices = list(experiment_params["w"])
-        fgw_w_choices = list(experiment_params.get("fgw_w_init") or [])
+        fgw_w_choices = (list(experiment_params.get("fgw_w_init") or [])
+                         + list(experiment_params.get("fgwnolr_w_init") or []))
     else:
         selected_modes = []
         w_choices = []
         fgw_w_choices = []
 
-    w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG", "FGW")]
+    w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG", "FGW", "FGWNOLR")]
 
     if w_modes:
-        if w_modes == ["FGW"]:
+        if set(w_modes) <= {"FGW", "FGWNOLR"}:
             # FGW learns w; preview the schedule at its starting value(s) fgw_w_init
             w_values = fgw_w_choices or w_choices or [float(w_slider.value)]
         else:
@@ -1219,7 +1226,7 @@ def wa_schedule(
             var=r"$w\,a_t$",
             title="Guidance weight schedule",
             subtitle="$a_t=(1-t)/t$ — applies to " + ", ".join(w_modes)
-                     + (" (FGW: w learned, shown at fgw_w_init)" if "FGW" in w_modes else ""),
+                     + (" (FGW/FGWNOLR: w learned, shown at w_init)" if ("FGW" in w_modes or "FGWNOLR" in w_modes) else ""),
             xlabel="$t$",
             figsize=(10, 6),
         )
@@ -2764,8 +2771,8 @@ def _(T, mo, notebook_mode):
         # T (flow steps) is constant across sweep points; deriving the range from the
         # config-pinned T (not the reloaded data cube) keeps t_slider from resetting when a
         # sweep axis changes.
-        steps=range(T) if notebook_mode == "analyze_rollout" else range(25),
-        value=0,
+        steps=range(1, T + 1) if notebook_mode == "analyze_rollout" else range(1, 26),
+        value=1,
         label="t: ",
         debounce=True,
         show_value=True
@@ -2870,7 +2877,8 @@ def _(
 
 @app.cell
 def _(t_slider):
-    t=t_slider.value
+    # slider is 1-based (1..T); t is the 0-based index
+    t=t_slider.value-1
     return (t,)
 
 

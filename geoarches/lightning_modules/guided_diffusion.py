@@ -210,17 +210,12 @@ class GuidedFlow(BaseLightningModule):
 
     def get_step_factors(self, i, timesteps):
         t = timesteps[i]
-
         s_t = t / self.num_train_timesteps
-
         if i < len(timesteps) - 1:
             s_next = timesteps[i + 1] / self.num_train_timesteps
             h = s_t - s_next
         else:
             h = s_t
-
-        print("t, s_t, h", t, s_t, h)
-
         return t, s_t, h
  
 
@@ -368,6 +363,16 @@ class GuidedFlow(BaseLightningModule):
             )
         elif guidance_type == "FGW":
             z, sampling_trace = self._fgw_flow(
+                x_cond=x_cond,
+                det_pred=det_pred,
+                delta_t=delta_n,
+                mask=mask,
+                x_ref=x_ref,
+                seed=seed,
+                **guidance_kwargs,
+            )
+        elif guidance_type == "FGWNOLR":
+            z, sampling_trace = self._fgwnolr_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_n,
@@ -981,7 +986,88 @@ class GuidedFlow(BaseLightningModule):
 
         return z_t, sampling_trace
 
-    ### flow variant 6 — naive FlowGrad on the scalar guidance strength w (FGW) ###
+    ### flow variant 6 — FlowGrad on the scalar guidance strength w (FGW / FGWNOLR) ###
+
+    def _fgw_final_pass(self, guidance_name, w_star, x_cond, det_pred, delta_t, mask, x_ref, seed):
+        # final pass through the standard LBG flow with the optimized constant w:
+        # identical application scheme, and yields the standard stackable traces
+        # (clean_preds/grads/vfs/gui_vfs) that the rollout zarr saving expects.
+        return self._gradient_flow(
+            guidance_name=guidance_name,
+            guidance_fn=self.lbg_guidance,
+            x_cond=x_cond,
+            det_pred=det_pred,
+            delta_n=delta_t,
+            mask=mask,
+            x_ref=x_ref,
+            lambda_schedule=[w_star] * self.T,
+            seed=seed,
+        )
+
+    def _fgwnolr_flow(
+        self,
+        x_cond,
+        det_pred: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_ref: TensorDict,
+        seed: int,
+        fgwnolr_k: int = 6,
+        fgwnolr_w_init: float = 250.0,
+    ):
+        # LR-free FGW: dL/dw is an exact SCALAR derivative, so instead of gradient
+        # descent solve dL/dw = 0 with the secant method -- no learning rate, and
+        # superlinear convergence (typically 3-6 evaluations). fgwnolr_k counts total
+        # loss/grad evaluations. Safeguards: w >= 0 projection, per-iteration step
+        # growth capped at 3x the previous step (secant can shoot off when the
+        # derivative flattens), and the best-LOSS w wins (secant targets a stationary
+        # point, which need not be the best point visited).
+        timesteps = self.get_flow_timesteps()
+        history = []  # (w, loss, dL/dw)
+
+        w_prev = max(float(fgwnolr_w_init), 0.0)
+        loss_prev, g_prev = self._fgw_loss_and_grad(
+            x_cond, det_pred, delta_t, mask, x_ref, seed, w_prev, timesteps
+        )
+        history.append((w_prev, loss_prev, g_prev))
+        print(f"FGWNOLR eval: w={w_prev:.4f} loss={loss_prev:.6f} dL/dw={g_prev:.3e}", flush=True)
+
+        # bootstrap second point: a 10% move against the gradient sign
+        step0 = 0.1 * max(abs(w_prev), 1.0)
+        w_curr = max(w_prev - math.copysign(step0, g_prev), 0.0)
+
+        for _ in tqdm(range(max(fgwnolr_k - 1, 0)), desc="FGWNOLR secant"):
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            loss_curr, g_curr = self._fgw_loss_and_grad(
+                x_cond, det_pred, delta_t, mask, x_ref, seed, w_curr, timesteps
+            )
+            history.append((w_curr, loss_curr, g_curr))
+            print(f"FGWNOLR eval: w={w_curr:.4f} loss={loss_curr:.6f} dL/dw={g_curr:.3e}", flush=True)
+
+            denom = g_curr - g_prev
+            if not math.isfinite(denom) or abs(denom) < 1e-20 or w_curr == w_prev:
+                break  # derivative flat or duplicated point -> secant undefined
+
+            step = -g_curr * (w_curr - w_prev) / denom
+            max_step = 3.0 * max(abs(w_curr - w_prev), 1e-6)
+            step = max(-max_step, min(step, max_step))
+
+            w_prev, g_prev = w_curr, g_curr
+            w_curr = max(w_curr + step, 0.0)
+
+            if abs(step) < 1e-3:
+                break  # converged in w
+
+        w_star, best_loss, _ = min(history, key=lambda item: item[1])
+        print(
+            f"FGWNOLR w*={w_star:.4f} best_loss={best_loss:.6f} "
+            f"history={[(round(w_, 3), round(l_, 6)) for w_, l_, _ in history]}",
+            flush=True,
+        )
+
+        return self._fgw_final_pass("FGWNOLR", w_star, x_cond, det_pred, delta_t, mask, x_ref, seed)
 
     def _fgw_flow(
         self,
@@ -992,8 +1078,8 @@ class GuidedFlow(BaseLightningModule):
         x_ref: TensorDict,
         seed: int,
         fgw_k: int = 10,
-        fgw_lr: float = 10.0,
-        fgw_w_init: float = 100.0,
+        fgw_lr: float = 50.0,
+        fgw_w_init: float = 250.0,
     ):
         # Naive FlowGrad: optimize the SINGLE scalar guidance strength w, applied exactly
         # like LBG (gui_step = w * a_t * g_t at every flow step), against the final masked
@@ -1001,115 +1087,104 @@ class GuidedFlow(BaseLightningModule):
         # the control space is one scalar:
         #   z_{i+1} = z_i + h_i u_i - h_i w a_t_i g_i
         #   dL/dw   = sum_i <a_{i+1}, -h_i a_t_i g_i>,  a = adjoint dL/dz.
+        # Adam normalizes the gradient, so fgw_lr IS the step size in w-units per
+        # iteration while the gradient sign is stable -> choose
+        # fgw_lr ~ |w_init - w*_expected| / fgw_k; final resolution ~ fgw_lr.
         # w >= 0 is enforced by projection (clamping) after each optimizer step, like FG.
         timesteps = self.get_flow_timesteps()
         T = len(timesteps)
 
         raw_w = torch.nn.Parameter(torch.tensor(float(fgw_w_init), device=self.device))
         optimizer = torch.optim.Adam([raw_w], lr=fgw_lr)
+        losses = []
 
-        def cached_forward(w):
-            # Detached Euler forward with the LBG application scheme; cache the leaf
-            # state z_i, the (detached) guidance direction g_i and (h_i, a_t_i).
-            z_t = self.init_noise(x_cond, seed)
-            z_cache, g_cache, fac_cache = [], [], []
-
-            for i in range(T):
-                t, s_t, h = self.get_step_factors(i, timesteps)
-                a_t = self.a_t(s_t)
-                z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
-
-                with torch.enable_grad():
-                    time_embedding = self.embedd_time(x_cond, t)
-                    input_state = self.get_velocity_input_state(z_t, x_cond)
-                    u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                    x_hat_t_norm = det_pred + self.euler_step(
-                        z_t, u_t, s_t
-                    ) * self.residual_to_pangu_scale
-                    x_hat_t = self.denormalize(x_hat_t_norm)
-                    g_t = self.lbg_guidance(
-                        x_hat_t=x_hat_t,
-                        x_hat_t_norm=x_hat_t_norm,
-                        x_ref=x_ref,
-                        delta_t=delta_t,
-                        mask=mask,
-                        z_t=z_t,
-                        a_t=a_t,
-                    )
-
-                z_cache.append(z_t.detach())
-                g_cache.append(g_t.detach())
-                fac_cache.append((h, a_t))
-
-                gui_step = g_t.apply(lambda g: g * (w * a_t))
-                u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
-                z_t = self.euler_step(z_t, u_t, h).detach()
-
-            return z_t, z_cache, g_cache, fac_cache
-
-        trace = defaultdict(list)
-        z_cache = g_cache = None
         for _ in tqdm(range(fgw_k), desc="FGW w optimization"):
-            # release the previous iteration's caches BEFORE cached_forward allocates
-            # the next ones (see _flowgrad_flow: both cache sets coexisting can OOM).
-            z_cache = g_cache = None
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
             w = float(raw_w.detach().clamp_min(0.0))
-            z_T, z_cache, g_cache, fac_cache = cached_forward(w)
-
-            # adjoint a_T = d(target_loss)/d(z_T)
-            z_T = z_T.detach().apply(lambda x: x.requires_grad_(True))
-            with torch.enable_grad():
-                x_hat_gui = self.final_prediction(det_pred, z_T)
-                target_loss = self.masked_loss(x_hat_gui, x_ref, delta_t, mask)
-            a = self.masked_loss_grad(target_loss, z_T)
-
-            # backward adjoint loop (g frozen -> dz_{i+1}/dz_i = I + h du/dz)
-            dw = torch.zeros((), device=self.device)
-            for i in range(T - 1, -1, -1):
-                t, s_t, h = self.get_step_factors(i, timesteps)
-                h_i, a_t_i = fac_cache[i]
-                # dL/dw contribution of step i (uses a = a_{i+1}, BEFORE propagation)
-                dw = dw - h_i * a_t_i * sum((a[k] * g_cache[i][k]).sum() for k in a.keys())
-
-                z_i = z_cache[i].detach().apply(lambda x: x.requires_grad_(True))
-                with torch.enable_grad():
-                    time_embedding = self.embedd_time(x_cond, t)
-                    input_state = self.get_velocity_input_state(z_i, x_cond)
-                    u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
-
-                vjp = self._vjp(u_i, z_i, a)
-                a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
-
-            raw_w.grad = dw.detach()
+            loss, dw = self._fgw_loss_and_grad(
+                x_cond, det_pred, delta_t, mask, x_ref, seed, w, timesteps
+            )
+            raw_w.grad = torch.tensor(dw, device=self.device)
             optimizer.step()
             with torch.no_grad():
                 raw_w.clamp_(min=0.0)  # projected gradient descent: keep w >= 0
 
-            trace["loss"].append(float(target_loss.detach().cpu()))
-            trace["w"].append(w)
-            print(f"FGW iter: w={w:.4f} loss={trace['loss'][-1]:.6f}", flush=True)
+            losses.append(loss)
+            print(f"FGW iter: w={w:.4f} loss={loss:.6f} dL/dw={dw:.3e}", flush=True)
 
         w_star = float(raw_w.detach().clamp_min(0.0))
-        print(f"FGW w*={w_star:.4f} (loss trajectory: {trace['loss']})", flush=True)
+        print(f"FGW w*={w_star:.4f} (loss trajectory: {losses})", flush=True)
 
-        # final pass through the standard LBG flow with the optimized constant w:
-        # identical application scheme, and yields the standard stackable traces
-        # (clean_preds/grads/vfs/gui_vfs) that the rollout zarr saving expects.
-        z_t, sampling_trace = self._gradient_flow(
-            guidance_name="FGW",
-            guidance_fn=self.lbg_guidance,
-            x_cond=x_cond,
-            det_pred=det_pred,
-            delta_n=delta_t,
-            mask=mask,
-            x_ref=x_ref,
-            lambda_schedule=[w_star] * T,
-            seed=seed,
-        )
-        return z_t, sampling_trace
+        return self._fgw_final_pass("FGW", w_star, x_cond, det_pred, delta_t, mask, x_ref, seed)
+
+    def _fgw_loss_and_grad(self, x_cond, det_pred, delta_t, mask, x_ref, seed, w, timesteps):
+        # One evaluation of the final masked loss L(w) and its EXACT scalar derivative
+        # dL/dw under the LBG application scheme (shared by FGW and FGWNOLR).
+        # Detached Euler forward caching the leaf state z_i, the (detached) guidance
+        # direction g_i and (h_i, a_t_i); then the backward adjoint loop (first-order
+        # Jacobian trick as in FG: g_t frozen, one VJP per step).
+        T = len(timesteps)
+        z_t = self.init_noise(x_cond, seed)
+        z_cache, g_cache, fac_cache = [], [], []
+
+        for i in range(T):
+            t, s_t, h = self.get_step_factors(i, timesteps)
+            a_t = self.a_t(s_t)
+            z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
+
+            with torch.enable_grad():
+                time_embedding = self.embedd_time(x_cond, t)
+                input_state = self.get_velocity_input_state(z_t, x_cond)
+                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                x_hat_t_norm = det_pred + self.euler_step(
+                    z_t, u_t, s_t
+                ) * self.residual_to_pangu_scale
+                x_hat_t = self.denormalize(x_hat_t_norm)
+                g_t = self.lbg_guidance(
+                    x_hat_t=x_hat_t,
+                    x_hat_t_norm=x_hat_t_norm,
+                    x_ref=x_ref,
+                    delta_t=delta_t,
+                    mask=mask,
+                    z_t=z_t,
+                    a_t=a_t,
+                )
+
+            z_cache.append(z_t.detach())
+            g_cache.append(g_t.detach())
+            fac_cache.append((h, a_t))
+
+            gui_step = g_t.apply(lambda g: g * (w * a_t))
+            u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
+            z_t = self.euler_step(z_t, u_t, h).detach()
+
+        # adjoint a_T = d(target_loss)/d(z_T)
+        z_T = z_t.detach().apply(lambda x: x.requires_grad_(True))
+        with torch.enable_grad():
+            x_hat_gui = self.final_prediction(det_pred, z_T)
+            target_loss = self.masked_loss(x_hat_gui, x_ref, delta_t, mask)
+        a = self.masked_loss_grad(target_loss, z_T)
+
+        # backward adjoint loop (g frozen -> dz_{i+1}/dz_i = I + h du/dz)
+        dw = torch.zeros((), device=self.device)
+        for i in range(T - 1, -1, -1):
+            t, s_t, h = self.get_step_factors(i, timesteps)
+            h_i, a_t_i = fac_cache[i]
+            # dL/dw contribution of step i (uses a = a_{i+1}, BEFORE propagation)
+            dw = dw - h_i * a_t_i * sum((a[k] * g_cache[i][k]).sum() for k in a.keys())
+
+            z_i = z_cache[i].detach().apply(lambda x: x.requires_grad_(True))
+            with torch.enable_grad():
+                time_embedding = self.embedd_time(x_cond, t)
+                input_state = self.get_velocity_input_state(z_i, x_cond)
+                u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
+
+            vjp = self._vjp(u_i, z_i, a)
+            a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
+
+        return float(target_loss.detach().cpu()), float(dw.detach().cpu())
 
     ### FlowGrad helpers (Jacobian-trick adjoint + coarse schedule) ###
 
