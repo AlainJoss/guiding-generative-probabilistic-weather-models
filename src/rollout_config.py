@@ -16,12 +16,15 @@ GUIDANCE_METHOD_HYPERS = {
     "FGF": ["fgf_k", "fgf_lr", "fgf_shift_init", "fgf_gamma", "fgf_n_windows"],
     # FGW learns the scalar w itself, so it has no "w" hyper -- only the optimizer's
     "FGW": ["fgw_k", "fgw_lr", "fgw_w_init"],
-    # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate at all
-    "FGWNOLR": ["fgwnolr_k", "fgwnolr_w_init"],
+    # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate, no iteration
+    # count (optimizes until the hardcoded loss threshold is reached)
+    "FGWNOLR": ["fgwnolr_w_init", "fgwnolr_eta"],
+    # FGWNOGAP: exact per-step gap closure (damped Newton on S = target); eta=1 -> full
+    "FGWNOGAP": ["fgwnogap_eta"],
 }
 
 # common hypers
-GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF", "FGW", "FGWNOLR"]
+GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF", "FGW", "FGWNOLR", "FGWNOGAP"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "GAUSSIAN"]
 
@@ -99,9 +102,13 @@ class RolloutConfig:
     fgw_lr: float | None = None    # Adam lr on the scalar w (= w-units per iteration)
     fgw_w_init: float | None = None  # starting w
 
-    # FGWNOLR (secant on the exact scalar dL/dw; no learning rate)
-    fgwnolr_k: int | None = None       # total loss/grad evaluations
+    # FGWNOLR (secant on the exact scalar dL/dw; no learning rate; runs until the
+    # hardcoded loss threshold is met)
     fgwnolr_w_init: float | None = None  # starting w
+    fgwnolr_eta: float | None = None     # closure rate: a_t = (1 - eta)^(t+1), as in NOGAP
+
+    # FGWNOGAP (exact per-step gap closure; no w at all)
+    fgwnogap_eta: float | None = None  # fraction of the gap closed per step (1 = all)
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 

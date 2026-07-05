@@ -72,6 +72,13 @@ def _():
     )
 
 
+@app.function
+def get_label(name: str, n_options: int) -> str:
+    # sliders with a single option render without a draggable track; pad the
+    # label with non-breaking spaces so rows of sliders keep their labels aligned
+    return f"{name}:\u00A0\u00A0" if n_options <= 1 else f"{name}: "
+
+
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
@@ -229,7 +236,7 @@ def _(
             w_slider = mo.ui.slider(
                 steps=w_defaults,
                 value=w_defaults[0],
-                label="w: ",
+                label=get_label("w", len(w_defaults)),
                 debounce=True,
                 show_value=True
             )
@@ -246,7 +253,7 @@ def _(
             w_slider = mo.ui.slider(
                 steps=w_defaults,
                 value=w_defaults[0],
-                label="w: ",
+                label=get_label("w", len(w_defaults)),
                 debounce=True,
                 show_value=True
             )
@@ -271,7 +278,7 @@ def _(
             w_slider = mo.ui.slider(
                 steps=experiment_params["w"],
                 value=experiment_params["w"][0],
-                label="w: ",
+                label=get_label("w", len(experiment_params["w"])),
                 debounce=True,
                 show_value=True,
             )
@@ -315,7 +322,7 @@ def _(
                     _extra[_k] = mo.ui.slider(
                         steps=list(_vals),
                         value=_vals[0],
-                        label=f"{_k}: ",
+                        label=get_label(_k, len(_vals)),
                         debounce=True,
                         show_value=True,
                     )
@@ -826,14 +833,14 @@ def _(PARTITIONS, mo):
 @app.cell
 def _(LEVELS_DICT, VARIABLES_DICT, mo, partition):
     LEVELS = LEVELS_DICT[partition]
-    level_label = "level:\u00A0\u00A0" if partition == "surface" else "level: "
+    level_label = get_label("level", len(LEVELS))
     level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[-1], label=level_label, show_value=True, debounce=True)
     VARIABLES = VARIABLES_DICT[partition]
     if partition == "surface":
         DEFAULT_VAR_VALUE = VARIABLES[2]
     else:
         DEFAULT_VAR_VALUE = VARIABLES[3]
-    var_dropdown = mo.ui.dropdown(VARIABLES, value=DEFAULT_VAR_VALUE, label="var : ")
+    var_dropdown = mo.ui.dropdown(VARIABLES, value=DEFAULT_VAR_VALUE, label="var: ")
     return level_slider, var_dropdown
 
 
@@ -877,18 +884,17 @@ def _(M, N, mo):
         start=1, 
         stop=N,
         step=1,
-        label="n: ",
+        label=get_label("n", N),
         value=1,
         debounce=True,
         show_value=True
     )
 
-    m_slider_label = "m:\u00A0\u00A0" if M==1 else "m: "
     m_slider = mo.ui.slider(
         start=1, 
         stop=M,
         step=1,
-        label=m_slider_label,
+        label=get_label("m", M),
         value=1,
         debounce=True,
         show_value=True
@@ -899,7 +905,7 @@ def _(M, N, mo):
 @app.cell
 def _(mo):
     # number of delta trajectories to author (each a sweep value of GUIDANCE_DELTA)
-    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="delta trajectories", show_value=True)
+    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="delta trajectories: ", show_value=True)
     # how each delta is shaped: hand-drawn linear ramp, or relative to the unguided ensemble
     # band  delta_n = k * sigma_band_n / |mean_n|,  sigma_band_n = (max_n - min_n)/2  (k per candidate;
     # k=1 pushes the masked mean to the top edge of the unguided ensemble band).
@@ -915,12 +921,12 @@ def _(N, delta_mode_dropdown, mo, n_deltas_slider, notebook_mode):
         _dc = {}
         for _i in range(n_deltas_slider.value):
             if delta_mode_dropdown.value == "band-based":
-                _dc[f"{_i}.k"] = mo.ui.number(value=1.0, label="k (× band)")
+                _dc[f"{_i}.k"] = mo.ui.number(value=1.0, label="k (× band): ")
             else:
-                _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label="start %")
-                _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %")
-                _dc[f"{_i}.start_at"] = mo.ui.slider(0, N, step=1, value=0, label="start@n", show_value=True)
-                _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, N, step=1, value=N, label="stop@n", show_value=True)
+                _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label="start %: ")
+                _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %: ")
+                _dc[f"{_i}.start_at"] = mo.ui.slider(0, N, step=1, value=0, label="start@n: ", show_value=True)
+                _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, N, step=1, value=N, label=get_label("stop@n", N), show_value=True)
         delta_controls = mo.ui.dictionary(_dc)
     else:
         delta_controls = mo.ui.dictionary({})
@@ -1072,9 +1078,9 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 @app.cell
 def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     # ===== sweep authoring widgets (guided_rollout) =====
-    guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["LBG"], label="GUIDANCE_MODE")
-    gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF")
-    mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE")
+    guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["LBG"], label="GUIDANCE_MODE: ")
+    gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF: ")
+    mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE: ")
 
     # numeric axes -> (start, stop, log_scale, integer)
     # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
@@ -1103,16 +1109,19 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         "fgw_k":          (5,    30,    False, True),
         "fgw_lr":         (10.0, 100.0, True,  False),
         "fgw_w_init":     (100.0, 400.0, False, False),
-        # FGWNOLR (secant on the exact scalar dL/dw; no learning rate)
-        "fgwnolr_k":      (3,    10,    False, True),
+        # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
+        # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
         "fgwnolr_w_init": (100.0, 400.0, False, False),
+        "fgwnolr_eta":    (0.1,  0.9,   False, False),
+        # FGWNOGAP (exact per-step gap closure; eta = fraction closed per step)
+        "fgwnogap_eta":   (0.1,  1.0,   False, False),
     }
 
     _rc = {}
     for _ax, (_s, _e, _log, _int) in NUMERIC_AXES.items():
-        _rc[f"{_ax}.start"] = mo.ui.number(value=_s, label="start")
-        _rc[f"{_ax}.stop"]  = mo.ui.number(value=_e, label="stop")
-        _rc[f"{_ax}.n"]     = mo.ui.slider(1, 20, step=1, value=1, label="n", show_value=True)
+        _rc[f"{_ax}.start"] = mo.ui.number(value=_s, label="start: ")
+        _rc[f"{_ax}.stop"]  = mo.ui.number(value=_e, label="stop: ")
+        _rc[f"{_ax}.n"]     = mo.ui.slider(1, 20, step=1, value=1, label="n: ", show_value=True)
         _rc[f"{_ax}.log"]   = mo.ui.checkbox(value=_log, label="log")
     sweep_ranges = mo.ui.dictionary(_rc)
 
@@ -1185,11 +1194,14 @@ def _(
 def wa_schedule(
     T,
     compute_axis_values,
-    delta_trajectory,
     experiment_params,
     guidance_mode_dropdown,
     guidance_mode_select,
+    guidance_schedules,
     guidance_weight_schedule,
+    lambda_t_by_method,
+    m,
+    n,
     notebook_mode,
     plot_trajectory,
     rollout_id,
@@ -1215,7 +1227,7 @@ def wa_schedule(
         import importlib as _importlib
         import src.utils as _utils
         _importlib.reload(_utils)
-        _sweep_sel = {k: (delta_trajectory if k == "GUIDANCE_DELTA" else v) for k, v in sweep_params.items()}
+        _sweep_sel = dict(sweep_params)  # records store the coord-label sweep form
         _wstar_recs = _utils.get_w_star(rollout_id, _sweep_sel)
         fgw_w_from_star = bool(_wstar_recs)
         fgw_w_choices = sorted({r["w_star"] for r in _wstar_recs}) or (
@@ -1227,18 +1239,33 @@ def wa_schedule(
         fgw_w_choices = []
 
     w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG", "FGW", "FGWNOLR")]
+    _has_recorded = notebook_mode == "analyze_rollout" and bool(lambda_t_by_method)
 
-    if w_modes:
-        if set(w_modes) <= {"FGW", "FGWNOLR"}:
-            # FGW learns w; preview the schedule at its starting value(s) fgw_w_init
-            w_values = fgw_w_choices or w_choices or [float(w_slider.value)]
+    if w_modes or _has_recorded:
+        if _has_recorded:
+            # the schedules actually applied by the run (guidance_schedule.json):
+            # lambda_t and w_t on the left axis, a_t (<= 1) on the right axis
+            _sched, _right = {}, {}
+            for _meth, _sd in guidance_schedules.items():
+                _sched[rf"$\lambda_t$ — {_meth}"] = list(_sd["lambda_t"])
+                _sched[rf"$w_t$ — {_meth}"] = list(_sd["w_t"])
+                _right[rf"$a_t$ — {_meth}"] = list(_sd["a_t"])
         else:
-            w_values = w_choices or [float(w_slider.value)]
+            if set(w_modes) <= {"FGW", "FGWNOLR"}:
+                # FGW learns w; preview the schedule at its starting value(s) fgw_w_init
+                w_values = fgw_w_choices or w_choices or [float(w_slider.value)]
+            else:
+                w_values = w_choices or [float(w_slider.value)]
+            _sched = guidance_weight_schedule(T, w_values)
+            _right = None
         wa_schedule_widget = plot_trajectory(
-            guidance_weight_schedule(T, w_values),
-            var=r"$w\,a_t$",
-            title="Guidance weight schedule",
-            subtitle=r"$a_t=\lambda_0\,\frac{a}{a+c}$, $a=\frac{s_{\mathrm{eff}}}{1-s_{\mathrm{eff}}}$ — applies to " + ", ".join(w_modes)
+            _sched,
+            right_trajectory=_right,
+            right_label=r"$a_t$",
+            var=r"$\lambda_t$",
+            title=r"Guidance weight schedule  $\lambda_t = w_t\,a_t$",
+            subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
+                      else r"preview: $\lambda_t = w\,a_t$, $a_t=\lambda_0\,\frac{a}{a+c}$ — applies to " + ", ".join(w_modes))
                      + (((" (w = optimized $w^*$)" if fgw_w_from_star else " (w learned, shown at w_init)"))
                         if ("FGW" in w_modes or "FGWNOLR" in w_modes) else ""),
             xlabel="$t$",
@@ -1269,6 +1296,7 @@ def _(
     var_dropdown,
     wa_schedule_widget,
     weather_map,
+    zoom_slider,
 ):
     mask_widget_controls = mo.hstack(
         [partition_dropdown, var_dropdown, level_slider],
@@ -1276,11 +1304,14 @@ def _(
         align="start",
     )
 
-    mask_widget_maps = mo.hstack(
-        [weather_map, mask_map],
-        justify="start",
-        align="start",
-    )
+    mask_widget_maps = mo.vstack([
+        mo.hstack([zoom_slider], justify="start"),
+        mo.hstack(
+            [weather_map, mask_map],
+            justify="start",
+            align="start",
+        ),
+    ], align="start")
     # authoring (unguided) exposes the mask coord controls; guided/analyze show only the
     # static, config-pinned mask map (the partition/var/level controls live in the
     # inspect-states / physical-realism sections for browsing the other maps).
@@ -1379,6 +1410,8 @@ def _(
     timestamps,
     var,
     visualize_map,
+    zoom_centers,
+    zoom_slider,
 ):
     # the mask section shows the guided variable: guided/analyze pin (partition, var,
     # level) to the loaded config; only the authoring (unguided) mode follows the
@@ -1400,6 +1433,9 @@ def _(
         # mask_corners=mask_corners, # TODO: simplify to this
         rectangle_x=(mask_corners[0], mask_corners[1]),
         rectangle_y=(mask_corners[2], mask_corners[3]),
+        zoom=zoom_slider.value,
+        zoom_center_lon=zoom_centers[0],
+        zoom_center_lat=zoom_centers[1],
         figsize=(14, 8),
         dpi=dpi_slider.value,
     )
@@ -1423,6 +1459,8 @@ def _(
     mask_var,
     np,
     visualize_map,
+    zoom_centers,
+    zoom_slider,
 ):
     mask_map = visualize_map(
         mask,
@@ -1434,6 +1472,9 @@ def _(
         center=np.mean(mask),
         rectangle_x=(mask_corners[0], mask_corners[1]),
         rectangle_y=(mask_corners[2], mask_corners[3]),
+        zoom=zoom_slider.value,
+        zoom_center_lon=zoom_centers[0],
+        zoom_center_lat=zoom_centers[1],
         figsize=(14, 8),
         dpi=dpi_slider.value
     )
@@ -1632,14 +1673,18 @@ def _(
                 absolute_maps = {}
 
                 for label, arr in absolute_panels:
+                    if norm_mode_dropdown.value == "own_scale":
+                        _v_min, _v_max, _v_center = safe_abs_limits([arr])
+                    else:
+                        _v_min, _v_max, _v_center = abs_vmin, abs_vmax, abs_center
                     absolute_maps[label] = visualize_map(
                         arr,
                         mask_2d=mask,
                         title=label,
                         interactive=map_interactive,
-                        vmin=abs_vmin,
-                        vmax=abs_vmax,
-                        center=abs_center,
+                        vmin=_v_min,
+                        vmax=_v_max,
+                        center=_v_center,
                         show_mask=show_mask_switch.value,
                         zoom=zoom_slider.value,
                         zoom_center_lon=zoom_centers[0],
@@ -1711,14 +1756,18 @@ def _(
                 absolute_maps = {}
 
                 for label, arr in absolute_panels:
+                    if norm_mode_dropdown.value == "own_scale":
+                        _v_min, _v_max, _v_center = safe_abs_limits([arr])
+                    else:
+                        _v_min, _v_max, _v_center = abs_vmin, abs_vmax, abs_center
                     absolute_maps[label] = visualize_map(
                         arr,
                         mask_2d=mask,
                         title=label,
                         interactive=map_interactive,
-                        vmin=abs_vmin,
-                        vmax=abs_vmax,
-                        center=abs_center,
+                        vmin=_v_min,
+                        vmax=_v_max,
+                        center=_v_center,
                         show_mask=show_mask_switch.value,
                         zoom=zoom_slider.value,
                         zoom_center_lon=zoom_centers[0],
@@ -1960,7 +2009,7 @@ def _(
                 inspect_states_widget_make = mo.vstack(
                     [
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider], justify="start"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
                         mo.hstack([curr_map, prev_map], justify="start"),
                         mo.hstack([ung_map, ung_prev_map], justify="start"),
                     ],
@@ -2006,7 +2055,7 @@ def _(
                     [
                         sweep_params_widget,
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider], justify="start"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
                         mo.hstack([
                             mo.vstack([inspect_checks[_k] for _k, _ in _rows], justify="start", align="start").style(width="fit-content"),
                             mo.vstack(
@@ -2185,7 +2234,7 @@ def _(mask, mo, np):
     aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
     dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
     cross_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "gt_diffs", "ung_gui_gt_diffs", "ung_gui_diffs", "grad_norms", "gui_vf_norms", "vf_norms", "deflections", "convergence", "informativeness",
+        "gt_diffs", "ung_gui_gt_diffs", "ung_gui_diffs", "grad_norms", "gui_vf_norms", "vf_norms", "deflections", "angular deflection", "convergence", "informativeness",
     )})
     differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
     abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$", value=True)
@@ -2308,7 +2357,7 @@ def _(
 @app.cell
 def _(aggregate_by_level_checkbox, level_var_dropdown, mo, n_traces):
     _kmax = n_traces(level_var_dropdown.value, aggregate_by_level_checkbox.value)
-    top_k_slider = mo.ui.slider(1, _kmax, value=min(5,_kmax), label="top K", show_value=True)
+    top_k_slider = mo.ui.slider(1, _kmax, value=min(5,_kmax), label=get_label("top K", _kmax), show_value=True)
     return (top_k_slider,)
 
 
@@ -2365,6 +2414,7 @@ def _(
     guided_xr,
     maybe_mask,
     notebook_mode,
+    np,
     ung_gui_final_xr,
     ung_gui_xr,
     vfs_xr,
@@ -2392,6 +2442,8 @@ def _(
             "gui_vfs_l2": _sq(gui_vfs_xr),
             "dvf_l2": _sq(_dvf),
             "dvf_mean": _mn(_dvf),
+            "dvf_dot": (_msk(vfs_xr) * _msk(gui_vfs_xr.shift(t=1))).sum(dim=_sp),
+            "gvf_prev_sq": _sq(gui_vfs_xr.shift(t=1)),
             "gui_ung_gui_mean": _nmn(guided_xr) - _nmn(ung_gui_final_xr),
             "gui_gt_mean": _nmn(guided_xr) - _nmn(gt_n_xr),
             "clean_gt_mean": _nmn(clean_preds_xr) - _nmn(gt_n_xr),
@@ -2400,6 +2452,11 @@ def _(
             "clean_ung_gui_mean": _nmn(clean_preds_xr) - _nmn(ung_gui_xr),
         }
         red = dict(zip(red, dask.compute(*red.values())))    # fused: each cube read once
+        # angular deflection: angle between vf_t and vf^gui_{t-1} over the (masked) spatial
+        # field, per (m, n, t[, level], var). NaN at t=0 (no previous guided vf) -> skipped
+        # by the mean reductions / rendered as a gap.
+        _ang_denom = (red["vfs_l2"] * red["gvf_prev_sq"]) ** 0.5
+        red["dvf_angle"] = np.degrees(np.arccos((red["dvf_dot"] / _ang_denom).clip(-1.0, 1.0)))
     else:
         red = None
     return (red,)
@@ -2435,6 +2492,8 @@ def _(
     t_slider,
     ung_gui_gt_n_plot,
     ung_gui_gt_t_plot,
+    vf_angdef_n_plot,
+    vf_angdef_t_plot,
     vf_deflection_n_plot,
     vf_deflection_t_plot,
     vf_norms_n_plot,
@@ -2459,6 +2518,7 @@ def _(
                             ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
                             ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
                             ("deflections", [vf_deflection_n_plot, vf_deflection_t_plot]),
+                            ("angular deflection", [vf_angdef_n_plot, vf_angdef_t_plot]),
                             ("convergence", [guidance_convergence_plot, guidance_convergence_t_plot]),
                             ("informativeness", [grad_informativeness_plot]),
                         ]
@@ -2551,11 +2611,13 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
         grad_norms_n_plot = _plot("Grad norms over $n$", r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["grads_l2"], "n", "l2")
         vf_deflection_n_plot = _plot("Vf deflection (gui − ung_gui) over $n$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["dvf_l2"], "n", "l2")
         vf_deflection_t_plot = _plot("Vf deflection (gui − ung_gui) over $t$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$", red["dvf_l2"].isel(n=n), "t", "l2")
+        vf_angdef_n_plot = _plot("Angular vf deflection over $n$", r"$\angle(\mathrm{vf}_t, \mathrm{vf}^{\mathrm{gui}}_{t-1})$ [$^\circ$]  (mean over $t$)", red["dvf_angle"], "n", "mean")
+        vf_angdef_t_plot = _plot("Angular vf deflection over $t$", r"$\angle(\mathrm{vf}_t, \mathrm{vf}^{\mathrm{gui}}_{t-1})$ [$^\circ$]", red["dvf_angle"].isel(n=n), "t", "mean")
         gui_vf_norms_n_plot = _plot("Gui vf norms over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["gui_vfs_l2"], "n", "l2")
         vf_norms_n_plot = _plot("Vf norms over $n$", r"$\|\mathrm{vf}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["vfs_l2"], "n", "l2")
         diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n), "t", "mean")
     else:
-        grad_norms_n_plot = vf_deflection_n_plot = vf_deflection_t_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = gui_gt_diff_n_plot = gui_gt_diff_t_plot = gui_ung_gui_t_plot = ung_gui_gt_n_plot = ung_gui_gt_t_plot = None
+        vf_angdef_n_plot = vf_angdef_t_plot = grad_norms_n_plot = vf_deflection_n_plot = vf_deflection_t_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = gui_gt_diff_n_plot = gui_gt_diff_t_plot = gui_ung_gui_t_plot = ung_gui_gt_n_plot = ung_gui_gt_t_plot = None
     return (
         grad_norms_n_plot,
         gui_gt_diff_n_plot,
@@ -2564,6 +2626,8 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
         gui_vf_norms_n_plot,
         ung_gui_gt_n_plot,
         ung_gui_gt_t_plot,
+        vf_angdef_n_plot,
+        vf_angdef_t_plot,
         vf_deflection_n_plot,
         vf_deflection_t_plot,
         vf_norms_n_plot,
@@ -2572,23 +2636,24 @@ def _(color_for, cross_ctl, cross_traces, m, n, notebook_mode, red, t):
 
 @app.cell
 def _(
-    T,
     cfg_clean_preds_slices,
     cfg_target_guidance_M_N_trajectories,
+    config,
     delta_trajectory,
     dist_bands_checkbox,
+    dpi_slider,
+    get_level_idx,
     get_masked_mean,
-    guidance_mode_dropdown,
-    guidance_weight_schedule,
+    get_slices,
+    get_var_idx,
+    gui_vfs_xr,
     m,
     mask,
     n,
     notebook_mode,
     np,
-    rollout_id,
-    sweep_params,
     t,
-    w_slider,
+    vfs_xr,
 ):
     if notebook_mode =="analyze_rollout":
         import importlib as _importlib
@@ -2618,39 +2683,99 @@ def _(
         )
         _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
         _diff_per_t = _all_per_t[m]
-        _w_sel = float(w_slider.value)  # currently selected guidance strength
-        _w_label = rf"$w\,a_t$  ($w={_w_sel:g}$)"
-        if guidance_mode_dropdown.value in ("FGW", "FGWNOLR"):
-            # these methods learn w; use the recorded w* for the selected (sweep, m, n)
-            import importlib as _importlib2
-            import src.utils as _utils2
-            _importlib2.reload(_utils2)
-            _sweep_sel = {k: (delta_trajectory if k == "GUIDANCE_DELTA" else v) for k, v in sweep_params.items()}
-            _recs = _utils2.get_w_star(rollout_id, _sweep_sel, m=m, n=n)
-            if _recs:
-                _w_sel = float(_recs[0]["w_star"])
-                _w_label = rf"$w^*\,a_t$  ($w^*={_w_sel:g}$, m={m}, n={n})"
-        _wa_line = next(iter(guidance_weight_schedule(T, [_w_sel]).values()))  # w * a_t over t
-        _wt = min(22.0, max(8.0, 3.4 + 0.78 * len(_diff_per_t)))
-        guidance_convergence_t_plot = _ptmod.plot_trajectory(
-            {"realized − target": _diff_per_t},
-            bands={"realized − target": (_all_per_t.min(axis=0), _all_per_t.max(axis=0))} if dist_bands_checkbox.value else None,
-            title="Guidance convergence over $t$",
-            subtitle=r"$\mathrm{mean}_{\mathrm{mask}}(x^{\mathrm{gui}}_{n,\,t}) - \mathrm{target}_n$",
-            xlabel="$t$",
-            step=t + 1,
-            color_map={"realized − target": "#B7950B"},
-            right_trajectory={_w_label: _wa_line},
-            right_color={_w_label: "#C0392B"},
-            figsize=(_wt, 6),
-            prepend_zero=False,
-            start_index=1,
-        )
+        # ---- within-step split: pre-step measurement + post-guidance prediction ----
+        # The clean prediction is affine in the velocity, so the post-guidance observable
+        # at the SAME t is recoverable from the stored traces:
+        #   S_post(t) = S_pre(t) + mean_mask(gui_vfs[t] - vfs[t]) * c,
+        # with c the residual denorm scaler of the guided channel (as in GuidedFlow).
+        # Both points share the same integer t; the red vertical segment is the guidance
+        # step ("deflectance", also drawn as the right-axis line); the connecting line
+        # post(t) -> pre(t+1) is the model's between-step drift.
+        import torch as _torch
+        from geoarches.paths import STATS_PATH as _STATS_PATH
+        _rscaler = _torch.load(_STATS_PATH / "deltapred24_aws_denorm.pt", weights_only=False)
+        if config.PARTITION == "level":
+            _c = float(_rscaler["level"][get_var_idx("level", config.VAR), get_level_idx("level", config.LEVEL)].squeeze())
+            if config.VAR == "vertical_velocity":
+                _c *= 3.0  # mirrors GuidedFlow.__init__
+        else:
+            _c = float(_rscaler["surface"][get_var_idx("surface", config.VAR)].squeeze())
+
+        _dvf_slices = get_slices(gui_vfs_xr - vfs_xr, config.PARTITION, config.VAR, config.LEVEL)
+        # (gui_vfs - vfs) is the velocity change over the REMAINING flow (duration s_t),
+        # but the guided velocity is only applied for ONE Euler step (duration h_t):
+        # weight by h_t/s_t so the diamond shows the direct effect of the step actually
+        # taken. Without this the diamond extrapolates the guidance over all of s_t and
+        # fabricates overshoot (validated: realized pre(t+1) never crosses the target).
+        _dvf_mm = get_masked_mean(_dvf_slices[:, n], mask).astype(float)
+        _s_flow = np.linspace(1000, 1, _dvf_mm.shape[1]) / 1000
+        _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
+        _post_per_t = _all_per_t + _dvf_mm * _c * (_h_flow / _s_flow)[None, :]
+        _post_sel = _post_per_t[m]
+        _guidance_move = _post_sel - _diff_per_t          # within-step: achieved(t) - measured(t)
+        _deflection_move = _diff_per_t[1:] - _post_sel[:-1]  # between steps: measured(t+1) - achieved(t)
+
+        import matplotlib.pyplot as _cplt
+        _T_len = len(_diff_per_t)
+        _xt = np.arange(1, _T_len + 1).astype(float)   # both points at the same integer t
+
+        # between-step drift line: post(t) -> pre(t+1)
+        _xz = np.empty(2 * _T_len); _yz = np.empty(2 * _T_len)
+        _xz[0::2], _xz[1::2] = _xt, _xt
+        _yz[0::2], _yz[1::2] = _diff_per_t, _post_sel
+
+        _wt = min(22.0, max(8.0, 3.4 + 0.78 * _T_len))
+        with _cplt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
+            _fig, _ax = _cplt.subplots(figsize=(_wt, 6), dpi=dpi_slider.value)
+            if dist_bands_checkbox.value:
+                _ax.fill_between(_xt, _all_per_t.min(axis=0), _all_per_t.max(axis=0),
+                                 color="#B7950B", alpha=0.14, linewidth=0, label=f"pre-step range, M={_all_per_t.shape[0]}")
+            # waterfall candles anchored ON the trajectory (same units as the axis):
+            # blue = the guidance move at t (ung_t -> gui_t);
+            # red  = the deflection arriving at t (gui_{t-1} -> ung_t)
+            _ax.bar(_xt, _guidance_move, bottom=_diff_per_t, width=0.28,
+                    color="#2E86C1", alpha=0.35, zorder=3, label="guidance move  (gui$_t$ − ung$_t$)")
+            if _T_len > 1:
+                _ax.bar(_xt[1:], _deflection_move, bottom=_post_sel[:-1], width=0.28,
+                        color="#C0392B", alpha=0.35, zorder=3, label="deflection move  (ung$_t$ − gui$_{t-1}$)")
+            # thin drift lines keep the trajectory readable across steps
+            for _i in range(_T_len - 1):
+                _ax.plot([_xt[_i], _xt[_i + 1]], [_post_sel[_i], _diff_per_t[_i + 1]],
+                         "-", color="#B7950B", alpha=0.5, linewidth=1.1, zorder=4,
+                         label="model drift" if _i == 0 else "_nolegend_")
+            _ax.plot(_xt, _post_sel, "D", color="#2E86C1", markersize=5, zorder=6,
+                     label="achieved with guidance")
+            _ax.plot(_xt, _diff_per_t, "o", markerfacecolor="none", markeredgecolor="#B7950B",
+                     markeredgewidth=1.8, markersize=8, linestyle="none", zorder=7,
+                     label="before step (measured; t=1: unguided)")
+            _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+            _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
+            _ax.set_xlim(0.6, _T_len + 0.4)
+            _ax.set_xticks(_xt)
+            _ax.set_xlabel("$t$"); _ax.set_ylabel("masked mean − target")
+            _ax.set_title("Guidance convergence over $t$ — within-step split", loc="left", fontweight="bold")
+            for _sp in ("top", "right"):
+                _ax.spines[_sp].set_visible(False)
+            _ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
+            _ax.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
+            _fig.tight_layout(rect=(0, 0, 0.82, 1))
+        guidance_convergence_t_plot = _fig
     return guidance_convergence_plot, guidance_convergence_t_plot
 
 
 @app.cell
-def _(config, dist_bands_checkbox, grads_xr, m, mask, n, notebook_mode, np, t):
+def _(
+    config,
+    dist_bands_checkbox,
+    grads_xr,
+    m,
+    mask,
+    mo,
+    n,
+    notebook_mode,
+    np,
+    t,
+):
     # ===== Gradient informativeness over t (saliency-style pattern metrics) =====
     # All metrics operate on the NORMALIZED gradient energy distribution
     # p_g = g_t^2 / sum(g_t^2) on the guided (var, level) channel: the stored grads are the
@@ -2726,27 +2851,34 @@ def _(config, dist_bands_checkbox, grads_xr, m, mask, n, notebook_mode, np, t):
             if dist_bands_checkbox.value else None
         )
         _wt = min(22.0, max(8.0, 3.4 + 0.78 * _T_len))
-        grad_informativeness_plot = _ptmod.plot_trajectory(
-            _traces,
-            bands=_bands,
-            title="Gradient informativeness over $t$",
-            subtitle=(r"pattern metrics of the normalized gradient energy "
-                      r"$p_g = g_t^2/\Sigma\, g_t^2$ vs mask "
-                      r"(IMEF skill | $1-\mathrm{JSD}(p_g\Vert p_m)/\ln 2$ | $\exp(H(p_g))/N$; right: NSS)"),
-            xlabel="$t$",
-            step=t + 1,
-            color_map={
-                "IMEF skill": "#0072B2",
-                "JSD align": "#D55E00",
-                "eff. active area": "#009E73",
-                "mask EAA (ref)": "#9AA0A6",
-            },
-            right_trajectory={"NSS": _sel(_nss)[m]},
-            right_label="NSS",
-            figsize=(_wt, 6),
-            prepend_zero=False,
-            start_index=1,
-        )
+        # NSS is NaN exactly when the applied gradient is zero/absent (skipna makes
+        # the other metrics spuriously finite there), so it is the reliable guard
+        if not np.isfinite(_sel(_nss)[m]).any():
+            # all-NaN metrics: gradients are zero/absent for this selection (e.g. eta=0 or
+            # delta=0 runs) -> nothing to normalize; show a note instead of crashing on ylim
+            grad_informativeness_plot = mo.md("_gradient informativeness: no applied gradient for this selection (all-zero grads)_")
+        else:
+            grad_informativeness_plot = _ptmod.plot_trajectory(
+                _traces,
+                bands=_bands,
+                title="Gradient informativeness over $t$",
+                subtitle=(r"pattern metrics of the normalized gradient energy "
+                          r"$p_g = g_t^2/\Sigma\, g_t^2$ vs mask "
+                          r"(IMEF skill | $1-\mathrm{JSD}(p_g\Vert p_m)/\ln 2$ | $\exp(H(p_g))/N$; right: NSS)"),
+                xlabel="$t$",
+                step=t + 1,
+                color_map={
+                    "IMEF skill": "#0072B2",
+                    "JSD align": "#D55E00",
+                    "eff. active area": "#009E73",
+                    "mask EAA (ref)": "#9AA0A6",
+                },
+                right_trajectory={"NSS": _sel(_nss)[m]},
+                right_label="NSS",
+                figsize=(_wt, 6),
+                prepend_zero=False,
+                start_index=1,
+            )
     else:
         grad_informativeness_plot = None
     return (grad_informativeness_plot,)
@@ -2800,7 +2932,7 @@ def _(T, mo, notebook_mode):
         # sweep axis changes.
         steps=range(1, T + 1) if notebook_mode == "analyze_rollout" else range(1, 26),
         value=1,
-        label="t: ",
+        label=get_label("t", T),
         debounce=True,
         show_value=True
     )
@@ -2809,39 +2941,101 @@ def _(T, mo, notebook_mode):
 
 @app.cell
 def _(
+    VARIABLES_DICT,
     get_rollout,
     guidance_mode_dropdown,
+    guided_xr,
     notebook_mode,
+    np,
     rollout_id,
     sweep_params,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
         # Keep the heavy per-flow-step cubes LAZY: only `.sel` the sweep point here.
-        # The `red` cell reduces them and computes the tiny result, and the map cells
-        # materialize a single var/level via get_slices -> neither ever holds the full
-        # (m, n, t, level, lat, lon) cube in RAM.
+        # NEW trace format (res.zarr present): stores hold raw primitives only --
+        # grads = dL/dz, vfs = u*s_t, res = noisy state z_t. Everything derived
+        # (gui_vec, gui_vf, gui_res, clean_preds) is reconstructed below via exact
+        # affine identities; no model needed. LEGACY stores load directly.
         grads_xr = get_rollout("grads", rollout_id).sel(sweep_params)
         vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params)
-        clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params)
-        gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params)
         ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params)
-        # ung_gui now carries the full flow-step (t) axis; its last slice is the final
-        # unguided state. Use that for per-step state views and keep the full cube for the
-        # over-t comparison. Guard so older stores (no t axis) still work.
+        # ung_gui carries the full flow-step (t) axis; its last slice is the final
+        # unguided state. Guard so older stores (no t axis) still work.
         ung_gui_final_xr = ung_gui_xr.isel(t=-1) if "t" in ung_gui_xr.dims else ung_gui_xr
-        # FLOWGRAD_FREE has no guidance direction -> these trace containers are all-NaN.
-        # Fill with 0 so the (not-applicable) trace plots render as flat zero instead of
-        # crashing on NaN axis limits; the learned controls live in the FlowGrad
-        # diagnostics panel. Other modes are untouched.
-        if guidance_mode_dropdown.value == "FGF":
-            grads_xr = grads_xr.fillna(0.0)
-            vfs_xr = vfs_xr.fillna(0.0)
-            clean_preds_xr = clean_preds_xr.fillna(0.0)
-            gui_vfs_xr = gui_vfs_xr.fillna(0.0)
+
+        try:
+            res_xr = get_rollout("res", rollout_id).sel(sweep_params)
+        except FileNotFoundError:
+            res_xr = None  # legacy rollout (pre raw-primitives format)
+
+        if res_xr is None:
+            # ---- LEGACY: applied grads (x s_t), gui_vfs and clean_preds stored directly ----
+            clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params)
+            gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params)
+            gui_vec_xr = None
+            gui_res_xr = None
+            # FLOWGRAD_FREE has no guidance direction -> trace containers are all-NaN;
+            # fill with 0 so the (not-applicable) trace plots render flat instead of crashing.
+            if guidance_mode_dropdown.value == "FGF":
+                grads_xr = grads_xr.fillna(0.0)
+                vfs_xr = vfs_xr.fillna(0.0)
+                clean_preds_xr = clean_preds_xr.fillna(0.0)
+                gui_vfs_xr = gui_vfs_xr.fillna(0.0)
+        else:
+            # ---- NEW FORMAT: reconstruct in-memory (stays lazy in dask) ----
+            import xarray as _xr
+            import torch as _torch
+            import importlib as _il
+            import src.utils as _su
+            from geoarches.paths import STATS_PATH as _STATS_PATH
+            _il.reload(_su)
+
+            # lambda_t[m, n, t] = w_t * a_t from the guidance_schedule sidecar
+            _sched_sel = dict(sweep_params)  # records store the coord-label sweep form
+            _recs = _su.get_guidance_schedule(rollout_id, _sched_sel, method=guidance_mode_dropdown.value)
+            _M, _N, _T = grads_xr.sizes["m"], grads_xr.sizes["n"], grads_xr.sizes["t"]
+            _lam = np.full((_M, _N, _T), np.nan)
+            for _r in _recs:
+                _wv, _av = np.asarray(_r["w_t"], float), np.asarray(_r["a_t"], float)
+                if len(_wv) == _T and _r["m"] < _M and _r["n"] < _N:
+                    _lam[_r["m"], _r["n"], :] = _wv * _av
+            lambda_t_xr = _xr.DataArray(
+                _lam, dims=("m", "n", "t"),
+                coords={"m": grads_xr.m, "n": grads_xr.n, "t": grads_xr.t},
+            )
+
+            # flow grids: s_t (noise level) and h_t (Euler step; last step h = s)
+            _s_np = np.linspace(1000, 1, _T) / 1000
+            _h_np = np.empty_like(_s_np); _h_np[:-1] = _s_np[:-1] - _s_np[1:]; _h_np[-1] = _s_np[-1]
+            _s_da = _xr.DataArray(_s_np, dims=("t",), coords={"t": grads_xr.t})
+            _h_da = _xr.DataArray(_h_np, dims=("t",), coords={"t": grads_xr.t})
+
+            # residual denorm scaler c per var (level vars: per-level vector), as in GuidedFlow
+            _rsc = _torch.load(_STATS_PATH / "deltapred24_aws_denorm.pt", weights_only=False)
+            _c_map = {}
+            for _vi, _v in enumerate(VARIABLES_DICT["surface"]):
+                _c_map[_v] = float(_rsc["surface"][_vi].squeeze())
+            _lev_np = _rsc["level"].squeeze(-1).squeeze(-1).numpy()
+            for _vi, _v in enumerate(VARIABLES_DICT["level"]):
+                _arr = _lev_np[_vi] * (3.0 if _v == "vertical_velocity" else 1.0)
+                _c_map[_v] = _xr.DataArray(_arr, dims=("level",), coords={"level": grads_xr.level})
+
+            # exact identities
+            gui_vec_xr = grads_xr * lambda_t_xr                 # applied guidance vector per t
+            gui_vfs_xr = vfs_xr - gui_vec_xr * _s_da            # guided vf, stored x s_t convention
+            gui_res_xr = -(gui_vec_xr * _h_da).sum("t")         # guidance contribution to z_T
+            _z_T = res_xr.isel(t=-1, drop=True) + gui_vfs_xr.isel(t=-1, drop=True) * float(_h_np[-1] / _s_np[-1])
+            # clean prediction (physical): gui_final + ((z_t + s_t*u_t) - z_T) * c
+            _dev = (res_xr + vfs_xr) - _z_T
+            clean_preds_xr = _xr.Dataset(
+                {_v: guided_xr[_v] + _dev[_v] * _c_map[_v] for _v in _dev.data_vars}
+            ).transpose("m", "n", "t", ...)  # broadcast puts t last; restore trace order
     return (
         clean_preds_xr,
         grads_xr,
+        gui_vec_xr,
         gui_vfs_xr,
+        res_xr,
         ung_gui_final_xr,
         ung_gui_xr,
         vfs_xr,
@@ -2850,17 +3044,65 @@ def _(
 
 @app.cell
 def _(
+    guidance_mode_dropdown,
+    m,
+    n,
+    notebook_mode,
+    np,
+    rollout_id,
+    sweep_params,
+):
+    # applied guidance weight schedules for the selected (sweep, m, n), recorded per
+    # method into guidance_schedule.json. lambda_t = w_t * a_t is the per-step multiplier
+    # on the raw gradient; for FGWNOGAP a_t is the ACHIEVED remaining-gap fraction and
+    # w_t the implied factor. `guidance_schedules` holds all methods at this selection;
+    # `lambda_t`/`w_t_schedule`/`a_t_schedule` are the selected method's (None for
+    # rollouts predating the sidecar -> charts fall back to the reconstructed preview).
+    if notebook_mode == "analyze_rollout":
+        import importlib as _importlib
+        import src.utils as _sched_utils
+        _importlib.reload(_sched_utils)
+        # records store the sweep in coord-label form == the notebook sweep_params dict
+        _sel = dict(sweep_params)
+        _recs = _sched_utils.get_guidance_schedule(rollout_id, _sel, m=m, n=n)
+        guidance_schedules = {
+            _r["method"]: {
+                "w_t": np.asarray(_r["w_t"], dtype=float),
+                "a_t": np.asarray(_r["a_t"], dtype=float),
+                "lambda_t": np.asarray(_r["w_t"], dtype=float) * np.asarray(_r["a_t"], dtype=float),
+            }
+            for _r in _recs
+        }
+        lambda_t_by_method = {_k: _v["lambda_t"] for _k, _v in guidance_schedules.items()}
+        if guidance_mode_dropdown.value in guidance_schedules:
+            _mine = guidance_schedules[guidance_mode_dropdown.value]
+            w_t_schedule, a_t_schedule, lambda_t = _mine["w_t"], _mine["a_t"], _mine["lambda_t"]
+        else:
+            w_t_schedule = a_t_schedule = lambda_t = None
+    else:
+        guidance_schedules = {}
+        lambda_t_by_method = {}
+        w_t_schedule = a_t_schedule = lambda_t = None
+    return guidance_schedules, lambda_t_by_method
+
+
+@app.cell
+def _(
     clean_preds_xr,
     get_slices,
     grads_xr,
     gt_curr,
+    gui_vec_xr,
     gui_vfs_xr,
     level,
     m,
     n,
     notebook_mode,
+    np,
     partition,
+    res_xr,
     t,
+    ung_gui_xr,
     ung_onl_curr,
     var,
     vfs_xr,
@@ -2877,17 +3119,43 @@ def _(
         diff_gt_ung_onl_slice =  ung_onl_curr - gt_curr
         diff_gt_clean_pred_slice = clean_preds_slices[m][n][t] - gt_curr
         # 2
-        ung_onl_clean_diff_slice = clean_preds_slices[m][n][t]- ung_onl_curr
+        # compare against the unguided clean prediction AT THE SAME flow step t (the
+        # ung_gui trace carries the full t axis; older stores without it fall back to final)
+        _ung_gui_t_slices = get_slices(ung_gui_xr, partition, var, level)
+        _ung_gui_t = _ung_gui_t_slices[m][n][t] if _ung_gui_t_slices.ndim == 5 else _ung_gui_t_slices[m][n]
+        ung_onl_clean_diff_slice = clean_preds_slices[m][n][t] - _ung_gui_t
         clean_preds_slice_prev = clean_preds_slices[m][n][t-1] if t>0 else clean_preds_slices[m][n][t]
         clean_preds_diff_slice = clean_preds_slices[m][n][t] - clean_preds_slice_prev
         # 3
         grads_slice = grads_slices[m][n][t]
         grads_slice_prev_slice = grads_slices[m][n][t-1] if t>0 else grads_slices[m][n][t]
         diff_grads_slice = grads_slice- grads_slice_prev_slice
+        # noisy state z_t + applied guidance vector gui_vec = lambda_t * grad
+        # (new-format rollouts only; zeros on legacy stores)
+        if res_xr is not None:
+            res_slice = get_slices(res_xr, partition, var, level)[m][n][t]
+        else:
+            res_slice = np.zeros_like(grads_slices[m][n][t])
+        if gui_vec_xr is not None:
+            gui_vec_slice = get_slices(gui_vec_xr, partition, var, level)[m][n][t]
+        else:
+            gui_vec_slice = np.zeros_like(grads_slices[m][n][t])
+
         # 4
         guided_vfs_slice = guided_vfs_slices[m][n][t]
         vfs_slice = vfs_slices[m][n][t]
-        vf_gui_next_diff_slice = (vfs_slices[m][n][t+1] if t + 1 < len(vfs_slices[m][n]) else vfs_slices[m][n][t]) - guided_vfs_slice
+        # Model reaction to the guidance applied at t, in SAME units: the stored vf
+        # traces are each weighted by their own s_t, so the naive vfs[t+1] - gui_vfs[t]
+        # is dominated by the s-decay (at the last transition it renders ~= -gui_vfs and
+        # fakes 'undoing'). Compare in u-space and scale by s_{t+1} -- the disagreement's
+        # actual contribution to the next state (its masked mean = the staircase's
+        # deflection segment). Last step: no t+1 -> zero map.
+        _s_sched = np.linspace(1000, 1, len(vfs_slices[m][n])) / 1000
+        vf_gui_next_diff_slice = (
+            vfs_slices[m][n][t+1] - guided_vfs_slice * (_s_sched[t+1] / _s_sched[t])
+            if t + 1 < len(vfs_slices[m][n])
+            else np.zeros_like(guided_vfs_slice)
+        )
     return (
         clean_preds_diff_slice,
         clean_preds_slices,
@@ -2895,7 +3163,9 @@ def _(
         diff_gt_clean_pred_slice,
         diff_gt_ung_onl_slice,
         grads_slice,
+        gui_vec_slice,
         guided_vfs_slice,
+        res_slice,
         ung_onl_clean_diff_slice,
         vf_gui_next_diff_slice,
         vfs_slice,
@@ -2917,10 +3187,12 @@ def _(
     diff_gt_ung_onl_slice,
     dpi_slider,
     grads_slice,
+    gui_vec_slice,
     guided_vfs_slice,
     mask,
     notebook_mode,
     np,
+    res_slice,
     show_mask_switch,
     ung_onl_clean_diff_slice,
     vf_gui_next_diff_slice,
@@ -2935,22 +3207,29 @@ def _(
         map_specs = [
             ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{n}^{\text{ung_gui}} - x_{n}^{\text{gt}}$", -1, 1),
             ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$x_t^{\text{gui}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$x_t^{\text{gui}} - x_{n}^{\text{ung_gui}}$", -1, 1),
+            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{ung\_gui}}$", -1, 1),
             ("clean_preds_diff_map", clean_preds_diff_slice, r"$x_t^{\text{gui}} - x_{t-1}^{\text{gui}}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("vfs_map", vfs_slice, r"$\text{vf}_t$", -0.001, 0.001),
             ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
             ("diff_vfs_map", diff_vfs_slice, r"$\text{vf}^{\text{gui}}_t - \text{vf}_t$", -0.001, 0.001),
-            ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$\text{vf}_{t+1} - \text{vf}^{\text{gui}}_t$", -0.001, 0.001),
+            ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$s_{t+1}(u_{t+1} - u^{\text{gui}}_t)$", -0.001, 0.001),
+            ("res_map", res_slice, r"$z_t$", -1, 1),
+            ("gui_vec_map", gui_vec_slice, r"$\lambda_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
         ]
 
         maps = {}
 
         for name, data, title, fallback_vmin, fallback_vmax in map_specs:
-            data_min = np.min(data)
-            data_max = np.max(data)
-            data_mean = np.mean(data)
+            data_min = np.nanmin(data) if np.isfinite(data).any() else np.nan
+            data_max = np.nanmax(data) if np.isfinite(data).any() else np.nan
+            data_mean = np.nanmean(data) if np.isfinite(data).any() else np.nan
+            if not (np.isfinite(data_min) and np.isfinite(data_max)):
+                # all-NaN slice (e.g. reconstruction without lambda records on mixed-run
+                # dirs) -> render a flat zero map instead of crashing the colormap
+                data = np.zeros_like(np.asarray(data))
+                data_min = data_max = data_mean = 0.0
             print(name, data_min, data_mean, data_max)
 
             maps[name] = visualize_map(
@@ -2978,13 +3257,17 @@ def _(
         guided_vfs_map = maps["guided_vfs_map"]
         diff_vfs_map = maps["diff_vfs_map"]
         vf_gui_next_diff_map = maps["vf_gui_next_diff_map"]
+        res_map = maps["res_map"]
+        gui_vec_map = maps["gui_vec_map"]
         diff_grads_map = maps["diff_grads_map"]
     return (
         diff_grads_map,
         diff_gt_clean_pred_map,
         diff_vfs_map,
         grads_map,
+        gui_vec_map,
         guided_vfs_map,
+        res_map,
         ung_onl_clean_diff_map,
         vf_gui_next_diff_map,
         vfs_map,
@@ -2994,7 +3277,7 @@ def _(
 @app.cell
 def _(mo):
     flow_checks = mo.ui.dictionary({n: mo.ui.checkbox(label=n, value=True) for n in (
-        "gui_t diffs", "grads", "vfs", "vf diffs",
+        "gui_t diffs", "grads", "vfs", "vf diffs", "res",
     )})
     return (flow_checks,)
 
@@ -3018,6 +3301,7 @@ def _(
     dpi_slider,
     flow_checks,
     grads_map,
+    gui_vec_map,
     guided_vfs_map,
     level_slider,
     m_slider,
@@ -3025,6 +3309,7 @@ def _(
     n_slider,
     notebook_mode,
     partition_dropdown,
+    res_map,
     show_mask_switch,
     sweep_params_widget,
     t_slider,
@@ -3071,7 +3356,8 @@ def _(
             ("gui_t diffs", [ung_onl_clean_diff_map, diff_gt_clean_pred_map]),
             ("grads", [grads_map, diff_grads_map]),
             ("vfs", [vfs_map, guided_vfs_map]),
-            ("vf diffs", [vf_gui_next_diff_map, diff_vfs_map]),
+            ("vf diffs", [diff_vfs_map, vf_gui_next_diff_map]),
+            ("res", [res_map, gui_vec_map]),
         ]
 
         flow_widget_make = mo.vstack(
@@ -3207,6 +3493,8 @@ def _(
         _wt = min(22.0, max(8.0, 3.4 + 0.78 * T))
 
         def _pr_plot(_tr, _title, _sub, _axis):
+            if not any(np.isfinite(np.asarray(_v, dtype=float)).any() for _v in _tr.values()):
+                return mo.md(f"_{_title}: no finite data for this selection_")
             return _pt(
                 _tr, title=_title, subtitle=_sub, xlabel=f"${_axis}$",
                 step=(n + 1 if _axis == "n" else t + 1),

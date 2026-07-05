@@ -87,11 +87,12 @@ def get_container_args(rollout_type):
         case "ung":
             return [("ung", False)]
         case "gui":
+            # raw primitives only: grads = dL/dz, vfs = u*s_t, res = noisy state z_t.
+            # gui_vec / gui_vf / gui_res / clean_preds are reconstructed in the UI.
             return [
                 ("grads", True),
                 ("vfs", True),
-                ("gui_vfs", True),
-                ("clean_preds", True),
+                ("res", True),
                 ("gui", False),
                 ("ung_gui", True)
             ]
@@ -108,7 +109,7 @@ def written_containers(rollout_type, guidance_mode):
     base = {"gui", "ung_gui"}
     if guidance_mode == "FGF":
         return base
-    return base | {"grads", "vfs", "gui_vfs", "clean_preds"}
+    return base | {"grads", "vfs", "res"}
 
 
 def find_resume_index(rollout_dir, rollout_type, sweep_params):

@@ -1,21 +1,14 @@
 __pycache__/
+.DS_Store
 
-/notebooks
-/data
-experiments/random.ipynb
-experiments/generated
-modelstore/
-geoarches/stats/
-rollouts/
+notebooks/
+data/
+local_data/
 
 journal/latex-notes/*
 !journal/latex-notes/main.pdf
 !journal/latex-notes/main.tex
-!journal/latex-notes/preamble.pdf
 !journal/latex-notes/refs.bib
 
-/local_data
-
 data_party_tricks.md
-
 skills-lock.json

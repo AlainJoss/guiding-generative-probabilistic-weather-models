@@ -12,14 +12,14 @@ from src.rollout_config import RolloutConfig, GUIDANCE_METHOD_HYPERS
 from src.mask import get_mask_tdict, get_mask_2d
 
 from src.utils import create_slice_zarr_container, tdict_to_xr, append_to_zarr, advance_x_cond
-from src.utils import get_gt_rollout, gt_state_to_tdict, append_w_star
+from src.utils import get_gt_rollout, gt_state_to_tdict, append_w_star, append_guidance_schedule
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
 from tensordict.tensordict import TensorDict
 
 def build_guidance_kwargs(guidance_type, sweep_params):
     # Straight pass-through: hyper names already equal the guidance-fn kwarg names.
-    # w is skipped -- it is a flow-level strength consumed as lambda_schedule, not a
+    # w is skipped -- it is a flow-level strength consumed as w_schedule, not a
     # guidance-fn argument.
     guidance_kwargs = {}
     for hk in GUIDANCE_METHOD_HYPERS[guidance_type]:
@@ -50,7 +50,7 @@ def rollout(
 
         delta_trajectory = config.GUIDANCE_DELTA
         # w is the constant guidance strength applied at every flow step; no schedule.
-        lambda_schedule = [config.w] * T
+        w_schedule = [config.w] * T
         mask_tdict = get_mask_tdict(x_cond_init["state"], config.PARTITION, var_idx, level_idx, mask_2d)
         guidance_type = config.GUIDANCE_MODE
         # GT reference: ground-truth field per step (member-independent). gt rollout holds
@@ -59,7 +59,7 @@ def rollout(
         guidance_kwargs = build_guidance_kwargs(guidance_type, sweep_params)
     else:
         delta_trajectory=None
-        lambda_schedule=None
+        w_schedule=None
         mask_tdict = None
         guidance_type = None
         gt_ds = None
@@ -77,7 +77,7 @@ def rollout(
                 delta_n=None,
                 mask=None,
                 x_ref=None,
-                lambda_schedule=None,
+                w_schedule=None,
                 seed= m + 1000 * n,  # + batch_nb * 10**6
             )
             x_hat_curr = x_hat_ung
@@ -104,7 +104,7 @@ def rollout(
                         delta_n=delta_n,
                         mask=mask_tdict,
                         x_ref=x_ref,
-                        lambda_schedule=lambda_schedule,
+                        w_schedule=w_schedule,
                         seed = m + 1000 * n,  # + batch_nb * 10**6
                     )
                 x_hat_curr = x_hat_gui
@@ -115,6 +115,11 @@ def rollout(
                 w_star = sampling_trace.pop("w_star", None)
                 if w_star is not None:
                     append_w_star(rollout_dir, sweep_params, m, n, w_star)
+
+                # applied weight schedule {w_t, a_t} (lambda_t = w_t * a_t) -> sidecar
+                sched = sampling_trace.pop("guidance_schedule", None)
+                if sched is not None:
+                    append_guidance_schedule(rollout_dir, guidance_type, sweep_params, m, n, **sched)
 
                 save_state = flow_model.denormalize(x_hat_gui).cpu()
                 save_state = tdict_to_xr(

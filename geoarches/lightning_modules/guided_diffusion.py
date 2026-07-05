@@ -209,6 +209,7 @@ class GuidedFlow(BaseLightningModule):
     
 
     def get_step_factors(self, i, timesteps):
+        # works perfectly with different Ts
         t = timesteps[i]
         s_t = t / self.num_train_timesteps
         if i < len(timesteps) - 1:
@@ -262,6 +263,12 @@ class GuidedFlow(BaseLightningModule):
         )
     
 
+    def masked_residual(self, x_hat_t, x_ref, delta_t, mask):
+        # signed residual r = S(x_hat) - (1 + delta) * S(x_ref); masked_loss = r^2
+        pred = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
+        target = sum((mask[k] * x_ref[k]).sum() for k in x_ref.keys())
+        return pred - (1 + delta_t) * target
+
     def masked_loss(self, x_hat_t, x_ref, delta_t, mask):
         # masked-average match: guide the masked mean toward (1+delta) * reference mean
         pred = sum((mask[k] * x_hat_t[k]).sum() for k in x_hat_t.keys())
@@ -271,6 +278,9 @@ class GuidedFlow(BaseLightningModule):
     
     
     def a_t(self, s_t, lambda0=1.0, c=5.0):
+        # -ds shift: a_t is EXACTLY 0 at the final flow step by design -- the last
+        # step applies no guidance (the state is already decided; late corrections
+        # would be pasted on rather than integrated).
         ds = 1.0 / self.num_train_timesteps
 
         s_eff = (s_t - ds).clamp(
@@ -294,7 +304,7 @@ class GuidedFlow(BaseLightningModule):
         delta_n: torch.Tensor | None = None,
         mask: TensorDict | None = None,
         x_ref: TensorDict | None = None,
-        lambda_schedule: list[torch.Tensor] | None = None,
+        w_schedule: list[torch.Tensor] | None = None,
         seed: int | None = None,
         guidance_kwargs: dict | None = None,
     ):
@@ -326,7 +336,7 @@ class GuidedFlow(BaseLightningModule):
                 delta_n=delta_n,
                 mask=mask,
                 x_ref=x_ref,
-                lambda_schedule=lambda_schedule,
+                w_schedule=w_schedule,
                 seed=seed,
                 **guidance_kwargs,
             )
@@ -337,7 +347,7 @@ class GuidedFlow(BaseLightningModule):
                 delta_t=delta_n,
                 mask=mask,
                 x_ref=x_ref,
-                lambda_schedule=lambda_schedule,
+                w_schedule=w_schedule,
                 seed=seed,
                 **guidance_kwargs,
             )
@@ -373,6 +383,16 @@ class GuidedFlow(BaseLightningModule):
             )
         elif guidance_type == "FGWNOLR":
             z, sampling_trace = self._fgwnolr_flow(
+                x_cond=x_cond,
+                det_pred=det_pred,
+                delta_t=delta_n,
+                mask=mask,
+                x_ref=x_ref,
+                seed=seed,
+                **guidance_kwargs,
+            )
+        elif guidance_type == "FGWNOGAP":
+            z, sampling_trace = self._fgwnogap_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_n,
@@ -430,19 +450,24 @@ class GuidedFlow(BaseLightningModule):
         delta_n: torch.Tensor,
         mask: TensorDict,
         x_ref: TensorDict,
-        lambda_schedule: list[torch.Tensor],
+        w_schedule: list[torch.Tensor],
         seed: int | None = None,
+        a_schedule: list[float] | None = None,
         # TODO: not sure whether I actually need these -> maybe flowgradn needs them
         differentiable_flag: bool = False,
         **guidance_kwargs,
     ):
+        # w_schedule   : per-step w_t; the applied multiplier is lambda_t = w_t * a_t
+        # a_schedule   : optional per-step a_t override (default: self.a_t(s_t));
+        #                e.g. FGWNOLR's deterministic closure schedule (1-eta)^(t+1)
         # create_graph : keep higher-order graph through the guidance gradient
         # differentiable: keep the whole trajectory attached so the outer
-        #                 objective stays differentiable w.r.t. lambda_schedule (FLOWGRAD)
+        #                 objective stays differentiable w.r.t. w_schedule (FLOWGRAD)
         # trace         : record the per-step sampling_trace (skipped for FLOWGRAD inner passes)
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.get_flow_timesteps()
         sampling_trace = defaultdict(list)
+        w_t_trace, a_t_trace = [], []  # applied factorization: lambda_t = w_t * a_t
 
         if differentiable_flag:
             z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
@@ -466,9 +491,9 @@ class GuidedFlow(BaseLightningModule):
 
                 x_hat_t = self.denormalize(x_hat_t_norm)
 
-                a_t = self.a_t(s_t)
+                a_t = a_schedule[i] if a_schedule is not None else self.a_t(s_t)
 
-                gui_vec = guidance_fn(
+                grad_vec = guidance_fn(
                     x_hat_t=x_hat_t,
                     x_hat_t_norm=x_hat_t_norm,
                     x_ref=x_ref,
@@ -479,25 +504,30 @@ class GuidedFlow(BaseLightningModule):
                     **guidance_kwargs,
                 )
 
-            gui_step = gui_vec.apply(
-                lambda g: g * (lambda_schedule[i] * a_t)
+            gui_step = grad_vec.apply(
+                lambda g: g * (w_schedule[i] * a_t)
             )
+            w_t_trace.append(float(w_schedule[i]))
+            a_t_trace.append(float(a_t))
 
-            sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
-            sampling_trace["grads"].append(gui_step.detach().cpu())  # the APPLIED guidance
+            # raw primitives only: gui_vec (= lambda_t * grads), gui_vf, gui_res and
+            # clean_preds are reconstructed in-memory in the UI from these plus the
+            # guidance_schedule sidecar
+            sampling_trace["grads"].append(grad_vec.detach().cpu())  # raw dL/dz
             sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
+            sampling_trace["res"].append(z_t.detach().cpu())         # noisy state z_t
 
             u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
-
-            sampling_trace["gui_vfs"].append(
-                u_t.apply(lambda x: x * s_t).detach().cpu()
-            )
 
             if differentiable_flag:
                 z_t = self.euler_step(z_t, u_t, h)
             else:
                 with torch.no_grad():
                     z_t = self.euler_step(z_t, u_t, h)
+
+        # applied weight schedule sidecar (rollout.py pops this before stacking and
+        # persists it to guidance_schedule.json; lambda_t = w_t * a_t)
+        sampling_trace["guidance_schedule"] = {"w_t": w_t_trace, "a_t": a_t_trace}
 
         return z_t, sampling_trace
 
@@ -558,7 +588,7 @@ class GuidedFlow(BaseLightningModule):
         mask: TensorDict,
         x_hat_ung: TensorDict,
         x_ref: TensorDict,
-        lambda_schedule: list[torch.Tensor],
+        w_schedule: list[torch.Tensor],
         seed: int | None = None,
         ug_s: int = 3,
         ug_k: int = 5,
@@ -601,7 +631,7 @@ class GuidedFlow(BaseLightningModule):
                 )
                 # keep the inner SGD's own magnitude (NOT unit-normalized): the converged
                 # dz shrinks as the masked-mean approaches the target, so the correction
-                # self-brakes instead of overshooting. lambda_schedule is now a gain on
+                # self-brakes instead of overshooting. w_schedule is now a gain on
                 # that true-magnitude shift (set alpha=0, w=1 for a flat gain of 1).
 
                 with torch.no_grad():
@@ -613,7 +643,7 @@ class GuidedFlow(BaseLightningModule):
 
                     # apply the backward shift in latent space (w * a_t scales it)
                     z_t = tensordict_apply(
-                        lambda z, d: z + lambda_schedule[i] * a_t * d, z_t, delta_z
+                        lambda z, d: z + w_schedule[i] * a_t * d, z_t, delta_z
                     )
 
                     # field / clean prediction at the shifted latent, then step
@@ -742,7 +772,7 @@ class GuidedFlow(BaseLightningModule):
             # coarse (K,) -> fine (T,) by piecewise-constant window assignment
             return lambda_win[win_of_t]
 
-        def run_flow(lambda_schedule, *, create_graph, differentiable, do_trace):
+        def run_flow(w_schedule, *, create_graph, differentiable, do_trace):
             return self._gradient_flow(
                 guidance_name="FG",
                 guidance_fn=self.lbg_guidance,
@@ -752,7 +782,7 @@ class GuidedFlow(BaseLightningModule):
                 mask=mask,
                 x_hat_ung=x_hat_ung,
                 x_ref=x_ref,
-                lambda_schedule=lambda_schedule,
+                w_schedule=w_schedule,
                 seed=seed,
                 create_graph_flag=create_graph,
                 differentiable_flag=differentiable,
@@ -988,7 +1018,8 @@ class GuidedFlow(BaseLightningModule):
 
     ### flow variant 6 — FlowGrad on the scalar guidance strength w (FGW / FGWNOLR) ###
 
-    def _fgw_final_pass(self, guidance_name, w_star, x_cond, det_pred, delta_t, mask, x_ref, seed):
+    def _fgw_final_pass(self, guidance_name, w_star, x_cond, det_pred, delta_t, mask, x_ref, seed,
+                        a_schedule=None):
         # final pass through the standard LBG flow with the optimized constant w:
         # identical application scheme, and yields the standard stackable traces
         # (clean_preds/grads/vfs/gui_vfs) that the rollout zarr saving expects.
@@ -1000,8 +1031,9 @@ class GuidedFlow(BaseLightningModule):
             delta_n=delta_t,
             mask=mask,
             x_ref=x_ref,
-            lambda_schedule=[w_star] * self.T,
+            w_schedule=[w_star] * self.T,
             seed=seed,
+            a_schedule=a_schedule,
         )
         # scalar sidecar for analysis (rollout.py pops this before stacking the traces
         # and persists it to w_star.json; see src/utils.append_w_star)
@@ -1016,22 +1048,32 @@ class GuidedFlow(BaseLightningModule):
         mask: TensorDict,
         x_ref: TensorDict,
         seed: int,
-        fgwnolr_k: int = 6,
         fgwnolr_w_init: float = 250.0,
+        fgwnolr_eta: float = 0.5,
     ):
         # LR-free FGW: dL/dw is an exact SCALAR derivative, so instead of gradient
-        # descent solve dL/dw = 0 with the secant method -- no learning rate, and
-        # superlinear convergence (typically 3-6 evaluations). fgwnolr_k counts total
-        # loss/grad evaluations. Safeguards: w >= 0 projection, per-iteration step
-        # growth capped at 3x the previous step (secant can shoot off when the
-        # derivative flattens), and the best-LOSS w wins (secant targets a stationary
-        # point, which need not be the best point visited).
+        # descent solve dL/dw = 0 with the secant method -- no learning rate and no
+        # iteration-count hyper: it optimizes UNTIL the loss (squared masked-sum
+        # residual) drops under LOSS_THRESHOLD.
+        # a_t is the DETERMINISTIC NOGAP closure schedule (remaining-gap fraction):
+        #   a_t = (1 - eta)^(t+1),
+        # used consistently in the secant evaluations AND the final pass, so the
+        # optimized w* means the same thing in both. Safeguards: w >= 0 projection,
+        # per-iteration step growth capped at 3x the previous step (secant can shoot
+        # off when the derivative flattens), a hard evaluation cap against plateaus,
+        # and the best-LOSS w wins (secant targets a stationary point, which need not
+        # be the best point visited).
+        LOSS_THRESHOLD = 1e-6   # stop when loss is essentially closed
+        MAX_EVALS = 30          # plateau safety net (never a tuning knob)
+
         timesteps = self.get_flow_timesteps()
+        a_sched = [(1.0 - fgwnolr_eta) ** (i + 1) for i in range(len(timesteps))]
         history = []  # (w, loss, dL/dw)
 
         w_prev = max(float(fgwnolr_w_init), 0.0)
         loss_prev, g_prev = self._fgw_loss_and_grad(
-            x_cond, det_pred, delta_t, mask, x_ref, seed, w_prev, timesteps
+            x_cond, det_pred, delta_t, mask, x_ref, seed, w_prev, timesteps,
+            a_schedule=a_sched,
         )
         history.append((w_prev, loss_prev, g_prev))
         print(f"FGWNOLR eval: w={w_prev:.4f} loss={loss_prev:.6f} dL/dw={g_prev:.3e}", flush=True)
@@ -1040,15 +1082,19 @@ class GuidedFlow(BaseLightningModule):
         step0 = 0.1 * max(abs(w_prev), 1.0)
         w_curr = max(w_prev - math.copysign(step0, g_prev), 0.0)
 
-        for _ in tqdm(range(max(fgwnolr_k - 1, 0)), desc="FGWNOLR secant"):
+        while loss_prev > LOSS_THRESHOLD and len(history) < MAX_EVALS:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
             loss_curr, g_curr = self._fgw_loss_and_grad(
-                x_cond, det_pred, delta_t, mask, x_ref, seed, w_curr, timesteps
+                x_cond, det_pred, delta_t, mask, x_ref, seed, w_curr, timesteps,
+                a_schedule=a_sched,
             )
             history.append((w_curr, loss_curr, g_curr))
             print(f"FGWNOLR eval: w={w_curr:.4f} loss={loss_curr:.6f} dL/dw={g_curr:.3e}", flush=True)
+
+            if loss_curr <= LOSS_THRESHOLD:
+                break  # under threshold: done
 
             denom = g_curr - g_prev
             if not math.isfinite(denom) or abs(denom) < 1e-20 or w_curr == w_prev:
@@ -1058,7 +1104,7 @@ class GuidedFlow(BaseLightningModule):
             max_step = 3.0 * max(abs(w_curr - w_prev), 1e-6)
             step = max(-max_step, min(step, max_step))
 
-            w_prev, g_prev = w_curr, g_curr
+            w_prev, g_prev, loss_prev = w_curr, g_curr, loss_curr
             w_curr = max(w_curr + step, 0.0)
 
             if abs(step) < 1e-3:
@@ -1071,7 +1117,10 @@ class GuidedFlow(BaseLightningModule):
             flush=True,
         )
 
-        return self._fgw_final_pass("FGWNOLR", w_star, x_cond, det_pred, delta_t, mask, x_ref, seed)
+        return self._fgw_final_pass(
+            "FGWNOLR", w_star, x_cond, det_pred, delta_t, mask, x_ref, seed,
+            a_schedule=a_sched,
+        )
 
     def _fgw_flow(
         self,
@@ -1123,7 +1172,8 @@ class GuidedFlow(BaseLightningModule):
 
         return self._fgw_final_pass("FGW", w_star, x_cond, det_pred, delta_t, mask, x_ref, seed)
 
-    def _fgw_loss_and_grad(self, x_cond, det_pred, delta_t, mask, x_ref, seed, w, timesteps):
+    def _fgw_loss_and_grad(self, x_cond, det_pred, delta_t, mask, x_ref, seed, w, timesteps,
+                           a_schedule=None):
         # One evaluation of the final masked loss L(w) and its EXACT scalar derivative
         # dL/dw under the LBG application scheme (shared by FGW and FGWNOLR).
         # Detached Euler forward caching the leaf state z_i, the (detached) guidance
@@ -1135,7 +1185,7 @@ class GuidedFlow(BaseLightningModule):
 
         for i in range(T):
             t, s_t, h = self.get_step_factors(i, timesteps)
-            a_t = self.a_t(s_t)
+            a_t = a_schedule[i] if a_schedule is not None else self.a_t(s_t)
             z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
 
             with torch.enable_grad():
@@ -1189,6 +1239,98 @@ class GuidedFlow(BaseLightningModule):
             a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
 
         return float(target_loss.detach().cpu()), float(dw.detach().cpu())
+
+    ### flow variant 7 — exact per-step gap closure (FGWNOGAP) ###
+
+    def _fgwnogap_flow(
+        self,
+        x_cond,
+        det_pred: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_ref: TensorDict,
+        seed: int,
+        fgwnogap_eta: float = 1.0,
+    ):
+        # Anchored per-step gap closure: track the DETERMINISTIC residual schedule
+        #   r_target(t) = (1 - eta)^(t+1) * r_0
+        # (closed form of a_{k+1} = a_k + eta*(1 - a_k)). Each step computes the Newton
+        # move from the CURRENTLY measured signed residual r_t to r_target(t), so
+        # over/under-achievement, model drift and overshoot are corrected against the
+        # prescribed path. On-path this reduces to the relative form 2*eta*L/(h*||g||^2).
+        # No w, no learned schedule: the recorded factorization is a_t = (1-eta)^(t+1)
+        # (theoretical) and w_t = lambda_t / a_t with lambda_t = the applied scale.
+        z_t = self.init_noise(x_cond, seed)
+        timesteps = self.get_flow_timesteps()
+        sampling_trace = defaultdict(list)
+        scale_trace = []
+
+        for i in tqdm(range(len(timesteps)), desc="FGWNOGAP sampling"):
+            t, s_t, h = self.get_step_factors(i, timesteps)
+            z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
+
+            with torch.enable_grad():
+                time_embedding = self.embedd_time(x_cond, t)
+                input_state = self.get_velocity_input_state(z_t, x_cond)
+                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+
+                x_hat_t_norm = det_pred + self.euler_step(
+                    z_t,
+                    u_t,
+                    s_t,
+                ) * self.residual_to_pangu_scale
+
+                x_hat_t = self.denormalize(x_hat_t_norm)
+
+                r_ = self.masked_residual(x_hat_t, x_ref, delta_t, mask)
+                loss_ = r_ ** 2
+                gui_vec = self.masked_loss_grad(loss_, z_t, create_graph=False)
+
+            # anchored trajectory tracking: aim the SIGNED residual at the
+            # deterministic schedule r_target = (1 - eta)^(t+1) * r_0, computed from
+            # the CURRENT state -- over/under-achievement, drift and overshoot are all
+            # corrected against the prescribed path at the next step. On-path this
+            # reduces exactly to the relative form 2*eta*L/(h*||g||^2).
+            # Newton step along g = 2 r dS/dz: <dS, dz> = r_target - r_t with
+            # dz = -h * gui_step  =>  gui_step = 2 r_t (r_t - r_target) g / (h ||g||^2).
+            r_det = float(r_.detach())
+            if i == 0:
+                r_0 = r_det
+            r_target = ((1.0 - fgwnogap_eta) ** (i + 1)) * r_0
+
+            g_norm2 = sum((gui_vec[k] ** 2).sum() for k in gui_vec.keys())
+            scale = (2.0 * r_det * (r_det - r_target)) / (h * g_norm2.clamp_min(1e-30))
+            gui_step = gui_vec.apply(lambda g: g * scale)
+            scale_trace.append(float(scale))
+
+            print(
+                f"FGWNOGAP step: t={i} r={r_det:.6f} r_target={r_target:.6f} "
+                f"scale(=lambda_t)={float(scale):.4f}",
+                flush=True,
+            )
+
+            # raw primitives only, matching _gradient_flow: gui_vec/gui_vf/gui_res and
+            # clean_preds are reconstructed in the UI (lambda_t = scale is recorded in
+            # the guidance_schedule sidecar with a_t = 1)
+            sampling_trace["grads"].append(gui_vec.detach().cpu())  # raw dL/dz
+            sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
+            sampling_trace["res"].append(z_t.detach().cpu())        # noisy state z_t
+
+            u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
+
+            with torch.no_grad():
+                z_t = self.euler_step(z_t, u_t, h)
+
+        # deterministic factorization: a_t is the THEORETICAL remaining-gap schedule
+        # (1 - eta)^(t+1); w_t = lambda_t / a_t so that lambda_t = w_t * a_t = scale.
+        a_theory = [(1.0 - fgwnogap_eta) ** (i + 1) for i in range(len(scale_trace))]
+        w_impl = [
+            _sc / _a if _a > 0 else float("nan")
+            for _sc, _a in zip(scale_trace, a_theory)
+        ]
+        sampling_trace["guidance_schedule"] = {"w_t": w_impl, "a_t": a_theory}
+
+        return z_t, sampling_trace
 
     ### FlowGrad helpers (Jacobian-trick adjoint + coarse schedule) ###
 

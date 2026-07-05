@@ -118,35 +118,71 @@ def append_w_star(rollout_dir, sweep_params: dict, m: int, n: int, w_star: float
     path.write_text(json.dumps(records, indent=2))
 
 
-def get_w_star(rollout_id, sweep_sel: dict | None = None, m: int | None = None, n: int | None = None):
-    """w_star records matching a sweep selection (loose float compare; lists compared
-    elementwise). sweep_sel uses ACTUAL values (GUIDANCE_DELTA as the vector, not its
-    zarr index). Returns [] if no sidecar exists (pre-FGW rollouts)."""
-    path = get_rollout_dir(rollout_id) / "w_star.json"
+def _sweep_match(sel_v, rec_v):
+    # loose sweep-value compare: floats via isclose, lists elementwise, else equality
+    if isinstance(sel_v, (list, tuple)) or isinstance(rec_v, (list, tuple)):
+        try:
+            a, b = np.asarray(sel_v, float), np.asarray(rec_v, float)
+            return a.shape == b.shape and bool(np.allclose(a, b))
+        except (TypeError, ValueError):
+            return sel_v == rec_v
+    if isinstance(sel_v, (int, float)) and isinstance(rec_v, (int, float)):
+        return bool(np.isclose(float(sel_v), float(rec_v)))
+    return sel_v == rec_v
+
+
+def _load_records(path, sweep_sel, m, n):
     if not path.exists():
         return []
-
-    def _match(sel_v, rec_v):
-        if isinstance(sel_v, (list, tuple)) or isinstance(rec_v, (list, tuple)):
-            try:
-                a, b = np.asarray(sel_v, float), np.asarray(rec_v, float)
-                return a.shape == b.shape and bool(np.allclose(a, b))
-            except (TypeError, ValueError):
-                return sel_v == rec_v
-        if isinstance(sel_v, (int, float)) and isinstance(rec_v, (int, float)):
-            return bool(np.isclose(float(sel_v), float(rec_v)))
-        return sel_v == rec_v
-
     out = []
     for r in json.loads(path.read_text()):
         if m is not None and r["m"] != m:
             continue
         if n is not None and r["n"] != n:
             continue
-        if sweep_sel and not all(_match(v, r["sweep"].get(k)) for k, v in sweep_sel.items()):
+        if sweep_sel and not all(_sweep_match(v, r["sweep"].get(k)) for k, v in sweep_sel.items()):
             continue
         out.append(r)
     return out
+
+
+def get_w_star(rollout_id, sweep_sel: dict | None = None, m: int | None = None, n: int | None = None):
+    """w_star records matching a sweep selection (loose float compare; lists compared
+    elementwise). sweep_sel uses ACTUAL values (GUIDANCE_DELTA as the vector, not its
+    zarr index). Returns [] if no sidecar exists (pre-FGW rollouts)."""
+    return _load_records(get_rollout_dir(rollout_id) / "w_star.json", sweep_sel, m, n)
+
+
+def append_guidance_schedule(rollout_dir, method: str, sweep_params: dict, m: int, n: int,
+                             w_t: list, a_t: list):
+    """Persist the APPLIED guidance weight schedule for one (method, sweep point, m, n).
+
+    Stored in <rollout_dir>/guidance_schedule.json as a list of records
+    {"method", "sweep", "m", "n", "w_t": [...T], "a_t": [...T]}; an existing record for
+    the same (method, sweep, m, n) is replaced (resume-safe). lambda_t = w_t * a_t is
+    the per-step multiplier on the raw gradient."""
+    path = Path(rollout_dir) / "guidance_schedule.json"
+    records = json.loads(path.read_text()) if path.exists() else []
+    sweep = dict(sweep_params or {})
+    records = [
+        r for r in records
+        if not (r["method"] == method and r["m"] == m and r["n"] == n and r["sweep"] == sweep)
+    ]
+    records.append({
+        "method": method, "sweep": sweep, "m": m, "n": n,
+        "w_t": [float(v) for v in w_t], "a_t": [float(v) for v in a_t],
+    })
+    path.write_text(json.dumps(records, indent=2))
+
+
+def get_guidance_schedule(rollout_id, sweep_sel: dict | None = None, m: int | None = None,
+                          n: int | None = None, method: str | None = None):
+    """guidance_schedule records matching a sweep selection (same loose matching as
+    get_w_star). Returns [] if no sidecar exists (older rollouts)."""
+    records = _load_records(get_rollout_dir(rollout_id) / "guidance_schedule.json", sweep_sel, m, n)
+    if method is not None:
+        records = [r for r in records if r["method"] == method]
+    return records
 
 
 # @functools.lru_cache(maxsize=None)
