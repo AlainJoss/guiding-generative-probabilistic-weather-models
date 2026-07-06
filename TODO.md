@@ -12,6 +12,11 @@ gui:
 ung_gui: 
 sampling trace: 
 
+New guidance modes:
+- LBG with 
+- fix a_t and optimize w
+- 
+
 Random:
 - Compute a priori the size of the experiment
 

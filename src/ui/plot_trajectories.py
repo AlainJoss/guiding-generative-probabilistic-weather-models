@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 import numpy as np
 import pandas as pd
@@ -193,26 +195,13 @@ def plot_trajectories(
         ):
             num_members = ensemble.shape[1]
 
-            ens_min = np.nanmin(ensemble, axis=1)
-            ens_max = np.nanmax(ensemble, axis=1)
-            ens_mean = np.nanmean(ensemble, axis=1)
-
-            if selected_member is not None:
-                if not np.isfinite(ensemble).any():
-                    raise ValueError(
-                        f"{label_prefix.lower()} ensemble is all-NaN — the rollout store is "
-                        f"incomplete or not fully synced yet (data chunks missing). Wait for "
-                        f"the sync to finish or re-generate the run."
-                    )
-                if not np.all(
-                    (selected_member >= ens_min - 1e-10)
-                    & (selected_member <= ens_max + 1e-10)
-                ):
-                    raise ValueError(
-                        f"{label_prefix.lower()} selected member falls outside the "
-                        f"{label_prefix.lower()} ensemble [min, max] — likely NaN/incomplete "
-                        f"data for this sweep point."
-                    )
+            # Partial-run tolerance: NaN steps (not-yet-written slices) simply leave a
+            # gap in the band/lines; all-NaN steps just emit a RuntimeWarning we silence.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                ens_min = np.nanmin(ensemble, axis=1)
+                ens_max = np.nanmax(ensemble, axis=1)
+                ens_mean = np.nanmean(ensemble, axis=1)
 
             ax.fill_between(
                 time_values,
@@ -601,7 +590,7 @@ def plot_trajectories(
         # ------------------------------------------------------------
         # Y-limits with padding
         # ------------------------------------------------------------
-        if y_values:
+        if y_values and np.isfinite(np.concatenate(y_values)).any():
             y_all = np.concatenate(y_values)
             y_min, y_max = np.nanmin(y_all), np.nanmax(y_all)
             y_pad = 0.08 * (y_max - y_min) if y_max > y_min else 1.0

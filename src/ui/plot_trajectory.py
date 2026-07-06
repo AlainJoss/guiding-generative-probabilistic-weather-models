@@ -38,6 +38,29 @@ def plot_trajectory(
     trajectory_dict = trajectory if isinstance(trajectory, dict) else {var: trajectory}
     trajectory_dict = {k: np.asarray(v, dtype=float) for k, v in trajectory_dict.items()}
 
+    # drop all-NaN traces (e.g. flow traces at forecast steps where guidance was
+    # off, so nothing was recorded); if none survive, render a placeholder figure
+    # instead of letting matplotlib fail on NaN axis limits.
+    finite_dict = {k: v for k, v in trajectory_dict.items() if np.isfinite(v).any()}
+    if trajectory_dict and not finite_dict:
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+        ax.set_axis_off()
+        ax.text(
+            0.5, 0.5,
+            "no finite data for this selection",
+            ha="center", va="center",
+            fontsize=12, color="#888888",
+            transform=ax.transAxes,
+        )
+        if title:
+            fig.suptitle(title, x=0.06, y=0.98, ha="left", fontsize=15,
+                         fontweight="bold", color="#222222")
+        if subtitle:
+            fig.text(0.06, 0.925, subtitle, ha="left", va="top",
+                     fontsize=9.5, color="#555555")
+        return fig
+    trajectory_dict = finite_dict
+
     if prepend_zero:
         # anchor every line at the origin (0, 0): the value for step i moves to x=i+1,
         # so x=0 is a baseline and the x-axis index matches the (1-indexed) selected
@@ -219,7 +242,9 @@ def plot_trajectory(
         final_ymin = ymin if ymin is not None else y_min - y_pad
         final_ymax = ymax if ymax is not None else y_max + y_pad
 
-        if final_ymin == final_ymax:
+        if not (np.isfinite(final_ymin) and np.isfinite(final_ymax)):
+            final_ymin, final_ymax = -1.0, 1.0
+        elif final_ymin == final_ymax:
             final_ymin -= 1.0
             final_ymax += 1.0
 
@@ -292,7 +317,9 @@ def plot_trajectory(
 
             right_all = np.concatenate(list(rights.values()))
             r_min, r_max = float(np.nanmin(right_all)), float(np.nanmax(right_all))
-            if r_min == r_max:
+            if not (np.isfinite(r_min) and np.isfinite(r_max)):
+                r_min, r_max = -1.0, 1.0
+            elif r_min == r_max:
                 r_min -= 1.0
                 r_max += 1.0
             r_pad = 0.08 * (r_max - r_min)

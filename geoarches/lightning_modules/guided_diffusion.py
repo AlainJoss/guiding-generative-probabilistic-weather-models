@@ -1117,9 +1117,14 @@ class GuidedFlow(BaseLightningModule):
             flush=True,
         )
 
+        # final pass with the optimized w*: identical schedule EXCEPT the last step,
+        # which applies no guidance (a_T = 0) -- with h = s the kick would be pasted
+        # straight into the final state with no network integration after it (mirrors
+        # self.a_t's -ds design). Traces at T-1 are still computed and stored; the
+        # secant optimization above deliberately keeps the full schedule.
         return self._fgw_final_pass(
             "FGWNOLR", w_star, x_cond, det_pred, delta_t, mask, x_ref, seed,
-            a_schedule=a_sched,
+            a_schedule=a_sched[:-1] + [0.0],
         )
 
     def _fgw_flow(
@@ -1253,7 +1258,9 @@ class GuidedFlow(BaseLightningModule):
         fgwnogap_eta: float = 1.0,
     ):
         # Anchored per-step gap closure: track the DETERMINISTIC residual schedule
-        #   r_target(t) = (1 - eta)^(t+1) * r_0
+        #   r_target(t) = (1 - eta)^(t+2) * r_0
+        # (exponent t+2: near-full closure is reached by step T-1, the last step
+        # that actually applies a kick -- the final step computes but skips it)
         # (closed form of a_{k+1} = a_k + eta*(1 - a_k)). Each step computes the Newton
         # move from the CURRENTLY measured signed residual r_t to r_target(t), so
         # over/under-achievement, model drift and overshoot are corrected against the
@@ -1287,7 +1294,7 @@ class GuidedFlow(BaseLightningModule):
                 gui_vec = self.masked_loss_grad(loss_, z_t, create_graph=False)
 
             # anchored trajectory tracking: aim the SIGNED residual at the
-            # deterministic schedule r_target = (1 - eta)^(t+1) * r_0, computed from
+            # deterministic schedule r_target = (1 - eta)^(t+2) * r_0, computed from
             # the CURRENT state -- over/under-achievement, drift and overshoot are all
             # corrected against the prescribed path at the next step. On-path this
             # reduces exactly to the relative form 2*eta*L/(h*||g||^2).
@@ -1296,16 +1303,26 @@ class GuidedFlow(BaseLightningModule):
             r_det = float(r_.detach())
             if i == 0:
                 r_0 = r_det
-            r_target = ((1.0 - fgwnogap_eta) ** (i + 1)) * r_0
+            # exponent i+2 (not i+1): the schedule demands (near-)full closure by the
+            # LAST APPLIED step T-1, since the final step applies no kick (see below).
+            r_target = ((1.0 - fgwnogap_eta) ** (i + 2)) * r_0
 
             g_norm2 = sum((gui_vec[k] ** 2).sum() for k in gui_vec.keys())
             scale = (2.0 * r_det * (r_det - r_target)) / (h * g_norm2.clamp_min(1e-30))
-            gui_step = gui_vec.apply(lambda g: g * scale)
-            scale_trace.append(float(scale))
+            # last step: compute every object as usual but DO NOT apply the kick --
+            # with h = s it would be pasted straight into the final state with no
+            # network integration after it (mirrors self.a_t's -ds design). The
+            # recorded lambda is the APPLIED one (0) so the UI reconstruction of
+            # gui_vfs / clean_preds from the sidecar stays exact.
+            is_last = i == len(timesteps) - 1
+            applied_scale = 0.0 if is_last else float(scale)
+            gui_step = gui_vec.apply(lambda g: g * applied_scale)
+            scale_trace.append(applied_scale)
 
             print(
                 f"FGWNOGAP step: t={i} r={r_det:.6f} r_target={r_target:.6f} "
-                f"scale(=lambda_t)={float(scale):.4f}",
+                f"scale(=lambda_t)={float(scale):.4f}"
+                + (" [last step: not applied]" if is_last else ""),
                 flush=True,
             )
 
@@ -1322,8 +1339,9 @@ class GuidedFlow(BaseLightningModule):
                 z_t = self.euler_step(z_t, u_t, h)
 
         # deterministic factorization: a_t is the THEORETICAL remaining-gap schedule
-        # (1 - eta)^(t+1); w_t = lambda_t / a_t so that lambda_t = w_t * a_t = scale.
-        a_theory = [(1.0 - fgwnogap_eta) ** (i + 1) for i in range(len(scale_trace))]
+        # (1 - eta)^(t+2); w_t = lambda_t / a_t so that lambda_t = w_t * a_t = scale.
+        # Kept in sync with r_target above -- the UI draws r_0 * a_t as the reference.
+        a_theory = [(1.0 - fgwnogap_eta) ** (i + 2) for i in range(len(scale_trace))]
         w_impl = [
             _sc / _a if _a > 0 else float("nan")
             for _sc, _a in zip(scale_trace, a_theory)

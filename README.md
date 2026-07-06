@@ -6,12 +6,13 @@ Resources:
 Analysis notebook:
 ```bash
 uv run marimo edit src/ui/guidance.py --watch --no-token
+python -m marimo edit src/ui/guidance.py --watch --no-token
 ```
 
 Experiment runner:
 ```bash
 python -m src.run --rollout_id 2026-07-03_10:28:29 --rollout_type ung
-python -m src.run --rollout_id 2026-07-02_12:18:10 --rollout_type gui
+python -m src.run --rollout_id 2026-07-06_11:30:21 --rollout_type gui
 
 ```
 
