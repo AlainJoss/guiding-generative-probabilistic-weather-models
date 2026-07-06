@@ -410,7 +410,8 @@ def plot_map_static(
         ax.contour(
             grid["lon_c_plot"],
             grid["lat_c"],
-            np.asarray(contour_2d),
+            # roll onto the plot grid like the background field
+            prepare_era5_plot_grid(np.asarray(contour_2d))["array_plot"],
             levels=contour_levels,
             colors=contour_color,
             linewidths=contour_linewidth,

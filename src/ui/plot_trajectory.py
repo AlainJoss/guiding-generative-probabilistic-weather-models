@@ -31,6 +31,7 @@ def plot_trajectory(
     prepend_zero: bool = False,
     start_index: int = 0,
     mirror_right_axis: bool = False,
+    linestyle_map: dict | None = None,
 ):
     # start_index: x-axis index of the first data point (default 0). Set to 1 for a
     # 1-indexed axis (e.g. "over t" plots that start at t=1) without prepend_zero's
@@ -148,7 +149,7 @@ def plot_trajectory(
             ax.plot(
                 x[: len(traj)],
                 traj,
-                linestyle="-",
+                linestyle=(linestyle_map or {}).get(label, "-"),
                 linewidth=2.2,
                 color=color,
                 alpha=0.95,

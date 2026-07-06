@@ -6,7 +6,7 @@ Resources:
 Analysis notebook:
 ```bash
 uv run marimo edit src/ui/guidance.py --watch --no-token
-python -m marimo edit src/ui/guidance.py --watch --no-token
+uv run marimo edit src/ui/contour_demo.py --watch --no-token
 ```
 
 Experiment runner:
