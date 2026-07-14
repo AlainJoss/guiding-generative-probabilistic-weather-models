@@ -1049,7 +1049,7 @@ class GuidedFlow(BaseLightningModule):
         x_ref: TensorDict,
         seed: int,
         fgwnolr_w_init: float = 250.0,
-        fgwnolr_eta: float = 0.5,
+        eta: float = 0.5,
     ):
         # LR-free FGW: dL/dw is an exact SCALAR derivative, so instead of gradient
         # descent solve dL/dw = 0 with the secant method -- no learning rate and no
@@ -1067,7 +1067,7 @@ class GuidedFlow(BaseLightningModule):
         MAX_EVALS = 30          # plateau safety net (never a tuning knob)
 
         timesteps = self.get_flow_timesteps()
-        a_sched = [(1.0 - fgwnolr_eta) ** (i + 1) for i in range(len(timesteps))]
+        a_sched = [(1.0 - eta) ** (i + 1) for i in range(len(timesteps))]
         history = []  # (w, loss, dL/dw)
 
         w_prev = max(float(fgwnolr_w_init), 0.0)
@@ -1253,7 +1253,7 @@ class GuidedFlow(BaseLightningModule):
         mask: TensorDict,
         x_ref: TensorDict,
         seed: int,
-        fgwnogap_eta: float = 1.0,
+        eta: float = 1.0,
     ):
         # Anchored per-step gap closure: track the DETERMINISTIC residual schedule
         #   r_target(t) = (1 - eta)^(t+1) * r_0
@@ -1299,7 +1299,7 @@ class GuidedFlow(BaseLightningModule):
             r_det = float(r_.detach())
             if i == 0:
                 r_0 = r_det
-            r_target = ((1.0 - fgwnogap_eta) ** (i + 1)) * r_0
+            r_target = ((1.0 - eta) ** (i + 1)) * r_0
 
             g_norm2 = sum((gui_vec[k] ** 2).sum() for k in gui_vec.keys())
             scale = (2.0 * r_det * (r_det - r_target)) / (h * g_norm2.clamp_min(1e-30))
@@ -1327,7 +1327,7 @@ class GuidedFlow(BaseLightningModule):
         # deterministic factorization: a_t is the THEORETICAL remaining-gap schedule
         # (1 - eta)^(t+1); w_t = lambda_t / a_t so that lambda_t = w_t * a_t = scale.
         # Kept in sync with r_target above -- the UI draws r_0 * a_t as the reference.
-        a_theory = [(1.0 - fgwnogap_eta) ** (i + 1) for i in range(len(scale_trace))]
+        a_theory = [(1.0 - eta) ** (i + 1) for i in range(len(scale_trace))]
         w_impl = [
             _sc / _a if _a > 0 else float("nan")
             for _sc, _a in zip(scale_trace, a_theory)

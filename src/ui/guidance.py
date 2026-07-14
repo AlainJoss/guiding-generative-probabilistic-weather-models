@@ -1131,9 +1131,9 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
         # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
         "fgwnolr_w_init": (100.0, 400.0, False, False),
-        "fgwnolr_eta":    (0.1,  0.9,   False, False),
-        # FGWNOGAP (exact per-step gap closure; eta = fraction closed per step)
-        "fgwnogap_eta":   (0.1,  1.0,   False, False),
+        # eta: shared closure rate for FGWNOLR and FGWNOGAP; a_t = (1 - eta)^(t+1)
+        # (FGWNOGAP: fraction of the remaining gap closed per step)
+        "eta":            (0.1,  1.0,   False, False),
     }
 
     _rc = {}
@@ -1221,22 +1221,24 @@ def wa_schedule(
     m,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
     rollout_id,
     sweep_params,
     sweep_ranges,
     w_slider,
 ):
-
     # Guidance weight schedule w * a_t over the flow, placed beside the rollout trajectories
     # plot. Shown only when a w-using method (LBG / LBG-MC / UG / FGW / FGWNOLR) is active.
-    # The schedule mirrors GuidedFlow.a_t (bounded; see src/schedules.py). For optimized
-    # methods, w comes from the run's w_star.json sidecar when available.
+    # a_t: FGWNOLR uses the closure schedule (1 - eta)^(t+1) (matches the sampler); the
+    # other w-modes use the bounded GuidedFlow.a_t (see src/schedules.py). Optimized w
+    # comes from the run's w_star.json sidecar when available.
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
         w_choices = compute_axis_values("w", sweep_ranges.value)
-        fgw_w_choices = (compute_axis_values("fgw_w_init", sweep_ranges.value)
-                         + compute_axis_values("fgwnolr_w_init", sweep_ranges.value))
+        fgw_w_choices = compute_axis_values("fgw_w_init", sweep_ranges.value)
+        fgwnolr_w_choices = compute_axis_values("fgwnolr_w_init", sweep_ranges.value)
+        eta_choices = compute_axis_values("eta", sweep_ranges.value)
         fgw_w_from_star = False
     elif notebook_mode == "analyze_rollout":
         selected_modes = [guidance_mode_dropdown.value]
@@ -1245,17 +1247,18 @@ def wa_schedule(
         _sweep_sel = dict(sweep_params)  # records store the coord-label sweep form
         _wstar_recs = get_w_star(rollout_id, _sweep_sel)
         fgw_w_from_star = bool(_wstar_recs)
-        fgw_w_choices = sorted({r["w_star"] for r in _wstar_recs}) or (
-            list(experiment_params.get("fgw_w_init") or [])
-            + list(experiment_params.get("fgwnolr_w_init") or []))
+        _wstar = sorted({r["w_star"] for r in _wstar_recs})
+        fgw_w_choices = _wstar or list(experiment_params.get("fgw_w_init") or [])
+        fgwnolr_w_choices = _wstar or list(experiment_params.get("fgwnolr_w_init") or [])
+        eta_choices = list(experiment_params.get("eta") or [])
     else:
         selected_modes = []
         w_choices = []
         fgw_w_choices = []
-
+        fgwnolr_w_choices = []
+        eta_choices = []
     w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG", "FGW", "FGWNOLR")]
     _has_recorded = notebook_mode == "analyze_rollout" and bool(lambda_t_by_method)
-
     if w_modes or _has_recorded:
         if _has_recorded:
             # the schedules actually applied by the run (guidance_schedule.json):
@@ -1266,12 +1269,23 @@ def wa_schedule(
                 _sched[rf"$w_t$ — {_meth}"] = list(_sd["w_t"])
                 _right[rf"$a_t$ — {_meth}"] = list(_sd["a_t"])
         else:
-            if set(w_modes) <= {"FGW", "FGWNOLR"}:
-                # FGW learns w; preview the schedule at its starting value(s) fgw_w_init
-                w_values = fgw_w_choices or w_choices or [float(w_slider.value)]
-            else:
-                w_values = w_choices or [float(w_slider.value)]
-            _sched = guidance_weight_schedule(T, w_values)
+            # preview: each mode at its OWN w-init and schedule
+            _sched, _bounded_w = {}, []
+            for _mode in w_modes:
+                if _mode == "FGWNOLR":
+                    # NOLR: a_t = (1 - eta)^(t+1) at the swept fgwnolr_w_init / eta
+                    for _w in (fgwnolr_w_choices or [float(w_slider.value)]):
+                        for _eta in (eta_choices or [0.5]):
+                            _a = (1.0 - _eta) ** np.arange(1, T + 1)
+                            _sched[rf"$w$={_w:g}, $\eta$={_eta:g}"] = (_w * _a).tolist()
+                elif _mode == "FGW":
+                    _bounded_w += list(fgw_w_choices)
+                else:  # LBG / LBG-MC / UG use the w sweep axis
+                    _bounded_w += list(w_choices)
+            if _bounded_w:
+                _sched |= guidance_weight_schedule(T, _bounded_w)
+            if not _sched:
+                _sched = guidance_weight_schedule(T, [float(w_slider.value)])
             _right = None
         wa_schedule_widget = plot_trajectory(
             _sched,
@@ -1280,7 +1294,7 @@ def wa_schedule(
             var=r"$\lambda_t$",
             title=r"Guidance weight schedule  $\lambda_t = w_t\,a_t$",
             subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
-                      else r"preview: $\lambda_t = w\,a_t$, $a_t=\lambda_0\,\frac{a}{a+c}$ — applies to " + ", ".join(w_modes))
+                      else r"preview: $\lambda_t = w\,a_t$ — " + ", ".join(w_modes))
                      + (((" (w = optimized $w^*$)" if fgw_w_from_star else " (w learned, shown at w_init)"))
                         if ("FGW" in w_modes or "FGWNOLR" in w_modes) else ""),
             xlabel="$t$",

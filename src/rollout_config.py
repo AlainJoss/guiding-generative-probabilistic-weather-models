@@ -18,9 +18,9 @@ GUIDANCE_METHOD_HYPERS = {
     "FGW": ["fgw_k", "fgw_lr", "fgw_w_init"],
     # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate, no iteration
     # count (optimizes until the hardcoded loss threshold is reached)
-    "FGWNOLR": ["fgwnolr_w_init", "fgwnolr_eta"],
+    "FGWNOLR": ["fgwnolr_w_init", "eta"],
     # FGWNOGAP: exact per-step gap closure (damped Newton on S = target); eta=1 -> full
-    "FGWNOGAP": ["fgwnogap_eta"],
+    "FGWNOGAP": ["eta"],
 }
 
 # common hypers
@@ -105,10 +105,10 @@ class RolloutConfig:
     # FGWNOLR (secant on the exact scalar dL/dw; no learning rate; runs until the
     # hardcoded loss threshold is met)
     fgwnolr_w_init: float | None = None  # starting w
-    fgwnolr_eta: float | None = None     # closure rate: a_t = (1 - eta)^(t+1), as in NOGAP
 
-    # FGWNOGAP (exact per-step gap closure; no w at all)
-    fgwnogap_eta: float | None = None  # fraction of the gap closed per step (1 = all)
+    # eta: shared closure rate for FGWNOLR and FGWNOGAP. a_t = (1 - eta)^(t+1);
+    # for FGWNOGAP it is the fraction of the remaining gap closed per step (1 = all).
+    eta: float | None = None
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 
