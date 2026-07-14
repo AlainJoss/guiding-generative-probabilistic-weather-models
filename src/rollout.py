@@ -19,14 +19,7 @@ from tensordict.tensordict import TensorDict
 
 def build_guidance_kwargs(guidance_type, sweep_params):
     # Straight pass-through: hyper names already equal the guidance-fn kwarg names.
-    # w is skipped -- it is a flow-level strength consumed as w_schedule, not a
-    # guidance-fn argument.
-    guidance_kwargs = {}
-    for hk in GUIDANCE_METHOD_HYPERS[guidance_type]:
-        if hk == "w":
-            continue
-        guidance_kwargs[hk] = sweep_params[hk]
-    return guidance_kwargs
+    return {hk: sweep_params[hk] for hk in GUIDANCE_METHOD_HYPERS[guidance_type]}
 
 
 def rollout(
@@ -49,8 +42,6 @@ def rollout(
         mask_2d = get_mask_2d(config.MASK_MODE, config.MASK_CORNERS)
 
         delta_trajectory = config.GUIDANCE_DELTA
-        # w is the constant guidance strength applied at every flow step; no schedule.
-        w_schedule = [config.w] * T
         mask_tdict = get_mask_tdict(x_cond_init["state"], config.PARTITION, var_idx, level_idx, mask_2d)
         guidance_type = config.GUIDANCE_MODE
         # GT reference: ground-truth field per step (member-independent). gt rollout holds
@@ -59,7 +50,6 @@ def rollout(
         guidance_kwargs = build_guidance_kwargs(guidance_type, sweep_params)
     else:
         delta_trajectory=None
-        w_schedule=None
         mask_tdict = None
         guidance_type = None
         gt_ds = None
@@ -77,7 +67,6 @@ def rollout(
                 delta_n=None,
                 mask=None,
                 x_ref=None,
-                w_schedule=None,
                 seed= m + 1000 * n,  # + batch_nb * 10**6
             )
             x_hat_curr = x_hat_ung
@@ -104,13 +93,12 @@ def rollout(
                         delta_n=delta_n,
                         mask=mask_tdict,
                         x_ref=x_ref,
-                        w_schedule=w_schedule,
                         seed = m + 1000 * n,  # + batch_nb * 10**6
                     )
                 x_hat_curr = x_hat_gui
 
             if guidance_flag:
-                # FGW/FGWNOLR attach the optimized scalar w* to the trace; pop it before
+                # FGWNOLR attaches the optimized scalar w* to the trace; pop it before
                 # the stacking loop (it is not a per-t tensor) and persist it as a sidecar.
                 w_star = sampling_trace.pop("w_star", None)
                 if w_star is not None:

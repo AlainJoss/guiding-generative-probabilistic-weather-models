@@ -8,7 +8,7 @@
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta}
+\usetikzlibrary{arrows.meta, positioning, calc}
 \usepackage{amsmath,amssymb}
 
 
@@ -37,7 +37,8 @@
 % Optional logo, upload logo.pdf/png to Overleaf first
 % \logo{\includegraphics[width=1.5cm]{logo}}
 
-\title{Guiding Generative Probabilistic Weather Models}
+% empty short title [] -> nothing shown in the sidebar
+\title[]{An Unreasonably Cheap Algorithm to Generate Extreme Weather Events}
 \author[]{Alain Joss}
 \institute{SDSC}
 \date{\today}
@@ -56,420 +57,240 @@
 
 \frame{\titlepage}
 
-\section{Introduction}
+\section{Motivation}
 
 \frame{
-\frametitle{Motivation}
-
-Extreme events ...
-
-}
-
-
-\frame{
-\frametitle{Starting Question}
-
-\begin{block}{Starting Question}
-Can we steer generative probabilistic weather models to generate extreme, physically realistic weather events?
-\end{block}
-
-\begin{enumerate}
-    \item \textbf{Steer}
-    \begin{itemize}
-        \item Sampling-based guidance
-        \item Guidance-based modification of the generation process
-    \end{itemize}
-
-    \item \textbf{Extreme}
-    \begin{itemize}
-        \item Defined for a target region and variable(s)
-        \item Evaluated relative to the forecast distribution
-    \end{itemize}
-
-    \item \textbf{Physically Realistic}
-    \begin{itemize}
-        \item Realism encouraged by the steering design
-        \item Assessed using realism-related metrics
-    \end{itemize}
-\end{enumerate}
-
-\vspace{0.3cm}
-
-\textbf{Goal}: Scenario generation for downstream tasks.
-
+\frametitle{Critical systems and extreme weather}
+\begin{itemize}
+  \item Energy, transport, agriculture: weather dependent
+  \begin{itemize}
+    \item Short-to-medium-term operation $\leftarrow$ forecasting
+    \item Long-term planning $\leftarrow$ scenario analysis (including extremes)
+  \end{itemize}
+  \item Extremes: unlikely but highly relevant for decision-making (potentially disruptive)
+  \item Analyze their consequences $\rightarrow$ map bottlenecks \& points of failure
+  \item Extreme scenarios must be evaluated before any forecast can see them
+  \begin{itemize}
+    \item some impacts are unavoidable $\rightarrow$ response decisions still have to be prepared ahead of the event
+    \item black-swan type: arguably very highly relevant
+  \end{itemize}
+  \item Deciding whether, and how, to prepare for extreme weather involves trading off
+        the cost of preparing for an event which might not occur, against the loss
+        incurred if no preparations are made and it does occur
+\end{itemize}
+\vfill
+$\rightarrow$ \textbf{How can these scenarios be generated?}
 }
 
 \frame{
-\frametitle{Approach}
-
-\begin{enumerate}
-    \item \textbf{Steering}
-    \begin{itemize}
-        \item ArchesWeather as the generative probabilistic weather model
-        \item Guidance-based methods adapted from the image domain
-    \end{itemize}
-
-    \item \textbf{Extreme}
-    \begin{itemize}
-        \item Mask defines the target region and forcing variable
-        \item Change trajectory relative to the unguided forecast distribution
-        \item Focus on heatwave scenarios
-    \end{itemize}
-
-    \item \textbf{Physically Realistic}
-    \begin{itemize}
-        \item Guidance is constrained or regularized
-        \item Assessment through:
-        \begin{itemize}
-            \item Visual checks
-            \item Distributional checks using power spectrum
-        \end{itemize}
-    \end{itemize}
-\end{enumerate}
-
+\frametitle{Our objective}
+\textbf{Objective:} simulate \emph{extreme}, yet \emph{plausible} weather scenarios
+(in contrast to forecasting)
+\begin{itemize}
+  \item Scenarios: simulate weather at different intensity levels
+  \item Example: if temperature goes up by $2^{\circ}$, \dots, $6^{\circ}$
+        in this region of interest $\rightarrow$ then \dots
+\end{itemize}
+\vfill
+\textbf{Definitions:}
+\begin{itemize}
+  \item \emph{Extreme}
+  \begin{itemize}
+    \item unlikely (and disruptive)
+    \item lives on the tails of the climatological and forecasting distribution
+  \end{itemize}
+  \item \emph{Plausible}
+  \begin{itemize}
+    \item transitions are physically grounded
+    \item variables co-vary in a coherent way
+  \end{itemize}
+\end{itemize}
+\vfill
+We give a precise description of the scenarios.
 }
 
 \frame{
-\frametitle{Example}
+\frametitle{Example: stress-testing power-grid control}
+\begin{itemize}
+  \item Climate changing fast $\rightarrow$ summers increasingly disruptive
+  \item Goal: stress-test grid resilience ahead of the coming years
+  \item Focus scenario: \textbf{heatwave}
+  \begin{itemize}
+    \item co-occurring extremes: heat, solar radiation, wind, fires, thunderstorms, hail
+  \end{itemize}
+  \item Potential consequences:
+  \begin{itemize}
+    \item grid instability
+    \item infrastructure damage
+    \item cascading failures
+    \item blackouts
+  \end{itemize}
+\end{itemize}
+}
 
+\section{How to generate extreme weather events}
+
+\frame{
+\frametitle{Our approach}
+\begin{itemize}
+  \item \textbf{Model:}
+  \begin{itemize}
+    \item medium-range generative probabilistic weather model
+    \item generative: score / diffusion / flow matching
+  \end{itemize}
+  \item \textbf{Guidance methods:}
+  \begin{itemize}
+    \item borrowed from the image generation domain
+    \item translated to the weather domain
+    \item two families: sampling-based or gradient-based
+  \end{itemize}
+\end{itemize}
+}
+
+\frame{
+\frametitle{But \dots}
+\textbf{Why not just use the tails of the base forecast distribution?}
+\begin{itemize}
+  \item Extremes $=$ rare tail events, possibly unprecedented
+  \item May be impossible to obtain from the base forecasting model
+  \item Or simply too expensive to sample
+  \item We want a \emph{distribution} of extremes $\rightarrow$ even harder
+  \item $\rightarrow$ need some scheme on top of the base model
+\end{itemize}
+\vfill
+\textbf{Why use a generative model?}
+\begin{itemize}
+  \item The hope is to keep the generated extremes close to the learned data distribution
+  \item If the modes of the learned data distribution encode physical realism, the
+        generative model can help us achieve extremes that satisfy this property
+\end{itemize}
+}
+
+\frame{
+\frametitle{Images vs.\ extreme weather}
+\textbf{Core challenge of our work:} translate / design guidance to match the
+challenges of the weather domain.
+\vfill
+3 key differences:
+\begin{itemize}
+  \item \textbf{Steps:}
+  \begin{itemize}
+    \item image domain $\rightarrow$ final image obtained one-shot
+    \item extreme-weather domain $\rightarrow$ multi-step trajectory
+          (video-alike, but not really \dots)
+  \end{itemize}
+  \item \textbf{Evaluation:}
+  \begin{itemize}
+    \item image domain $\rightarrow$ visual appeal
+    \item extreme-weather domain $\rightarrow$ visual checks $+$ quantified realism
+  \end{itemize}
+  \item \textbf{Target:}
+  \begin{itemize}
+    \item image domain $\rightarrow$ inherent to a specific task
+          (super-resolution, inpainting, prompt alignment, \dots)
+    \item extreme-weather domain $\rightarrow$ unclear a priori (designed)
+  \end{itemize}
+\end{itemize}
+\vfill
+Video-alike but not really $\rightarrow$ transitions must be physically grounded.
+}
+
+\frame{
+\frametitle{Related work}
+\begin{itemize}
+  \item guide first step
+  \item shift sampled noise
+  \item plain classifier guidance
+\end{itemize}
+}
+
+\section{Weather guidance}
+
+\frame{
+\frametitle{Data}
+\textbf{ERA5 Reanalysis (ECMWF)}
+\begin{itemize}
+  \item Global, $1.5^{\circ}$ grid --- $240 \times 121$ points
+  \item 82 fields per state:
+  \begin{itemize}
+    \item 4 surface: 2m temperature, MSL pressure, 10m u/v wind
+    \item 6 upper-air $\times$ 13 pressure levels: geopotential, temperature,
+          humidity, u/v wind, vertical velocity
+  \end{itemize}
+  \item 24-hour forecast steps, available at 00:00, 06:00, 12:00, 18:00 UTC
+  \item Test set: $\geq$ 01.01.2020
+\end{itemize}
+}
+
+\frame{
+\frametitle{Model}
+Prediction $=$ deterministic model $+$ residual flow matching model
+\vfill
 \centering
-
-\begin{minipage}{0.48\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{figures/region.png}
-
-    \small Target variable
-\end{minipage}
-\hfill
-\begin{minipage}{0.48\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{figures/mask.png}
-
-    \small Target region
-\end{minipage}
-
-\vspace{0.4cm}
-
-\begin{minipage}{0.75\textwidth}
-    \centering
-    \includegraphics[width=\linewidth]{figures/plot.png}
-
-    \small Guidance signal
-\end{minipage}
-
-}
-
-\section{Background}
-\frame{
-\frametitle{Model: ArchesWeather}
-
-\begin{block}{Forecast decomposition}
-\[
-x_{n+1}
-=
-\mathbb{E}
-\left[
-x_{n+1}
-\mid x_n,x_{n-1},n
-\right]
-+
-r_{n+1}
-\]
-\end{block}
-
-\vspace{-0.1cm}
-
-\begin{block}{Implementation}
-\[
-\hat{x}^{\mathrm{norm}}_{n+1}
-=
-\hat{x}^{\mathrm{det}}_{n+1}
-+
-\sigma^{\mathrm{res}} \hat{r}_{n+1}
-\]
-\[
-\hat{x}_{n+1}
-=
-\bar{x}^{\mathrm{data}}
-+
-\sigma^{\mathrm{data}}
-\hat{x}^{\mathrm{norm}}_{n+1}
-\]
-\end{block}
-
-\vspace{-0.1cm}
-
-\begin{itemize}
-    \item The deterministic model predicts the conditional mean.
-    \item The flow model generates a residual around this forecast.
-    \item Month, hour, and rollout step are used as time conditioning.
-\end{itemize}
-
-\vspace{-0.1cm}
-
-\begin{center}
-\begin{tabular}{ll}
-Dataset & ERA5 \\
-Forecast step & 24h \\
-Grid & global $1.5^\circ$, $121 \times 240$ cells \\
-Variables & 4 surface, 6 pressure-level variables \\
-Pressure levels & 13 levels, 50--1000 hPa \\
-\end{tabular}
-\end{center}
+\resizebox{\textwidth}{!}{\input{pipeline_figure}}
 }
 
 \frame{
-\frametitle{Flow Matching}
-
+\frametitle{Guidance @ weather time: pipeline}
+We target the following:
 \begin{itemize}
-    \item Learned vector field $u_\theta(X_t,t)$ transports noise to data:
-    \[
-    \frac{d}{dt}X_t = u_\theta(X_t,t)
-    \]
-    \item s.t. sampling generates residuals:
-    \[
-    r_{n+1} \sim p_{\mathrm{data}}
-    \]
+  \item heatwave scenarios (surface temperature)
+  \item over a specific region
+  \item with a specified change trajectory
+  \item over a specific timeframe
+  \item with respect to the unguided step
 \end{itemize}
-
-\vspace{-0.2cm}
-
-\begin{algorithm}[H]
-\caption{Euler Sampling}
-\begin{algorithmic}[1]
-\Require Vector field $u_\theta$, number of steps $T$
-\State Sample $X_0 \sim p_{\mathrm{init}}$
-\State $h \gets 1/T$
-\For{$i=0,\dots,T-1$}
-    \State $t \gets i/T$
-    \State $X_{t+h} \gets X_t + h\,u_\theta(X_t,t)$
-\EndFor
-\State \Return $X_1$
-\end{algorithmic}
-\end{algorithm}
-
-}
-
-\section{Weather-guidance design}
-
-\frame{
-\frametitle{Guidance Design}
-
-\begin{itemize}
-    \item Guidance modifies the sampling process to favor samples with a desired property $y$.
-
-    \item In our case, $y$ corresponds to an extreme weather scenario:
-    \begin{itemize}
-        \item target variable,
-        \item target region,
-        \item desired change over the unguided forecast.
-    \end{itemize}
-
-    \item All guidance methods use this information to modify the vector field:
-    \[
-    u_t(z_t)
-    \quad \longrightarrow \quad
-    \tilde{u}_t(z_t)
-    \]
-
-    \item The central design choice is therefore:
-\end{itemize}
-
-\vspace{0.2cm}
-
-\begin{block}{Question}
-How do we define the guidance objective $y$ for weather trajectories?
-\end{block}
-
 }
 
 \frame{
-\frametitle{Weather Guidance Objective}
-
+\frametitle{Guidance @ weather time: mask}
+\textbf{Mask:}
 \begin{itemize}
-    \item We guide the generated state toward a prescribed change relative to the unguided forecast.
-
-    \item The target is defined through a masked spatial average:
+  \item Gaussian over the region of interest
+  \item at the variable of interest (surface temperature)
 \end{itemize}
-
-\begin{block}{Weather Guidance Loss}
-\[
-\mathcal{L}_n^\mathrm{target}
-=
-\left\|
-\frac{\sum_i m_i \hat{x}_{n,i}}{\sum_i m_i}
--
-(1+\delta_n)
-\frac{\sum_i m_i \hat{x}^\mathrm{ung}_{n,i}}{\sum_i m_i}
-\right\|^2
-\]
-\end{block}
-
-\begin{itemize}
-    \item $\mathbf{m}$: mask selecting target region and variable
-    \item $\hat{x}_n$: current guided clean-state estimate
-    \item $\hat{x}_{n}^\mathrm{ung}$: unguided prediction
-    \item $\delta_n$: desired relative change at rollout step $n$
-\end{itemize}
-
-\begin{block}{Loss evaluation}
-The loss is evaluated at different stages during guided sampling depending on the adopted method.
-\end{block}
-}
-
-
-\frame{
-\frametitle{Loss Regularization}
-
-\begin{itemize}
-    \item The guidance loss can be regularized to discourage unrealistic deviations from the unguided forecast as follows:
-    \[
-    \mathcal{L}_n^{\mathrm{total}}
-    =
-    \mathcal{L}_n^{\mathrm{target}}
-    +
-    \lambda \mathcal{R}
-    \]
-    where $\mathcal{R}$ is the chosen regularization term.
-\end{itemize}
-
-\begin{block}{Regularization Choices}
-\[
-\mathcal{R}_{\mathrm{ID}}
-=
-\left\|
-\hat{x}_n
--
-\hat{x}_{n}^\mathrm{ung}
-\right\|^2
-\]
-\[
-\mathcal{R}_{\mathrm{PS}}
-=
-\left\|
-\mathrm{PS}(\hat{x}_n)
--
-\mathrm{PS}(\hat{x}_{n}^\mathrm{ung})
-\right\|^2
-\]
-\[
-\mathcal{R}_{\mathrm{A}}
-=
-\left\|
-\mathrm{A}(\hat{x}_n)
--
-\mathrm{A}(\hat{x}_{n}^\mathrm{ung})
-\right\|^2
-\]
-\end{block}
-
-\begin{itemize}
-    \item $\mathcal{R}_{\mathrm{ID}}$: keeps the full guided state close to the unguided forecast.
-    \item $\mathcal{R}_{\mathrm{PS}}$: preserves the spatial power spectrum.
-    \item $\mathcal{R}_{\mathrm{A}}$: preserves activity-related structure.
-\end{itemize}
-
 }
 
 \frame{
-\frametitle{Guiding Weather Rollouts}
-
+\frametitle{Guidance @ weather time: change trajectory}
+\textbf{Change trajectory:}
 \begin{itemize}
-    \item Unlike image generation, weather generation evolves over multiple forecast steps.
-
-    \item The desired change is therefore defined as a trajectory:
-    \[
-    \delta_1,\delta_2,\dots,\delta_N
-    \]
-
-    \item At each rollout step $n$, the guidance objective becomes
-    \[
-    \mathcal{L}_n
-    =
-    \mathcal{L}
-    \left(
-    \hat{x}_n,
-    \hat{x}_{n}^\mathrm{ung},
-    \delta_n,
-    \mathbf{m}
-    \right)
-    \]
-
-    \item This allows us to prescribe how the extreme event should develop over time.
-    \item We may play with different schemes to define $\{\delta\}_{n=1}^N$.
+  \item over an $N$-step timeframe
+  \item defined as a percentage change trajectory
+  \item with respect to the unguided step average over the mask
+  \item (later: with respect to the unguided--guided step)
 \end{itemize}
-
 }
 
 \frame{
-\frametitle{Notation summary}
-
-At rollout step $n$ and flow time $t$:
-
-\begin{center}
-\begin{tikzpicture}[x=0.9cm,y=0.9cm]
-    \def\L{3.4}
-    \def\M{25}
-
-    \draw[-{Latex[length=3mm]}] (0,0) -- (10.8,0);
-
-    \foreach \j in {0,1,2} {
-        \foreach \i in {1,...,24} {
-            \draw[line width=0.3pt]
-                ({\j*\L + \i*\L/\M}, -0.10) -- ({\j*\L + \i*\L/\M}, 0.10);
-        }
-    }
-
-    \foreach \x/\lab in {
-        0/{n=0},
-        3.4/{n=1},
-        6.8/{\cdots},
-        10.2/{n=N}
-    }{
-        \draw[line width=1pt] (\x,-0.28) -- (\x,0.28);
-        \node[below=6pt] at (\x,-0.28) {\scriptsize $\lab$};
-    }
-
-    \node[above] at (1.7,0.35) {\scriptsize $T=25$ flow steps};
-\end{tikzpicture}
-\end{center}
-
+\frametitle{Guidance @ flow time: pipeline}
+At every flow step $t$, we steer the velocity before taking the Euler step:
+\begin{enumerate}
+  \item Estimate the clean state from the current noisy residual:
+        $\hat{x}_t = \hat{x}^{\text{det}} + \sigma_r \odot \left( z^{(t)} + s_t\, u_t \right)$
+  \item Score it with the masked loss: $L(\hat{x}_t)$
+  \item Take the gradient w.r.t.\ the noisy state:
+        $g_t = \nabla_{z^{(t)}} L(\hat{x}_t)$
+  \item Steer the velocity: $\tilde{u}_t = u_t - \lambda_t\, g_t$
+        \; with strength $\lambda_t = w \cdot a_t$
+  \item Euler step as usual: $z^{(t+1)} = z^{(t)} + h_t\, \tilde{u}_t$
+\end{enumerate}
+\vfill
+Two design choices define the method:
 \begin{itemize}
-    \item $z_t$: current flow state
-    \item $\hat{x}_{n}$: clean estimate at rollout step $n$ at flow time $t$
-    \item $\mathcal{L}_n^{\mathrm{total}}$: target loss plus optional regularization
+  \item \textbf{Masked loss} --- what to push and where
+  \item \textbf{Guidance strength--schedule} --- how hard and when
 \end{itemize}
-
-\begin{block}{Guidance Gradient}
-\[
-g_{n,t}
-=
--\nabla_{z_t}
-\mathcal{L}_n^{\mathrm{total}}
-\left(
-\hat{x}_{n},
-y
-\right)
-\]
-\end{block}
-
-\begin{itemize}
-    \item All methods below use this gradient, but inject it into $\tilde{u}_t^\theta$ using different schemes.
-\end{itemize}
-
 }
 
-\section{Guidance methods}
-
 \frame{
-\frametitle{LBG: Loss-Based Guidance}
+\frametitle{Guidance @ flow time: probabilistic view (LBG)}
 
-\textbf{Idea:} modify the vector field using the gradient of a target likelihood.
+\textbf{Steering with a loss gradient $=$ sampling from a posterior:}
 
 \[
-p(x|y) \propto p(y|x)p(x)
+p(x|y) \propto p(y|x)\,p(x)
 \]
-
 \[
 \nabla_x\log p(x|y)
 =
@@ -478,818 +299,208 @@ p(x|y) \propto p(y|x)p(x)
 \nabla_x\log p(y|x)
 \]
 
-\begin{block}{Guided Vector Field}
+\begin{block}{Guided vector field}
 \[
-\tilde{u}_t(z_t|y)
+\tilde{u}_t
 =
-u_t(z_t)
-+
-w\,a_t\,\nabla_{z_t}\log p(y|z_t)
-\]
-\end{block}
-
-Using the weather loss:
-
-\[
-\nabla_{z_t}\log p(y|z_t)
-=
--\nabla_{z_t}\mathcal{L}_n(\hat{x}_{n},y)
-=
-g_{n,t}
-\]
-
-\begin{itemize}
-    \item For linear probability paths: $a_t=\frac{1-t}{t}$
-    \item $w$ controls guidance strength
-    \item For $w\neq 1$, the exact probabilistic interpretation is lost
-    \item Unlike DPS paper, we do not rescale $w\,a_t$ by $\|\nabla_{z_t}\|$.
-\end{itemize}
-
-\paperref{Dhariwal \& Nichol, Diffusion Models Beat GANs on Image Synthesis, NeurIPS 2021.}
-% \paperref{Chung et al., Diffusion Posterior Sampling for General Noisy Inverse Problems, ICLR 2023.}
-}
-
-\frame{
-\frametitle{LBG-MC: Loss-Based Guidance Monte Carlo}
-
-\textbf{Idea:} avoid guiding only through the point estimate $\hat{x}_{n}:=x(\hat{z_0})$.
-
-\begin{itemize}
-    \item Account for uncertainty in the clean state:
-    \begin{align*}
-    p(y|z_t)
-    &=
-    \int
-    p(y|\hat{x}_{n})
-    p(\hat{x}_{n}|z_t)
-    \,d\hat{x}_{n} \\
-    &= \mathbb{E}_{\hat{x}_{n}|z_t}
-    \left[
-    \exp\!\left(-\mathcal{L}_n(\hat{x}_{n}, y)\right)
-    \right]        
-    \end{align*}
-
-    \item Since the true posterior $p(\hat{x}_{n}|z_t)$ is intractable, approximate it by
-    \[
-    q(\hat{x}_{n}|z_t)
-    =
-    \mathcal{N}
-    \left(
-    \hat{x}_{n},
-    \sigma_t^2 I
-    \right)
-    \]
-
-    \item In our implementation:
-    \[
-    \sigma_t = R\,a_t
-    \]
-    and we perturb $\hat{x}_{n}^\text{norm}$ instead of $\hat{x}_{n}$ directly.
-\end{itemize}
-
-\paperref{Song et al., Loss-Guided Diffusion Models for Plug-and-Play Controllable Generation, ICML 2023.}
-}
-
-\frame{
-\frametitle{LBG-MC: Loss-Based Guidance Monte Carlo}
-
-Sample clean-state candidates:
-\[
-x^{(i)}
-=
-\hat{x}_{n}
-+
-\sigma_t \varepsilon^{(i)},
+u_t - \lambda_t\, g_t,
 \qquad
-\varepsilon^{(i)} \sim \mathcal{N}(0,I),
-\qquad
-\sigma_t = R\,a_t
-\]
-
-Approximate the guidance likelihood:
-\[
-p(y|z_t)
-\approx
-\frac{1}{N_{\mathrm{MC}}}
-\sum_{i=1}^{N_{\mathrm{MC}}}
-\exp\!\left(
--\mathcal{L}_n(x^{(i)},y)
-\right)
-\]
-\[
-\nabla_{z_t} \log p(y|z_t)
-\approx
-\nabla_{z_t} \log
-\frac{1}{N_{\mathrm{MC}}}
-\sum_{i=1}^{N_{\mathrm{MC}}}
-\exp\!\left(
--\mathcal{L}_n(x^{(i)},y)
-\right)
-\]
-
-\begin{block}{Monte-Carlo Loss}
-\[
-\tilde{\mathcal{L}}_n
-=
-\log N_{\mathrm{MC}}
--
-\operatorname{logsumexp}_{i}
-\left(
--\mathcal{L}_n(x^{(i)},y)
-\right)
+g_t = \nabla_{z^{(t)}} L(\hat{x}_t) = -\nabla_{z^{(t)}}\log p(y|z^{(t)})
 \]
 \end{block}
 
 \begin{itemize}
-    \item $N_{\mathrm{MC}}$: number of Monte-Carlo samples
-    \item $R$: spread magnitude; $a_t$ shrinks the cloud over the flow
-    % \item $N_{\mathrm{MC}}=1$ and $R=0$ recovers the LBG point-estimate loss.
-    \item Limitation: Gaussian posterior approximation
+    \item $u_t$ transports the prior $p(x)$ --- the learned weather distribution
+    \item the masked loss defines the likelihood: $p(y|x) \propto e^{-L}$
+    \item exact posterior needs $w=1$ and a path-specific $a_t$
+          (e.g.\ $\tfrac{s_t}{1-s_t}$ for linear paths)
+    \item we trade exactness for \emph{control}: $\lambda_t = w \cdot a_t$
+          with the gap-closing schedule
+    \item unlike DPS, no rescaling of $w\,a_t$ by the gradient norm
 \end{itemize}
 
-\paperref{Song et al., Loss-Guided Diffusion Models for Plug-and-Play Controllable Generation, ICML 2023.}
-}
-
-
-\frame{
-\frametitle{UG: Universal Guidance}
-
-\textbf{Idea:} optimize noisy state before taking the generative step.
-
-\begin{block}{Inner Optimization}
-\[
-\Delta z_t^*
-=
-\arg\min_{\Delta z}
-\;
-\mathcal{L}_n
-\left(
-\hat{x}_{n,t}(z_t+\Delta z),
-y
-\right)
-\]
-\end{block}
-
-In practice, approximate $\Delta z_t^*$ with $K$ gradient steps:
-
-\[
-\Delta z_t
-\leftarrow
-\Delta z_t
--
-\eta
-\nabla_{\Delta z}
-\mathcal{L}_n
-\left(
-\hat{x}_{n,t}(z_t+\Delta z),
-y
-\right)
-\]
-
-Then apply the optimized correction:
-
-\[
-z_t^{\mathrm{gui}}
-=
-z_t
-+
-w\,a_t\,\Delta z_t
-\]
-
-Strong correction may leave the data manifold $\rightarrow$ re-inject noise.
-
-\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
+\paperref{Dhariwal \& Nichol, NeurIPS 2021 \quad\textperiodcentered\quad Chung et al.\ (DPS), ICLR 2023}
 }
 
 \frame{
-\frametitle{UG: Universal Guidance}
-
-\textbf{Idea:} repeat guidance at the same flow time $t$ before moving to $t+h$, in a self recurrent fashion.
-
-\begin{block}{One Self-Recurrence Step}
-\[
-z_t^{(s)}
-\;\xrightarrow{\text{guide}}\;
-z_t^{(s),\mathrm{gui}}
-=
-z_t^{(s)}
-+
-w\,a_t\,\Delta z_t^{(s)}
-\]
-\[
-z_t^{(s),\mathrm{gui}}
-\;\xrightarrow{\text{Euler}}\;
-z_{t+h}^{(s)}
-=
-z_t^{(s),\mathrm{gui}}
-+
-h\,u_t\!\left(z_t^{(s),\mathrm{gui}}\right)
-\]
-\[
-z_{t+h}^{(s)}
-\;\xrightarrow{\text{renoise}}\;
-z_t^{(s+1)}
-\]
-\end{block}
-
+\frametitle{Guidance @ flow time: loss}
+\begin{equation*}
+  L = \Big( \textstyle\sum m \odot \hat{x}_t \;-\; (1+\delta) \sum m \odot x^{\text{ref}} \Big)^2
+\end{equation*}
 \begin{itemize}
-    \item Repeat this loop for $s=1,\dots,S$ at the same flow time $t$.
-    \item Re-noising brings the sample back to the same flow level after a "trial" step.
-    \item After the last recurrence, keep the Euler step and move to $t+h$.
-    \item Hyperparameters: $K$ inner optimization steps, $S$ recurrence steps, guidance strength $w$, learning rate $\eta$
+  \item $\sum m \odot x$ --- the masked statistic: one number summarizing the region of interest
+  \item $\hat{x}_t$ --- the clean-state estimate at flow step $t$ (where we currently are)
+  \item $(1+\delta)\, \sum m \odot x^{\text{ref}}$ --- the target: the reference statistic, shifted by $\delta$
+  \item $x^{\text{ref}}$ --- the model's own unguided forecast (or ground truth)
+  \item the signed difference inside the square is the \textbf{gap} $r_t$ ---
+        the quantity the schedule drives to zero
 \end{itemize}
-
-\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
-}
-
-
-\begin{frame}[fragile]
-\frametitle{Universal Guidance: Algorithm}
-
-\scriptsize
-
-\begin{algorithm}[H]
-\caption{Universal Guidance with Self-Recurrence}
-\begin{algorithmic}[1]
-\Require Vector field $u_\theta$, loss $\mathcal{L}_n$, clean predictor $\hat{x}_{n,t}$,
-         steps $T$, inner steps $K$, recurrences $S$
-\State Sample $z_0 \sim p_{\mathrm{init}}$
-\State $h \gets 1/T$
-
-\For{$j=0,\dots,T-1$}
-    \State $t \gets j/T$
-
-    \For{$s=1,\dots,S$}
-        \State $\Delta z_t \gets 0$
-
-        \For{$k=1,\dots,K$}
-            \State $\Delta z_t \gets \Delta z_t
-            -
-            \eta
-            \nabla_{\Delta z_t}
-            \mathcal{L}_n
-            \left(
-            \hat{x}_{n,t}(z_t+\Delta z_t),
-            y
-            \right)$
-        \EndFor
-
-        \State $z_t^{\mathrm{gui}}
-        \gets
-        z_t
-        +
-        w\,a_t\,\Delta z_t$
-
-        \State $z_{t+h}
-        \gets
-        z_t^{\mathrm{gui}}
-        +
-        h\,u_\theta(z_t^{\mathrm{gui}},t)$
-
-        \If{$s<S$}
-            \State $z_t \gets \operatorname{renoise}(z_{t+h},\,t+h \rightarrow t)$
-        \EndIf
-    \EndFor
-
-    \State $z_t \gets z_{t+h}$
-\EndFor
-
-\State \Return $z_1$
-\end{algorithmic}
-\end{algorithm}
-
-\paperref{Bansal et al., Universal Guidance for Diffusion Models, CVPR Workshop 2023.}
-
-\end{frame}
-
-
-
-\frame{
-\frametitle{FlowGrad (FG)}
-
+\vfill
+The gradient flows \emph{through the model} into $z^{(t)}$:
+the network Jacobian spreads the correction over the whole field.
 }
 
 \frame{
-\frametitle{FlowGrad-free (FGF)}
-
-}
-
-\frame{
-\frametitle{Runtime Overview}
-
-\begin{center}
-\begin{tabular}{lll}
-\textbf{Method} & \textbf{Mechanism} & \textbf{Cost / flow step} \\
-\hline
-LBG  & loss gradient at $\hat{x}_{n}$              & 1 backward \\
-LBG-MC  & MC-averaged likelihood gradient              & $S$ backward \\
-UG   & inner-loop latent shift $\Delta z_t$          & $K \times S$ backward \\
-FG   & optimized schedule $\lambda_t$ on $g_{n,t}$   & backprop through ODE \\
-FGF  & free controls $c_t$                           & backprop through ODE \\
-\end{tabular}
-\end{center}
-
-\vspace{0.4cm}
-
+\frametitle{Guidance @ flow time: strength--schedule}
+Applied strength factorizes: $\lambda_t = w \cdot a_t$
 \begin{itemize}
-    \item \textbf{Score-based}: LBG and LBG-MC add a guidance gradient to the vector field.
-    \item \textbf{Optimization-based}: UG, FG, and FGF optimize correction variables during sampling.
+  \item $w$ --- global gain: \emph{how hard} to push
+  \item $a_t$ --- schedule: \emph{when} to push
 \end{itemize}
-
-}
-
-
-% \frame{
-% \frametitle{Method-Specific Hyperparameters}
-
-% \begin{center}
-% \begin{tabular}{lll}
-% \textbf{Symbol} & \textbf{Meaning} & \textbf{Used in} \\
-% \hline
-% $w$ & guidance strength & LBG, LBG-MC, UG \\
-% $a_t$ & flow-time guidance scaling & LBG, LBG-MC, UG \\
-% $N_{\mathrm{MC}}$ & Monte-Carlo samples & LBG-MC \\
-% $R$ & posterior spread magnitude & LBG-MC \\
-% $K$ & inner optimization steps & UG \\
-% $S$ & self-recurrence steps & UG \\
-% $\eta$ & learning rate & UG
-% \end{tabular}
-% \end{center}
-% }
-
-\frame{
-\frametitle{Method-Specific Hyperparameters}
-
-\begin{center}
-\scalebox{1.2}{
-\begin{tikzpicture}[
-    level distance=1.15cm,
-    sibling distance=3.2cm,
-    every node/.style={
-        align=center,
-        rounded corners,
-        draw,
-        inner sep=3.5pt,
-        font=\scriptsize
-    },
-    edge from parent/.style={draw, -latex}
-]
-
-\node {\textbf{Guidance}\\ shared: $w$, $a_t$}
-    child {node {\textbf{LBG}\\ no extra}}
-    child {node {\textbf{LBG-MC}\\ $N_{\mathrm{MC}}$: samples\\ $R$: spread}}
-    child {node {\textbf{UG}\\ $K$: inner steps\\ $S$: recurrence\\ $\eta$: learning rate}};
-
-\end{tikzpicture}
-}
-\end{center}
-}
-
-\section{Experiments}
-
-\frame{
-\frametitle{Experimental Setup}
-
-\begin{center}
-\begin{tabular}{ll}
-\textbf{Parameter} & \textbf{Meaning} \\
-\hline
-Start time & input-state timestamp at $n=0$ \\
-$M$ & number of ensemble members \\
-$N$ & number of rollout steps \\
-$T$ & number of flow steps per rollout step \\
-Reference & unguided forecast \\
-$\{\delta_n\}_{n=1}^{N}$ & prescribed target change trajectory \\
-$\lambda$ & regularization strength \\
-$\mathcal{R}$ & regularization type \\
-Mask & target region and variable \\
-Mask mode & BBOX or Gaussian mask \\
-\end{tabular}
-\end{center}
-
+\vfill
+\textbf{Gap closing:} each step closes a fraction $\eta$ of the remaining gap:
+\begin{equation*}
+  r_{t+1} = (1-\eta)\, r_t
+\end{equation*}
+This prescribes the residual path $r_t = (1-\eta)^{t+1}\, r_0$
+and the schedule $a_t = (1-\eta)^{t+1}$.
+\vfill
+Early steps do the heavy lifting; late steps only refine.
 }
 
 \frame{
-\frametitle{Evaluation framework}
-
-For each guidance method, we report following:
-
+\frametitle{Change trajectory}
 \begin{itemize}
-    \item \textbf{Best hyperparameter setting:} the setting that best balances target achievement and physical realism.
-    \item \textbf{Target achievement:} how closely the guided rollout follows the prescribed $\delta_n$ trajectory.
-    \item \textbf{Realism cost:} how much the rollout deviates from the unguided forecast distribution.
-    \item \textbf{Stability:} whether the method produces smooth and stable rollouts across forecast steps.
-    \item \textbf{Runtime cost:} the additional computational cost compared to unguided sampling.
-    \item \textbf{Findings:} trade-off between target achievement and realism, or optimal guidance schedule.
-\end{itemize}
-}
-
-
-\frame{
-\frametitle{Evaluation Metrics}
-
-We evaluate the guidance methods using two main questions:
-
-\begin{itemize}
-    \item Can the method achieve the prescribed guidance target?
-    \item Are the resulting guided rollouts physically meaningful?
-\end{itemize}
-
-\vspace{0.2cm}
-
-We quantify these questions with two main metrics:
-
-\begin{itemize}
-    \item \textbf{Target error:} distance between the realized guided change and the prescribed target trajectory.
-    \item \textbf{Spectral deviation:} distance between the guided- and the unguided power spectrum.
-\end{itemize}
-
-\vspace{0.2cm}
-
-In addition, we inspect the guided rollouts qualitatively through:
-
-\begin{itemize}
-    \item final weather maps,
-    \item guidance gradients,
-    \item modified vector fields,
-    \item ...
+  \item We define the full change trajectory at all steps $n$
+  \item The perturbation paper does it only at $n=1$, applies the forecasting model
+        $N$ times, and lets the gradient flow back through all $N$ weather steps
+  \item This enables us to control the full trajectory instead, and to have a
+        distribution \emph{over the defined trajectory} --- compared to a distribution
+        over possible ways to reach the final target state at $N$
 \end{itemize}
 }
 
 \frame{
-\frametitle{Power Spectrum: Spherical-Harmonic Expansion}
-
-We compute the \textbf{spherical harmonics} for each variable slice $x_n^{v}(\theta,\varphi)$
-
-\begin{block}{Spherical-harmonic expansion}
-\[
-x_n^{v}(\theta,\varphi)
-=
-\sum_{\ell=0}^{L}\sum_{m=-\ell}^{\ell}
-a_{\ell m}^{v}\,Y_{\ell m}(\theta,\varphi)
-\]
-\end{block}
-
+\frametitle{Guidance methods}
 \begin{itemize}
-    \item $x_n^{v}$: a single $(\theta,\varphi)$ field --- a surface variable or one pressure level.
-    \item $Y_{\ell m}$: spherical harmonic of degree $\ell$, order $m$ --- the orthonormal basis on the sphere.
-    \item $a_{\ell m}^{v}$: expansion coefficient, the projection of $x_n^{v}$ onto $Y_{\ell m}$.
-    \item Each degree $\ell$ carries $2\ell+1$ orders $m=-\ell,\dots,\ell$ (the orientations of that scale).
-    \item $L=59$: max degree for our $120\times240$ grid ($\ell=0,\dots,59$).
+  \item \textbf{OPTIMIZE-STRENGTH}
+  \item \textbf{CLOSE-GAP}
 \end{itemize}
-
 }
 
 \frame{
-\frametitle{Spectral Realism Metrics}
-
-Per slice $x_n^{v}$, we compare the guided spectrum $\mathrm{PS}^{\mathrm{gui}}_n(\ell)$
-to a reference $\mathrm{PS}^{\mathrm{ref}}_n(\ell)$ (unguided forecast or ground truth),
-over the $L$ degrees $\ell \ge 1$ ($\ell=0$, the field mean, is dropped).
-
-\begin{block}{Log-spectral distance --- magnitude of mismatch}
-\[
-\mathrm{LSD}_n
-=
-\sqrt{
-\frac{1}{L}
-\sum_{\ell\ge1}
-\left(
-\ln \mathrm{PS}^{\mathrm{gui}}_n(\ell)
--
-\ln \mathrm{PS}^{\mathrm{ref}}_n(\ell)
-\right)^2
-}
-\]
-\end{block}
-
-\begin{block}{Spectral bias --- signed direction}
-\[
-\mathrm{bias}_n
-=
-\frac{1}{L}
-\sum_{\ell\ge1}
-\ln\frac{\mathrm{PS}^{\mathrm{gui}}_n(\ell)}{\mathrm{PS}^{\mathrm{ref}}_n(\ell)}
-\qquad
-\begin{cases}
-<0 & \text{too smooth}\\[-1pt]
->0 & \text{too rough}
-\end{cases}
-\]
-\end{block}
-
-\begin{block}{Total power --- structure magnitude}
-\[
-P_n = \sum_{\ell\ge1} \mathrm{PS}_n(\ell)
-\]
-\end{block}
-
+\frametitle{OPTIMIZE-STRENGTH}
+Optimize the single scalar $w$ against the final loss --- no learning rate.
 \begin{itemize}
-    \item The log-ratio weights every scale equally (raw $|P-Q|$ is dominated by low $\ell$).
+  \item Run the guided flow with constant $w$: $\lambda_t = w \cdot a_t$
+  \item $w$ is a scalar, so $\frac{dL}{dw}$ is an \emph{exact} derivative (one adjoint pass)
+  \item Solve $\frac{dL}{dw} = 0$ with the secant method --- no learning rate,
+        no iteration count; it stops when the final loss is closed,
+        then reruns once with $w^{*}$
 \end{itemize}
-
+\vfill
+Cost: a few full flow evaluations.
 }
+
+\frame{
+\frametitle{CLOSE-GAP}
+No $w$ at all --- close the gap \emph{exactly} at every step.
+\begin{itemize}
+  \item Measure the current gap $r_t$, aim at the prescribed path:
+        $r_t^{\text{target}} = (1-\eta)^{t+1}\, r_0$
+  \item The exact landing is a Newton move along the gradient:
+        \begin{equation*}
+          \lambda_t = \frac{2\, r_t \left( r_t - r_t^{\text{target}} \right)}{h_t\, \lVert g_t \rVert^2}
+        \end{equation*}
+  \item Anchored to the \emph{measured} gap $\rightarrow$ drift and overshoot are
+        corrected at the next step
+  \item $\eta = 1$: whole gap in one step; smaller $\eta$: spread smoothly over the flow
+\end{itemize}
+\vfill
+Cost: a single guided flow --- no outer optimization.
+}
+
+\frame{
+\frametitle{Notation summary}
+% TODO: fill in
+}
+
+\frame{
+\frametitle{Assumptions}
+\begin{itemize}
+  \item If we can find metrics that enable us to make statements about the
+        plausibility of the weather states, we don't need to make any assumptions
+        about the physical realism of the guidance target and the learned model function
+  \item If this holds, we can also make statements about full trajectories:
+        if a one-step guided forecast is physically plausible, then so is its
+        autoregressive successor --- or better, we can measure the degradation
+        of physical realism
+  \item Reason to guide this way: many little steps that only slightly change
+        the trajectory are good
+\end{itemize}
+}
+
+\section{Experimental setup}
+
+\frame{
+\frametitle{Validation}
+Guiding towards ground truth
+}
+
+\section{Results}
 
 \frame{
 \frametitle{Results}
-
+% TODO: fill in
 }
 
-\frame{
-\centering
-\Huge QA
-}
+\section{Limitations}
 
 \frame{
-\centering
-\Huge Ideas
+\frametitle{Limitations}
 \begin{itemize}
-    \item Explain why not just do M-step GD on the deterministic prediction.
+  \item Works well for heatwaves because the mask is fixed $\rightarrow$
+        not appropriate for cyclones and other moving events
+  \item Sampling methods provide a more direct way to respect the transition function
+        learned by the model $\rightarrow$ no manual mask and manual trajectories
+        $\rightarrow$ would side-step the need to check the realism of both mask and
+        delta trajectory, and of the produced results
 \end{itemize}
 }
 
+\section{Future directions}
 
-%%%%%
+\frame{
+\frametitle{Future directions}
+\begin{itemize}
+  \item GenCast: higher resolution --- $0.25^{\circ}$ $==$ $721 \times 1440$ grid
+  \item Likelihood estimation of an event
+  \item Guiding noise
+  \item Guiding steps
+\end{itemize}
+}
 
 \appendix
+\section{Appendix}
 
-\begin{frame}[plain]
-    \centering
-    \vfill
-    {\fontsize{50}{60}\selectfont Appendix}
-    \vfill
-\end{frame}
-
-\section{Background}
 \frame{
-\frametitle{Flow Matching}
-
+\frametitle{Residual model}
+\textbf{Inputs:}
 \begin{itemize}
-    \item Assume observations are samples from a data distribution
-    \[
-    p_{\mathrm{data}}
-    \]
-
-    \item Generation corresponds to sampling from this distribution
-
-    \item Start from a simple distribution
-    \[
-    p_{\mathrm{init}}
-    \]
-
-    \item Learn a transformation
-    \[
-    p_{\mathrm{init}}
-    \longrightarrow
-    p_{\mathrm{data}}
-    \]
+  \item \texttt{state} --- the current analysis $x_0$ (at $t_0$)
+  \item \texttt{prev\_state} --- the state at $t_0 - 24\,$h
+  \item \texttt{pred\_state} $=$ \texttt{det\_pred} --- the deterministic prediction
+  \item $z_t$ --- the noisy residual latent at the current noise level
+        (the thing being denoised)
+  \item time embedding --- month $+$ hour $+$ flow timestep $t$:
+        seasonality/diurnal conditioning $+$ noise-level conditioning
 \end{itemize}
-
 }
 
 \frame{
-\frametitle{Representing the Transformation}
-
+\frametitle{Anchoring scenarios in time}
+\textbf{Option 1: take past events}
 \begin{itemize}
-
-    \item The transformation is represented by a \textbf{vector field}
-    \[
-    (t,x) \mapsto u_t(x)
-    \]
-
-    \item The vector field defines a trajectory
-    \[
-    t \mapsto x_t
-    \]
-
-    \item Through the ODE
-    \[
-    \frac{d}{dt}x_t = u_t(x_t)
-    \]
-
-    \item Solving the ODE induces a flow
-    \[
-    x_t = \phi_t(x_0)
-    \]
-
+  \item extremify them
+  \item compare against available ground truth
 \end{itemize}
-
-}
-
-\frame{
-\frametitle{Sampling}
-
+\vfill
+\textbf{Option 2: generate from the present into the future}
 \begin{itemize}
-    \item Learn a neural vector field
-    \[
-    u_\theta(x_t,t)
-    \]
-
-    \item Solving
-    \[
-    \frac{d}{dt}x_t=u_\theta(x_t,t)
-    \]
-    transports samples from
-    \[
-    p_{\mathrm{init}}
-    \rightarrow
-    p_{\mathrm{data}}
-    \]
-
-    \item The solution is generally not available in closed form.
-
-    \item Numerical integration is therefore required.
+  \item the past may not contain all scenarios of interest
+  \item stress-test infrastructure in its current state
+  \item ground truth not available
 \end{itemize}
-
 }
-
-
-\frame{
-\frametitle{Euler Integration}
-
-\begin{algorithm}[H]
-\caption{Sampling from a Flow Model}
-\begin{algorithmic}[1]
-\Require Vector field $u_\theta$, number of steps $T$
-\State Sample $X_0 \sim p_{\mathrm{init}}$
-\State $h \gets 1/T$
-\For{$i=0,\dots,T-1$}
-    \State $t \gets i/T$
-    \State $X_{t+h} \gets X_t + h\,u_\theta(X_t,t)$
-\EndFor
-\State \Return $X_1$
-\end{algorithmic}
-\end{algorithm}
-}
-
-\frame{
-\frametitle{From Sampling to Training}
-
-\begin{itemize}
-    \item During sampling, the learned ODE transports
-    \[
-    X_0 \sim p_{\mathrm{init}}
-    \quad \longrightarrow \quad
-    X_1 \sim p_{\mathrm{data}}
-    \]
-
-    \item To train the vector field, we prescribe how intermediate samples should look:
-    \[
-    p_0
-    =
-    p_{\mathrm{init}}
-    \quad \longrightarrow \quad
-    p_t
-    \quad \longrightarrow \quad
-    p_1
-    =
-    p_{\mathrm{data}}
-    \]
-
-    \item This family of intermediate distributions is the \textbf{probability path}.
-
-    \item Flow matching trains $u_\theta$ to match the velocity of this path.
-\end{itemize}
-
-}
-
-\frame{
-\frametitle{Training Flow Matching}
-
-\begin{itemize}
-    \item Define a Gaussian probability path conditioned on a sample $x_1$:
-    \[
-    p_t(x \mid x_1)
-    =
-    \mathcal{N}\!\left(x;\, t x_1,\,(1-t)^2 I\right)
-    \]
-
-    \item Equivalently, sample along this path using
-    \[
-    x_t = (1-t)x_0 + t x_1,
-    \qquad
-    x_0 \sim \mathcal{N}(0,I),
-    \quad
-    x_1 \sim p_{\mathrm{data}}
-    \]
-
-    \item The target velocity along this path is
-    \[
-    u_t^*(x_t)
-    =
-    \frac{d}{dt}x_t
-    =
-    x_1 - x_0
-    \]
-
-    \item Train $u_\theta$ to match this velocity:
-\end{itemize}
-
-\vspace{-0.1cm}
-
-\[
-\mathcal{L}_{FM}(\theta)
-=
-\mathbb{E}_{t,x_0,x_1}
-\Big[
-\|u_\theta(x_t,t) - (x_1-x_0)\|^2
-\Big]
-\]
-
-}
-
-
-\frame{
-\frametitle{From Loss to Guidance Gradient}
-
-\begin{itemize}
-    \item Once the target and regularization terms are chosen, the total loss defines the guidance signal:
-    \[
-    \mathcal{L}_n^{\mathrm{total}}
-    =
-    \mathcal{L}_n^{\mathrm{target}}
-    +
-    \lambda\mathcal{R}
-    \]
-
-    \item We define the guidance likelihood through this loss:
-    \[
-    p(y|z_t)
-    =
-    \exp\!\left(
-    -
-    \mathcal{L}_n^{\mathrm{total}}
-    \left(
-    \hat{x}_{n,t},
-    y
-    \right)
-    \right)
-    \]
-
-    \item Therefore, the guidance gradient is:
-    \[
-    \nabla_{z_t}\log p(y|z_t)
-    =
-    -
-    \nabla_{z_t}
-    \mathcal{L}_n^{\mathrm{total}}
-    \left(
-    \hat{x}_{n,t},
-    y
-    \right)
-    \]
-\end{itemize}
-
-\begin{block}{Guidance Signal}
-\[
-g_{n,t}
-=
--
-\nabla_{z_t}
-\mathcal{L}_n^{\mathrm{total}}
-\left(
-\hat{x}_{n,t},
-y
-\right)
-\]
-\end{block}
-
-}
-
-
-\frame{
-\frametitle{LBG: Loss-Based Guidance}
-
-\textbf{Idea:} same loss-gradient guidance as classifier guidance, but with a normalized guidance scale.
-
-\begin{block}{LBG Update}
-\[
-\tilde{u}_t(z_t)
-=
-u_t(z_t)
-+
-\psi_t\,g_{n,t},
-\qquad
-g_{n,t}
-=
--\nabla_{z_t}\mathcal{L}_n(\hat{x}_{n,t},y)
-\]
-\[
-\psi_t
-=
-\frac{w\,a_t}{\|g_{n,t}\|+\varepsilon}
-\]
-\end{block}
-
-\begin{itemize}
-    \item Hyperparameters: guidance strength $w$.
-    \item $\hat{x}_{n,t}$ is treated as a point estimate of the clean state.
-    \item Normalization stabilizes guidance magnitude across flow steps.
-    \item Limitation: ignores uncertainty in $x_1|z_t$.
-\end{itemize}
-
-\paperref{Chung et al., Diffusion Posterior Sampling for General Noisy Inverse Problems, ICLR 2023.}
-}
-
 
 \end{document}

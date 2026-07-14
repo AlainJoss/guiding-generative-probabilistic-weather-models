@@ -20,7 +20,7 @@ def _():
     from geoarches.paths import STATS_PATH
 
 
-    return STATS_PATH, cv2, dask, mcolors, mo, np, plt, timedelta, torch, xr
+    return STATS_PATH, cv2, dask, mcolors, mo, np, plt, torch, xr
 
 
 @app.cell
@@ -41,7 +41,7 @@ def _():
         dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config, sweep_coord_label
     )
     from src.utils import get_w_star, get_guidance_schedule
-    from src.schedules import N_schedule, delta_schedule, guidance_weight_schedule
+    from src.schedules import N_schedule, delta_schedule
     from src.normalization import XarrayNormalizer
     from src.spectrum import power_spectrum, log_spectral_distance, spectral_bias
 
@@ -79,13 +79,9 @@ def _():
         get_timestamp_from_sliders,
         get_var_idx,
         get_w_star,
-        guidance_weight_schedule,
-        log_spectral_distance,
         max_day,
         plot_trajectories,
         plot_trajectory,
-        power_spectrum,
-        spectral_bias,
         sweep_coord_label,
         visualize_map,
     )
@@ -294,13 +290,18 @@ def _(
                 value=experiment_params["GUI_REF"][0],
                 label="guidance_reference: ",
             )
-            w_slider = mo.ui.slider(
-                steps=experiment_params["w"],
-                value=experiment_params["w"][0],
-                label=get_label("w", len(experiment_params["w"])),
-                debounce=True,
-                show_value=True,
-            )
+            # "w" was the flow-level strength axis of legacy runs; current sweeps
+            # (FGWNOLR/FGWNOGAP) don't have it
+            if "w" in experiment_params:
+                w_slider = mo.ui.slider(
+                    steps=experiment_params["w"],
+                    value=experiment_params["w"][0],
+                    label=get_label("w", len(experiment_params["w"])),
+                    debounce=True,
+                    show_value=True,
+                )
+            else:
+                w_slider = None
             mask_mode_dropdown = mo.ui.dropdown(
                 options=experiment_params["MASK_MODE"],
                 value=experiment_params["MASK_MODE"][0],
@@ -409,7 +410,7 @@ def _(
             hash_params = {
                 "guidance_reference": guidance_reference_dropdown.value,
                 "mask_mode": mask_mode_dropdown.value,
-                "w": w_slider.value,
+                "w": w_slider.value if w_slider is not None else None,
             }
         case _:
             pass
@@ -750,7 +751,6 @@ def _(
         target_guidance_trajectory,
         ung_M_N_slices,
         ung_M_N_trajectories,
-        ung_gui_M_N_slices,
         ung_gui_m_trajectory,
         ung_m_trajectory,
     )
@@ -769,11 +769,13 @@ def _(
     w_slider,
 ):
     sweep_params = {
-        "w": w_slider.value,
         "GUI_REF": guidance_reference_dropdown.value,
         "MASK_MODE": mask_mode_dropdown.value,
         "GUIDANCE_MODE": guidance_mode_dropdown.value,
     }
+    # "w" axis only exists on legacy runs (see w_slider construction)
+    if w_slider is not None:
+        sweep_params["w"] = w_slider.value
     # delta_trajectory is an integer-indexed sweep axis in the zarr (real vectors live
     # in the delta_trajectory_value coord); the dropdown holds the chosen index.
     if delta_trajectory_dropdown is not None:
@@ -1095,81 +1097,6 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 
 
 @app.cell
-def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
-    # ===== sweep authoring widgets (guided_rollout) =====
-    guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["LBG"], label="GUIDANCE_MODE: ")
-    gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF: ")
-    mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE: ")
-
-    # numeric axes -> (start, stop, log_scale, integer)
-    # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
-    NUMERIC_AXES = {
-        "w":              (0.1,  5.0,   False, False),
-        # LBG-MC
-        "n_mc":           (4,    16,    False, True),
-        "r":              (0.1,  1.0,   False, False),
-        # UG
-        "ug_k":           (10,   50,    False, True),
-        "ug_lr":          (1e-2, 1e-1,  True,  False),
-        "ug_s":           (4,    8,     False, True),
-        # FG (legacy, not finalized)
-        "fg_k":           (10,   50,    False, True),
-        "fg_lr":          (1e-2, 1e-1,  True,  False),
-        "fg_gamma":       (1e-3, 1e-2,  True,  False),
-        "fg_lambda_init": (0.0,  2.0,   False, False),
-        "fg_n_windows":   (5,    25,    False, True),
-        # FGF (legacy, not finalized)
-        "fgf_k":          (10,   50,    False, True),
-        "fgf_lr":         (1e-2, 1e-1,  True,  False),
-        "fgf_shift_init": (0.0,  1.0,   False, False),
-        "fgf_gamma":      (1e-3, 1e-2,  True,  False),
-        "fgf_n_windows":  (5,    25,    False, True),
-        # FGW (naive FlowGrad on the scalar w; fgw_lr = w-units per Adam iteration)
-        "fgw_k":          (5,    30,    False, True),
-        "fgw_lr":         (10.0, 100.0, True,  False),
-        "fgw_w_init":     (100.0, 400.0, False, False),
-        # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
-        # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
-        "fgwnolr_w_init": (100.0, 400.0, False, False),
-        # eta: shared closure rate for FGWNOLR and FGWNOGAP; a_t = (1 - eta)^(t+1)
-        # (FGWNOGAP: fraction of the remaining gap closed per step)
-        "eta":            (0.1,  1.0,   False, False),
-    }
-
-    _rc = {}
-    for _ax, (_s, _e, _log, _int) in NUMERIC_AXES.items():
-        _rc[f"{_ax}.start"] = mo.ui.number(value=_s, label="start: ")
-        _rc[f"{_ax}.stop"]  = mo.ui.number(value=_e, label="stop: ")
-        _rc[f"{_ax}.n"]     = mo.ui.slider(1, 20, step=1, value=1, label="n: ", show_value=True)
-        _rc[f"{_ax}.log"]   = mo.ui.checkbox(value=_log, label="log")
-    sweep_ranges = mo.ui.dictionary(_rc)
-
-
-    def compute_axis_values(ax, rv):
-        s, e = rv[f"{ax}.start"], rv[f"{ax}.stop"]
-        nn = int(rv[f"{ax}.n"] or 1)
-        log = rv[f"{ax}.log"]
-        integer = NUMERIC_AXES[ax][3]
-        if nn <= 1:
-            vals = [s]
-        elif log and s > 0 and e > 0:
-            vals = list(np.logspace(np.log10(s), np.log10(e), nn))
-        else:
-            vals = list(np.linspace(s, e, nn))
-        return sorted({int(round(v)) for v in vals}) if integer else [round(float(v), 8) for v in vals]
-
-
-    return (
-        NUMERIC_AXES,
-        compute_axis_values,
-        gui_ref_select,
-        guidance_mode_select,
-        mask_mode_select,
-        sweep_ranges,
-    )
-
-
-@app.cell
 def _(
     GUIDANCE_METHOD_HYPERS,
     NUMERIC_AXES,
@@ -1181,7 +1108,7 @@ def _(
     notebook_mode,
     sweep_ranges,
 ):
-    # shown only for the modes that use it: LBG / LBG-MC / UG).
+    # shown only for the modes that use them (see GUIDANCE_METHOD_HYPERS)
     _MODE_HYPERS = GUIDANCE_METHOD_HYPERS
 
     _rv = sweep_ranges.value
@@ -1216,7 +1143,6 @@ def wa_schedule(
     guidance_mode_dropdown,
     guidance_mode_select,
     guidance_schedules,
-    guidance_weight_schedule,
     lambda_t_by_method,
     m,
     n,
@@ -1226,77 +1152,77 @@ def wa_schedule(
     rollout_id,
     sweep_params,
     sweep_ranges,
-    w_slider,
 ):
-    # Guidance weight schedule w * a_t over the flow, placed beside the rollout trajectories
-    # plot. Shown only when a w-using method (LBG / LBG-MC / UG / FGW / FGWNOLR) is active.
-    # a_t: FGWNOLR uses the closure schedule (1 - eta)^(t+1) (matches the sampler); the
-    # other w-modes use the bounded GuidedFlow.a_t (see src/schedules.py). Optimized w
-    # comes from the run's w_star.json sidecar when available.
+    # Guidance weight schedule over the flow, beside the rollout trajectories plot.
+    # Separates a_t and the closed gap 1 - (1-eta)^t (right axis) from w_t and lambda_t (left).
+    # a_t = (1 - eta)^(t+1) is the shared remaining-gap schedule of FGWNOLR and FGWNOGAP
+    # (both depend on eta); 1 - (1-eta)^t is the fraction already closed ENTERING step t
+    # (0 at t=0), matching the chart's 0-based t axis.
+    # guided_rollout: preview at the swept w_init / eta. analyze_rollout: recorded schedules.
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
-        w_choices = compute_axis_values("w", sweep_ranges.value)
-        fgw_w_choices = compute_axis_values("fgw_w_init", sweep_ranges.value)
         fgwnolr_w_choices = compute_axis_values("fgwnolr_w_init", sweep_ranges.value)
         eta_choices = compute_axis_values("eta", sweep_ranges.value)
-        fgw_w_from_star = False
+        w_from_star = False
     elif notebook_mode == "analyze_rollout":
         selected_modes = [guidance_mode_dropdown.value]
-        w_choices = list(experiment_params["w"])
-        # optimized w* recorded by FGW/FGWNOLR runs; fall back to the w_init axes
         _sweep_sel = dict(sweep_params)  # records store the coord-label sweep form
         _wstar_recs = get_w_star(rollout_id, _sweep_sel)
-        fgw_w_from_star = bool(_wstar_recs)
+        w_from_star = bool(_wstar_recs)
         _wstar = sorted({r["w_star"] for r in _wstar_recs})
-        fgw_w_choices = _wstar or list(experiment_params.get("fgw_w_init") or [])
         fgwnolr_w_choices = _wstar or list(experiment_params.get("fgwnolr_w_init") or [])
         eta_choices = list(experiment_params.get("eta") or [])
     else:
         selected_modes = []
-        w_choices = []
-        fgw_w_choices = []
         fgwnolr_w_choices = []
         eta_choices = []
-    w_modes = [mode for mode in selected_modes if mode in ("LBG", "LBG-MC", "UG", "FGW", "FGWNOLR")]
+    eta_modes = [mode for mode in selected_modes if mode in ("FGWNOLR", "FGWNOGAP")]
     _has_recorded = notebook_mode == "analyze_rollout" and bool(lambda_t_by_method)
-    if w_modes or _has_recorded:
+    _AT_COLOR, _CLOSED_COLOR = "#7B2CBF", "#E67E22"  # a_t purple, closed-gap 1 - a_t orange
+    if eta_modes or _has_recorded:
+        _left_label = r"$\lambda_t,\ w_t$"
         if _has_recorded:
-            # the schedules actually applied by the run (guidance_schedule.json):
-            # lambda_t and w_t on the left axis, a_t (<= 1) on the right axis
+            # schedules actually applied by the run: lambda_t and w_t on the left axis,
+            # a_t and the closed-gap 1 - a_t on the right axis
             _sched, _right = {}, {}
             for _meth, _sd in guidance_schedules.items():
                 _sched[rf"$\lambda_t$ — {_meth}"] = list(_sd["lambda_t"])
                 _sched[rf"$w_t$ — {_meth}"] = list(_sd["w_t"])
-                _right[rf"$a_t$ — {_meth}"] = list(_sd["a_t"])
+                _a = np.asarray(_sd["a_t"], dtype=float)
+                _right[rf"$a_t$ — {_meth}"] = _a.tolist()
+                # 1 - (1-eta)^t = 1 - a_{t-1} shifted right one step, 0 at t=0
+                _right[rf"$1-(1-\eta)^t$ — {_meth}"] = np.concatenate([[0.0], (1.0 - _a)[:-1]]).tolist()
         else:
-            # preview: each mode at its OWN w-init and schedule
-            _sched, _bounded_w = {}, []
-            for _mode in w_modes:
-                if _mode == "FGWNOLR":
-                    # NOLR: a_t = (1 - eta)^(t+1) at the swept fgwnolr_w_init / eta
-                    for _w in (fgwnolr_w_choices or [float(w_slider.value)]):
-                        for _eta in (eta_choices or [0.5]):
-                            _a = (1.0 - _eta) ** np.arange(1, T + 1)
-                            _sched[rf"$w$={_w:g}, $\eta$={_eta:g}"] = (_w * _a).tolist()
-                elif _mode == "FGW":
-                    _bounded_w += list(fgw_w_choices)
-                else:  # LBG / LBG-MC / UG use the w sweep axis
-                    _bounded_w += list(w_choices)
-            if _bounded_w:
-                _sched |= guidance_weight_schedule(T, _bounded_w)
+            # preview: a_t and 1 - a_t on the RIGHT (shared by both methods). NOLR also
+            # previews w_t (constant w_init) and lambda_t = w_t * a_t on the LEFT; NOGAP's
+            # w_t / lambda_t are solved per step at runtime, so only a_t / 1 - a_t are shown.
+            _sched, _right = {}, {}
+            _steps = np.arange(1, T + 1)
+            for _eta in (eta_choices or [0.5]):
+                _a = (1.0 - _eta) ** _steps
+                _right[rf"$a_t$ ($\eta$={_eta:g})"] = _a.tolist()
+                _right[rf"$1-(1-\eta)^t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1)).tolist()
+                if "FGWNOLR" in eta_modes:
+                    for _w in (fgwnolr_w_choices or [250.0]):
+                        _sched[rf"$w_t$ ($w$={_w:g})"] = [float(_w)] * T
+                        _sched[rf"$\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_w * _a).tolist()
             if not _sched:
-                _sched = guidance_weight_schedule(T, [float(w_slider.value)])
-            _right = None
+                # NOGAP-only: no w/lambda -> put a_t and 1 - a_t on the left
+                _sched, _right, _left_label = _right, None, r"$a_t,\ 1-(1-\eta)^t$"
+        _gap_color = lambda _k: _CLOSED_COLOR if _k.startswith(r"$1-(") else _AT_COLOR
+        _color_map = {_k: _gap_color(_k) for _k in _sched} if _right is None else None
+        _right_color = {_k: _gap_color(_k) for _k in _right} if _right is not None else "#7B2CBF"
         wa_schedule_widget = plot_trajectory(
             _sched,
             right_trajectory=_right,
             right_label=r"$a_t$",
-            var=r"$\lambda_t$",
-            title=r"Guidance weight schedule  $\lambda_t = w_t\,a_t$",
+            right_color=_right_color,
+            color_map=_color_map,
+            var=_left_label,
+            title=r"Guidance weight schedule  ($\lambda_t = w_t\,a_t$, $a_t=(1-\eta)^{t+1}$)",
             subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
-                      else r"preview: $\lambda_t = w\,a_t$ — " + ", ".join(w_modes))
-                     + (((" (w = optimized $w^*$)" if fgw_w_from_star else " (w learned, shown at w_init)"))
-                        if ("FGW" in w_modes or "FGWNOLR" in w_modes) else ""),
+                      else "preview — " + ", ".join(eta_modes)
+                           + (" (NOLR w shown at w_init)" if "FGWNOLR" in eta_modes else "")),
             xlabel="$t$",
             figsize=(10, 6),
         )
@@ -1310,6 +1236,7 @@ def _(
     M_N_widget,
     T_slider,
     delta_widget,
+    guidance_convergence_t_plot,
     guidance_reference_dropdown,
     inspect_states_widget_make,
     level_slider,
@@ -1388,18 +1315,14 @@ def _(
                     [mo.vstack(list(traj_checks.values())), trajectories_plot]
                     + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
                     justify="start", align="start",
-                )
+                ),
+                guidance_convergence_t_plot,
             ], align="start")
-            mask_widget = mo.vstack([sweep_params_widget, mask_widget_maps], align="start")
+            mask_widget = mask_widget_maps
             inspect_states_widget=inspect_states_widget_make
         case _:
             pass
-    return (
-        inspect_states_widget,
-        mask_widget,
-        mask_widget_controls,
-        trajectory_widget,
-    )
+    return inspect_states_widget, mask_widget, trajectory_widget
 
 
 @app.cell(hide_code=True)
@@ -2297,719 +2220,6 @@ def _(
     return (trajectories_plot,)
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## Cross variable checks
-    """)
-    return
-
-
-@app.cell
-def _(mask, mcolors, mo, np, plt, xr):
-
-    LEVEL_VARS = ["geopotential", "u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity", "vertical_velocity"]
-    SURFACE_PAIR = {"temperature": "2m_temperature", "u_component_of_wind": "10m_u_component_of_wind", "v_component_of_wind": "10m_v_component_of_wind"}
-    _ALL_VARS = LEVEL_VARS + ["10m_u_component_of_wind", "10m_v_component_of_wind", "2m_temperature", "mean_sea_level_pressure"]
-    _SURF_TO_LVL = {s: l for l, s in SURFACE_PAIR.items()}
-    _PALETTE = plt.get_cmap("tab10").colors
-    _N_LEVELS = 13
-
-    level_var_dropdown = mo.ui.dropdown(LEVEL_VARS + ["mean_sea_level_pressure"], label="variable: ")
-    aggregate_by_level_checkbox = mo.ui.checkbox(label="aggregate by level")
-    aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
-    dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
-    cross_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "masked avg", "gt_diffs", "ung_gui_gt_diffs", "ung_gui_diffs", "grad_norms", "gui_vf_norms", "vf_norms", "deflections", "angular deflection", "convergence", "informativeness",
-    )})
-    differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
-    abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$", value=True)
-
-    def n_traces(v, agg):
-        if v is None:
-            return len(_ALL_VARS) if agg else len(LEVEL_VARS) * _N_LEVELS + (len(_ALL_VARS) - len(LEVEL_VARS))
-        if agg:
-            return 1
-        return (_N_LEVELS + (1 if v in SURFACE_PAIR else 0)) if v in LEVEL_VARS else 1
-
-    def grouped_vars(ds, v, agg):
-        vars_ = list(ds.data_vars) if v is None else [v] + ([SURFACE_PAIR[v]] if v in SURFACE_PAIR else [])
-        if v is not None and agg:
-            return {v: [ds[x] for x in vars_]}
-        out = {}
-        for name in vars_:
-            da = ds[name]
-            if "level" in da.dims and not agg:
-                for lv in da["level"].values:
-                    out[f"{name} L{int(lv)}"] = [da.sel(level=lv)]
-            else:
-                out[name] = [da]
-        return out
-
-    def color_for(labels):
-        out = {}
-        for label in labels:
-            if " L" in label:
-                name, lv = label.rsplit(" L", 1); lv = int(lv)
-            else:
-                name, lv = label, None
-            base = _SURF_TO_LVL.get(name, name)
-            hue = mcolors.to_rgb(_PALETTE[_ALL_VARS.index(base) % len(_PALETTE)])
-            intensity = 1.0 if lv is None else 0.3 + 0.7 * lv / 1000
-            out[label] = tuple(c + (1 - c) * (1 - intensity) for c in hue)
-        return out
-
-    def maybe_mask(ds, mode):
-        if mode not in ("mask", "!mask"):
-            return ds
-        # boolean region at half-maximum: BBOX (0/1) is unchanged; GAUSSIAN is
-        # nonzero everywhere (astype(bool) would be all-True -> "!mask" all-NaN),
-        # and its peak is ~1/sum, so the threshold must be relative to max.
-        _m = xr.DataArray(
-            mask >= 0.5 * mask.max(),
-            dims=("latitude", "longitude"),
-            coords={"latitude": ds.latitude, "longitude": ds.longitude},
-        )
-        return ds.where(_m if mode == "mask" else ~_m)
-
-    def cross_traces(red_ds, axis, agg, m_idx, *, k, var, by_level, diff, absv, bands):
-        """Member trace + optional min/max band from spatially pre-reduced cubes (see `red`).
-        Pure: all control values come in as args so callers carry the UI dependencies."""
-        _g = grouped_vars(red_ds, var, by_level)
-
-        def _reduce(das):
-            _other = lambda da: [d for d in da.dims if d not in (axis, "m")]
-            if agg == "l2":
-                out = np.sqrt(sum(da.sum(dim=_other(da)) for da in das))
-            else:
-                out = sum(da.mean(dim=_other(da)) for da in das) / len(das)
-            if "m" in out.dims:
-                out = out.transpose("m", axis)
-            arr = np.atleast_2d(out.values)  # (members, axis)
-            if diff:
-                arr = np.concatenate([np.zeros((arr.shape[0], 1)), np.diff(arr, axis=1)], axis=1)
-            if absv:
-                arr = np.abs(arr)
-            return arr
-
-        _full = {k_: _reduce(das) for k_, das in _g.items()}
-        traces = top_k({k_: v[m_idx if v.shape[0] > 1 else 0] for k_, v in _full.items()}, k)
-        bands_out = (
-            {k_: (_full[k_].min(axis=0), _full[k_].max(axis=0)) for k_ in traces if _full[k_].shape[0] > 1}
-            if bands
-            else None
-        )
-        return traces, bands_out
-
-    def top_k(traces, k):
-        return dict(sorted(traces.items(), key=lambda kv: -float(np.max(np.abs(kv[1]))))[:k])
-
-    return (
-        abs_checkbox,
-        aggregate_by_level_checkbox,
-        aggregate_spatially_dropdown,
-        color_for,
-        cross_row_checks,
-        cross_traces,
-        differential_checkbox,
-        dist_bands_checkbox,
-        level_var_dropdown,
-        maybe_mask,
-        n_traces,
-    )
-
-
-@app.cell
-def _(
-    abs_checkbox,
-    aggregate_by_level_checkbox,
-    differential_checkbox,
-    dist_bands_checkbox,
-    level_var_dropdown,
-    top_k_slider,
-):
-    cross_ctl = dict(
-        k=top_k_slider.value,
-        var=level_var_dropdown.value,
-        by_level=aggregate_by_level_checkbox.value,
-        diff=differential_checkbox.value,
-        absv=abs_checkbox.value,
-        bands=dist_bands_checkbox.value,
-    )
-    return (cross_ctl,)
-
-
-@app.cell
-def _(aggregate_by_level_checkbox, level_var_dropdown, mo, n_traces):
-    _kmax = n_traces(level_var_dropdown.value, aggregate_by_level_checkbox.value)
-    top_k_slider = mo.ui.slider(1, _kmax, value=min(5,_kmax), label=get_label("top K", _kmax), show_value=True)
-    return (top_k_slider,)
-
-
-@app.cell
-def _(
-    abs_checkbox,
-    aggregate_by_level_checkbox,
-    aggregate_spatially_dropdown,
-    differential_checkbox,
-    level_var_dropdown,
-    mo,
-    top_k_slider,
-):
-    cross_check_controls = mo.vstack(
-        [
-            mo.hstack([differential_checkbox, abs_checkbox, top_k_slider], justify="start", align="start"),
-            mo.hstack([level_var_dropdown, aggregate_by_level_checkbox, aggregate_spatially_dropdown], justify="start", align="start"),
-        ],
-        align="start",
-    )
-    return (cross_check_controls,)
-
-
-@app.cell
-def _(XarrayNormalizer, gt_rollout, guided_xr, notebook_mode):
-    if notebook_mode == "analyze_rollout":
-        xnorm = XarrayNormalizer()
-        # raw (un-normalized) gt aligned to rollout coords. Normalization is deferred
-        # until AFTER the spatial reduction in the `red` cell: the affine, per-(var,level)
-        # normalization commutes with the spatial mean, so we never build a full-cube copy.
-        gt_n_xr = (
-            gt_rollout.isel(time=slice(1, None))
-            .rename({"time": "n"})
-            # gt coords differ from rollout coords in float precision; assign exact
-            # copies so xarray alignment keeps the full grid
-            .assign_coords(
-                n=guided_xr.n,
-                latitude=guided_xr.latitude,
-                longitude=guided_xr.longitude,
-                level=guided_xr.level,
-            )
-        )
-    return gt_n_xr, xnorm
-
-
-@app.cell
-def _(
-    aggregate_spatially_dropdown,
-    clean_preds_xr,
-    dask,
-    grads_xr,
-    gt_n_xr,
-    gui_vfs_xr,
-    guided_xr,
-    maybe_mask,
-    notebook_mode,
-    np,
-    ung_gui_final_xr,
-    ung_gui_xr,
-    vfs_xr,
-    xnorm,
-):
-    # spatially-reduced cubes: built LAZILY on the dask-backed cubes, then computed in
-    # one fused pass -> dask streams chunks and never materializes a full cube. Sliders
-    # (m, n, t, k, variable, Δ, abs, bands) then only index these tiny arrays.
-    if notebook_mode == "analyze_rollout":
-
-        _sp = ("latitude", "longitude")
-        _msk = lambda ds: maybe_mask(ds, aggregate_spatially_dropdown.value)
-        _sq = lambda ds: (_msk(ds) ** 2).sum(dim=_sp)        # squared sum; sqrt after folding
-        _mn = lambda ds: _msk(ds).mean(dim=_sp)
-        _nmn = lambda ds: xnorm.normalize(_mn(ds))           # normalize commutes with the spatial mean
-        # deflection accounts for the temporal ordering: within a step the unguided vf is
-        # computed before the guided one, so the guided push at t is compared to the unguided
-        # vf one step later -> vf_t - vf^gui_{t-1}. shift pads the initial step (t=0) -> 0,
-        # like the other difference charts.
-        _dvf = (vfs_xr - gui_vfs_xr.shift(t=1)).fillna(0.0)
-        red = {
-            "grads_l2": _sq(grads_xr),
-            "vfs_l2": _sq(vfs_xr),
-            "gui_vfs_l2": _sq(gui_vfs_xr),
-            "dvf_l2": _sq(_dvf),
-            "dvf_mean": _mn(_dvf),
-            "dvf_dot": (_msk(vfs_xr) * _msk(gui_vfs_xr.shift(t=1))).sum(dim=_sp),
-            "gvf_prev_sq": _sq(gui_vfs_xr.shift(t=1)),
-            "gui_ung_gui_mean": _nmn(guided_xr) - _nmn(ung_gui_final_xr),
-            "gui_gt_mean": _nmn(guided_xr) - _nmn(gt_n_xr),
-            "clean_gt_mean": _nmn(clean_preds_xr) - _nmn(gt_n_xr),
-            "ung_gui_gt_mean": _nmn(ung_gui_final_xr) - _nmn(gt_n_xr),
-            "ung_gui_gt_t_mean": _nmn(ung_gui_xr) - _nmn(gt_n_xr),
-            "clean_ung_gui_mean": _nmn(clean_preds_xr) - _nmn(ung_gui_xr),
-            "gui_mean": _nmn(guided_xr),
-            "clean_mean": _nmn(clean_preds_xr),
-            "ung_gui_mean": _nmn(ung_gui_final_xr),
-            "ung_gui_t_mean": _nmn(ung_gui_xr),
-            # full-domain ||dL/dz||^2 per (m, n, t) -- consumed by the convergence plot's
-            # through-Jacobian claim; UNMASKED by design (the loss gradient lives everywhere)
-            "grads_l2_full": sum(
-                (grads_xr[_v] ** 2).sum(dim=[_d for _d in grads_xr[_v].dims if _d not in ("m", "n", "t")])
-                for _v in grads_xr.data_vars
-            ),
-        }
-        red = dict(zip(red, dask.compute(*red.values())))    # fused: each cube read once
-        # angular deflection: angle between vf_t and vf^gui_{t-1} over the (masked) spatial
-        # field, per (m, n, t[, level], var). NaN at t=0 (no previous guided vf) -> skipped
-        # by the mean reductions / rendered as a gap.
-        _ang_denom = (red["vfs_l2"] * red["gvf_prev_sq"]) ** 0.5
-        red["dvf_angle"] = np.degrees(np.arccos((red["dvf_dot"] / _ang_denom).clip(-1.0, 1.0)))
-    else:
-        red = None
-    return (red,)
-
-
-@app.cell
-def _():
-    # final widget
-    return
-
-
-@app.cell
-def _(
-    cross_check_controls,
-    cross_row_checks,
-    diff_gui_ung_gui_plot,
-    dist_bands_checkbox,
-    grad_informativeness_plot,
-    grad_norms_n_plot,
-    grad_norms_plot,
-    gui_gt_diff_n_plot,
-    gui_gt_diff_t_plot,
-    gui_mean_n_plot,
-    gui_mean_t_plot,
-    gui_ung_gui_t_plot,
-    gui_vf_norms_n_plot,
-    guidance_convergence_plot,
-    guidance_convergence_t_plot,
-    guided_vf_norms_plot,
-    m_slider,
-    mo,
-    n_slider,
-    notebook_mode,
-    sweep_params_widget,
-    t_slider,
-    ung_gui_gt_n_plot,
-    ung_gui_gt_t_plot,
-    vf_angdef_n_plot,
-    vf_angdef_t_plot,
-    vf_deflection_n_plot,
-    vf_deflection_t_plot,
-    vf_norms_n_plot,
-    vf_norms_plot,
-):
-    if notebook_mode =="analyze_rollout":
-        cross_checks_widget = mo.vstack([
-            sweep_params_widget,
-            dist_bands_checkbox,
-            cross_check_controls,
-            mo.hstack([m_slider, n_slider, t_slider], justify="start"),
-            mo.hstack([
-                mo.vstack(list(cross_row_checks.values()), justify="start", align="start").style(width="fit-content"),
-                mo.vstack(
-                    [
-                        mo.hstack(_row, justify="start")
-                        for _key, _row in [
-                            ("masked avg", [gui_mean_n_plot, gui_mean_t_plot]),
-                            ("gt_diffs", [gui_gt_diff_n_plot, gui_gt_diff_t_plot]),
-                            ("ung_gui_gt_diffs", [ung_gui_gt_n_plot, ung_gui_gt_t_plot]),
-                            ("ung_gui_diffs", [diff_gui_ung_gui_plot, gui_ung_gui_t_plot]),
-                            ("grad_norms", [grad_norms_n_plot, grad_norms_plot]),
-                            ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
-                            ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
-                            ("deflections", [vf_deflection_n_plot, vf_deflection_t_plot]),
-                            ("angular deflection", [vf_angdef_n_plot, vf_angdef_t_plot]),
-                            ("convergence", [guidance_convergence_plot, guidance_convergence_t_plot]),
-                            ("informativeness", [grad_informativeness_plot]),
-                        ]
-                        if cross_row_checks[_key].value
-                    ],
-                    justify="start",
-                    align="start",
-                ).style(width="fit-content"),
-            ],
-            align="start",
-            justify="start",),
-        ], align="start")
-    else:
-        cross_checks_widget = None
-    cross_checks_widget
-    return
-
-
-@app.cell
-def _(
-    color_for,
-    cross_ctl,
-    cross_traces,
-    m,
-    n,
-    notebook_mode,
-    plot_trajectory,
-    red,
-    t,
-):
-    if notebook_mode =="analyze_rollout":
-        _traces, _bands = cross_traces(red["grads_l2"].isel(n=n), "t", "l2", m, **cross_ctl)
-        _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _traces.values()), default=1)))
-        grad_norms_plot = plot_trajectory(_traces, title="Grad norms over $t$",
-            subtitle=r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial}}$", step=t + 1, color_map=color_for(_traces), bands=_bands,
-            figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True,
-        )
-        # grad_norms_plot
-    return (grad_norms_plot,)
-
-
-@app.cell
-def _(
-    color_for,
-    cross_ctl,
-    cross_traces,
-    m,
-    n,
-    notebook_mode,
-    plot_trajectory,
-    red,
-):
-    if notebook_mode =="analyze_rollout":
-        _raw, _bands = cross_traces(red["gui_ung_gui_mean"], "n", "mean", m, **cross_ctl)
-        _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _raw.values()), default=1)))
-        diff_gui_ung_gui_plot = plot_trajectory(
-            _raw,
-            title="Diff (gui − ung_gui) over $n$",
-            subtitle=r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{n} - \tilde{x}^{\,\mathrm{ung\_gui}}_{n})$  ($\tilde{x}$: normalized $x$)",
-            xlabel="$n$",
-            step=n+1,
-            color_map=color_for(_raw),
-            bands=_bands,
-            figsize=(_w, 6),
-            prepend_zero=False,
-            start_index=1,
-            mirror_right_axis=True,
-        )
-        # diff_gui_ung_gui_plot
-    return (diff_gui_ung_gui_plot,)
-
-
-@app.cell
-def _(
-    color_for,
-    cross_ctl,
-    cross_traces,
-    m,
-    n,
-    notebook_mode,
-    plot_trajectory,
-    red,
-    t,
-):
-    if notebook_mode == "analyze_rollout":
-
-        def _plot(title, subtitle, ds, axis, agg, twin_ds=None):
-            _tr, _bands = cross_traces(ds, axis, agg, m, **cross_ctl)
-            _colors = color_for(_tr)
-            _styles = None
-            if twin_ds is not None:
-                # ung_gui twin overlay: same variable colors, dotted line style
-                _twin, _ = cross_traces(twin_ds, axis, agg, m, **cross_ctl)
-                _twin = {f"{_k} (ung_gui)": _v for _k, _v in _twin.items() if _k in _tr}
-                _colors |= {_k: _colors[_k.removesuffix(" (ung_gui)")] for _k in _twin}
-                _styles = {_k: ":" for _k in _twin}
-                _tr = _tr | _twin
-            # width scales with the number of steps so the sparse "over n" plots
-            # (N points) are not stretched across the same width as "over t" (T points)
-            _nsteps = max((len(_v) for _v in _tr.values()), default=1)
-            _w = min(22.0, max(8.0, 3.4 + 0.78 * _nsteps))
-            return plot_trajectory(
-                _tr, title=title, subtitle=subtitle, xlabel=f"${axis}$",
-                step=(n + 1 if axis == "n" else t + 1), color_map=_colors, bands=_bands,
-                figsize=(_w, 6), prepend_zero=False, start_index=1,
-                mirror_right_axis=True, linestyle_map=_styles,
-            )
-
-        gui_gt_diff_n_plot = _plot("Diff (gui − gt) over $n$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{n} - \tilde{x}^{\,\mathrm{gt}}_{n})$  ($\tilde{x}$: normalized $x$)", red["gui_gt_mean"], "n", "mean")
-        gui_gt_diff_t_plot = _plot("Diff (gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["clean_gt_mean"].isel(n=n), "t", "mean")
-        ung_gui_gt_n_plot = _plot("Diff (ung_gui − gt) over $n$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{n} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["ung_gui_gt_mean"], "n", "mean")
-        ung_gui_gt_t_plot = _plot("Diff (ung_gui − gt) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{t} - \tilde{x}^{\,\mathrm{gt}}_{n})$", red["ung_gui_gt_t_mean"].isel(n=n), "t", "mean")
-        gui_ung_gui_t_plot = _plot("Diff (gui − ung_gui) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\tilde{x}^{\,\mathrm{gui}}_{t} - \tilde{x}^{\,\mathrm{ung\_gui}}_{n})$", red["clean_ung_gui_mean"].isel(n=n), "t", "mean")
-        grad_norms_n_plot = _plot("Grad norms over $n$", r"$\|\nabla_{z_t} \mathcal{L}_t\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["grads_l2"], "n", "l2")
-        vf_deflection_n_plot = _plot("Vf deflection (gui − ung_gui) over $n$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["dvf_l2"], "n", "l2")
-        vf_deflection_t_plot = _plot("Vf deflection (gui − ung_gui) over $t$", r"$\|\mathrm{vf}_t - \mathrm{vf}^{\mathrm{gui}}_{t-1}\|_{\mathrm{spatial}}$", red["dvf_l2"].isel(n=n), "t", "l2")
-        vf_angdef_n_plot = _plot("Angular vf deflection over $n$", r"$\angle(\mathrm{vf}_t, \mathrm{vf}^{\mathrm{gui}}_{t-1})$ [$^\circ$]  (mean over $t$)", red["dvf_angle"], "n", "mean")
-        vf_angdef_t_plot = _plot("Angular vf deflection over $t$", r"$\angle(\mathrm{vf}_t, \mathrm{vf}^{\mathrm{gui}}_{t-1})$ [$^\circ$]", red["dvf_angle"].isel(n=n), "t", "mean")
-        gui_vf_norms_n_plot = _plot("Gui vf norms over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["gui_vfs_l2"], "n", "l2")
-        vf_norms_n_plot = _plot("Vf norms over $n$", r"$\|\mathrm{vf}\|_{\mathrm{spatial}}$  ($\Sigma$ over $t$)", red["vfs_l2"], "n", "l2")
-        diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n), "t", "mean")
-        gui_mean_n_plot = _plot("Masked avg over $n$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{n})$  ($\tilde{x}$: normalized $x$)", red["gui_mean"], "n", "mean", twin_ds=red["ung_gui_mean"])
-        gui_mean_t_plot = _plot("Masked avg over $t$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{t})$", red["clean_mean"].isel(n=n), "t", "mean", twin_ds=red["ung_gui_t_mean"].isel(n=n))
-    else:
-        gui_mean_n_plot = gui_mean_t_plot = vf_angdef_n_plot = vf_angdef_t_plot = grad_norms_n_plot = vf_deflection_n_plot = vf_deflection_t_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = gui_gt_diff_n_plot = gui_gt_diff_t_plot = gui_ung_gui_t_plot = ung_gui_gt_n_plot = ung_gui_gt_t_plot = None
-    return (
-        grad_norms_n_plot,
-        gui_gt_diff_n_plot,
-        gui_gt_diff_t_plot,
-        gui_mean_n_plot,
-        gui_mean_t_plot,
-        gui_ung_gui_t_plot,
-        gui_vf_norms_n_plot,
-        ung_gui_gt_n_plot,
-        ung_gui_gt_t_plot,
-        vf_angdef_n_plot,
-        vf_angdef_t_plot,
-        vf_deflection_n_plot,
-        vf_deflection_t_plot,
-        vf_norms_n_plot,
-    )
-
-
-@app.cell
-def _(
-    a_t_schedule,
-    cfg_clean_preds_slices,
-    cfg_target_guidance_M_N_trajectories,
-    config,
-    delta_trajectory,
-    dist_bands_checkbox,
-    dpi_slider,
-    get_masked_mean,
-    get_slices,
-    guidance_mode_dropdown,
-    guided_xr,
-    lambda_t,
-    m,
-    mask,
-    n,
-    notebook_mode,
-    np,
-    plot_trajectory,
-    plt,
-    red,
-    t,
-):
-    if notebook_mode =="analyze_rollout":
-        # realized FINAL guided state (gui store). NOT clean_preds[t=-1]: that object
-        # carries the last kick's identity-path term (+h*lambda*g*c) and disagrees with
-        # both the trajectories plot and the true landing point (~25x inflated gap).
-        _cfg_gui_slices = get_slices(guided_xr, config.PARTITION, config.VAR, config.LEVEL)
-        _all_per_n = get_masked_mean(_cfg_gui_slices, mask).astype(float) - cfg_target_guidance_M_N_trajectories
-        # δ=0 steps run no guided pass (gui copies ung, no clean_preds trace) -> the
-        # target is trivially met; zero exactly those steps, not a blanket step 0
-        _all_per_n[:, np.asarray(delta_trajectory, dtype=float) == 0.0] = 0.0
-        _diff_per_n = _all_per_n[m]
-        _wn = min(22.0, max(8.0, 3.4 + 0.78 * len(_diff_per_n)))
-        guidance_convergence_plot = plot_trajectory(
-            {"realized − target": _diff_per_n},
-            bands={"realized − target": (_all_per_n.min(axis=0), _all_per_n.max(axis=0))} if dist_bands_checkbox.value else None,
-            title="Guidance convergence over $n$",
-            subtitle=r"$\mathrm{mean}_{\mathrm{mask}}(x^{\mathrm{gui}}_{n,\,t=T}) - \mathrm{target}_n$",
-            xlabel="$n$",
-            step=n+1,
-            color_map={"realized − target": "#B7950B"},
-            right_trajectory=delta_trajectory,
-            right_label=r"$\delta_n$",
-            right_color="#8A2BE2",
-            right_percentage=True,
-            figsize=(_wn, 6),
-            prepend_zero=False,
-            start_index=1,
-        )
-        _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
-        _diff_per_t = _all_per_t[m]
-        # ---- guidance claim: first-order effect THROUGH the model Jacobian ----
-        # g = dL/dz = 2 r dS/dz, so one guided Euler step (dz = -h*lambda*g) changes the
-        # masked-sum residual by  dS = <dS/dz, dz> = -h * lambda_t * ||g||^2 / (2 r).
-        # This is the linearization the guidance itself is calibrated in: for FGWNOGAP,
-        # post(t) lands EXACTLY on the prescribed schedule r_target = (1-eta)^(t+1) * r_0
-        # (no overshoot by construction, drawn as the dashed reference); for FGW/FGWNOLR
-        # it is the honest one-step claim. The identity-path object mean(gui_vfs-vfs)*c
-        # is misleading here: the loss gradient acts through the network Jacobian, and
-        # its z-space direction can even oppose its effect on the observable.
-        if lambda_t is not None:
-            # precomputed in the fused `red` pass -> indexing a tiny in-memory array
-            _g2_t = np.asarray(red["grads_l2_full"].isel(m=m, n=n), dtype=float)
-            _s_flow = np.linspace(1000, 1, len(_diff_per_t)) / 1000
-            _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
-            _r_sum = _diff_per_t * float(np.asarray(mask).sum())  # masked-SUM residual (mask sums to 1)
-            _dS = np.where(np.abs(_r_sum) > 1e-12, -_h_flow * lambda_t * _g2_t / (2.0 * _r_sum), 0.0)
-            _post_sel = _diff_per_t + _dS
-        else:
-            # rollout predates the guidance_schedule sidecar -> no recorded lambda_t
-            _post_sel = np.full_like(_diff_per_t, np.nan)
-        _guidance_move = _post_sel - _diff_per_t          # within-step: achieved(t) - measured(t)
-        _deflection_move = _diff_per_t[1:] - _post_sel[:-1]  # between steps: measured(t+1) - achieved(t)
-
-        _T_len = len(_diff_per_t)
-        _xt = np.arange(1, _T_len + 1).astype(float)   # both points at the same integer t
-
-        # between-step drift line: post(t) -> pre(t+1)
-        _xz = np.empty(2 * _T_len); _yz = np.empty(2 * _T_len)
-        _xz[0::2], _xz[1::2] = _xt, _xt
-        _yz[0::2], _yz[1::2] = _diff_per_t, _post_sel
-
-        _wt = min(22.0, max(8.0, 3.4 + 0.78 * _T_len))
-        with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
-            _fig, _ax = plt.subplots(figsize=(_wt, 6), dpi=dpi_slider.value)
-            if dist_bands_checkbox.value:
-                _ax.fill_between(_xt, _all_per_t.min(axis=0), _all_per_t.max(axis=0),
-                                 color="#B7950B", alpha=0.14, linewidth=0, label=f"pre-step range, M={_all_per_t.shape[0]}")
-            # waterfall candles anchored ON the trajectory (same units as the axis):
-            # blue = the guidance move at t (ung_t -> gui_t);
-            # red  = the deflection arriving at t (gui_{t-1} -> ung_t)
-            # red bar sits just LEFT of the tick (the realization gap arriving at t),
-            # blue bar just RIGHT of it (the new claim leaving t)
-            _bar_off = 0.16
-            _ax.bar(_xt + _bar_off, _guidance_move, bottom=_diff_per_t, width=0.28,
-                    color="#2E86C1", alpha=0.35, zorder=3, label=r"guidance claim (1st order, via Jacobian)")
-            if _T_len > 1:
-                _ax.bar(_xt[1:] - _bar_off, _deflection_move, bottom=_post_sel[:-1], width=0.28,
-                        color="#C0392B", alpha=0.35, zorder=3, label=r"realization gap  (pre$_{t+1}$ − post$_t$)")
-            # thin drift lines keep the trajectory readable across steps
-            for _i in range(_T_len - 1):
-                _ax.plot([_xt[_i], _xt[_i + 1]], [_post_sel[_i], _diff_per_t[_i + 1]],
-                         "-", color="#B7950B", alpha=0.5, linewidth=1.1, zorder=4,
-                         label="model drift" if _i == 0 else "_nolegend_")
-            # recorded a_t IS the theoretical remaining-gap schedule for NOGAP, so this
-            # reference stays correct across rollouts regardless of the exponent used
-            if guidance_mode_dropdown.value == "FGWNOGAP" and a_t_schedule is not None:
-                _ax.plot(_xt, _diff_per_t[0] * np.asarray(a_t_schedule, dtype=float),
-                         "--", color="#888888", linewidth=1.2, alpha=0.9, zorder=2,
-                         label=r"NOGAP schedule  $r_0\,a_t$")
-            _ax.plot(_xt, _post_sel, "D", color="#2E86C1", markersize=5, zorder=6,
-                     label=r"claimed after step $t$")
-            _ax.plot(_xt, _diff_per_t, "o", markerfacecolor="none", markeredgecolor="#B7950B",
-                     markeredgewidth=1.8, markersize=8, linestyle="none", zorder=7,
-                     label=r"measured before step $t$  (clean pred)")
-            _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
-            _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
-            _ax.set_xlim(0.6, _T_len + 0.4)
-            _ax.set_xticks(_xt)
-            _ax.set_xlabel("$t$"); _ax.set_ylabel("masked mean − target")
-            _ax.set_title("Guidance convergence over $t$ — within-step split", loc="left", fontweight="bold")
-            for _sp in ("top", "right"):
-                _ax.spines[_sp].set_visible(False)
-            _ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
-            _ax.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
-            _fig.tight_layout(rect=(0, 0, 0.82, 1))
-        guidance_convergence_t_plot = _fig
-    return guidance_convergence_plot, guidance_convergence_t_plot
-
-
-@app.cell
-def _(
-    config,
-    dask,
-    dist_bands_checkbox,
-    grads_xr,
-    m,
-    mask,
-    mo,
-    n,
-    notebook_mode,
-    np,
-    plot_trajectory,
-    t,
-    xr,
-):
-    # ===== Gradient informativeness over t (saliency-style pattern metrics) =====
-    # All metrics operate on the NORMALIZED gradient energy distribution
-    # p_g = g_t^2 / sum(g_t^2) on the guided (var, level) channel: the stored grads are the
-    # applied step (raw grad x w*a_t) and the raw LBG grad is residual-proportional, so
-    # per-(m,n,t) normalization removes every scalar factor -> pure spatial pattern.
-    # Metrics follow the saliency-benchmark taxonomy (Bylinskii et al., arXiv:1604.03605):
-    #   IMEF skill  - in-mask energy fraction, skill-normalized vs mask area (0=random, 1=perfect)
-    #   JSD align   - 1 - JSD(p_g || p_m)/ln2 vs the mask density (bounded [0,1], zero-safe)
-    #   eff. active area - exp(H(p_g))/N: fraction of grid the gradient effectively occupies
-    #                      (mask-independent sharpening; the mask's own EAA is drawn as a
-    #                      reference -- the gradient can be SHARPER than the mask, so the
-    #                      informativeness gain over t is mass RELOCATION, not sharpening)
-    #   NSS (right axis) - mean z-score of g^2 inside the half-max mask region
-    if notebook_mode == "analyze_rollout":
-
-        _sp = ("latitude", "longitude")
-        _g = grads_xr[config.VAR]
-        if config.PARTITION == "level":
-            _g = _g.sel(level=config.LEVEL)
-        _G = _g ** 2
-        _tot = _G.sum(dim=_sp)
-        _pg = _G / _tot.where(_tot > 0)
-
-        _pm_np = mask / mask.sum()
-        _coords = {"latitude": _g.latitude, "longitude": _g.longitude}
-        _pm = xr.DataArray(_pm_np, dims=_sp, coords=_coords)
-        _R = xr.DataArray(mask >= 0.5 * mask.max(), dims=_sp, coords=_coords)
-        _A = float(_R.values.mean())
-        _Ncells = float(mask.size)
-
-        def _plogq(p, q):
-            # p*log(p/q) with the 0*log(0) = 0 convention
-            return xr.where(p > 0, p * np.log(p / q), 0.0)
-
-        # 1. in-mask energy fraction, skill-normalized vs mask area
-        _imef_skill = (_pg.where(_R).sum(dim=_sp) - _A) / (1.0 - _A)
-
-        # 2. Jensen-Shannon alignment with the mask density
-        _mavg = 0.5 * (_pg + _pm)
-        _jsd = 0.5 * _plogq(_pg, _mavg).sum(dim=_sp) + 0.5 * _plogq(_pm, _mavg).sum(dim=_sp)
-        _jsd_align = 1.0 - _jsd / np.log(2.0)
-
-        # 3. effective active area (spatial perplexity / N)
-        _H = -_plogq(_pg, 1.0).sum(dim=_sp)
-        _eaa = np.exp(_H) / _Ncells
-        _Hm = float(-np.where(_pm_np > 0, _pm_np * np.log(_pm_np), 0.0).sum())
-        _eaa_floor = float(np.exp(_Hm) / _Ncells)
-
-        # 4. NSS: mean z-score of gradient energy inside the mask region
-        _z = (_G - _G.mean(dim=_sp)) / _G.std(dim=_sp)
-        _nss = _z.where(_R).mean(dim=_sp)
-
-        _imef_skill, _jsd_align, _eaa, _nss = dask.compute(_imef_skill, _jsd_align, _eaa, _nss)
-
-        def _sel(da):
-            return np.atleast_2d(da.isel(n=n).values)  # (m, t)
-
-        _curves = {
-            "IMEF skill": _sel(_imef_skill),
-            "JSD align": _sel(_jsd_align),
-            "eff. active area": _sel(_eaa),
-        }
-        _T_len = next(iter(_curves.values())).shape[1]
-        _traces = {_k: _v[m] for _k, _v in _curves.items()}
-        _traces["mask EAA (ref)"] = np.full(_T_len, _eaa_floor)
-        _bands = (
-            {_k: (_v.min(axis=0), _v.max(axis=0)) for _k, _v in _curves.items()}
-            if dist_bands_checkbox.value else None
-        )
-        _wt = min(22.0, max(8.0, 3.4 + 0.78 * _T_len))
-        # NSS is NaN exactly when the applied gradient is zero/absent (skipna makes
-        # the other metrics spuriously finite there), so it is the reliable guard
-        if not np.isfinite(_sel(_nss)[m]).any():
-            # all-NaN metrics: gradients are zero/absent for this selection (e.g. eta=0 or
-            # delta=0 runs) -> nothing to normalize; show a note instead of crashing on ylim
-            grad_informativeness_plot = mo.md("_gradient informativeness: no applied gradient for this selection (all-zero grads)_")
-        else:
-            grad_informativeness_plot = plot_trajectory(
-                _traces,
-                bands=_bands,
-                title="Gradient informativeness over $t$",
-                subtitle=(r"pattern metrics of the normalized gradient energy "
-                          r"$p_g = g_t^2/\Sigma\, g_t^2$ vs mask "
-                          r"(IMEF skill | $1-\mathrm{JSD}(p_g\Vert p_m)/\ln 2$ | $\exp(H(p_g))/N$; right: NSS)"),
-                xlabel="$t$",
-                step=t + 1,
-                color_map={
-                    "IMEF skill": "#0072B2",
-                    "JSD align": "#D55E00",
-                    "eff. active area": "#009E73",
-                    "mask EAA (ref)": "#9AA0A6",
-                },
-                right_trajectory={"NSS": _sel(_nss)[m]},
-                right_label="NSS",
-                figsize=(_wt, 6),
-                prepend_zero=False,
-                start_index=1,
-            )
-    else:
-        grad_informativeness_plot = None
-    return (grad_informativeness_plot,)
-
-
 @app.cell
 def _(mo):
     mo.md(r"""
@@ -3028,13 +2238,16 @@ def _(
     notebook_mode,
     plot_trajectory,
     red,
+    row_keys,
     t,
 ):
     if notebook_mode == "analyze_rollout":
-        _vf_traces, _bands = cross_traces(red["vfs_l2"].isel(n=n), "t", "l2", m, **cross_ctl)
+        _vf_traces, _bands = cross_traces(red["vfs_l2"].isel(n=n), "t", "l2", m, **{**cross_ctl, "k": 10**9})
+        _vf_traces = {_k: _vf_traces[_k] for _k in row_keys["vfs"] if _k in _vf_traces}
+        _bands = {_k: _bands[_k] for _k in _vf_traces if _k in _bands} if _bands else None
         _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _vf_traces.values()), default=1)))
-        vf_norms_plot = plot_trajectory(_vf_traces, title="Vf norms over $t$",
-            subtitle=r"$\|\mathrm{vf}_t\|_{\mathrm{spatial}}$", step=t + 1, color_map=color_for(_vf_traces), bands=_bands,
+        vf_norms_plot = plot_trajectory(_vf_traces, title="Vector field norm over $t$",
+            subtitle=r"$\|\mathrm{vf}_t\|$ (model vf before the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space, at the selected $n$", step=t + 1, color_map=color_for(_vf_traces), bands=_bands,
             figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True)
     else:
         vf_norms_plot = None
@@ -3051,13 +2264,16 @@ def _(
     notebook_mode,
     plot_trajectory,
     red,
+    row_keys,
     t,
 ):
     if notebook_mode == "analyze_rollout":
-        _gvf_traces, _bands = cross_traces(red["gui_vfs_l2"].isel(n=n), "t", "l2", m, **cross_ctl)
+        _gvf_traces, _bands = cross_traces(red["gui_vfs_l2"].isel(n=n), "t", "l2", m, **{**cross_ctl, "k": 10**9})
+        _gvf_traces = {_k: _gvf_traces[_k] for _k in row_keys["gui_vfs"] if _k in _gvf_traces}
+        _bands = {_k: _bands[_k] for _k in _gvf_traces if _k in _bands} if _bands else None
         _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _gvf_traces.values()), default=1)))
-        guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Gui vf norms over $t$",
-            subtitle=r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|_{\mathrm{spatial}}$", step=t + 1, color_map=color_for(_gvf_traces), bands=_bands,
+        guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided vector field norm over $t$",
+            subtitle=r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|$ (after the guidance kick) — L2 over space, at the selected $n$", step=t + 1, color_map=color_for(_gvf_traces), bands=_bands,
             figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True)
     else:
         guided_vf_norms_plot = None
@@ -3118,13 +2334,6 @@ def _(
             gui_vfs_xr = get_rollout("gui_vfs", rollout_id).sel(sweep_params)
             gui_vec_xr = None
             gui_res_xr = None
-            # FLOWGRAD_FREE has no guidance direction -> trace containers are all-NaN;
-            # fill with 0 so the (not-applicable) trace plots render flat instead of crashing.
-            if guidance_mode_dropdown.value == "FGF":
-                grads_xr = grads_xr.fillna(0.0)
-                vfs_xr = vfs_xr.fillna(0.0)
-                clean_preds_xr = clean_preds_xr.fillna(0.0)
-                gui_vfs_xr = gui_vfs_xr.fillna(0.0)
         else:
             # ---- NEW FORMAT: reconstruct in-memory (stays lazy in dask) ----
 
@@ -3306,7 +2515,6 @@ def _(
         )
     return (
         clean_preds_diff_slice,
-        clean_preds_slices,
         diff_grads_slice,
         diff_gt_clean_pred_slice,
         diff_gt_ung_onl_slice,
@@ -3503,28 +2711,27 @@ def _(
             ],
             align="start",
         )
-        flow_controls = mo.hstack(
+        flow_controls = mo.vstack(
             [
-                mo.vstack(
+                mo.hstack(
                     [
-                        mo.hstack([t_slider, dpi_slider], justify="start", align="start"),
-                        mo.hstack([m_slider, n_slider], justify="start", align="start"),
-                    ],
-                    align="start",
-                ),
-                mo.vstack(
-                    [
-                        var_controls,
-                        mo.hstack([show_mask_switch, zoom_slider], justify="start", align="start"),
-                        mo.hstack(
-                            [contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider],
-                            justify="start", align="start",
+                        mo.vstack(
+                            [
+                                mo.hstack([t_slider, dpi_slider], justify="start", align="start"),
+                                mo.hstack([m_slider, n_slider], justify="start", align="start"),
+                            ],
+                            align="start",
                         ),
+                        var_controls,
                     ],
-                    align="start",
+                    justify="start", align="start",
+                ),
+                mo.hstack([show_mask_switch, zoom_slider], justify="start", align="start"),
+                mo.hstack(
+                    [contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider],
+                    justify="start", align="start",
                 ),
             ],
-            justify="start",
             align="start",
         )
 
@@ -3538,14 +2745,14 @@ def _(
         flow_widget_make = mo.vstack(
             [
                 sweep_params_widget,
-                mo.hstack(
-                    [mo.vstack(list(flow_checks.values())), flow_controls],
-                    justify="start", align="start",
-                ),
-                mo.vstack(
-                    [mo.hstack(maps, justify="start", align="start") for n, maps in map_rows if flow_checks[n].value],
-                    align="start",
-                ),
+                flow_controls,
+                mo.hstack([
+                    mo.vstack([flow_checks[_k] for _k, _ in map_rows], justify="start", align="start").style(width="fit-content"),
+                    mo.vstack(
+                        [mo.hstack(_maps, justify="start", align="start") for _k, _maps in map_rows if flow_checks[_k].value],
+                        justify="start", align="start",
+                    ).style(width="fit-content"),
+                ], justify="start", align="start"),
             ],
             justify="start", align="start",
         )
@@ -3563,196 +2770,569 @@ def _(flow_widget_make, notebook_mode):
 
 
 @app.cell(hide_code=True)
-def pr_ctl(mo):
-    # physical-realism row toggles (mirrors cross_row_checks)
-    pr_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "spectral distance", "spectral bias", "total power", "distributional skill",
-    )})
-    return (pr_row_checks,)
-
-
-@app.cell(hide_code=True)
-def pr_data(
-    N,
-    T,
-    clean_preds_slices,
-    gt_N_slices,
-    gt_rollout,
-    gui_M_N_slices,
-    log_spectral_distance,
-    m,
-    n,
-    notebook_mode,
-    np,
-    power_spectrum,
-    spectral_bias,
-    ung_M_N_slices,
-    ung_gui_M_N_slices,
-):
-    # ===== Physical realism: per-source spectral metric traces (LSD / bias / power) =====
-    # Mirrors the cross-var `red` idea but with spherical-harmonic spectra: for the selected
-    # var/level, power spectra of each source (ung / ung_gui / gui) are compared to gt per
-    # rollout step n; over flow t the guided clean-pred trajectory is compared to gt at step n.
-    if notebook_mode == "analyze_rollout":
-        _lat = gt_rollout.latitude.values
-
-        def _spec(_f):
-            return power_spectrum(np.asarray(_f), _lat)[1]
-
-        # forecast step _ni is valid at day _ni+1; gt_N_slices holds days 0..N
-        _gt_spec = {_ni: _spec(gt_N_slices[_ni + 1]) for _ni in range(N)}
-        _src_slices = {"ung": ung_M_N_slices, "ung_gui": ung_gui_M_N_slices, "gui": gui_M_N_slices}
-
-        pr_n = {"lsd": {}, "bias": {}, "power": {}}
-        for _k, _sl in _src_slices.items():
-            _specs = [_spec(_sl[m][_ni]) for _ni in range(N)]
-            pr_n["lsd"][_k]   = [log_spectral_distance(_specs[_ni], _gt_spec[_ni]) for _ni in range(N)]
-            pr_n["bias"][_k]  = [spectral_bias(_specs[_ni], _gt_spec[_ni]) for _ni in range(N)]
-            pr_n["power"][_k] = [float(np.sum(_specs[_ni][1:])) for _ni in range(N)]
-        pr_n["power"]["gt"] = [float(np.sum(_gt_spec[_ni][1:])) for _ni in range(N)]
-
-        _clean_specs = [_spec(clean_preds_slices[m][n][_ti]) for _ti in range(T)]
-        pr_t = {
-            "lsd":   {"gui": [log_spectral_distance(_clean_specs[_ti], _gt_spec[n]) for _ti in range(T)]},
-            "bias":  {"gui": [spectral_bias(_clean_specs[_ti], _gt_spec[n]) for _ti in range(T)]},
-            "power": {"gui": [float(np.sum(_clean_specs[_ti][1:])) for _ti in range(T)],
-                      "gt":  [float(np.sum(_gt_spec[n][1:]))] * T},
-        }
-
-        # distributional skill: the spatial value distribution of the selected var/level slice
-        # at the chosen (m, n) for each source -> overlaid histograms (gt / ung / ung_gui / gui).
-        pr_dist = {
-            "gt":      np.asarray(gt_N_slices[n+1]).ravel(),
-            "ung":     np.asarray(ung_M_N_slices[m][n]).ravel(),
-            "ung_gui": np.asarray(ung_gui_M_N_slices[m][n]).ravel(),
-            "gui":     np.asarray(gui_M_N_slices[m][n]).ravel(),
-        }
-    else:
-        pr_n = pr_t = pr_dist = None
-    return pr_dist, pr_n, pr_t
-
-
-@app.cell
-def _(
-    N,
-    T,
-    level,
-    m,
-    m_slider,
-    mask_widget_controls,
-    mo,
-    n,
-    n_slider,
-    notebook_mode,
-    np,
-    partition,
-    plot_trajectory,
-    plt,
-    pr_dist,
-    pr_n,
-    pr_row_checks,
-    pr_t,
-    sweep_params_widget,
-    t,
-    t_slider,
-    var,
-):
-    # ===== Physical realism: spectral-realism plots, cross-var-check style =====
-    if notebook_mode == "analyze_rollout":
-
-        _src_colors = {"gt": "#222222", "ung": "#1f77b4", "ung_gui": "#2ca02c", "gui": "#d62728"}
-        _wn = min(22.0, max(8.0, 3.4 + 0.78 * N))
-        _wt = min(22.0, max(8.0, 3.4 + 0.78 * T))
-
-        def _pr_plot(_tr, _title, _sub, _axis):
-            if not any(np.isfinite(np.asarray(_v, dtype=float)).any() for _v in _tr.values()):
-                return mo.md(f"_{_title}: no finite data for this selection_")
-            return plot_trajectory(
-                _tr, title=_title, subtitle=_sub, xlabel=f"${_axis}$",
-                step=(n + 1 if _axis == "n" else t + 1),
-                color_map={_k: _src_colors[_k] for _k in _tr},
-                figsize=((_wn if _axis == "n" else _wt), 6),
-                prepend_zero=(_axis == "n"), start_index=(1 if _axis == "t" else 0),
-                mirror_right_axis=True,
-            )
-
-        # value-distribution histogram at the selected (m, n): overlaid densities per source
-        def _dist_plot(dist):
-            _order = [s for s in ("gt", "ung", "ung_gui", "gui") if s in dist]
-            _fin = {s: dist[s][np.isfinite(dist[s])] for s in _order}
-            _present = [s for s in _order if _fin[s].size]
-            _lvl = f" @ {level} hPa" if partition == "level" else ""
-            with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
-                _fig, _ax = plt.subplots(figsize=(_wn, 6), dpi=130)
-                if _present:
-                    _allv = np.concatenate([_fin[s] for s in _present])
-                    _bins = np.linspace(float(_allv.min()), float(_allv.max()), 41)
-                    for s in _present:
-                        # curve histogram: stepped outline only, no filled bars
-                        _ax.hist(_fin[s], bins=_bins, density=True, histtype="step",
-                                 linewidth=1.9, color=_src_colors[s], label=s, zorder=3)
-                _ax.set_xlabel(f"{var}{_lvl} value")
-                _ax.set_ylabel("density")
-                _ax.set_title(f"Value distribution — {var}{_lvl}  (m={m}, n={n})",
-                              loc="left", fontweight="bold")
-                for _sp in ("top", "right"):
-                    _ax.spines[_sp].set_visible(False)
-                _ax.legend(frameon=False, loc="upper right")
-                _fig.tight_layout()
-            return _fig
-
-        _pr_rows = {
-            "spectral distance": [
-                _pr_plot(pr_n["lsd"],  r"Log-spectral distance (LSD) over $n$",
-                         r"$\mathrm{LSD}_n=\sqrt{\frac{1}{L}\sum_{\ell\geq1}\left(\ln\mathrm{PS}_n(\ell)-\ln\mathrm{PS}^{\mathrm{gt}}_n(\ell)\right)^2}$", "n"),
-                _pr_plot(pr_t["lsd"],  r"Log-spectral distance (LSD) over $t$",
-                         r"$\mathrm{LSD}_t=\sqrt{\frac{1}{L}\sum_{\ell\geq1}\left(\ln\mathrm{PS}_t(\ell)-\ln\mathrm{PS}^{\mathrm{gt}}_n(\ell)\right)^2}$", "t"),
-            ],
-            "spectral bias": [
-                _pr_plot(pr_n["bias"], r"Spectral bias over $n$",
-                         r"$\mathrm{bias}_n=\frac{1}{L}\sum_{\ell\geq1}\ln\frac{\mathrm{PS}_n(\ell)}{\mathrm{PS}^{\mathrm{gt}}_n(\ell)}$", "n"),
-                _pr_plot(pr_t["bias"], r"Spectral bias over $t$",
-                         r"$\mathrm{bias}_t=\frac{1}{L}\sum_{\ell\geq1}\ln\frac{\mathrm{PS}_t(\ell)}{\mathrm{PS}^{\mathrm{gt}}_n(\ell)}$", "t"),
-            ],
-            "total power": [
-                _pr_plot(pr_n["power"], r"Total power over $n$",
-                         r"$P_n=\sum_{\ell\geq1}\mathrm{PS}_n(\ell)$", "n"),
-                _pr_plot(pr_t["power"], r"Total power over $t$",
-                         r"$P_t=\sum_{\ell\geq1}\mathrm{PS}_t(\ell)$", "t"),
-            ],
-            # distributional skill: spatial value distribution at the selected (m, n), all sources.
-            "distributional skill": [
-                _dist_plot(pr_dist),
-            ],
-        }
-
-        power_spectrum_widget = mo.vstack([
-            mo.md("## Physical realism"),
-            sweep_params_widget,
-            mask_widget_controls,
-            mo.hstack([m_slider, n_slider, t_slider], justify="start"),
-            mo.hstack([
-                mo.vstack(list(pr_row_checks.values()), justify="start", align="start").style(width="fit-content"),
-                mo.vstack(
-                    [mo.hstack(_plots, justify="start") for _key, _plots in _pr_rows.items() if pr_row_checks[_key].value],
-                    align="start",
-                ).style(width="fit-content"),
-            ], align="start", justify="start"),
-        ], align="start")
-    else:
-        power_spectrum_widget = None
-    power_spectrum_widget
+def _(mo):
+    mo.md(r"""
+    ## Cross variable checks
+    """)
     return
 
 
 @app.cell
+def _(mask, mcolors, mo, np, plt, xr):
+
+    LEVEL_VARS = ["geopotential", "u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity", "vertical_velocity"]
+    SURFACE_PAIR = {"temperature": "2m_temperature", "u_component_of_wind": "10m_u_component_of_wind", "v_component_of_wind": "10m_v_component_of_wind"}
+    _ALL_VARS = LEVEL_VARS + ["10m_u_component_of_wind", "10m_v_component_of_wind", "2m_temperature", "mean_sea_level_pressure"]
+    _SURF_TO_LVL = {s: l for l, s in SURFACE_PAIR.items()}
+    _PALETTE = plt.get_cmap("tab10").colors
+    _N_LEVELS = 13
+
+    level_var_dropdown = mo.ui.dropdown(LEVEL_VARS + ["mean_sea_level_pressure"], label="variable: ")
+    aggregate_by_level_checkbox = mo.ui.checkbox(label="aggregate by level")
+    aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
+    dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
+    cross_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
+        "masked avg", "grad_norms", "gui_vf_norms", "vf_norms", "angular deflection",
+    )})
+    differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
+    abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$", value=True)
+
+    def n_traces(v, agg):
+        if v is None:
+            return len(_ALL_VARS) if agg else len(LEVEL_VARS) * _N_LEVELS + (len(_ALL_VARS) - len(LEVEL_VARS))
+        if agg:
+            return 1
+        return (_N_LEVELS + (1 if v in SURFACE_PAIR else 0)) if v in LEVEL_VARS else 1
+
+    def grouped_vars(ds, v, agg):
+        vars_ = list(ds.data_vars) if v is None else [v] + ([SURFACE_PAIR[v]] if v in SURFACE_PAIR else [])
+        if v is not None and agg:
+            return {v: [ds[x] for x in vars_]}
+        out = {}
+        for name in vars_:
+            da = ds[name]
+            if "level" in da.dims and not agg:
+                for lv in da["level"].values:
+                    out[f"{name} L{int(lv)}"] = [da.sel(level=lv)]
+            else:
+                out[name] = [da]
+        return out
+
+    def color_for(labels):
+        out = {}
+        for label in labels:
+            if " L" in label:
+                name, lv = label.rsplit(" L", 1); lv = int(lv)
+            else:
+                name, lv = label, None
+            base = _SURF_TO_LVL.get(name, name)
+            hue = mcolors.to_rgb(_PALETTE[_ALL_VARS.index(base) % len(_PALETTE)])
+            intensity = 1.0 if lv is None else 0.3 + 0.7 * lv / 1000
+            out[label] = tuple(c + (1 - c) * (1 - intensity) for c in hue)
+        return out
+
+    def maybe_mask(ds, mode):
+        if mode not in ("mask", "!mask"):
+            return ds
+        # boolean region at half-maximum: BBOX (0/1) is unchanged; GAUSSIAN is
+        # nonzero everywhere (astype(bool) would be all-True -> "!mask" all-NaN),
+        # and its peak is ~1/sum, so the threshold must be relative to max.
+        _m = xr.DataArray(
+            mask >= 0.5 * mask.max(),
+            dims=("latitude", "longitude"),
+            coords={"latitude": ds.latitude, "longitude": ds.longitude},
+        )
+        return ds.where(_m if mode == "mask" else ~_m)
+
+    def cross_traces(red_ds, axis, agg, m_idx, *, k, var, by_level, diff, absv, bands):
+        """Member trace + optional min/max band from spatially pre-reduced cubes (see `red`).
+        Pure: all control values come in as args so callers carry the UI dependencies."""
+        _g = grouped_vars(red_ds, var, by_level)
+
+        def _reduce(das):
+            _other = lambda da: [d for d in da.dims if d not in (axis, "m")]
+            if agg == "l2":
+                out = np.sqrt(sum(da.sum(dim=_other(da)) for da in das))
+            else:
+                out = sum(da.mean(dim=_other(da)) for da in das) / len(das)
+            if "m" in out.dims:
+                out = out.transpose("m", axis)
+            arr = np.atleast_2d(out.values)  # (members, axis)
+            if diff:
+                arr = np.concatenate([np.zeros((arr.shape[0], 1)), np.diff(arr, axis=1)], axis=1)
+            if absv:
+                arr = np.abs(arr)
+            return arr
+
+        _full = {k_: _reduce(das) for k_, das in _g.items()}
+        traces = top_k({k_: v[m_idx if v.shape[0] > 1 else 0] for k_, v in _full.items()}, k)
+        bands_out = (
+            {k_: (_full[k_].min(axis=0), _full[k_].max(axis=0)) for k_ in traces if _full[k_].shape[0] > 1}
+            if bands
+            else None
+        )
+        return traces, bands_out
+
+    def top_k(traces, k):
+        # rank by the variable's AGGREGATED influence over all steps (nan-aware mean of
+        # |trace|), not by a single peak step. nan-safe: traces may carry NaN gaps (e.g.
+        # dvf_angle at t=0); all-NaN traces rank last.
+        def _key(kv):
+            _v = np.abs(kv[1])
+            return -float(np.nanmean(_v)) if np.isfinite(_v).any() else np.inf
+        return dict(sorted(traces.items(), key=_key)[:k])
+
+    return (
+        abs_checkbox,
+        aggregate_by_level_checkbox,
+        aggregate_spatially_dropdown,
+        color_for,
+        cross_row_checks,
+        cross_traces,
+        differential_checkbox,
+        dist_bands_checkbox,
+        level_var_dropdown,
+        maybe_mask,
+        n_traces,
+    )
+
+
+@app.cell
+def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
+    differential_checkbox,
+    dist_bands_checkbox,
+    level_var_dropdown,
+    top_k_slider,
+):
+    cross_ctl = dict(
+        k=top_k_slider.value,
+        var=level_var_dropdown.value,
+        by_level=aggregate_by_level_checkbox.value,
+        diff=differential_checkbox.value,
+        absv=abs_checkbox.value,
+        bands=dist_bands_checkbox.value,
+    )
+    return (cross_ctl,)
+
+
+@app.cell
+def _(aggregate_by_level_checkbox, level_var_dropdown, mo, n_traces):
+    _kmax = n_traces(level_var_dropdown.value, aggregate_by_level_checkbox.value)
+    top_k_slider = mo.ui.slider(1, _kmax, value=min(5,_kmax), label=get_label("top K", _kmax), show_value=True)
+    return (top_k_slider,)
+
+
+@app.cell
+def _(
+    abs_checkbox,
+    aggregate_by_level_checkbox,
+    aggregate_spatially_dropdown,
+    differential_checkbox,
+    level_var_dropdown,
+    mo,
+    top_k_slider,
+):
+    cross_check_controls = mo.vstack(
+        [
+            mo.hstack([differential_checkbox, abs_checkbox, top_k_slider], justify="start", align="start"),
+            mo.hstack([level_var_dropdown, aggregate_by_level_checkbox, aggregate_spatially_dropdown], justify="start", align="start"),
+        ],
+        align="start",
+    )
+    return (cross_check_controls,)
+
+
+@app.cell
+def _(XarrayNormalizer, gt_rollout, guided_xr, notebook_mode):
+    if notebook_mode == "analyze_rollout":
+        xnorm = XarrayNormalizer()
+        # raw (un-normalized) gt aligned to rollout coords. Normalization is deferred
+        # until AFTER the spatial reduction in the `red` cell: the affine, per-(var,level)
+        # normalization commutes with the spatial mean, so we never build a full-cube copy.
+        gt_n_xr = (
+            gt_rollout.isel(time=slice(1, None))
+            .rename({"time": "n"})
+            # gt coords differ from rollout coords in float precision; assign exact
+            # copies so xarray alignment keeps the full grid
+            .assign_coords(
+                n=guided_xr.n,
+                latitude=guided_xr.latitude,
+                longitude=guided_xr.longitude,
+                level=guided_xr.level,
+            )
+        )
+    return gt_n_xr, xnorm
+
+
+@app.cell
+def _(
+    aggregate_spatially_dropdown,
+    clean_preds_xr,
+    dask,
+    grads_xr,
+    gt_n_xr,
+    gui_vfs_xr,
+    guided_xr,
+    mask,
+    maybe_mask,
+    notebook_mode,
+    np,
+    ung_gui_final_xr,
+    ung_gui_xr,
+    vfs_xr,
+    xnorm,
+    xr,
+):
+    # spatially-reduced cubes: built LAZILY on the dask-backed cubes, then computed in
+    # one fused pass -> dask streams chunks and never materializes a full cube. Sliders
+    # (m, n, t, k, variable, Δ, abs, bands) then only index these tiny arrays.
+    if notebook_mode == "analyze_rollout":
+
+        _sp = ("latitude", "longitude")
+        _msk = lambda ds: maybe_mask(ds, aggregate_spatially_dropdown.value)
+        _sq = lambda ds: (_msk(ds) ** 2).sum(dim=_sp)        # squared sum; sqrt after folding
+        _mn = lambda ds: _msk(ds).mean(dim=_sp)
+        _nmn = lambda ds: xnorm.normalize(_mn(ds))           # normalize commutes with the spatial mean
+        # mask-WEIGHTED mean (rollout-trajectories convention: sum(mask*x)/sum(mask)); the
+        # masked-average charts use the mask weights, independent of the aggregate dropdown.
+        _mask_w = xr.DataArray(np.asarray(mask, dtype=float), dims=_sp,
+                               coords={"latitude": guided_xr.latitude, "longitude": guided_xr.longitude})
+        _wmn = lambda ds: (ds * _mask_w).sum(dim=_sp) / float(_mask_w.sum())
+        _wnmn = lambda ds: xnorm.normalize(_wmn(ds))
+        # deflection accounts for the temporal ordering: within a step the unguided vf is
+        # computed before the guided one, so the guided push at t is compared to the unguided
+        # vf one step later -> vf_t - vf^gui_{t-1}. shift pads the initial step (t=0) -> 0,
+        # like the other difference charts.
+        _dvf = (vfs_xr - gui_vfs_xr.shift(t=1)).fillna(0.0)
+        red = {
+            "grads_l2": _sq(grads_xr),
+            "vfs_l2": _sq(vfs_xr),
+            "gui_vfs_l2": _sq(gui_vfs_xr),
+            "dvf_l2": _sq(_dvf),
+            "dvf_mean": _mn(_dvf),
+            "dvf_dot": (_msk(vfs_xr) * _msk(gui_vfs_xr.shift(t=1))).sum(dim=_sp),
+            "gvf_prev_sq": _sq(gui_vfs_xr.shift(t=1)),
+            "gui_ung_gui_mean": _nmn(guided_xr) - _nmn(ung_gui_final_xr),
+            "gui_gt_mean": _nmn(guided_xr) - _nmn(gt_n_xr),
+            "clean_gt_mean": _nmn(clean_preds_xr) - _nmn(gt_n_xr),
+            "ung_gui_gt_mean": _nmn(ung_gui_final_xr) - _nmn(gt_n_xr),
+            "ung_gui_gt_t_mean": _nmn(ung_gui_xr) - _nmn(gt_n_xr),
+            "clean_ung_gui_mean": _nmn(clean_preds_xr) - _nmn(ung_gui_xr),
+            "gui_ung_gui_denorm": _wmn(guided_xr) - _wmn(ung_gui_final_xr),
+            "clean_ung_gui_denorm": _wmn(clean_preds_xr) - _wmn(ung_gui_xr),
+            "gui_ung_gui_wnorm": _wnmn(guided_xr) - _wnmn(ung_gui_final_xr),
+            "clean_ung_gui_wnorm": _wnmn(clean_preds_xr) - _wnmn(ung_gui_xr),
+            # full-domain ||dL/dz||^2 per (m, n, t) -- consumed by the convergence plot's
+            # through-Jacobian claim; UNMASKED by design (the loss gradient lives everywhere)
+            "grads_l2_full": sum(
+                (grads_xr[_v] ** 2).sum(dim=[_d for _d in grads_xr[_v].dims if _d not in ("m", "n", "t")])
+                for _v in grads_xr.data_vars
+            ),
+        }
+        red = dict(zip(red, dask.compute(*red.values())))    # fused: each cube read once
+        # angular deflection: angle between vf_t and vf^gui_{t-1} over the (masked) spatial
+        # field, per (m, n, t[, level], var). NaN at t=0 (no previous guided vf) -> skipped
+        # by the mean reductions / rendered as a gap.
+        _ang_denom = (red["vfs_l2"] * red["gvf_prev_sq"]) ** 0.5
+        red["dvf_angle"] = np.degrees(np.arccos((red["dvf_dot"] / _ang_denom).clip(-1.0, 1.0)))
+        # gap the FINAL flow step: as s_t -> 0 the velocity (r_hat - z_t)/s_t is noise/
+        # curvature-dominated, so the step-to-step rotation inflates regardless of guidance
+        # (and the last step applies no kick anyway, a_T = 0) -> not a guidance signal
+        red["dvf_angle"] = red["dvf_angle"].where(red["dvf_angle"]["t"] != red["dvf_angle"]["t"].values[-1])
+    else:
+        red = None
+    return (red,)
+
+
+@app.cell
+def _():
+    # final widget
+    return
+
+
+@app.cell
+def _(
+    cross_check_controls,
+    cross_row_checks,
+    dist_bands_checkbox,
+    grad_norms_n_plot,
+    grad_norms_plot,
+    gui_mean_n_plot,
+    gui_mean_t_plot,
+    gui_vf_norms_n_plot,
+    guided_vf_norms_plot,
+    m_slider,
+    mo,
+    n_slider,
+    notebook_mode,
+    sweep_params_widget,
+    t_slider,
+    vf_angdef_n_plot,
+    vf_angdef_t_plot,
+    vf_norms_n_plot,
+    vf_norms_plot,
+):
+    if notebook_mode =="analyze_rollout":
+        cross_checks_widget = mo.vstack([
+            sweep_params_widget,
+            dist_bands_checkbox,
+            cross_check_controls,
+            mo.hstack([m_slider, n_slider, t_slider], justify="start"),
+            mo.hstack([
+                mo.vstack(list(cross_row_checks.values()), justify="start", align="start").style(width="fit-content"),
+                mo.vstack(
+                    [
+                        mo.hstack(_row, justify="start")
+                        for _key, _row in [
+                            ("masked avg", [gui_mean_n_plot, gui_mean_t_plot]),
+                            ("grad_norms", [grad_norms_n_plot, grad_norms_plot]),
+                            ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
+                            ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
+                            ("angular deflection", [vf_angdef_n_plot, vf_angdef_t_plot]),
+                        ]
+                        if cross_row_checks[_key].value
+                    ],
+                    justify="start",
+                    align="start",
+                ).style(width="fit-content"),
+            ],
+            align="start",
+            justify="start",),
+        ], align="start")
+    else:
+        cross_checks_widget = None
+    cross_checks_widget
+    return
+
+
+@app.cell
+def _(
+    color_for,
+    cross_ctl,
+    cross_traces,
+    m,
+    n,
+    notebook_mode,
+    plot_trajectory,
+    red,
+    row_keys,
+    t,
+):
+    if notebook_mode =="analyze_rollout":
+        _traces, _bands = cross_traces(red["grads_l2"].isel(n=n), "t", "l2", m, **{**cross_ctl, "k": 10**9})
+        _traces = {_k: _traces[_k] for _k in row_keys["grads"] if _k in _traces}
+        _bands = {_k: _bands[_k] for _k in _traces if _k in _bands} if _bands else None
+        _w = min(22.0, max(8.0, 3.4 + 0.78 * max((len(_v) for _v in _traces.values()), default=1)))
+        grad_norms_plot = plot_trajectory(_traces, title="Gradient norm over $t$",
+            subtitle=r"$\|\nabla_{z_t} \mathcal{L}_t\|$ — L2 over space, at the selected $n$", step=t + 1, color_map=color_for(_traces), bands=_bands,
+            figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True,
+        )
+        # grad_norms_plot
+    return (grad_norms_plot,)
+
+
+@app.cell
+def _(
+    color_for,
+    cross_ctl,
+    cross_traces,
+    m,
+    n,
+    notebook_mode,
+    np,
+    plot_trajectory,
+    red,
+    t,
+):
+    if notebook_mode == "analyze_rollout":
+
+        def _plot(title, subtitle, ds, axis, agg, twin_ds=None, rank_ds=None, keys=None):
+            if keys is not None:
+                # lock the displayed variables to a caller-provided set (e.g. the matching
+                # over-n chart) so both charts of a row show the SAME traces
+                _all, _bands_all = cross_traces(ds, axis, agg, m, **{**cross_ctl, "k": 10**9})
+                _tr = {_k: _all[_k] for _k in keys if _k in _all}
+                _bands = {_k: _bands_all[_k] for _k in _tr if _k in _bands_all} if _bands_all else None
+            elif rank_ds is not None:
+                # rank variables by the NORMALIZED gui - ung_gui difference in rank_ds
+                # (fair across variables) instead of their own magnitude; the DISPLAY (ds)
+                # stays denormalized. Pull every variable's rank + display trace (k huge),
+                # sort by max|rank|, keep the top-k.
+                _ctl_all = {**cross_ctl, "k": 10**9}
+                _rank_all, _ = cross_traces(rank_ds, axis, agg, m, **_ctl_all)
+                _gui_all, _bands_all = cross_traces(ds, axis, agg, m, **_ctl_all)
+                def _rank_key(_k):  # largest |rank| first; all-NaN traces sort last
+                    _v = np.abs(_rank_all[_k])
+                    return -float(np.nanmax(_v)) if np.isfinite(_v).any() else np.inf
+                _keys = [_k for _k in sorted(_rank_all, key=_rank_key) if _k in _gui_all][: cross_ctl["k"]]
+                _tr = {_k: _gui_all[_k] for _k in _keys}
+                _bands = {_k: _bands_all[_k] for _k in _keys if _k in _bands_all} if _bands_all else None
+            else:
+                _tr, _bands = cross_traces(ds, axis, agg, m, **cross_ctl)
+            _colors = color_for(_tr)
+            _styles = None
+            if twin_ds is not None:
+                # ung_gui twin overlay for the displayed variables: same colors, dotted
+                _twin_src, _ = cross_traces(twin_ds, axis, agg, m, **{**cross_ctl, "k": 10**9})
+                _twin = {f"{_k} (ung_gui)": _twin_src[_k] for _k in _tr if _k in _twin_src}
+                _colors |= {_k: _colors[_k.removesuffix(" (ung_gui)")] for _k in _twin}
+                _styles = {_k: ":" for _k in _twin}
+                _tr = _tr | _twin
+            # width scales with the number of steps so the sparse "over n" plots
+            # (N points) are not stretched across the same width as "over t" (T points)
+            _nsteps = max((len(_v) for _v in _tr.values()), default=1)
+            _w = min(22.0, max(8.0, 3.4 + 0.78 * _nsteps))
+            return plot_trajectory(
+                _tr, title=title, subtitle=subtitle, xlabel=f"${axis}$",
+                step=(n + 1 if axis == "n" else t + 1), color_map=_colors, bands=_bands,
+                figsize=(_w, 6), prepend_zero=False, start_index=1,
+                mirror_right_axis=True, linestyle_map=_styles,
+            )
+
+        grad_norms_n_plot = _plot("Gradient norm over $n$", r"$\|\nabla_{z_t} \mathcal{L}_t\|$ — L2 over space and all flow steps $t$", red["grads_l2"], "n", "l2")
+        # per-row variable sets, ranked on the over-n cubes (which fold ALL n and t):
+        # the over-t charts display the SAME variables, so ranking always reflects the
+        # aggregated influence of the variable over all steps, never a single-step peak
+        row_keys = {
+            "masked_avg": list(cross_traces(red["gui_ung_gui_wnorm"], "n", "mean", m, **cross_ctl)[0]),
+            "grads": list(cross_traces(red["grads_l2"], "n", "l2", m, **cross_ctl)[0]),
+            "gui_vfs": list(cross_traces(red["gui_vfs_l2"], "n", "l2", m, **cross_ctl)[0]),
+            "vfs": list(cross_traces(red["vfs_l2"], "n", "l2", m, **cross_ctl)[0]),
+            "angle": list(cross_traces(red["dvf_angle"], "n", "mean", m, **cross_ctl)[0]),
+        }
+        vf_angdef_n_plot = _plot("Angular deflection over $n$", r"$\angle(\mathrm{vf}_t,\ \mathrm{vf}^{\mathrm{gui}}_{t-1})$ [$^\circ$] — rotation of the model vf away from the previous guided vf, mean over $t$", red["dvf_angle"], "n", "mean")
+        vf_angdef_t_plot = _plot("Angular deflection over $t$", r"$\angle(\mathrm{vf}_t,\ \mathrm{vf}^{\mathrm{gui}}_{t-1})$ [$^\circ$] — rotation of the model vf away from the previous guided vf, at the selected $n$; last step omitted ($s_t \to 0$ artifact)", red["dvf_angle"].isel(n=n), "t", "mean", keys=row_keys["angle"])
+        gui_vf_norms_n_plot = _plot("Guided vector field norm over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|$ (after the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space and all flow steps $t$", red["gui_vfs_l2"], "n", "l2")
+        vf_norms_n_plot = _plot("Vector field norm over $n$", r"$\|\mathrm{vf}_t\|$ (model vf before the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space and all flow steps $t$", red["vfs_l2"], "n", "l2")
+        diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n), "t", "mean")
+        gui_mean_n_plot = _plot("Masked average: guided − unguided over $n$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{n}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{n})$ — final states per forecast step, normalized units", red["gui_ung_gui_wnorm"], "n", "mean")
+        gui_mean_t_plot = _plot("Masked average: guided − unguided over $t$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{t}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{t})$ — clean predictions along the flow at the selected $n$, normalized units", red["clean_ung_gui_wnorm"].isel(n=n), "t", "mean", keys=row_keys["masked_avg"])
+    else:
+        row_keys = None
+        gui_mean_n_plot = gui_mean_t_plot = vf_angdef_n_plot = vf_angdef_t_plot = grad_norms_n_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = None
+    return (
+        grad_norms_n_plot,
+        gui_mean_n_plot,
+        gui_mean_t_plot,
+        gui_vf_norms_n_plot,
+        row_keys,
+        vf_angdef_n_plot,
+        vf_angdef_t_plot,
+        vf_norms_n_plot,
+    )
+
+
+@app.cell
+def _(
+    a_t_schedule,
+    cfg_clean_preds_slices,
+    cfg_target_guidance_M_N_trajectories,
+    dist_bands_checkbox,
+    dpi_slider,
+    get_masked_mean,
+    guidance_mode_dropdown,
+    lambda_t,
+    m,
+    mask,
+    n,
+    notebook_mode,
+    np,
+    plt,
+    red,
+    t,
+):
+    if notebook_mode =="analyze_rollout":
+        _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
+        _diff_per_t = _all_per_t[m]
+        # ---- guidance claim: first-order effect THROUGH the model Jacobian ----
+        # g = dL/dz = 2 r dS/dz, so one guided Euler step (dz = -h*lambda*g) changes the
+        # masked-sum residual by  dS = <dS/dz, dz> = -h * lambda_t * ||g||^2 / (2 r).
+        # This is the linearization the guidance itself is calibrated in: for FGWNOGAP,
+        # post(t) lands EXACTLY on the prescribed schedule r_target = (1-eta)^(t+1) * r_0
+        # (no overshoot by construction, drawn as the dashed reference); for FGW/FGWNOLR
+        # it is the honest one-step claim. The identity-path object mean(gui_vfs-vfs)*c
+        # is misleading here: the loss gradient acts through the network Jacobian, and
+        # its z-space direction can even oppose its effect on the observable.
+        if lambda_t is not None:
+            # precomputed in the fused `red` pass -> indexing a tiny in-memory array
+            _g2_t = np.asarray(red["grads_l2_full"].isel(m=m, n=n), dtype=float)
+            _s_flow = np.linspace(1000, 1, len(_diff_per_t)) / 1000
+            _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
+            _r_sum = _diff_per_t * float(np.asarray(mask).sum())  # masked-SUM residual (mask sums to 1)
+            _dS = np.where(np.abs(_r_sum) > 1e-12, -_h_flow * lambda_t * _g2_t / (2.0 * _r_sum), 0.0)
+            _post_sel = _diff_per_t + _dS
+        else:
+            # rollout predates the guidance_schedule sidecar -> no recorded lambda_t
+            _post_sel = np.full_like(_diff_per_t, np.nan)
+        _guidance_move = _post_sel - _diff_per_t          # within-step: achieved(t) - measured(t)
+        _deflection_move = _diff_per_t[1:] - _post_sel[:-1]  # between steps: measured(t+1) - achieved(t)
+
+        _T_len = len(_diff_per_t)
+        _xt = np.arange(1, _T_len + 1).astype(float)   # both points at the same integer t
+
+        # between-step drift line: post(t) -> pre(t+1)
+        _xz = np.empty(2 * _T_len); _yz = np.empty(2 * _T_len)
+        _xz[0::2], _xz[1::2] = _xt, _xt
+        _yz[0::2], _yz[1::2] = _diff_per_t, _post_sel
+
+        _wt = 22.0  # match the rollout trajectories figure width so the stacked plots align
+        with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
+            _fig, _ax = plt.subplots(figsize=(_wt, 6), dpi=dpi_slider.value)
+            if dist_bands_checkbox.value:
+                _ax.fill_between(_xt, _all_per_t.min(axis=0), _all_per_t.max(axis=0),
+                                 color="#B7950B", alpha=0.14, linewidth=0, label=f"pre-step range, M={_all_per_t.shape[0]}")
+            # waterfall candles anchored ON the trajectory (same units as the axis):
+            # blue = the guidance move at t (ung_t -> gui_t);
+            # red  = the deflection arriving at t (gui_{t-1} -> ung_t)
+            # red bar sits just LEFT of the tick (the realization gap arriving at t),
+            # blue bar just RIGHT of it (the new claim leaving t)
+            _bar_off = 0.16
+            _ax.bar(_xt + _bar_off, _guidance_move, bottom=_diff_per_t, width=0.28,
+                    color="#2E86C1", alpha=0.35, zorder=3, label=r"guidance claim (1st order, via Jacobian)")
+            if _T_len > 1:
+                _ax.bar(_xt[1:] - _bar_off, _deflection_move, bottom=_post_sel[:-1], width=0.28,
+                        color="#C0392B", alpha=0.35, zorder=3, label=r"realization gap  (pre$_{t+1}$ − post$_t$)")
+            # thin drift lines keep the trajectory readable across steps
+            for _i in range(_T_len - 1):
+                _ax.plot([_xt[_i], _xt[_i + 1]], [_post_sel[_i], _diff_per_t[_i + 1]],
+                         "-", color="#B7950B", alpha=0.5, linewidth=1.1, zorder=4,
+                         label="model drift" if _i == 0 else "_nolegend_")
+            # recorded a_t IS the theoretical remaining-gap schedule for NOGAP, so this
+            # reference stays correct across rollouts regardless of the exponent used
+            if guidance_mode_dropdown.value == "FGWNOGAP" and a_t_schedule is not None:
+                _ax.plot(_xt, _diff_per_t[0] * np.asarray(a_t_schedule, dtype=float),
+                         "--", color="#888888", linewidth=1.2, alpha=0.9, zorder=2,
+                         label=r"NOGAP schedule  $r_0\,a_t$")
+            _ax.plot(_xt, _post_sel, "D", color="#2E86C1", markersize=5, zorder=6,
+                     label=r"claimed after step $t$")
+            _ax.plot(_xt, _diff_per_t, "o", markerfacecolor="none", markeredgecolor="#B7950B",
+                     markeredgewidth=1.8, markersize=8, linestyle="none", zorder=7,
+                     label=r"measured before step $t$  (clean pred)")
+            _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+            _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
+            _ax.set_xlim(0.6, _T_len + 0.4)
+            _ax.set_xticks(_xt)
+            _ax.set_xlabel("$t$"); _ax.set_ylabel("masked mean − target")
+            _ax.set_title("Guidance convergence over $t$", loc="left", fontweight="bold")
+            for _sp in ("top", "right"):
+                _ax.spines[_sp].set_visible(False)
+            _ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
+            _ax.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
+            _fig.tight_layout(rect=(0, 0, 0.82, 1))
+        guidance_convergence_t_plot = _fig
+    return (guidance_convergence_t_plot,)
+
+
+@app.cell
 def _(mo, plt):
-    contour_checkbox = mo.ui.checkbox(label="contours")
-    contour_levels_slider = mo.ui.slider(4, 30, step=2, value=12, label="levels: ", show_value=True, debounce=True)
-    contour_lw_slider = mo.ui.slider(start=0.4, stop=2.0, step=0.2, value=0.8, label="linewidth: ", show_value=True, debounce=True)
-    contour_color_dropdown = mo.ui.dropdown(["black", "dimgray", "red", "white"], value="black", label="contour color: ")
+    contour_checkbox = mo.ui.checkbox(label="contours", value=True)
+    contour_levels_slider = mo.ui.slider(4, 30, step=2, value=4, label="levels: ", show_value=True, debounce=True)
+    contour_lw_slider = mo.ui.slider(start=0.4, stop=2.0, step=0.2, value=0.4, label="linewidth: ", show_value=True, debounce=True)
+    contour_color_dropdown = mo.ui.dropdown(["black", "dimgray", "red", "white"], value="dimgray", label="contour color: ")
     white_zero_checkbox = mo.ui.checkbox(label="white zeros")
-    white_zero_slider = mo.ui.slider(start=0.0, stop=20.0, step=0.5, value=5.0, label="white below (% of max |v|): ", show_value=True, debounce=True)
+    white_zero_slider = mo.ui.slider(start=0.0, stop=100.0, step=0.5, value=50.0, label="white below (% of max |v|): ", show_value=True, debounce=True)
     white_zero_cmap = plt.get_cmap("coolwarm").copy()
     white_zero_cmap.set_bad("white")
     return (
@@ -3767,196 +3347,54 @@ def _(mo, plt):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ## Latent trajectories (PCA)
-    """)
-    return
+def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
+    # ===== sweep authoring widgets (guided_rollout) =====
+    guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["FGWNOLR"], label="GUIDANCE_MODE: ")
+    gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF: ")
+    mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["GAUSSIAN"], label="MASK_MODE: ")
+
+    # numeric axes -> (start, stop, log_scale, integer)
+    # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
+    NUMERIC_AXES = {
+        # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
+        # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
+        "fgwnolr_w_init": (1000.0, 5000.0, False, False),
+        # eta: shared closure rate for FGWNOLR and FGWNOGAP; a_t = (1 - eta)^(t+1)
+        # (FGWNOGAP: fraction of the remaining gap closed per step)
+        "eta":            (0.01,  0.1,   False, False),
+    }
+
+    _rc = {}
+    for _ax, (_s, _e, _log, _int) in NUMERIC_AXES.items():
+        _rc[f"{_ax}.start"] = mo.ui.number(value=_s, label="start: ")
+        _rc[f"{_ax}.stop"]  = mo.ui.number(value=_e, label="stop: ")
+        _rc[f"{_ax}.n"]     = mo.ui.slider(1, 20, step=1, value=1, label="n: ", show_value=True)
+        _rc[f"{_ax}.log"]   = mo.ui.checkbox(value=_log, label="log")
+    sweep_ranges = mo.ui.dictionary(_rc)
 
 
-@app.cell
-def _(config, get_gt_rollout, mask, notebook_mode, np, timedelta):
-    # ===== PCA latent trajectories (arXiv:2605.14317-style) =====
-    # latent = the guided channel's field in the mask's half-max bbox, flattened;
-    # frame  = PCA fit on daily ERA5/GT states in the same bbox (fixed reference cloud)
-    def pca_mask_bbox(mask_2d_arr, rel_threshold=0.5):
-        """Row/col slices of the mask footprint at rel_threshold * max."""
-        rows, cols = np.where(np.asarray(mask_2d_arr) >= rel_threshold * float(np.asarray(mask_2d_arr).max()))
-        return slice(int(rows.min()), int(rows.max()) + 1), slice(int(cols.min()), int(cols.max()) + 1)
-
-    def pca_bbox_latent(field):
-        """Flatten the bbox region of (..., lat, lon) fields into feature vectors."""
-        field = np.asarray(field, dtype=float)
-        _rows, _cols = pca_mask_bbox(mask)
-        return field[..., _rows, _cols].reshape(*field.shape[:-2], -1)
-
-    if notebook_mode == "analyze_rollout":
-        def _gt_reference_cloud(days_back=60):
-            """Daily GT states ending just before the rollout start (shrinks if the store is short)."""
-            _err = None
-            for _days in (days_back, days_back // 2, days_back // 4, 7):
-                try:
-                    _da = get_gt_rollout(_days, config.START_TS - timedelta(days=_days + 2))[config.VAR]
-                    _da = _da.sel(level=config.LEVEL) if "level" in _da.dims else _da
-                    return pca_bbox_latent(_da.values)
-                except Exception as _e:
-                    _err = _e
-            raise RuntimeError(f"no GT reference cloud loadable: {_err}")
-
-        pca_cloud = _gt_reference_cloud()
-    else:
-        pca_cloud = None
-    return pca_bbox_latent, pca_cloud
+    def compute_axis_values(ax, rv):
+        s, e = rv[f"{ax}.start"], rv[f"{ax}.stop"]
+        nn = int(rv[f"{ax}.n"] or 1)
+        log = rv[f"{ax}.log"]
+        integer = NUMERIC_AXES[ax][3]
+        if nn <= 1:
+            vals = [s]
+        elif log and s > 0 and e > 0:
+            vals = list(np.logspace(np.log10(s), np.log10(e), nn))
+        else:
+            vals = list(np.linspace(s, e, nn))
+        return sorted({int(round(v)) for v in vals}) if integer else [round(float(v), 8) for v in vals]
 
 
-@app.cell
-def _(np, pca_cloud):
-    def pca_frame(reference, n_components=3):
-        """PCA basis of `reference` rows; returns (project, explained_variance_ratio)."""
-        _mu = reference.mean(axis=0)
-        _, _sv, _vt = np.linalg.svd(reference - _mu, full_matrices=False)
-        _basis = _vt[:n_components].T
-        return (lambda x: (x - _mu) @ _basis), (_sv ** 2 / (_sv ** 2).sum())[:n_components]
-
-    if pca_cloud is not None:
-        pca_project, pca_evr = pca_frame(pca_cloud)
-        pca_cloud_proj = pca_project(pca_cloud)
-    else:
-        pca_project = pca_evr = pca_cloud_proj = None
-    return pca_cloud_proj, pca_evr, pca_project
-
-
-@app.cell
-def _(
-    cfg_clean_preds_slices,
-    config,
-    get_rollout,
-    get_slices,
-    gt_n_xr,
-    m,
-    n,
-    notebook_mode,
-    pca_bbox_latent,
-    rollout_id,
-    ung_gui_xr,
-):
-    # latents at the CURRENT selection (sweep point, m, n) -- config-pinned channel
-    if notebook_mode == "analyze_rollout":
-        pca_guided = pca_bbox_latent(cfg_clean_preds_slices[m, n])                 # (T, F)
-        pca_ung_gui = pca_bbox_latent(
-            get_slices(ung_gui_xr, config.PARTITION, config.VAR, config.LEVEL)[m, n]
-        )
-        pca_gt_target = pca_bbox_latent(
-            get_slices(gt_n_xr, config.PARTITION, config.VAR, config.LEVEL)[n]
-        ).ravel()
-        try:
-            pca_ung_point = pca_bbox_latent(
-                get_slices(get_rollout("ung", rollout_id), config.PARTITION, config.VAR, config.LEVEL)[m, n]
-            ).ravel()
-        except FileNotFoundError:
-            pca_ung_point = None  # rollout without an independent unguided store
-    else:
-        pca_guided = pca_ung_gui = pca_gt_target = pca_ung_point = None
-    return pca_gt_target, pca_guided, pca_ung_gui, pca_ung_point
-
-
-@app.cell
-def _(mo):
-    pca_elev_slider = mo.ui.slider(0, 90, step=5, value=25, label="elev: ", show_value=True, debounce=True)
-    pca_azim_slider = mo.ui.slider(-180, 180, step=5, value=-60, label="azim: ", show_value=True, debounce=True)
-    pca_zoom_checkbox = mo.ui.checkbox(label="zoom to trajectories")
-    return pca_azim_slider, pca_elev_slider, pca_zoom_checkbox
-
-
-@app.cell
-def _(
-    dpi_slider,
-    guidance_mode_dropdown,
-    m,
-    m_slider,
-    mo,
-    n,
-    n_slider,
-    notebook_mode,
-    np,
-    pca_azim_slider,
-    pca_cloud_proj,
-    pca_elev_slider,
-    pca_evr,
-    pca_gt_target,
-    pca_guided,
-    pca_project,
-    pca_ung_gui,
-    pca_ung_point,
-    pca_zoom_checkbox,
-    plot_trajectory,
-    plt,
-    sweep_params_widget,
-):
-    # ===== 3D trajectory plot + deviation-alignment diagnostic =====
-    def _pca_traj_figure():
-        _fig = plt.figure(figsize=(14, 10), dpi=dpi_slider.value)
-        _ax = _fig.add_subplot(projection="3d")
-        _ax.scatter(*pca_cloud_proj.T, color="#BBBBBB", s=14, alpha=0.5, depthshade=False,
-                    label=f"ERA5 cloud ({pca_cloud_proj.shape[0]} days)")
-        _gp, _up = pca_project(pca_guided), pca_project(pca_ung_gui)
-        _ax.plot(*_gp.T, "-", color="#1f77b4", linewidth=1.7, alpha=0.9, label="guided clean pred")
-        _ax.scatter(*_gp.T, s=np.linspace(8, 46, len(_gp)), color="#1f77b4", alpha=0.9, depthshade=False)
-        _ax.scatter(*_gp[-1], marker="D", s=70, color="#1f77b4", edgecolors="white", depthshade=False)
-        _ax.plot(*_up.T, "--", color="#1f77b4", linewidth=1.2, alpha=0.65, label="ung_gui twin")
-        _ax.scatter(*_up[-1], marker="X", s=90, color="#1f77b4", alpha=0.8, edgecolors="white", depthshade=False)
-        _tp = pca_project(pca_gt_target)
-        _ax.scatter(*_tp, marker="*", s=320, color="black", depthshade=False, label="GT (valid day)")
-        _groups = [_gp, _up, _tp[None, :]]
-        if pca_ung_point is not None:
-            _op = pca_project(pca_ung_point)
-            _ax.scatter(*_op, marker="o", s=130, facecolors="none", edgecolors="#111111",
-                        linewidths=2.0, depthshade=False, label="ung rollout (final state)")
-            _groups.append(_op[None, :])
-        if pca_zoom_checkbox.value:
-            _pts = np.vstack(_groups)
-            _lo, _hi = _pts.min(axis=0), _pts.max(axis=0)
-            _pad = 0.12 * float((_hi - _lo).max())
-            _ax.set_xlim(_lo[0] - _pad, _hi[0] + _pad)
-            _ax.set_ylim(_lo[1] - _pad, _hi[1] + _pad)
-            _ax.set_zlim(_lo[2] - _pad, _hi[2] + _pad)
-        _ax.set_xlabel("PC1"); _ax.set_ylabel("PC2"); _ax.set_zlabel("PC3")
-        _ax.set_title(
-            f"{guidance_mode_dropdown.value} | m={m} n={n+1} | bbox latents, EVR={pca_evr.sum():.0%}",
-            loc="left",
-        )
-        _ax.view_init(elev=pca_elev_slider.value, azim=pca_azim_slider.value)
-        _ax.legend(loc="upper left", fontsize=9)
-        return _fig
-
-    def _pca_alignment_figure():
-        """cos(guidance displacement, direction from the ung_gui twin to GT), per flow step."""
-        def _cos(a, b):
-            return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30))
-        _align = [_cos(g - u, pca_gt_target - u) for g, u in zip(pca_guided, pca_ung_gui)]
-        return plot_trajectory(
-            {guidance_mode_dropdown.value: _align},
-            title="Deviation alignment over $t$",
-            subtitle=r"$\cos(\hat{x}^{gui}_t - \hat{x}^{ung\_gui}_t,\; x^{gt} - \hat{x}^{ung\_gui}_t)$",
-            xlabel="$t$", figsize=(11, 5), prepend_zero=False, start_index=1,
-        )
-
-    if notebook_mode == "analyze_rollout" and np.isfinite(pca_guided).any():
-        latent_traj_widget = mo.vstack(
-            [
-                sweep_params_widget,
-                mo.hstack([m_slider, n_slider], justify="start"),
-                mo.hstack([pca_elev_slider, pca_azim_slider, pca_zoom_checkbox], justify="start"),
-                mo.hstack([_pca_traj_figure(), _pca_alignment_figure()], justify="start", align="start"),
-            ],
-            align="start",
-        )
-    elif notebook_mode == "analyze_rollout":
-        latent_traj_widget = mo.md("_no flow traces at this selection (guidance inactive, δ=0)_")
-    else:
-        latent_traj_widget = None
-    latent_traj_widget
-    return
+    return (
+        NUMERIC_AXES,
+        compute_axis_values,
+        gui_ref_select,
+        guidance_mode_select,
+        mask_mode_select,
+        sweep_ranges,
+    )
 
 
 if __name__ == "__main__":

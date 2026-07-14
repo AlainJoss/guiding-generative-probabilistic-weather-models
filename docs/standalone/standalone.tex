@@ -1,0 +1,26 @@
+% Standalone build of the prediction-pipeline figure
+% (shared source: ../presentation/pipeline_figure.tex).
+%
+% PDF:  latexmk -pdf standalone.tex
+% PNG:  magick -density 300 standalone.pdf pipeline_figure.png
+%       (or compile with shell-escape and the convert option below)
+%
+% \documentclass[tikz, convert={density=300, outext=.png}]{standalone}  % needs -shell-escape
+\documentclass[tikz, border=8pt]{standalone}
+
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usetikzlibrary{arrows.meta, positioning, calc}
+
+% match the beamer look: sans text, serif math
+\renewcommand{\familydefault}{\sfdefault}
+
+% KU green colors (kept in sync with presentation.tex)
+\definecolor{kugreen}{RGB}{50,93,61}
+\definecolor{kugreenlys}{RGB}{132,158,139}
+\definecolor{kugreenlyslys}{RGB}{173,190,177}
+\definecolor{kugreenlyslyslys}{RGB}{214,223,216}
+
+\begin{document}
+\input{../presentation/pipeline_figure}
+\end{document}

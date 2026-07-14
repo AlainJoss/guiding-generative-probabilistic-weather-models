@@ -5,17 +5,8 @@ from typing import Any
 
 # hyperparameter tree
 # hyper names equal the guidance-fn kwarg names so build_guidance_kwargs is a straight
-# pass-through (no map). w is flow-level (-> lambda_schedule) and is skipped there.
-# UG/FG/FGF optimizer hypers are method-namespaced so each method's lr/steps can be swept
-# independently even though the flow fns share a generic optimizer.
+# pass-through (no map).
 GUIDANCE_METHOD_HYPERS = {
-    "LBG": ["w"],
-    "LBG-MC": ["w", "n_mc", "r"],
-    "UG": ["w", "ug_k", "ug_lr", "ug_s"],
-    "FG": ["fg_k", "fg_lr", "fg_gamma", "fg_lambda_init", "fg_n_windows"],
-    "FGF": ["fgf_k", "fgf_lr", "fgf_shift_init", "fgf_gamma", "fgf_n_windows"],
-    # FGW learns the scalar w itself, so it has no "w" hyper -- only the optimizer's
-    "FGW": ["fgw_k", "fgw_lr", "fgw_w_init"],
     # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate, no iteration
     # count (optimizes until the hardcoded loss threshold is reached)
     "FGWNOLR": ["fgwnolr_w_init", "eta"],
@@ -24,7 +15,7 @@ GUIDANCE_METHOD_HYPERS = {
 }
 
 # common hypers
-GUIDANCE_METHODS = ["LBG", "LBG-MC", "UG", "FG", "FGF", "FGW", "FGWNOLR", "FGWNOGAP"]
+GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "GAUSSIAN"]
 
@@ -70,37 +61,6 @@ class RolloutConfig:
 
     ### mode-specific swept hypers (None -> method default; pinned for irrelevant modes)
     # names match the guidance-fn kwargs (see GUIDANCE_METHOD_HYPERS)
-
-    # LBG, LBG-MC, UG
-    w: float | None = None  # guidance strength: applied as w * a_t * unit(grad) per flow step
-
-    # LBG-MC
-    n_mc: int | None = None    # number of Monte-Carlo samples
-    r: float | None = None     # posterior spread magnitude (cloud std sigma_t = r * a_t)
-
-    # UG
-    ug_k: int | None = None    # inner optimization steps
-    ug_lr: float | None = None  # inner-optimization learning rate
-    ug_s: int | None = None    # self-recurrence steps
-
-    # FG
-    fg_k: int | None = None            # optimization iterations
-    fg_lr: float | None = None
-    fg_gamma: float | None = None      # L2 penalty weight
-    fg_lambda_init: float | None = None  # learned-lambda init
-    fg_n_windows: int | None = None    # coarse schedule: number of windows
-
-    # FGF
-    fgf_k: int | None = None           # optimization iterations
-    fgf_lr: float | None = None
-    fgf_shift_init: float | None = None  # free-control init
-    fgf_gamma: float | None = None     # L2 penalty weight
-    fgf_n_windows: int | None = None   # coarse schedule: number of windows
-
-    # FGW (naive FlowGrad on the scalar w; w itself is learned, not a hyper)
-    fgw_k: int | None = None       # optimization iterations
-    fgw_lr: float | None = None    # Adam lr on the scalar w (= w-units per iteration)
-    fgw_w_init: float | None = None  # starting w
 
     # FGWNOLR (secant on the exact scalar dL/dw; no learning rate; runs until the
     # hardcoded loss threshold is met)

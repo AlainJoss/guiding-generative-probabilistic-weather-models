@@ -11,7 +11,8 @@ uv run marimo edit src/ui/contour_demo.py --watch --no-token
 
 Experiment runner:
 ```bash
-python -m src.run --rollout_id ID --rollout_type ung
+python -m src.run --rollout_id 2026-07-14_09:38:59 --rollout_type gui
+python -m src.run --rollout_id 2026-07-14_09:38:58 --rollout_type gui
 ```
 
 Terminal setup:

@@ -99,17 +99,12 @@ def get_container_args(rollout_type):
         case _:
             return []
 
-# TODO: check, this 
+# TODO: check, this
 def written_containers(rollout_type, guidance_mode):
-    """Container types a single sweep point actually fills. FLOWGRAD_FREE has no
-    guidance-direction trace, so it only writes gui/ung_gui; the trace containers
-    stay NaN by design and must not be required when deciding 'filled' on resume."""
+    """Container types a single sweep point actually fills."""
     if rollout_type == "ung":
         return {"ung"}
-    base = {"gui", "ung_gui"}
-    if guidance_mode == "FGF":
-        return base
-    return base | {"grads", "vfs", "res"}
+    return {"gui", "ung_gui", "grads", "vfs", "res"}
 
 
 def find_resume_index(rollout_dir, rollout_type, sweep_params):

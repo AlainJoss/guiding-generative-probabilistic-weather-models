@@ -146,6 +146,15 @@ def plot_trajectories(
         else None
     )
 
+    # the right axis is a "%" axis (formatter appends %), and deltas are stored as
+    # fractions -> scale to percent. delta_trajectories (plural) is what the notebook
+    # actually passes and previously skipped this, so labels read 100x too small.
+    delta_trajectories = (
+        [_as_1d(_dt, "delta_trajectories", gt0=gt0) * 100.0 for _dt in delta_trajectories]
+        if delta_trajectories is not None
+        else None
+    )
+
     guided_ensemble = _as_step_member_array(guided_ensemble, "guided_ensemble", gt0=gt0)
     unguided_ensemble = _as_step_member_array(unguided_ensemble, "unguided_ensemble", gt0=gt0)
     target_ensemble = _as_step_member_array(target_ensemble, "target_ensemble", gt0=gt0)
