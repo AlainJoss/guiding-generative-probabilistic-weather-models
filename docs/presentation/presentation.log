@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  14 JUL 2026 16:41
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  20 JUL 2026 16:25
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -636,34 +636,62 @@ File: pgflibraryarrows.meta.code.tex 2023-01-15 v3.1.10 (3.1.10)
 File: tikzlibrarypositioning.code.tex 2023-01-15 v3.1.10 (3.1.10)
 ) (/usr/local/texlive/2023/texmf-dist/tex/generic/pgf/frontendlayer/tikz/libraries/tikzlibrarycalc.code.tex
 File: tikzlibrarycalc.code.tex 2023-01-15 v3.1.10 (3.1.10)
+) (/usr/local/texlive/2023/texmf-dist/tex/latex/mathtools/mathtools.sty
+Package: mathtools 2022/06/29 v1.29 mathematical typesetting tools
+ (/usr/local/texlive/2023/texmf-dist/tex/latex/tools/calc.sty
+Package: calc 2017/05/25 v4.3 Infix arithmetic (KKT,FJ)
+\calc@Acount=\count352
+\calc@Bcount=\count353
+\calc@Adimen=\dimen311
+\calc@Bdimen=\dimen312
+\calc@Askip=\skip68
+\calc@Bskip=\skip69
+LaTeX Info: Redefining \setlength on input line 80.
+LaTeX Info: Redefining \addtolength on input line 81.
+\calc@Ccount=\count354
+\calc@Cskip=\skip70
+) (/usr/local/texlive/2023/texmf-dist/tex/latex/mathtools/mhsetup.sty
+Package: mhsetup 2021/03/18 v1.4 programming setup (MH)
+)
+\g_MT_multlinerow_int=\count355
+\l_MT_multwidth_dim=\dimen313
+\origjot=\skip71
+\l_MT_shortvdotswithinadjustabove_dim=\dimen314
+\l_MT_shortvdotswithinadjustbelow_dim=\dimen315
+\l_MT_above_intertext_sep=\dimen316
+\l_MT_below_intertext_sep=\dimen317
+\l_MT_above_shortintertext_sep=\dimen318
+\l_MT_below_shortintertext_sep=\dimen319
+\xmathstrut@box=\box83
+\xmathstrut@dim=\dimen320
 ) (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamerthemePaloAlto.sty (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamerouterthemesidebar.sty
-\beamer@sidebarwidth=\dimen311
-\beamer@headheight=\dimen312
+\beamer@sidebarwidth=\dimen321
+\beamer@headheight=\dimen322
 ) (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamerinnerthemerounded.sty) (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamercolorthemeorchid.sty)) (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamercolorthemestructure.sty) (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamerinnerthemecircles.sty) (/usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamerfontthemeserif.sty) (/usr/local/texlive/2023/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def
 File: l3backend-pdftex.def 2023-01-16 L3 backend support: PDF output (pdfTeX)
-\l__color_backend_stack_int=\count352
-\l__pdf_internal_box=\box83
+\l__color_backend_stack_int=\count356
+\l__pdf_internal_box=\box84
 ) (./presentation.aux)
 \openout1 = `presentation.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 56.
-LaTeX Font Info:    ... okay on input line 56.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 64.
+LaTeX Font Info:    ... okay on input line 64.
 
 *geometry* driver: auto-detecting
 *geometry* detected driver: pdftex
@@ -701,16 +729,16 @@ LaTeX Font Info:    ... okay on input line 56.
 
 (/usr/local/texlive/2023/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
-\scratchcounter=\count353
-\scratchdimen=\dimen313
-\scratchbox=\box84
-\nofMPsegments=\count354
-\nofMParguments=\count355
+\scratchcounter=\count357
+\scratchdimen=\dimen323
+\scratchbox=\box85
+\nofMPsegments=\count358
+\nofMParguments=\count359
 \everyMPshowfont=\toks52
-\MPscratchCnt=\count356
-\MPscratchDim=\dimen314
-\MPnumerator=\count357
-\makeMPintoPDFobject=\count358
+\MPscratchCnt=\count360
+\MPscratchDim=\dimen324
+\MPnumerator=\count361
+\makeMPintoPDFobject=\count362
 \everyMPtoPDFconversion=\toks53
 ) (/usr/local/texlive/2023/texmf-dist/tex/latex/epstopdf-pkg/epstopdf-base.sty
 Package: epstopdf-base 2020-01-24 v2.11 Base part for package epstopdf
@@ -718,7 +746,7 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 48
  (/usr/local/texlive/2023/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2010/07/13 v1.3 Configuration of (r)epstopdf for TeX Live
 ))
-Package hyperref Info: Link coloring OFF on input line 56.
+Package hyperref Info: Link coloring OFF on input line 64.
  (./presentation.out) (./presentation.out)
 \@outlinefile=\write5
 \openout5 = `presentation.out'.
@@ -761,35 +789,80 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 
 ] [9
 
-] [10
+]
+<figures/flow-phases.png, id=147, 944.52875pt x 204.765pt>
+File: figures/flow-phases.png Graphic file (type png)
+<use figures/flow-phases.png>
+Package pdftex.def Info: figures/flow-phases.png  used on input line 292.
+(pdftex.def)             Requested size: 290.74263pt x 63.02968pt.
+<figures/flow-dist.png, id=149, 793.96625pt x 255.95625pt>
+File: figures/flow-dist.png Graphic file (type png)
+<use figures/flow-dist.png>
+Package pdftex.def Info: figures/flow-dist.png  used on input line 292.
+(pdftex.def)             Requested size: 116.29527pt x 37.48958pt.
+ [10
 
-] [11
+ <./figures/flow-phases.png> <./figures/flow-dist.png>] (./pipeline_figure.tex) [11
 
 ] [12
 
-] (./pipeline_figure.tex) [13
+]
+<figures/mask_var.png, id=191, 759.83875pt x 379.4175pt>
+File: figures/mask_var.png Graphic file (type png)
+<use figures/mask_var.png>
+Package pdftex.def Info: figures/mask_var.png  used on input line 390.
+(pdftex.def)             Requested size: 85.35826pt x 42.62183pt.
+<figures/gaussian_mask.png, id=192, 744.381pt x 370.7451pt>
+File: figures/gaussian_mask.png Graphic file (type png)
+<use figures/gaussian_mask.png>
+Package pdftex.def Info: figures/gaussian_mask.png  used on input line 390.
+(pdftex.def)             Requested size: 109.89948pt x 54.73251pt.
+<figures/3d_mask.png, id=193, 492.8814pt x 244.2726pt>
+File: figures/3d_mask.png Graphic file (type png)
+<use figures/3d_mask.png>
+Package pdftex.def Info: figures/3d_mask.png  used on input line 390.
+(pdftex.def)             Requested size: 109.89948pt x 54.46323pt.
+ [13
 
-] [14
+ <./figures/mask_var.png> <./figures/gaussian_mask.png> <./figures/3d_mask.png>]
+<figures/delta_n.png, id=209, 1250.271pt x 415.5525pt>
+File: figures/delta_n.png Graphic file (type png)
+<use figures/delta_n.png>
+Package pdftex.def Info: figures/delta_n.png  used on input line 404.
+(pdftex.def)             Requested size: 279.11487pt x 92.76608pt.
+ [14
 
-] [15
+ <./figures/delta_n.png>] [15
 
 ] [16
 
-] [17
-
 ]
-LaTeX Font Info:    Trying to load font information for TS1+cmss on input line 323.
- (/usr/local/texlive/2023/texmf-dist/tex/latex/base/ts1cmss.fd
-File: ts1cmss.fd 2022/07/10 v2.5l Standard LaTeX font definitions
-) [18
+<figures/pca_pingpong.png, id=257, 823.878pt x 739.3221pt>
+File: figures/pca_pingpong.png Graphic file (type png)
+<use figures/pca_pingpong.png>
+Package pdftex.def Info: figures/pca_pingpong.png  used on input line 497.
+(pdftex.def)             Requested size: 221.94717pt x 199.16928pt.
 
-{/usr/local/texlive/2023/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}] [19
+Overfull \vbox (5.13788pt too high) detected at line 497
+ []
+
+[17
+
+ <./figures/pca_pingpong.png>] [18
+
+] (./pipeline_figure.tex) [19
 
 ] [20
 
-] [21
+]
+<figures/gap-closing.png, id=303, 670.1035pt x 426.393pt>
+File: figures/gap-closing.png Graphic file (type png)
+<use figures/gap-closing.png>
+Package pdftex.def Info: figures/gap-closing.png  used on input line 566.
+(pdftex.def)             Requested size: 232.59499pt x 148.0036pt.
+ [21
 
-] [22
+ <./figures/gap-closing.png>] [22
 
 ] [23
 
@@ -815,20 +888,9 @@ File: ts1cmss.fd 2022/07/10 v2.5l Standard LaTeX font definitions
 
 ] [34
 
-]
+] [35
 
-Package hyperref Warning: Token not allowed in a PDF string (Unicode):
-(hyperref)                removing `\translate ' on input line 474.
-
-[35
-
-]
-LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 488.
- (/usr/local/texlive/2023/texmf-dist/tex/latex/base/t1cmtt.fd
-File: t1cmtt.fd 2022/07/10 v2.5l Standard LaTeX font definitions
-) [36
-
-] [37
+] [36
 
 ]
 \tf@nav=\write6
@@ -842,21 +904,21 @@ File: t1cmtt.fd 2022/07/10 v2.5l Standard LaTeX font definitions
 
  (./presentation.aux)
 Package rerunfilecheck Info: File `presentation.out' has not changed.
-(rerunfilecheck)             Checksum: 5FED1293FAD8D74394E2B0BD182FB2A5;1082.
+(rerunfilecheck)             Checksum: 62A2423D7271A031D6455300B180CF51;466.
  ) 
 Here is how much of TeX's memory you used:
- 26910 strings out of 476025
- 545577 string characters out of 5790016
- 1877388 words of memory out of 5000000
- 46705 multiletter control sequences out of 15000+600000
- 529624 words of font info for 73 fonts, out of 8000000 for 9000
+ 27766 strings out of 476025
+ 561507 string characters out of 5790016
+ 1876388 words of memory out of 5000000
+ 47545 multiletter control sequences out of 15000+600000
+ 534195 words of font info for 87 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 128i,16n,122p,488b,813s stack positions out of 10000i,1000n,20000p,200000b,200000s
-</usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmex9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsi1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0500.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0600.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0700.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0900.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0500.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0700.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftt1000.pfb>
-Output written on presentation.pdf (37 pages, 430678 bytes).
+ 128i,20n,122p,488b,967s stack positions out of 10000i,1000n,20000p,200000b,200000s
+</usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmex9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsi1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0500.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0600.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0700.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0800.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0900.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0500.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0700.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0900.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx1000.pfb>
+Output written on presentation.pdf (36 pages, 2603381 bytes).
 PDF statistics:
- 1498 PDF objects out of 1728 (max. 8388607)
- 1367 compressed objects within 14 object streams
- 84 named destinations out of 1000 (max. 500000)
+ 634 PDF objects out of 1000 (max. 8388607)
+ 482 compressed objects within 5 object streams
+ 77 named destinations out of 1000 (max. 500000)
  193 words of extra memory for PDF output out of 10000 (max. 10000000)
 

@@ -115,6 +115,30 @@ def clean_pred_trajectory(rollout_dir, records, sel, m, n, var, c, level=None):
     return gui[None] + ((res + vfs) - z_final[None]) * c
 
 
+def clean_pred_branches(rollout_dir, records, sel, m, n, var, c, level=None):
+    """(gui_ung_over_t, gui) clean-pred trajectory pair, both (T, lat, lon).
+
+    gui_ung_over_t: the raw-velocity estimate res_t + vfs_t (no step-t
+    guidance kick); gui: the same estimate after subtracting the applied
+    kick lam_t * grads_t * s_t. Their per-step difference is exactly the
+    guidance contribution. None without a lambda record."""
+    lam = applied_lambda(records, sel, m, n)
+    if lam is None:
+        return None
+    def _load(store):
+        da = select_point(open_store(rollout_dir, store, var), sel)
+        da = da.sel(level=level) if "level" in da.dims and level is not None else da
+        return np.asarray(da.isel(m=m, n=n), dtype=float)
+
+    res, vfs, grads = _load("res"), _load("vfs"), _load("grads")
+    gui = _load("gui")
+    s, h = flow_grids(res.shape[0])
+    z_final = res[-1] + (vfs[-1] - lam[-1] * grads[-1] * s[-1]) * (h[-1] / s[-1])
+    base = gui[None] + ((res + vfs) - z_final[None]) * c
+    kick = base - (lam[:, None, None] * grads * s[:, None, None]) * c
+    return base, kick
+
+
 def guidance_vector(rollout_dir, records, sel, m, n, var, level=None):
     """Applied guidance vector lambda_t * grads_t as (T, lat, lon), or None."""
     lam = applied_lambda(records, sel, m, n)

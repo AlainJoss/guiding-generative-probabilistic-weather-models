@@ -52,7 +52,7 @@ def _(mo):
     # Physical realism
 
     Spherical-harmonic spectral realism of one sweep point, at the rollout's guided channel.
-    Per rollout step $n$ the power spectra of each source (ung / ung_gui / gui) are compared
+    Per rollout step $n$ the power spectra of each source (ung / gui_ung / gui) are compared
     to ground truth; over flow $t$ the guided clean-pred trajectory is compared to gt at step
     $n$. The bottom row overlays the spatial value distribution of every source at $(m, n)$.
     """)
@@ -125,15 +125,15 @@ def _(
     _gt = np.asarray(_gt_da.isel(time=slice(1, None)), dtype=float)  # (N, lat, lon); [ni] valid day ni+1
     _ung = _src("ung")
     _gui = _src("gui")
-    _twin = channel(select_point(open_store(rollout_dir, "ung_gui", VAR), _sel), config)
+    _twin = channel(select_point(open_store(rollout_dir, "gui_ung", VAR), _sel), config)
     _twin = _twin.isel(t=-1) if "t" in _twin.dims else _twin
-    _ung_gui = np.asarray(_twin.isel(m=_m), dtype=float)
+    _gui_ung = np.asarray(_twin.isel(m=_m), dtype=float)
 
     def _spec(_f):
         return power_spectrum(np.asarray(_f), _lat)[1]
 
     _gt_spec = {_ni: _spec(_gt[_ni]) for _ni in range(N)}
-    _src_slices = {"ung": _ung, "ung_gui": _ung_gui, "gui": _gui}
+    _src_slices = {"ung": _ung, "gui_ung": _gui_ung, "gui": _gui}
     pr_n = {"lsd": {}, "bias": {}, "power": {}}
     for _k, _arr in _src_slices.items():
         _specs = [_spec(_arr[_ni]) for _ni in range(N)]
@@ -161,7 +161,7 @@ def _(
     pr_dist = {
         "gt": _gt[_n].ravel(),
         "ung": _ung[_n].ravel(),
-        "ung_gui": _ung_gui[_n].ravel(),
+        "gui_ung": _gui_ung[_n].ravel(),
         "gui": _gui[_n].ravel(),
     }
     return pr_dist, pr_n, pr_t
@@ -189,7 +189,7 @@ def _(
 ):
     # ===== spectral-realism plots, cross-var-check style =====
     _m, _n, _t = m_slider.value - 1, n_slider.value - 1, t_slider.value - 1
-    _src_colors = {"gt": "#222222", "ung": "#1f77b4", "ung_gui": "#2ca02c", "gui": "#d62728"}
+    _src_colors = {"gt": "#222222", "ung": "#1f77b4", "gui_ung": "#2ca02c", "gui": "#d62728"}
     _wn = min(22.0, max(8.0, 3.4 + 0.78 * N))
     _wt = min(22.0, max(8.0, 3.4 + 0.78 * T))
 
@@ -206,7 +206,7 @@ def _(
         )
 
     def _dist_plot(dist):
-        _order = [s for s in ("gt", "ung", "ung_gui", "gui") if s in dist]
+        _order = [s for s in ("gt", "ung", "gui_ung", "gui") if s in dist]
         _fin = {s: dist[s][np.isfinite(dist[s])] for s in _order}
         _present = [s for s in _order if _fin[s].size]
         _lvl = f" @ {LEVEL} hPa" if PARTITION == "level" else ""

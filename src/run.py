@@ -94,7 +94,7 @@ def get_container_args(rollout_type):
                 ("vfs", True),
                 ("res", True),
                 ("gui", False),
-                ("ung_gui", True)
+                ("gui_ung", True)
             ]
         case _:
             return []
@@ -104,7 +104,7 @@ def written_containers(rollout_type, guidance_mode):
     """Container types a single sweep point actually fills."""
     if rollout_type == "ung":
         return {"ung"}
-    return {"gui", "ung_gui", "grads", "vfs", "res"}
+    return {"gui", "gui_ung", "grads", "vfs", "res"}
 
 
 def find_resume_index(rollout_dir, rollout_type, sweep_params):

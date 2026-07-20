@@ -30,7 +30,7 @@ def _():
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
-    from src.ui.map import visualize_map
+    from src.ui.map import visualize_map, visualize_mask_3d
     from src.ui.plot_trajectory import plot_trajectory
     from src.ui.plot_trajectories import plot_trajectories
 
@@ -45,7 +45,7 @@ def _():
     from src.normalization import XarrayNormalizer
     from src.spectrum import power_spectrum, log_spectral_distance, spectral_bias
 
-    from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma, get_mask_center
+    from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma, get_mask_center, get_great_circle_field, get_bbox_mask
     from src.target import get_target_slices
 
 
@@ -69,7 +69,6 @@ def _():
         get_mask_2d,
         get_mask_center,
         get_masked_mean,
-        get_mu_sigma,
         get_now_timestamp,
         get_rollout,
         get_rollout_ids,
@@ -84,6 +83,7 @@ def _():
         plot_trajectory,
         sweep_coord_label,
         visualize_map,
+        visualize_mask_3d,
     )
 
 
@@ -258,6 +258,7 @@ def _(
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
             guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="guidance_mode: ")
             delta_trajectory_dropdown = None
+            view_mask_mode_dropdown = None
             sweep_extra_dropdowns = mo.ui.dictionary({})
             sweep_params_widget = None
 
@@ -275,6 +276,7 @@ def _(
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
             guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="guidance_mode: ")
             delta_trajectory_dropdown = None
+            view_mask_mode_dropdown = None
             sweep_extra_dropdowns = mo.ui.dictionary({})
             sweep_params_widget = None
 
@@ -320,6 +322,14 @@ def _(
                 options=_dt_options,
                 value=next(iter(_dt_options)),
                 label="delta_trajectory: ",
+            )
+            # view mask: masked-average VIEW mask, independent of the data-selection
+            # MASK_MODE (which indexes the zarr) -> lets the same states be region-
+            # averaged under either BBOX or GAUSSIAN.
+            view_mask_mode_dropdown = mo.ui.dropdown(
+                options=MASK_MODES,
+                value=experiment_params["MASK_MODE"][0],
+                label="view mask: ",
             )
 
             # axes with a dedicated named widget above; every other sweep key gets an
@@ -379,6 +389,7 @@ def _(
         mask_mode_dropdown,
         sweep_extra_dropdowns,
         sweep_params_widget,
+        view_mask_mode_dropdown,
         w_slider,
     )
 
@@ -531,25 +542,40 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
 @app.cell
 def _(
     config,
-    get_corners,
     get_mask_2d,
-    get_mu_sigma,
-    mask_mode,
+    get_mask_center_pt,
     notebook_mode,
+    np,
+    side_lat_slider,
+    side_lon_slider,
+    sigma_div_slider,
+    view_mask_mode,
 ):
-    # mask
+    # mask: rectangle = center puck +/- half side lengths
     match notebook_mode:
         case "unguided_rollout":
-            mask_corners = get_corners()
-            mu, sigma = get_mu_sigma(*mask_corners)
-            mask=get_mask_2d(mask_mode, mask_corners)
+            _lon_c, _lat_c = get_mask_center_pt()
+            # corners are NOT clamped: the box center must stay on the puck.
+            # lon wraps at the dateline; lat may stick out over a pole -- the
+            # mask functions handle both (spherical: over-the-pole distances)
+            mask_corners = (
+                _lon_c - side_lon_slider.value / 2,
+                _lon_c + side_lon_slider.value / 2,
+                _lat_c - side_lat_slider.value / 2,
+                _lat_c + side_lat_slider.value / 2,
+            )
+            mask = get_mask_2d(view_mask_mode, mask_corners,
+                               sigma_div=sigma_div_slider.value)
         case "guided_rollout" | "analyze_rollout":
             mask_corners = config.MASK_CORNERS
-            mu, sigma = get_mu_sigma(*mask_corners)
-            mask=get_mask_2d(mask_mode, mask_corners)
+            mask = get_mask_2d(view_mask_mode, mask_corners)
         case _:
             pass
-    return mask, mask_corners
+    # own-mask-scale region: the mask's own support (weight above 1e-6 of
+    # the peak, i.e. numerically nonzero) -> box for BBOX, blob for gaussian
+    mask_region = np.asarray(mask) > 1e-6 * float(np.asarray(mask).max())
+
+    return mask, mask_corners, mask_region
 
 
 @app.cell
@@ -646,17 +672,17 @@ def _(
     delta_trajectory,
     get_masked_mean,
     get_slices,
+    gui_ung_final_xr,
     mask,
     notebook_mode,
     np,
-    ung_gui_final_xr,
 ):
     # guidance-target at config coords (pinned — independent of browsing sliders)
     if notebook_mode == "analyze_rollout":
         cfg_clean_preds_slices = get_slices(clean_preds_xr, config.PARTITION, config.VAR, config.LEVEL)
-        cfg_ung_gui_M_N_slices = get_slices(ung_gui_final_xr, config.PARTITION, config.VAR, config.LEVEL)
-        cfg_ung_gui_M_N_trajectories = get_masked_mean(cfg_ung_gui_M_N_slices, mask)
-        cfg_target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * cfg_ung_gui_M_N_trajectories
+        cfg_gui_ung_M_N_slices = get_slices(gui_ung_final_xr, config.PARTITION, config.VAR, config.LEVEL)
+        cfg_gui_ung_M_N_trajectories = get_masked_mean(cfg_gui_ung_M_N_slices, mask)
+        cfg_target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * cfg_gui_ung_M_N_trajectories
     return cfg_clean_preds_slices, cfg_target_guidance_M_N_trajectories
 
 
@@ -667,6 +693,7 @@ def _(
     get_gt_rollout,
     get_masked_mean,
     get_slices,
+    gui_ung_final_xr,
     guided_xr,
     level,
     m,
@@ -675,7 +702,6 @@ def _(
     np,
     partition,
     timestamp,
-    ung_gui_final_xr,
     unguided_xr,
     var,
 ):
@@ -694,7 +720,7 @@ def _(
             gui_mean_trajectory = None
             gui_m_trajectory = None
 
-            ung_gui_m_trajectory = None
+            gui_ung_m_trajectory = None
             target_guidance_trajectory = None
             target_guidance_M_N_trajectories = None
         case "guided_rollout":
@@ -710,7 +736,7 @@ def _(
             gui_mean_trajectory = None
             gui_m_trajectory = None
 
-            ung_gui_m_trajectory = None
+            gui_ung_m_trajectory = None
             target_guidance_trajectory = None
             target_guidance_M_N_trajectories = None
         case "analyze_rollout":
@@ -726,13 +752,13 @@ def _(
             gui_mean_trajectory = gui_M_N_trajectories.mean(axis=0)
             gui_m_trajectory = gui_M_N_trajectories[m]
 
-            ung_gui_M_N_slices = get_slices(ung_gui_final_xr, partition, var, level)
-            ung_gui_M_N_trajectories = get_masked_mean(ung_gui_M_N_slices, mask)
-            ung_gui_m_trajectory = ung_gui_M_N_trajectories[m]
-            print(ung_gui_m_trajectory.shape)
+            gui_ung_M_N_slices = get_slices(gui_ung_final_xr, partition, var, level)
+            gui_ung_M_N_trajectories = get_masked_mean(gui_ung_M_N_slices, mask)
+            gui_ung_m_trajectory = gui_ung_M_N_trajectories[m]
+            print(gui_ung_m_trajectory.shape)
 
-            target_guidance_trajectory = (1 + np.asarray(delta_trajectory)) * ung_gui_m_trajectory
-            target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * ung_gui_M_N_trajectories
+            target_guidance_trajectory = (1 + np.asarray(delta_trajectory)) * gui_ung_m_trajectory
+            target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * gui_ung_M_N_trajectories
         case _:
             pass
 
@@ -747,11 +773,11 @@ def _(
         gui_M_N_slices,
         gui_M_N_trajectories,
         gui_m_trajectory,
+        gui_ung_m_trajectory,
         target_guidance_M_N_trajectories,
         target_guidance_trajectory,
         ung_M_N_slices,
         ung_M_N_trajectories,
-        ung_gui_m_trajectory,
         ung_m_trajectory,
     )
 
@@ -935,7 +961,7 @@ def _(mo):
 
 
 @app.cell
-def _(N, delta_mode_dropdown, mo, n_deltas_slider, notebook_mode):
+def _(config, delta_mode_dropdown, mo, n_deltas_slider, notebook_mode):
     # per-delta params. linear: start% / peak% / start@n / stop@n. band-based: one multiplier
     # k per candidate (delta_n = k * sigma_band_n/|mean_n|, sigma_band_n = (max-min)/2 of the ensemble).
     if notebook_mode == "guided_rollout":
@@ -946,8 +972,8 @@ def _(N, delta_mode_dropdown, mo, n_deltas_slider, notebook_mode):
             else:
                 _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label="start %: ")
                 _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %: ")
-                _dc[f"{_i}.start_at"] = mo.ui.slider(0, N, step=1, value=0, label="start@n: ", show_value=True)
-                _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, N, step=1, value=N, label=get_label("stop@n", N), show_value=True)
+                _dc[f"{_i}.start_at"] = mo.ui.slider(0, config.N, step=1, value=0, label="start@n: ", show_value=True)
+                _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, config.N, step=1, value=config.N, label=get_label("stop@n", config.N), show_value=True)
         delta_controls = mo.ui.dictionary(_dc)
     else:
         delta_controls = mo.ui.dictionary({})
@@ -1036,12 +1062,16 @@ def _(
 
 
 @app.cell
-def _(mask_mode_dropdown):
+def _(mask_mode_dropdown, view_mask_mode_dropdown):
     # mask_mode comes from the dropdown in every mode: authoring selection in
     # unguided/guided, and the sweep selector in analyze. (MASK_MODE is a swept axis,
     # so the scalar config.MASK_MODE is None -- don't read it here.)
     mask_mode = mask_mode_dropdown.value
-    return (mask_mode,)
+    # visualization/masked-average mask: in analyze mode this can differ from the
+    # data-selection mask_mode (which indexes the zarr), so the same states can be
+    # region-averaged under either BBOX or GAUSSIAN. Falls back to mask_mode elsewhere.
+    view_mask_mode = view_mask_mode_dropdown.value if view_mask_mode_dropdown is not None else mask_mode
+    return (view_mask_mode,)
 
 
 @app.cell
@@ -1154,9 +1184,9 @@ def wa_schedule(
     sweep_ranges,
 ):
     # Guidance weight schedule over the flow, beside the rollout trajectories plot.
-    # Separates a_t and the closed gap 1 - (1-eta)^t (right axis) from w_t and lambda_t (left).
+    # Separates a_t and the closed-gap fraction gamma_t = 1 - (1-eta)^t (right axis) from w_t and lambda_t (left).
     # a_t = (1 - eta)^(t+1) is the shared remaining-gap schedule of FGWNOLR and FGWNOGAP
-    # (both depend on eta); 1 - (1-eta)^t is the fraction already closed ENTERING step t
+    # (both depend on eta); gamma_t = 1 - (1-eta)^t is the fraction already closed ENTERING step t
     # (0 at t=0), matching the chart's 0-based t axis.
     # guided_rollout: preview at the swept w_init / eta. analyze_rollout: recorded schedules.
     if notebook_mode == "guided_rollout":
@@ -1178,7 +1208,7 @@ def wa_schedule(
         eta_choices = []
     eta_modes = [mode for mode in selected_modes if mode in ("FGWNOLR", "FGWNOGAP")]
     _has_recorded = notebook_mode == "analyze_rollout" and bool(lambda_t_by_method)
-    _AT_COLOR, _CLOSED_COLOR = "#7B2CBF", "#E67E22"  # a_t purple, closed-gap 1 - a_t orange
+    _AT_COLOR, _CLOSED_COLOR = "#7B2CBF", "#E91E63"  # a_t purple, gamma_t (closed fraction) pink
     if eta_modes or _has_recorded:
         _left_label = r"$\lambda_t,\ w_t$"
         if _has_recorded:
@@ -1191,7 +1221,7 @@ def wa_schedule(
                 _a = np.asarray(_sd["a_t"], dtype=float)
                 _right[rf"$a_t$ — {_meth}"] = _a.tolist()
                 # 1 - (1-eta)^t = 1 - a_{t-1} shifted right one step, 0 at t=0
-                _right[rf"$1-(1-\eta)^t$ — {_meth}"] = np.concatenate([[0.0], (1.0 - _a)[:-1]]).tolist()
+                _right[rf"$\gamma_t$ — {_meth}"] = np.concatenate([[0.0], (1.0 - _a)[:-1]]).tolist()
         else:
             # preview: a_t and 1 - a_t on the RIGHT (shared by both methods). NOLR also
             # previews w_t (constant w_init) and lambda_t = w_t * a_t on the LEFT; NOGAP's
@@ -1201,15 +1231,15 @@ def wa_schedule(
             for _eta in (eta_choices or [0.5]):
                 _a = (1.0 - _eta) ** _steps
                 _right[rf"$a_t$ ($\eta$={_eta:g})"] = _a.tolist()
-                _right[rf"$1-(1-\eta)^t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1)).tolist()
+                _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1)).tolist()
                 if "FGWNOLR" in eta_modes:
                     for _w in (fgwnolr_w_choices or [250.0]):
                         _sched[rf"$w_t$ ($w$={_w:g})"] = [float(_w)] * T
                         _sched[rf"$\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_w * _a).tolist()
             if not _sched:
                 # NOGAP-only: no w/lambda -> put a_t and 1 - a_t on the left
-                _sched, _right, _left_label = _right, None, r"$a_t,\ 1-(1-\eta)^t$"
-        _gap_color = lambda _k: _CLOSED_COLOR if _k.startswith(r"$1-(") else _AT_COLOR
+                _sched, _right, _left_label = _right, None, r"$a_t,\ \gamma_t$"
+        _gap_color = lambda _k: _CLOSED_COLOR if _k.startswith(r"$\gamma") else _AT_COLOR
         _color_map = {_k: _gap_color(_k) for _k in _sched} if _right is None else None
         _right_color = {_k: _gap_color(_k) for _k in _right} if _right is not None else "#7B2CBF"
         wa_schedule_widget = plot_trajectory(
@@ -1221,8 +1251,7 @@ def wa_schedule(
             var=_left_label,
             title=r"Guidance weight schedule  ($\lambda_t = w_t\,a_t$, $a_t=(1-\eta)^{t+1}$)",
             subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
-                      else "preview — " + ", ".join(eta_modes)
-                           + (" (NOLR w shown at w_init)" if "FGWNOLR" in eta_modes else "")),
+                      else "preview — before guiding"),
             xlabel="$t$",
             figsize=(10, 6),
         )
@@ -1236,20 +1265,26 @@ def _(
     M_N_widget,
     T_slider,
     delta_widget,
+    dpi_slider,
     guidance_convergence_t_plot,
     guidance_reference_dropdown,
     inspect_states_widget_make,
     level_slider,
     m_n_widget,
     mask_map,
+    mask_map_3d,
     mask_mode_dropdown,
     mo,
     notebook_mode,
     partition_dropdown,
+    side_lat_slider,
+    side_lon_slider,
+    sigma_div_slider,
     sweep_params_widget,
-    traj_checks,
+    traj_row_select,
     trajectories_plot,
     var_dropdown,
+    view_mask_mode_dropdown,
     wa_schedule_widget,
     weather_map,
     zoom_slider,
@@ -1261,9 +1296,9 @@ def _(
     )
 
     mask_widget_maps = mo.vstack([
-        mo.hstack([zoom_slider], justify="start"),
+        mo.hstack([zoom_slider, dpi_slider, side_lon_slider, side_lat_slider, sigma_div_slider], justify="start"),
         mo.hstack(
-            [weather_map, mask_map],
+            [weather_map, mask_map, mask_map_3d],
             justify="start",
             align="start",
         ),
@@ -1283,6 +1318,7 @@ def _(
                 mask_widget_controls,
                 M_N_widget,
                 m_n_widget,
+                traj_row_select,
                 trajectories_plot
             ])
             inspect_states_widget=None
@@ -1295,11 +1331,14 @@ def _(
                     justify="start",
                 ),
                 delta_widget,
-                mo.hstack(
-                    [mo.vstack(list(traj_checks.values())), trajectories_plot]
-                    + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
-                    justify="start", align="start",
-                )
+                mo.vstack([
+                    traj_row_select,
+                    mo.hstack(
+                        [trajectories_plot]
+                        + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
+                        justify="start", align="start",
+                    ),
+                ], align="start")
             ], align="start")
             mask_widget = mask_widget_maps
             inspect_states_widget=inspect_states_widget_make
@@ -1311,11 +1350,14 @@ def _(
                     [partition_dropdown, var_dropdown, level_slider],
                     justify="start",
                 ),
-                mo.hstack(
-                    [mo.vstack(list(traj_checks.values())), trajectories_plot]
-                    + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
-                    justify="start", align="start",
-                ),
+                mo.vstack([
+                    mo.hstack([view_mask_mode_dropdown, traj_row_select], justify="start", align="center"),
+                    mo.hstack(
+                        [trajectories_plot]
+                        + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
+                        justify="start", align="start",
+                    ),
+                ], align="start"),
                 guidance_convergence_t_plot,
             ], align="start")
             mask_widget = mask_widget_maps
@@ -1341,8 +1383,8 @@ def _(mask_widget):
 
 @app.cell
 def _(mo):
-    get_corners, set_corners = mo.state((-10.0, 2.0, 35.0, 45.0))
-    return get_corners, set_corners
+    get_mask_center_pt, set_mask_center_pt = mo.state((-4.0, 40.0))
+    return get_mask_center_pt, set_mask_center_pt
 
 
 @app.cell
@@ -1358,7 +1400,7 @@ def _(
     notebook_mode,
     np,
     partition,
-    set_corners,
+    set_mask_center_pt,
     timestamps,
     var,
     visualize_map,
@@ -1382,9 +1424,12 @@ def _(
         vmin=np.min(weather_slices),
         vmax=np.max(weather_slices),
         center=np.mean(weather_slices),
-        # mask_corners=mask_corners, # TODO: simplify to this
-        rectangle_x=(mask_corners[0], mask_corners[1]),
-        rectangle_y=(mask_corners[2], mask_corners[3]),
+        puck_center=(
+            (mask_corners[0] + mask_corners[1]) / 2,
+            (mask_corners[2] + mask_corners[3]) / 2,
+        ),
+        side_lon=mask_corners[1] - mask_corners[0],
+        side_lat=mask_corners[3] - mask_corners[2],
         zoom=zoom_slider.value,
         zoom_center_lon=zoom_centers[0],
         zoom_center_lat=zoom_centers[1],
@@ -1393,8 +1438,8 @@ def _(
     )
     if map_interactive:
         weather_map.widget.observe(
-            lambda _c: set_corners(
-                (*sorted(weather_map.widget.x), *sorted(weather_map.widget.y))
+            lambda _c: set_mask_center_pt(
+                (weather_map.widget.x[0], weather_map.widget.y[0])
             ),
             names=["x", "y"],
         )
@@ -1405,7 +1450,6 @@ def _(
 def _(
     dpi_slider,
     mask,
-    mask_corners,
     mask_level,
     mask_partition,
     mask_var,
@@ -1421,9 +1465,11 @@ def _(
         interactive=False,
         vmin=np.min(mask) if np.min(mask) < np.max(mask) else -0.001,
         vmax=np.max(mask) if np.min(mask) < np.max(mask) else 0.001,
-        center=np.mean(mask),
-        rectangle_x=(mask_corners[0], mask_corners[1]),
-        rectangle_y=(mask_corners[2], mask_corners[3]),
+        center=np.mean(mask) if np.min(mask) < np.max(mask) else 0.0,
+        contour_2d=mask,  # level sets of the displayed mask (incl. cos weight)
+        contour_levels=8,
+        contour_color="black",
+        contour_linewidth=0.5,
         zoom=zoom_slider.value,
         zoom_center_lon=zoom_centers[0],
         zoom_center_lat=zoom_centers[1],
@@ -1480,7 +1526,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    dpi_slider = mo.ui.slider(start=50, stop=500, step=50, value=100, debounce=True, show_value=True, label="dpi: ")
+    dpi_slider = mo.ui.slider(start=50, stop=1000, step=50, value=100, debounce=True, show_value=True, label="dpi: ")
     return (dpi_slider,)
 
 
@@ -1506,13 +1552,13 @@ def _(
     get_slices,
     gt_N_slices,
     gui_M_N_slices,
+    gui_ung_final_xr,
     level,
     m,
     n,
     notebook_mode,
     partition,
     ung_M_N_slices,
-    ung_gui_final_xr,
     var,
 ):
     if notebook_mode =="guided_rollout":
@@ -1534,16 +1580,15 @@ def _(
         gui_prev = gui_M_N_slices[m][n-1] if n>0 else gui_M_N_slices[m][n]
         gt_prev = gt_N_slices[n]
 
-        ung_onl_slice = get_slices(ung_gui_final_xr, partition, var, level)
-        ung_onl_curr = ung_onl_slice[m][n]
-        ung_onl_prev = ung_onl_slice[m][n-1] if n>0 else ung_onl_slice[m][n]
+        gui_ung_slice = get_slices(gui_ung_final_xr, partition, var, level)
+        gui_ung_curr = gui_ung_slice[m][n]
+        gui_ung_prev = gui_ung_slice[m][n-1] if n>0 else gui_ung_slice[m][n]
 
         gt_gt = gt_curr - gt_prev
         gui_gui = gui_curr - gui_prev
-        gui_ung_gui = gui_curr - ung_onl_curr
+        gui_gui_ung = gui_curr - gui_ung_curr
         gui_gt = gui_curr - gt_curr
-        ung_gui_gt = ung_onl_curr - gt_curr
-        ung_gui_ung_gui = ung_onl_curr - ung_onl_prev
+        gui_ung_gt = gui_ung_curr - gt_curr
     return (
         gt_curr,
         gt_gt,
@@ -1552,9 +1597,9 @@ def _(
         gui_curr,
         gui_gt,
         gui_gui,
-        gui_ung_gui,
+        gui_gui_ung,
+        gui_ung_curr,
         ung_curr,
-        ung_onl_curr,
         ung_prev,
     )
 
@@ -1592,9 +1637,11 @@ def _(
     gui_curr,
     gui_gt,
     gui_gui,
-    gui_ung_gui,
+    gui_gui_ung,
+    gui_ung_curr,
     map_interactive,
     mask,
+    mask_region,
     mo,
     norm_mode_dropdown,
     notebook_mode,
@@ -1602,10 +1649,8 @@ def _(
     safe_abs_limits,
     show_mask_switch,
     ung_curr,
-    ung_onl_curr,
     ung_prev,
     visualize_map,
-    white_zero_checkbox,
     white_zero_cmap,
     white_zero_slider,
     zoom_centers,
@@ -1632,11 +1677,14 @@ def _(
                         _v_min, _v_max, _v_center = safe_abs_limits([arr])
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # own limits, restricted to inside the mask (nonzero weights)
-                        _v_min, _v_max, _v_center = safe_abs_limits([np.where(np.asarray(mask) > 0, arr, np.nan)])
+                        _v_min, _v_max, _v_center = safe_abs_limits([np.where(mask_region, arr, np.nan)])
+                        arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max, _v_center = abs_vmin, abs_vmax, abs_center
+                    _arr_wz = np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
                     absolute_maps[label] = visualize_map(
-                        arr,
+                        _arr_wz,
+                        cmap=white_zero_cmap,
                         contour_2d=arr if contour_checkbox.value else None,
                         contour_levels=contour_levels_slider.value,
                         contour_color=contour_color_dropdown.value,
@@ -1677,19 +1725,25 @@ def _(
                         v_min = min(float(np.nanmin(arr)), -1e-12)
                         v_max = max(float(np.nanmax(arr)), 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
-                        _arr_in = np.where(np.asarray(mask) > 0, arr, np.nan)
-                        v_min = min(float(np.nanmin(_arr_in)), -1e-12)
-                        v_max = max(float(np.nanmax(_arr_in)), 1e-12)
+                        # EXACT in-mask min/max, regardless of larger values outside
+                        _arr_in = np.where(mask_region, arr, np.nan)
+                        v_min = float(np.nanmin(_arr_in))
+                        v_max = max(float(np.nanmax(_arr_in)), v_min + 1e-12)
+                        arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         v_min, v_max = diff_vmin, diff_vmax
+                    # zero-inclusion clamp only for the zero-centered modes; own-mask
+                    # keeps its exact in-mask range. NaN guard applies to all modes.
+                    if norm_mode_dropdown.value != "own_mask_scale":
+                        v_min = min(v_min, -1e-12) if np.isfinite(v_min) else -1.0
+                        v_max = max(v_max, 1e-12) if np.isfinite(v_max) else 1.0
+                    elif not (np.isfinite(v_min) and np.isfinite(v_max)):
+                        v_min, v_max = -1.0, 1.0
 
-                    _arr_wz = (
-                        np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
-                        if white_zero_checkbox.value else arr
-                    )
+                    _arr_wz = np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
                     difference_maps[label] = visualize_map(
                         _arr_wz,
-                        cmap=white_zero_cmap if white_zero_checkbox.value else "coolwarm",
+                        cmap=white_zero_cmap,
                         contour_2d=arr if contour_checkbox.value else None,
                         contour_levels=contour_levels_slider.value,
                         contour_color=contour_color_dropdown.value,
@@ -1698,7 +1752,7 @@ def _(
                         title=label,
                         vmin=v_min,
                         vmax=v_max,
-                        center=0.0,
+                        center=0.0 if v_min < 0.0 < v_max else None,
                         show_mask=show_mask_switch.value,
                         zoom=zoom_slider.value,
                         zoom_center_lon=zoom_centers[0],
@@ -1719,7 +1773,7 @@ def _(
             case "absolute":
                 absolute_panels = [
                     ("$x_{n}^{\\text{gt}}$", gt_curr),
-                    ("$x_{n}^{\\text{ung_gui}}$", ung_onl_curr),
+                    ("$x_{n}^{\\text{gui_ung}}$", gui_ung_curr),
                     ("$x_{n}^{gui}$", gui_curr),
                     ("$x_{n}^{ung}$", ung_curr),
                 ]
@@ -1735,11 +1789,14 @@ def _(
                         _v_min, _v_max, _v_center = safe_abs_limits([arr])
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # own limits, restricted to inside the mask (nonzero weights)
-                        _v_min, _v_max, _v_center = safe_abs_limits([np.where(np.asarray(mask) > 0, arr, np.nan)])
+                        _v_min, _v_max, _v_center = safe_abs_limits([np.where(mask_region, arr, np.nan)])
+                        arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max, _v_center = abs_vmin, abs_vmax, abs_center
+                    _arr_wz = np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
                     absolute_maps[label] = visualize_map(
-                        arr,
+                        _arr_wz,
+                        cmap=white_zero_cmap,
                         contour_2d=arr if contour_checkbox.value else None,
                         contour_levels=contour_levels_slider.value,
                         contour_color=contour_color_dropdown.value,
@@ -1759,7 +1816,7 @@ def _(
                     )
 
                 curr_map = absolute_maps["$x_{n}^{\\text{gt}}$"]
-                prev_map = absolute_maps["$x_{n}^{\\text{ung_gui}}$"]
+                prev_map = absolute_maps["$x_{n}^{\\text{gui_ung}}$"]
                 ung_map = absolute_maps["$x_{n}^{ung}$"]
                 gui_map = absolute_maps["$x_{n}^{gui}$"]
 
@@ -1767,7 +1824,7 @@ def _(
                 difference_panels = [
                     ("$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$", gt_gt),
                     ("$x_{n}^{gui} - x_{n}^{\\text{gt}}$", gui_gt),
-                    ("$x_{n}^{gui} - x_{n}^{\\text{ung_gui}}$", gui_ung_gui),
+                    ("$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$", gui_gui_ung),
                     ("$x_{n}^{gui} - x_{n-1}^{gui}$", gui_gui),
                 ]
 
@@ -1783,19 +1840,25 @@ def _(
                         v_min = min(float(np.nanmin(arr)), -1e-12)
                         v_max = max(float(np.nanmax(arr)), 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
-                        _arr_in = np.where(np.asarray(mask) > 0, arr, np.nan)
-                        v_min = min(float(np.nanmin(_arr_in)), -1e-12)
-                        v_max = max(float(np.nanmax(_arr_in)), 1e-12)
+                        # EXACT in-mask min/max, regardless of larger values outside
+                        _arr_in = np.where(mask_region, arr, np.nan)
+                        v_min = float(np.nanmin(_arr_in))
+                        v_max = max(float(np.nanmax(_arr_in)), v_min + 1e-12)
+                        arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         v_min, v_max = diff_vmin, diff_vmax
+                    # zero-inclusion clamp only for the zero-centered modes; own-mask
+                    # keeps its exact in-mask range. NaN guard applies to all modes.
+                    if norm_mode_dropdown.value != "own_mask_scale":
+                        v_min = min(v_min, -1e-12) if np.isfinite(v_min) else -1.0
+                        v_max = max(v_max, 1e-12) if np.isfinite(v_max) else 1.0
+                    elif not (np.isfinite(v_min) and np.isfinite(v_max)):
+                        v_min, v_max = -1.0, 1.0
 
-                    _arr_wz = (
-                        np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
-                        if white_zero_checkbox.value else arr
-                    )
+                    _arr_wz = np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
                     difference_maps[label] = visualize_map(
                         _arr_wz,
-                        cmap=white_zero_cmap if white_zero_checkbox.value else "coolwarm",
+                        cmap=white_zero_cmap,
                         contour_2d=arr if contour_checkbox.value else None,
                         contour_levels=contour_levels_slider.value,
                         contour_color=contour_color_dropdown.value,
@@ -1804,7 +1867,7 @@ def _(
                         title=label,
                         vmin=v_min,
                         vmax=v_max,
-                        center=0.0,
+                        center=0.0 if v_min < 0.0 < v_max else None,
                         show_mask=show_mask_switch.value,
                         zoom=zoom_slider.value,
                         zoom_center_lon=zoom_centers[0],
@@ -1815,7 +1878,7 @@ def _(
 
                 gt_gt_map = difference_maps["$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$"]
                 gui_gui_map = difference_maps["$x_{n}^{gui} - x_{n-1}^{gui}$"]
-                gui_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{ung_gui}}$"]
+                gui_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$"]
                 gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gt}}$"]
             case "sobel_grads":
                 gradmap_gt_x = cv2.Sobel(gt_curr, cv2.CV_32F, 1, 0, ksize=3)
@@ -1830,15 +1893,15 @@ def _(
                 gradmap_ung_y = cv2.Sobel(ung_curr, cv2.CV_32F, 0, 1, ksize=3)
                 gradmap_ung_mag = np.sqrt(gradmap_ung_x**2 + gradmap_ung_y**2)
 
-                gradmap_gui_ung_x = cv2.Sobel(ung_onl_curr, cv2.CV_32F, 1, 0, ksize=3)
-                gradmap_gui_ung_y = cv2.Sobel(ung_onl_curr, cv2.CV_32F, 0, 1, ksize=3)
+                gradmap_gui_ung_x = cv2.Sobel(gui_ung_curr, cv2.CV_32F, 1, 0, ksize=3)
+                gradmap_gui_ung_y = cv2.Sobel(gui_ung_curr, cv2.CV_32F, 0, 1, ksize=3)
                 gradmap_gui_ung_mag = np.sqrt(gradmap_gui_ung_x**2 + gradmap_gui_ung_y**2)
 
                 gradmap_mag_panels = [
                     (r"$\|\nabla x_n^{\text{gt}}\|$", gradmap_gt_mag),
                     (r"$\|\nabla x_n^{\text{ung}}\|$", gradmap_ung_mag),
                     (r"$\|\nabla x_n^{\text{gui}}\|$", gradmap_gui_mag),
-                    (r"$\|\nabla (x_n^{\text{ung_gui}})\|$", gradmap_gui_ung_mag),
+                    (r"$\|\nabla (x_n^{\text{gui_ung}})\|$", gradmap_gui_ung_mag),
                 ]
 
                 gradmap_mag_vmin = min(float(np.nanmin(gradmap_arr)) for _, gradmap_arr in gradmap_mag_panels)
@@ -1851,15 +1914,18 @@ def _(
                         _v_min = float(np.nanmin(gradmap_arr))
                         _v_max = max(float(np.nanmax(gradmap_arr)), _v_min + 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
-                        _arr_in = np.where(np.asarray(mask) > 0, gradmap_arr, np.nan)
+                        _arr_in = np.where(mask_region, gradmap_arr, np.nan)
                         _v_min = float(np.nanmin(_arr_in))
                         _v_max = max(float(np.nanmax(_arr_in)), _v_min + 1e-12)
+                        gradmap_arr = np.where(mask_region, gradmap_arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max = gradmap_mag_vmin, gradmap_mag_vmax
                     print(_v_min, _v_max)
+                    _gradmap_wz = np.where(np.abs(gradmap_arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(gradmap_arr))), np.nan, gradmap_arr)
                     gradmap_figures.append(
                         visualize_map(
-                            gradmap_arr,
+                            _gradmap_wz,
+                            cmap=white_zero_cmap,
                             contour_2d=gradmap_arr if contour_checkbox.value else None,
                             contour_levels=contour_levels_slider.value,
                             contour_color=contour_color_dropdown.value,
@@ -1868,7 +1934,7 @@ def _(
                             title=gradmap_title,
                             vmin=-1 if _v_min == _v_max else _v_min,
                             vmax=1 if _v_min == _v_max else _v_max,
-                            center=0.0 if (_v_max!=0.0 and _v_min!=0.0) else np.mean([_v_min,_v_max]),
+                            center=0.0 if _v_min < 0.0 < _v_max else None,
                             show_mask=show_mask_switch.value,
                             zoom=zoom_slider.value,
                             zoom_center_lon=zoom_centers[0],
@@ -1897,15 +1963,15 @@ def _(
                 sobel_ung_y = cv2.Sobel(ung_curr, cv2.CV_32F, 0, 1, ksize=3)
                 sobel_ung_mag = np.sqrt(sobel_ung_x**2 + sobel_ung_y**2)
 
-                sobel_ung_gui_x = cv2.Sobel(ung_onl_curr, cv2.CV_32F, 1, 0, ksize=3)
-                sobel_ung_gui_y = cv2.Sobel(ung_onl_curr, cv2.CV_32F, 0, 1, ksize=3)
-                sobel_ung_gui_mag = np.sqrt(sobel_ung_gui_x**2 + sobel_ung_gui_y**2)
+                sobel_gui_ung_x = cv2.Sobel(gui_ung_curr, cv2.CV_32F, 1, 0, ksize=3)
+                sobel_gui_ung_y = cv2.Sobel(gui_ung_curr, cv2.CV_32F, 0, 1, ksize=3)
+                sobel_gui_ung_mag = np.sqrt(sobel_gui_ung_x**2 + sobel_gui_ung_y**2)
 
                 sobel_diff_panels = [
                     (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gt_mag - sobel_ung_mag),
-                    (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla x_n^{\text{gui}}\|$", sobel_gt_mag - sobel_gui_mag),
-                    (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla (x_n^{\text{ung_gui}})\|$", sobel_gt_mag - sobel_ung_gui_mag),
-                    (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla (x_n^{\text{ung_gui}})\|$", sobel_gui_mag - sobel_ung_gui_mag),
+                    (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gui_mag - sobel_ung_mag),
+                    (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla (x_n^{\text{gui_ung}})\|$", sobel_gt_mag - sobel_gui_ung_mag),
+                    (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla (x_n^{\text{gui_ung}})\|$", sobel_gui_mag - sobel_gui_ung_mag),
                 ]
 
                 sobel_diff_vmin = min(float(np.nanmin(arr)) for _, arr in sobel_diff_panels)
@@ -1918,14 +1984,18 @@ def _(
                         _v_min = min(float(np.nanmin(sobel_diff_arr)), -1e-12)
                         _v_max = max(float(np.nanmax(sobel_diff_arr)), 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
-                        _arr_in = np.where(np.asarray(mask) > 0, sobel_diff_arr, np.nan)
-                        _v_min = min(float(np.nanmin(_arr_in)), -1e-12)
-                        _v_max = max(float(np.nanmax(_arr_in)), 1e-12)
+                        # EXACT in-mask min/max, regardless of larger values outside
+                        _arr_in = np.where(mask_region, sobel_diff_arr, np.nan)
+                        _v_min = float(np.nanmin(_arr_in))
+                        _v_max = max(float(np.nanmax(_arr_in)), _v_min + 1e-12)
+                        sobel_diff_arr = np.where(mask_region, sobel_diff_arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max = min(sobel_diff_vmin, -1e-12), max(sobel_diff_vmax, 1e-12)
+                    _sobel_diff_wz = np.where(np.abs(sobel_diff_arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(sobel_diff_arr))), np.nan, sobel_diff_arr)
                     sobel_diff_figures.append(
                         visualize_map(
-                            sobel_diff_arr,
+                            _sobel_diff_wz,
+                            cmap=white_zero_cmap,
                             contour_2d=sobel_diff_arr if contour_checkbox.value else None,
                             contour_levels=contour_levels_slider.value,
                             contour_color=contour_color_dropdown.value,
@@ -1934,7 +2004,7 @@ def _(
                             title=sobel_diff_title,
                             vmin=-1 if _v_min == _v_max else _v_min,
                             vmax=1 if _v_min == _v_max else _v_max,
-                            center=0.0 if (_v_max!=0.0 and _v_min!=0.0) else np.mean([_v_min,_v_max]),
+                            center=0.0 if _v_min < 0.0 < _v_max else None,
                             show_mask=show_mask_switch.value,
                             zoom=zoom_slider.value,
                             zoom_center_lon=zoom_centers[0],
@@ -1983,7 +2053,7 @@ def _(
     gui_gui_map,
     gui_map,
     gui_ung_map,
-    inspect_checks,
+    inspect_row_select,
     level_slider,
     m_slider,
     mo,
@@ -1999,7 +2069,6 @@ def _(
     ung_map,
     ung_prev_map,
     var_dropdown,
-    white_zero_checkbox,
     white_zero_slider,
     zoom_slider,
 ):
@@ -2019,7 +2088,7 @@ def _(
                     [
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
-                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider], justify="start", align="center"),
+                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         mo.hstack([curr_map, prev_map], justify="start"),
                         mo.hstack([ung_map, ung_prev_map], justify="start"),
                     ],
@@ -2031,7 +2100,7 @@ def _(
                     [
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
-                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider], justify="start", align="center"),
+                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         mo.hstack([gt_gt_map, gt_ung_map], justify="start")
                     ], justify="start",
                 )
@@ -2067,14 +2136,12 @@ def _(
                         sweep_params_widget,
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
-                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider], justify="start", align="center"),
-                        mo.hstack([
-                            mo.vstack([inspect_checks[_k] for _k, _ in _rows], justify="start", align="start").style(width="fit-content"),
-                            mo.vstack(
-                                [mo.hstack(_maps, justify="start") for _k, _maps in _rows if inspect_checks[_k].value],
-                                justify="start", align="start",
-                            ).style(width="fit-content"),
-                        ], justify="start", align="start"),
+                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
+                        inspect_row_select,
+                        mo.vstack(
+                            [mo.hstack(_maps, justify="start") for _k, _maps in _rows if _k in inspect_row_select.value],
+                            justify="start", align="start",
+                        ),
                     ],
                     justify="start",
                 )
@@ -2089,14 +2156,12 @@ def _(
                         sweep_params_widget,
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
-                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider], justify="start", align="center"),
-                        mo.hstack([
-                            mo.vstack([inspect_checks[_k] for _k, _ in _rows], justify="start", align="start").style(width="fit-content"),
-                            mo.vstack(
-                                [mo.hstack(_maps, justify="start") for _k, _maps in _rows if inspect_checks[_k].value],
-                                justify="start", align="start",
-                            ).style(width="fit-content"),
-                        ], justify="start", align="start"),
+                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
+                        inspect_row_select,
+                        mo.vstack(
+                            [mo.hstack(_maps, justify="start") for _k, _maps in _rows if _k in inspect_row_select.value],
+                            justify="start", align="start",
+                        ),
                     ], justify="start",
                 )
 
@@ -2106,7 +2171,7 @@ def _(
                         sweep_params_widget,
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
-                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider], justify="start", align="center"),
+                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         sobel_grad_widget
                     ], justify="start",
                 )
@@ -2116,7 +2181,7 @@ def _(
                         sweep_params_widget,
                         *common_controls,
                         mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
-                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider], justify="start", align="center"),
+                        mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         sobel_diffs_widget
                     ], justify="start",
                 )
@@ -2147,11 +2212,12 @@ def _(trajectory_widget):
 
 @app.cell
 def _(mo):
-    # checkboxes compact
-    traj_checks = mo.ui.dictionary({n: mo.ui.checkbox(label=n, value=True) for n in (
-        "unguided", "guided", "unguided_guided", "planned_guidance", "target_guidance", "delta_trajectory", "dist_bands"
-    )})
-    return (traj_checks,)
+    # chart/trace selector for the rollout-trajectories plot, mirroring the
+    # cross-checks / flow-analysis / inspect-states multiselects.
+    _traj_rows = ["unguided", "guided", "guided_unguided", "planned_guidance",
+                  "target_guidance", "delta_trajectory", "dist_bands"]
+    traj_row_select = mo.ui.multiselect(_traj_rows, value=_traj_rows, label="charts: ")
+    return (traj_row_select,)
 
 
 @app.cell
@@ -2170,6 +2236,7 @@ def _(
     gt_trajectory,
     gui_M_N_trajectories,
     gui_m_trajectory,
+    gui_ung_m_trajectory,
     m,
     n,
     notebook_mode,
@@ -2179,11 +2246,11 @@ def _(
     target_guidance_M_N_trajectories,
     target_guidance_trajectory,
     timestamps,
-    traj_checks,
+    traj_row_select,
     ung_M_N_trajectories,
-    ung_gui_m_trajectory,
     ung_m_trajectory,
     var,
+    view_mask_mode,
 ):
 
     var_check = (var==config.VAR if notebook_mode in ("guided_rollout", "analyze_rollout") else False)
@@ -2193,22 +2260,23 @@ def _(
         var=var,
         m=m,
         n=n+1,
-        guided_member=gui_m_trajectory if traj_checks["guided"].value else None,
-        unguided_member=ung_m_trajectory if traj_checks["unguided"].value else None,
-        unguided_guided_member=ung_gui_m_trajectory if traj_checks["unguided_guided"].value else None,
-        guided_ensemble=gui_M_N_trajectories if traj_checks["dist_bands"].value else None,
-        unguided_ensemble=ung_M_N_trajectories if traj_checks["dist_bands"].value else None,
-        target_ensemble=planned_guidance_trajectories if (traj_checks["planned_guidance"].value and traj_checks["dist_bands"].value and var_check) else None,
-        target_guidance_ensemble=target_guidance_M_N_trajectories if (traj_checks["dist_bands"].value and traj_checks["target_guidance"].value and var_check) else None,
-        target_trajectory=planned_guidance_trajectory if (traj_checks["planned_guidance"].value and var_check) else None,
-        target_guidance_trajectory=target_guidance_trajectory if (traj_checks["target_guidance"].value and var_check) else None,
+        guided_member=gui_m_trajectory if ("guided" in traj_row_select.value) else None,
+        unguided_member=ung_m_trajectory if ("unguided" in traj_row_select.value) else None,
+        guided_unguided_member=gui_ung_m_trajectory if ("guided_unguided" in traj_row_select.value) else None,
+        guided_ensemble=gui_M_N_trajectories if ("dist_bands" in traj_row_select.value) else None,
+        unguided_ensemble=ung_M_N_trajectories if ("dist_bands" in traj_row_select.value) else None,
+        target_ensemble=planned_guidance_trajectories if (("planned_guidance" in traj_row_select.value) and ("dist_bands" in traj_row_select.value) and var_check) else None,
+        target_guidance_ensemble=target_guidance_M_N_trajectories if (("dist_bands" in traj_row_select.value) and ("target_guidance" in traj_row_select.value) and var_check) else None,
+        target_trajectory=planned_guidance_trajectory if (("planned_guidance" in traj_row_select.value) and var_check) else None,
+        target_guidance_trajectory=target_guidance_trajectory if (("target_guidance" in traj_row_select.value) and var_check) else None,
         ground_truth=gt_trajectory,
+        ground_truth_label=f"Ground truth ({view_mask_mode})",
         delta_trajectories=(
             ([[0] + list(_t) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
              else [[0] + list(delta_trajectory)])
-            if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
+            if (("delta_trajectory" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
         ),
-        cumulative_delta_trajectory=[0] + list(cumulative_delta_trajectory) if (traj_checks["delta_trajectory"].value and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
+        cumulative_delta_trajectory=[0] + list(cumulative_delta_trajectory) if (("delta_trajectory" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
         show_guided_mean=False,
         show_unguided_mean=False,
         title=f"rollout trajectories",
@@ -2318,10 +2386,10 @@ def _(
         # affine identities; no model needed. LEGACY stores load directly.
         grads_xr = get_rollout("grads", rollout_id).sel(sweep_params)
         vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params)
-        ung_gui_xr = get_rollout("ung_gui", rollout_id).sel(sweep_params)
-        # ung_gui carries the full flow-step (t) axis; its last slice is the final
+        gui_ung_xr = get_rollout("gui_ung", rollout_id).sel(sweep_params)
+        # gui_ung carries the full flow-step (t) axis; its last slice is the final
         # unguided state. Guard so older stores (no t axis) still work.
-        ung_gui_final_xr = ung_gui_xr.isel(t=-1) if "t" in ung_gui_xr.dims else ung_gui_xr
+        gui_ung_final_xr = gui_ung_xr.isel(t=-1) if "t" in gui_ung_xr.dims else gui_ung_xr
 
         try:
             res_xr = get_rollout("res", rollout_id).sel(sweep_params)
@@ -2380,11 +2448,11 @@ def _(
     return (
         clean_preds_xr,
         grads_xr,
+        gui_ung_final_xr,
+        gui_ung_xr,
         gui_vec_xr,
         gui_vfs_xr,
         res_xr,
-        ung_gui_final_xr,
-        ung_gui_xr,
         vfs_xr,
     )
 
@@ -2438,6 +2506,8 @@ def _(
     get_slices,
     grads_xr,
     gt_curr,
+    gui_ung_curr,
+    gui_ung_xr,
     gui_vec_xr,
     gui_vfs_xr,
     level,
@@ -2450,8 +2520,6 @@ def _(
     res_xr,
     sweep_params,
     t,
-    ung_gui_xr,
-    ung_onl_curr,
     var,
     vfs_xr,
 ):
@@ -2464,14 +2532,14 @@ def _(
 
         # slices of interest
         # 1
-        diff_gt_ung_onl_slice =  ung_onl_curr - gt_curr
+        diff_gt_gui_ung_slice =  gui_ung_curr - gt_curr
         diff_gt_clean_pred_slice = clean_preds_slices[m][n][t] - gt_curr
         # 2
         # compare against the unguided clean prediction AT THE SAME flow step t (the
-        # ung_gui trace carries the full t axis; older stores without it fall back to final)
-        _ung_gui_t_slices = get_slices(ung_gui_xr, partition, var, level)
-        _ung_gui_t = _ung_gui_t_slices[m][n][t] if _ung_gui_t_slices.ndim == 5 else _ung_gui_t_slices[m][n]
-        ung_onl_clean_diff_slice = clean_preds_slices[m][n][t] - _ung_gui_t
+        # gui_ung trace carries the full t axis; older stores without it fall back to final)
+        _gui_ung_t_slices = get_slices(gui_ung_xr, partition, var, level)
+        _gui_ung_t = _gui_ung_t_slices[m][n][t] if _gui_ung_t_slices.ndim == 5 else _gui_ung_t_slices[m][n]
+        gui_ung_clean_diff_slice = clean_preds_slices[m][n][t] - _gui_ung_t
         clean_preds_slice_prev = clean_preds_slices[m][n][t-1] if t>0 else clean_preds_slices[m][n][t]
         clean_preds_diff_slice = clean_preds_slices[m][n][t] - clean_preds_slice_prev
         # 3
@@ -2498,7 +2566,7 @@ def _(
         vfs_slice = vfs_slices[m][n][t]
         # residual integrand of the masked loss: mask * (x_hat - (1+delta)*x_ref),
         # whose spatial sum IS the signed residual r_t that the gradient differentiates
-        _x_ref_slice = gt_curr if sweep_params.get("GUI_REF") == "GT" else ung_onl_curr
+        _x_ref_slice = gt_curr if sweep_params.get("GUI_REF") == "GT" else gui_ung_curr
         _delta_n = 1.0 + float(np.asarray(delta_trajectory, dtype=float)[n])
         masked_residual_slice = (clean_preds_slices[m][n][t] - _delta_n * _x_ref_slice) * np.asarray(mask)
         # Model reaction to the guidance applied at t, in SAME units: the stored vf
@@ -2517,14 +2585,14 @@ def _(
         clean_preds_diff_slice,
         diff_grads_slice,
         diff_gt_clean_pred_slice,
-        diff_gt_ung_onl_slice,
+        diff_gt_gui_ung_slice,
         grads_slice,
+        gui_ung_clean_diff_slice,
         gui_vec_slice,
         guided_vfs_slice,
         masked_residual_slice,
         res_next_slice,
         res_slice,
-        ung_onl_clean_diff_slice,
         vf_gui_next_diff_slice,
         vfs_slice,
     )
@@ -2546,9 +2614,10 @@ def _(
     contour_lw_slider,
     diff_grads_slice,
     diff_gt_clean_pred_slice,
-    diff_gt_ung_onl_slice,
+    diff_gt_gui_ung_slice,
     dpi_slider,
     grads_slice,
+    gui_ung_clean_diff_slice,
     gui_vec_slice,
     guided_vfs_slice,
     mask,
@@ -2558,11 +2627,9 @@ def _(
     res_next_slice,
     res_slice,
     show_mask_switch,
-    ung_onl_clean_diff_slice,
     vf_gui_next_diff_slice,
     vfs_slice,
     visualize_map,
-    white_zero_checkbox,
     white_zero_cmap,
     white_zero_slider,
     zoom_centers,
@@ -2572,9 +2639,9 @@ def _(
         diff_vfs_slice = guided_vfs_slice - vfs_slice
 
         map_specs = [
-            ("diff_gt_ung_onl_map", diff_gt_ung_onl_slice, r"$x_{n}^{\text{ung_gui}} - x_{n}^{\text{gt}}$", -1, 1),
+            ("diff_gt_gui_ung_map", diff_gt_gui_ung_slice, r"$x_{n}^{\text{gui_ung}} - x_{n}^{\text{gt}}$", -1, 1),
             ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$x_t^{\text{gui}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("ung_onl_clean_diff_map", ung_onl_clean_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{ung\_gui}}$", -1, 1),
+            ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$", -1, 1),
             ("clean_preds_diff_map", clean_preds_diff_slice, r"$x_t^{\text{gui}} - x_{t-1}^{\text{gui}}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("vfs_map", vfs_slice, r"$\text{vf}_t$", -0.001, 0.001),
@@ -2601,11 +2668,11 @@ def _(
                 data_min = data_max = data_mean = 0.0
             print(name, data_min, data_mean, data_max)
 
-            if white_zero_checkbox.value and data_min != data_max:
+            if data_min != data_max:
                 data = np.where(np.abs(data) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(data))), np.nan, data)
             maps[name] = visualize_map(
                 data,
-                cmap=white_zero_cmap if white_zero_checkbox.value else "coolwarm",
+                cmap=white_zero_cmap,
                 mask_2d=mask,
                 show_mask=show_mask_switch.value,
                 title=title,
@@ -2624,9 +2691,9 @@ def _(
                 contour_linewidth=contour_lw_slider.value,
             )
 
-        diff_gt_ung_onl_map = maps["diff_gt_ung_onl_map"]
+        diff_gt_gui_ung_map = maps["diff_gt_gui_ung_map"]
         diff_gt_clean_pred_map = maps["diff_gt_clean_pred_map"]
-        ung_onl_clean_diff_map = maps["ung_onl_clean_diff_map"]
+        gui_ung_clean_diff_map = maps["gui_ung_clean_diff_map"]
         clean_preds_diff_map = maps["clean_preds_diff_map"]
         grads_map = maps["grads_map"]
         vfs_map = maps["vfs_map"]
@@ -2640,33 +2707,30 @@ def _(
         diff_grads_map = maps["diff_grads_map"]
     return (
         grads_map,
+        gui_ung_clean_diff_map,
         gui_vec_map,
         guided_vfs_map,
         masked_residual_map,
         res_map,
         res_next_map,
-        ung_onl_clean_diff_map,
         vfs_map,
     )
 
 
 @app.cell
 def _(mo):
-    flow_checks = mo.ui.dictionary({n: mo.ui.checkbox(label=n, value=True) for n in (
-        "gui_t diffs", "grads", "vfs", "z_t",
-    )})
-    return (flow_checks,)
+    _flow_rows = ["gui_t diffs", "grads", "vfs", "z_t"]
+    flow_row_select = mo.ui.multiselect(_flow_rows, value=_flow_rows, label="charts: ")
+    return (flow_row_select,)
 
 
 @app.cell
 def _(mo):
-    # row-toggle checkboxes for the Inspect states maps (analyze mode), mirroring
-    # flow_checks / cross_row_checks. Keys cover the absolute + difference rows.
-    inspect_checks = mo.ui.dictionary({n: mo.ui.checkbox(label=n, value=True) for n in (
-        "curr / prev", "gui / ung",
-        "gt_gt / gui_gui", "gui_gt / gui_ung",
-    )})
-    return (inspect_checks,)
+    # chart-row selector for the Inspect states maps (analyze mode), mirroring the
+    # cross-checks / flow-analysis multiselects. Keys cover the absolute + difference rows.
+    _inspect_rows = ["curr / prev", "gui / ung", "gt_gt / gui_gui", "gui_gt / gui_ung"]
+    inspect_row_select = mo.ui.multiselect(_inspect_rows, value=_inspect_rows, label="charts: ")
+    return (inspect_row_select,)
 
 
 @app.cell
@@ -2676,8 +2740,9 @@ def _(
     contour_levels_slider,
     contour_lw_slider,
     dpi_slider,
-    flow_checks,
+    flow_row_select,
     grads_map,
+    gui_ung_clean_diff_map,
     gui_vec_map,
     guided_vfs_map,
     level_slider,
@@ -2692,10 +2757,8 @@ def _(
     show_mask_switch,
     sweep_params_widget,
     t_slider,
-    ung_onl_clean_diff_map,
     var_dropdown,
     vfs_map,
-    white_zero_checkbox,
     white_zero_slider,
     zoom_slider,
 ):
@@ -2728,7 +2791,7 @@ def _(
                 ),
                 mo.hstack([show_mask_switch, zoom_slider], justify="start", align="start"),
                 mo.hstack(
-                    [contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_checkbox, white_zero_slider],
+                    [contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider],
                     justify="start", align="start",
                 ),
             ],
@@ -2736,7 +2799,7 @@ def _(
         )
 
         map_rows = [
-            ("gui_t diffs", [ung_onl_clean_diff_map, masked_residual_map]),
+            ("gui_t diffs", [gui_ung_clean_diff_map, masked_residual_map]),
             ("grads", [grads_map, gui_vec_map]),
             ("vfs", [vfs_map, guided_vfs_map]),
             ("z_t", [res_map, res_next_map]),
@@ -2746,13 +2809,11 @@ def _(
             [
                 sweep_params_widget,
                 flow_controls,
-                mo.hstack([
-                    mo.vstack([flow_checks[_k] for _k, _ in map_rows], justify="start", align="start").style(width="fit-content"),
-                    mo.vstack(
-                        [mo.hstack(_maps, justify="start", align="start") for _k, _maps in map_rows if flow_checks[_k].value],
-                        justify="start", align="start",
-                    ).style(width="fit-content"),
-                ], justify="start", align="start"),
+                flow_row_select,
+                mo.vstack(
+                    [mo.hstack(_maps, justify="start", align="start") for _k, _maps in map_rows if _k in flow_row_select.value],
+                    justify="start", align="start",
+                ),
             ],
             justify="start", align="start",
         )
@@ -2791,9 +2852,8 @@ def _(mask, mcolors, mo, np, plt, xr):
     aggregate_by_level_checkbox = mo.ui.checkbox(label="aggregate by level")
     aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
     dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
-    cross_row_checks = mo.ui.dictionary({k: mo.ui.checkbox(label=k, value=True) for k in (
-        "masked avg", "grad_norms", "gui_vf_norms", "vf_norms", "angular deflection",
-    )})
+    _cross_rows = ["masked avg", "grad_norms", "gui_vf_norms", "vf_norms", "angular deflection"]
+    cross_row_select = mo.ui.multiselect(_cross_rows, value=_cross_rows, label="charts: ")
     differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
     abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$", value=True)
 
@@ -2887,7 +2947,7 @@ def _(mask, mcolors, mo, np, plt, xr):
         aggregate_by_level_checkbox,
         aggregate_spatially_dropdown,
         color_for,
-        cross_row_checks,
+        cross_row_select,
         cross_traces,
         differential_checkbox,
         dist_bands_checkbox,
@@ -2973,14 +3033,14 @@ def _(
     dask,
     grads_xr,
     gt_n_xr,
+    gui_ung_final_xr,
+    gui_ung_xr,
     gui_vfs_xr,
     guided_xr,
     mask,
     maybe_mask,
     notebook_mode,
     np,
-    ung_gui_final_xr,
-    ung_gui_xr,
     vfs_xr,
     xnorm,
     xr,
@@ -3014,16 +3074,16 @@ def _(
             "dvf_mean": _mn(_dvf),
             "dvf_dot": (_msk(vfs_xr) * _msk(gui_vfs_xr.shift(t=1))).sum(dim=_sp),
             "gvf_prev_sq": _sq(gui_vfs_xr.shift(t=1)),
-            "gui_ung_gui_mean": _nmn(guided_xr) - _nmn(ung_gui_final_xr),
+            "gui_gui_ung_mean": _nmn(guided_xr) - _nmn(gui_ung_final_xr),
             "gui_gt_mean": _nmn(guided_xr) - _nmn(gt_n_xr),
             "clean_gt_mean": _nmn(clean_preds_xr) - _nmn(gt_n_xr),
-            "ung_gui_gt_mean": _nmn(ung_gui_final_xr) - _nmn(gt_n_xr),
-            "ung_gui_gt_t_mean": _nmn(ung_gui_xr) - _nmn(gt_n_xr),
-            "clean_ung_gui_mean": _nmn(clean_preds_xr) - _nmn(ung_gui_xr),
-            "gui_ung_gui_denorm": _wmn(guided_xr) - _wmn(ung_gui_final_xr),
-            "clean_ung_gui_denorm": _wmn(clean_preds_xr) - _wmn(ung_gui_xr),
-            "gui_ung_gui_wnorm": _wnmn(guided_xr) - _wnmn(ung_gui_final_xr),
-            "clean_ung_gui_wnorm": _wnmn(clean_preds_xr) - _wnmn(ung_gui_xr),
+            "gui_ung_gt_mean": _nmn(gui_ung_final_xr) - _nmn(gt_n_xr),
+            "gui_ung_gt_t_mean": _nmn(gui_ung_xr) - _nmn(gt_n_xr),
+            "clean_gui_ung_mean": _nmn(clean_preds_xr) - _nmn(gui_ung_xr),
+            "gui_gui_ung_denorm": _wmn(guided_xr) - _wmn(gui_ung_final_xr),
+            "clean_gui_ung_denorm": _wmn(clean_preds_xr) - _wmn(gui_ung_xr),
+            "gui_gui_ung_wnorm": _wnmn(guided_xr) - _wnmn(gui_ung_final_xr),
+            "clean_gui_ung_wnorm": _wnmn(clean_preds_xr) - _wnmn(gui_ung_xr),
             # full-domain ||dL/dz||^2 per (m, n, t) -- consumed by the convergence plot's
             # through-Jacobian claim; UNMASKED by design (the loss gradient lives everywhere)
             "grads_l2_full": sum(
@@ -3055,7 +3115,7 @@ def _():
 @app.cell
 def _(
     cross_check_controls,
-    cross_row_checks,
+    cross_row_select,
     dist_bands_checkbox,
     grad_norms_n_plot,
     grad_norms_plot,
@@ -3080,26 +3140,22 @@ def _(
             dist_bands_checkbox,
             cross_check_controls,
             mo.hstack([m_slider, n_slider, t_slider], justify="start"),
-            mo.hstack([
-                mo.vstack(list(cross_row_checks.values()), justify="start", align="start").style(width="fit-content"),
-                mo.vstack(
-                    [
-                        mo.hstack(_row, justify="start")
-                        for _key, _row in [
-                            ("masked avg", [gui_mean_n_plot, gui_mean_t_plot]),
-                            ("grad_norms", [grad_norms_n_plot, grad_norms_plot]),
-                            ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
-                            ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
-                            ("angular deflection", [vf_angdef_n_plot, vf_angdef_t_plot]),
-                        ]
-                        if cross_row_checks[_key].value
-                    ],
-                    justify="start",
-                    align="start",
-                ).style(width="fit-content"),
-            ],
-            align="start",
-            justify="start",),
+            cross_row_select,
+            mo.vstack(
+                [
+                    mo.hstack(_row, justify="start")
+                    for _key, _row in [
+                        ("masked avg", [gui_mean_n_plot, gui_mean_t_plot]),
+                        ("grad_norms", [grad_norms_n_plot, grad_norms_plot]),
+                        ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
+                        ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
+                        ("angular deflection", [vf_angdef_n_plot, vf_angdef_t_plot]),
+                    ]
+                    if _key in cross_row_select.value
+                ],
+                justify="start",
+                align="start",
+            ),
         ], align="start")
     else:
         cross_checks_widget = None
@@ -3156,7 +3212,7 @@ def _(
                 _tr = {_k: _all[_k] for _k in keys if _k in _all}
                 _bands = {_k: _bands_all[_k] for _k in _tr if _k in _bands_all} if _bands_all else None
             elif rank_ds is not None:
-                # rank variables by the NORMALIZED gui - ung_gui difference in rank_ds
+                # rank variables by the NORMALIZED gui - gui_ung difference in rank_ds
                 # (fair across variables) instead of their own magnitude; the DISPLAY (ds)
                 # stays denormalized. Pull every variable's rank + display trace (k huge),
                 # sort by max|rank|, keep the top-k.
@@ -3174,10 +3230,10 @@ def _(
             _colors = color_for(_tr)
             _styles = None
             if twin_ds is not None:
-                # ung_gui twin overlay for the displayed variables: same colors, dotted
+                # gui_ung twin overlay for the displayed variables: same colors, dotted
                 _twin_src, _ = cross_traces(twin_ds, axis, agg, m, **{**cross_ctl, "k": 10**9})
-                _twin = {f"{_k} (ung_gui)": _twin_src[_k] for _k in _tr if _k in _twin_src}
-                _colors |= {_k: _colors[_k.removesuffix(" (ung_gui)")] for _k in _twin}
+                _twin = {f"{_k} (gui_ung)": _twin_src[_k] for _k in _tr if _k in _twin_src}
+                _colors |= {_k: _colors[_k.removesuffix(" (gui_ung)")] for _k in _twin}
                 _styles = {_k: ":" for _k in _twin}
                 _tr = _tr | _twin
             # width scales with the number of steps so the sparse "over n" plots
@@ -3196,7 +3252,7 @@ def _(
         # the over-t charts display the SAME variables, so ranking always reflects the
         # aggregated influence of the variable over all steps, never a single-step peak
         row_keys = {
-            "masked_avg": list(cross_traces(red["gui_ung_gui_wnorm"], "n", "mean", m, **cross_ctl)[0]),
+            "masked_avg": list(cross_traces(red["gui_gui_ung_wnorm"], "n", "mean", m, **cross_ctl)[0]),
             "grads": list(cross_traces(red["grads_l2"], "n", "l2", m, **cross_ctl)[0]),
             "gui_vfs": list(cross_traces(red["gui_vfs_l2"], "n", "l2", m, **cross_ctl)[0]),
             "vfs": list(cross_traces(red["vfs_l2"], "n", "l2", m, **cross_ctl)[0]),
@@ -3207,8 +3263,8 @@ def _(
         gui_vf_norms_n_plot = _plot("Guided vector field norm over $n$", r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|$ (after the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space and all flow steps $t$", red["gui_vfs_l2"], "n", "l2")
         vf_norms_n_plot = _plot("Vector field norm over $n$", r"$\|\mathrm{vf}_t\|$ (model vf before the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space and all flow steps $t$", red["vfs_l2"], "n", "l2")
         diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n), "t", "mean")
-        gui_mean_n_plot = _plot("Masked average: guided − unguided over $n$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{n}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{n})$ — final states per forecast step, normalized units", red["gui_ung_gui_wnorm"], "n", "mean")
-        gui_mean_t_plot = _plot("Masked average: guided − unguided over $t$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{t}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{ung\_gui}}_{t})$ — clean predictions along the flow at the selected $n$, normalized units", red["clean_ung_gui_wnorm"].isel(n=n), "t", "mean", keys=row_keys["masked_avg"])
+        gui_mean_n_plot = _plot("Masked average: guided − unguided over $n$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{n}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui\_ung}}_{n})$ — final states per forecast step, normalized units", red["gui_gui_ung_wnorm"], "n", "mean")
+        gui_mean_t_plot = _plot("Masked average: guided − unguided over $t$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{t}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui\_ung}}_{t})$ — clean predictions along the flow at the selected $n$, normalized units", red["clean_gui_ung_wnorm"].isel(n=n), "t", "mean", keys=row_keys["masked_avg"])
     else:
         row_keys = None
         gui_mean_n_plot = gui_mean_t_plot = vf_angdef_n_plot = vf_angdef_t_plot = grad_norms_n_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = None
@@ -3331,8 +3387,7 @@ def _(mo, plt):
     contour_levels_slider = mo.ui.slider(4, 30, step=2, value=4, label="levels: ", show_value=True, debounce=True)
     contour_lw_slider = mo.ui.slider(start=0.4, stop=2.0, step=0.2, value=0.4, label="linewidth: ", show_value=True, debounce=True)
     contour_color_dropdown = mo.ui.dropdown(["black", "dimgray", "red", "white"], value="dimgray", label="contour color: ")
-    white_zero_checkbox = mo.ui.checkbox(label="white zeros")
-    white_zero_slider = mo.ui.slider(start=0.0, stop=100.0, step=0.5, value=50.0, label="white below (% of max |v|): ", show_value=True, debounce=True)
+    white_zero_slider = mo.ui.slider(start=0.0, stop=100.0, step=0.5, value=0.0, label="white below (% of max |v|): ", show_value=True, debounce=True)
     white_zero_cmap = plt.get_cmap("coolwarm").copy()
     white_zero_cmap.set_bad("white")
     return (
@@ -3340,7 +3395,6 @@ def _(mo, plt):
         contour_color_dropdown,
         contour_levels_slider,
         contour_lw_slider,
-        white_zero_checkbox,
         white_zero_cmap,
         white_zero_slider,
     )
@@ -3395,6 +3449,28 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         mask_mode_select,
         sweep_ranges,
     )
+
+
+@app.cell
+def _(mo):
+    side_lon_slider = mo.ui.slider(1.5, 90, step=1.5, value=12, label="lon side: ", show_value=True, debounce=True)
+    side_lat_slider = mo.ui.slider(1.5, 60, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
+    sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=1, label="sigma divisor: ", show_value=True)
+    return side_lat_slider, side_lon_slider, sigma_div_slider
+
+
+@app.cell
+def _(dpi_slider, mask, visualize_mask_3d, zoom_centers, zoom_slider):
+    mask_map_3d = visualize_mask_3d(
+        mask,
+        title="mask (3D)",
+        zoom=zoom_slider.value,
+        zoom_center_lon=zoom_centers[0],
+        zoom_center_lat=zoom_centers[1],
+        figsize=(14, 8),
+        dpi=dpi_slider.value,
+    )
+    return (mask_map_3d,)
 
 
 if __name__ == "__main__":

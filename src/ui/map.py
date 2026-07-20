@@ -23,17 +23,6 @@ def _get_world():
     return gpd.read_file(geodatasets.get_path("naturalearth.land"))
 
 
-def get_mask_corners_from_widget(map_widget):
-    x0, x1 = map_widget.value["x"]
-    y0, y1 = map_widget.value["y"]
-
-    lon_left, lon_right = sorted([x0, x1])
-    lat_bottom, lat_top = sorted([y0, y1])
-
-    return lon_left, lon_right, lat_bottom, lat_top
-
-
-
 # ------------------------------------------------------------
 # ERA5 grid preparation
 # ------------------------------------------------------------
@@ -327,6 +316,20 @@ def draw_base_map(
         cax = divider.append_axes("right", size="4%", pad=0.08)
         cbar = ax.figure.colorbar(im, cax=cax)
         cbar.ax.tick_params(labelsize=9)
+        # always label the true min, max, and (for diverging norms) the center
+        # of the color scale; drop auto ticks that would overlap the anchors
+        _vmin, _vmax = im.norm.vmin, im.norm.vmax
+        if (_vmin is not None and _vmax is not None
+                and np.isfinite(_vmin) and np.isfinite(_vmax) and _vmax > _vmin):
+            _anchors = [_vmin, _vmax]
+            _vc = getattr(im.norm, "vcenter", None)
+            if _vc is not None and np.isfinite(_vc) and _vmin < _vc < _vmax:
+                _anchors.append(float(_vc))
+            _span = _vmax - _vmin
+            _keep = [t for t in cbar.get_ticks()
+                     if _vmin <= t <= _vmax
+                     and all(abs(t - a) > 0.04 * _span for a in _anchors)]
+            cbar.set_ticks(sorted(_anchors + _keep))
 
     return im
 
@@ -462,9 +465,11 @@ def make_interactive_map(
     center=None,
     title=None,
     suptitle=None,
-    rectangle_x=(-10.0, 2.0),
-    rectangle_y=(45.0, 35.0),
+    puck_center=(-4.0, 40.0),
+    side_lon=12.0,
+    side_lat=10.0,
 ):
+    # single puck = rectangle CENTER; side lengths come from the sliders
     plt.rcParams["font.family"] = "Menlo"
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
@@ -492,32 +497,34 @@ def make_interactive_map(
             world=world,
         )
 
-        x0, x1 = widget.x
-        y0, y1 = widget.y
+        lon_c, lat_c = widget.x[0], widget.y[0]
 
-        lon_left, lon_right = sorted([x0, x1])
-        lat_bottom, lat_top = sorted([y0, y1])
+        lon_left = lon_c - side_lon / 2
+        lon_right = lon_c + side_lon / 2
+        lat_bottom = max(-90.0, lat_c - side_lat / 2)
+        lat_top = min(90.0, lat_c + side_lat / 2)
 
-        rect = mpatches.Rectangle(
-            (lon_left, lat_bottom),
-            lon_right - lon_left,
-            lat_top - lat_bottom,
-            fill=False,
-            edgecolor="red",
-            linewidth=1.5,
-            zorder=10,
-        )
-        ax.add_patch(rect)
-        # fig.tight_layout()
+        # +/-360 copies so a box crossing the dateline continues on the
+        # other side (the axes clip whatever falls outside the map)
+        for _shift in (-360.0, 0.0, 360.0):
+            ax.add_patch(mpatches.Rectangle(
+                (lon_left + _shift, lat_bottom),
+                lon_right - lon_left,
+                lat_top - lat_bottom,
+                fill=False,
+                edgecolor="red",
+                linewidth=1.5,
+                zorder=10,
+            ))
 
         # Important: do not call fig.tight_layout() here.
 
     return mo.ui.anywidget(
         ChartPuck.from_callback(
             draw_fn=draw_map,
-            x=list(rectangle_x),
-            y=list(rectangle_y),
-            puck_color=["green", "red"],
+            x=[puck_center[0]],
+            y=[puck_center[1]],
+            puck_color=["green"],
             figsize=(10.31, 5),
             x_bounds=(-180.0, 180.0),
             y_bounds=(-90.0, 90.0),
@@ -525,6 +532,60 @@ def make_interactive_map(
             puck_radius=3,
         )
     )
+
+
+def visualize_mask_3d(
+    mask_2d,
+    *,
+    cmap="coolwarm",
+    figsize=(9, 6),
+    dpi=100,
+    elev=35,
+    azim=-60,
+    title=None,
+    zoom=1,
+    zoom_center_lon=0.0,
+    zoom_center_lat=0.0,
+):
+    """3D surface of the mask weights with the world map drawn on the base plane."""
+    grid = prepare_era5_plot_grid(np.asarray(mask_2d).astype(float))
+    lon, lat = np.meshgrid(grid["lon_c_plot"], grid["lat_c"])
+    z = grid["array_plot"]
+
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    ax = fig.add_subplot(projection="3d")
+
+    ax.plot_surface(
+        lon, lat, z,
+        cmap=cmap, linewidth=0, antialiased=True, alpha=0.85,
+        rstride=1, cstride=1,
+    )
+
+    # coastlines on the base plane (z = 0)
+    for geom in _get_world().boundary.geometry:
+        for line in getattr(geom, "geoms", [geom]):
+            xs, ys = line.xy
+            ax.plot(xs, ys, zs=0.0, zdir="z", color="black", linewidth=0.4)
+
+    # same integer-zoom convention as the 2D maps
+    zoom_ = max(1, int(zoom))
+    lon_span, lat_span = 360.0 / zoom_, 180.0 / zoom_
+    ax.set_xlim(max(-180.0, zoom_center_lon - lon_span / 2),
+                min(180.0, zoom_center_lon + lon_span / 2))
+    ax.set_ylim(max(-90.0, zoom_center_lat - lat_span / 2),
+                min(90.0, zoom_center_lat + lat_span / 2))
+    zmax = float(np.nanmax(z))
+    ax.set_zlim(0.0, zmax * 1.05 if zmax > 0 else 1e-6)
+
+    ax.set_xlabel("Longitude", fontsize=9)
+    ax.set_ylabel("Latitude", fontsize=9)
+    ax.tick_params(axis="both", labelsize=8)
+    ax.view_init(elev=elev, azim=azim)
+    ax.set_box_aspect((2, 1, 0.6))
+    if title is not None:
+        ax.set_title(title, fontsize=12)
+
+    return fig
 
 
 # ------------------------------------------------------------
@@ -552,8 +613,9 @@ def visualize_map(
     value_fontsize=6,
     value_color="black",
     value_threshold=None,
-    rectangle_x=(-10.0, 2.0),
-    rectangle_y=(45.0, 35.0),
+    puck_center=(-4.0, 40.0),
+    side_lon=12.0,
+    side_lat=10.0,
     contour_2d=None,
     contour_levels=8,
     contour_color="red",
@@ -568,8 +630,9 @@ def visualize_map(
             center=center,
             title=title,
             suptitle=suptitle,
-            rectangle_x=rectangle_x,
-            rectangle_y=rectangle_y,
+            puck_center=puck_center,
+            side_lon=side_lon,
+            side_lat=side_lat,
         )
 
     return plot_map_static(

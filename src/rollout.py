@@ -117,7 +117,7 @@ def rollout(
                 )
                 append_to_zarr(rollout_dir, "gui", save_state)
 
-                # ung_gui is the unguided clean-prediction trajectory over flow steps t
+                # gui_ung is the unguided clean-prediction trajectory over flow steps t
                 # (last slice == final unguided state). Mirrors clean_preds for the guided
                 # pass; clean_prediction already denormalizes, so this is in physical units.
                 ung_traj = torch.stack(ung_trace["clean_preds"], dim=0)
@@ -126,7 +126,7 @@ def rollout(
                     ung_traj,
                     t_dim=True
                 )
-                append_to_zarr(rollout_dir, "ung_gui", save_state)
+                append_to_zarr(rollout_dir, "gui_ung", save_state)
 
                 for trace_type, trace in sampling_trace.items():
                     save_trace = torch.stack(trace, dim=0)

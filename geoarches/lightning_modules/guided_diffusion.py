@@ -341,7 +341,7 @@ class GuidedFlow(BaseLightningModule):
         seed: int | None = None,
     ):
         # trace: record the per-flow-step clean-state estimate (same quantity as the
-        # guided clean_preds), so the unguided pass yields a full-t trajectory -> ung_gui.
+        # guided clean_preds), so the unguided pass yields a full-t trajectory -> gui_ung.
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.get_flow_timesteps()
         sampling_trace = defaultdict(list)

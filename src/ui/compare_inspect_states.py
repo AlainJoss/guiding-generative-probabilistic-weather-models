@@ -45,7 +45,7 @@ def _(mo):
 
     State maps across sweep points (rows) and the temporal context $n-1,\ n,\ n+1$
     (columns), at the rollout's guided channel. The object dropdown switches between the
-    guided state and its differences to ground truth / the `ung_gui` twin. Color scale is
+    guided state and its differences to ground truth / the `gui_ung` twin. Color scale is
     shared within each row.
     """)
     return
@@ -71,7 +71,7 @@ def _(load_rollout, rollout_dropdown, sweep_points):
 def _(config, default_selection, mo, points):
     points_multiselect = mo.ui.multiselect(list(points), value=default_selection(points), label="runs: ")
     object_dropdown = mo.ui.dropdown(
-        ["gui", "gui − gt", "gui − ung_gui"], value="gui − ung_gui", label="object: "
+        ["gui", "gui − gt", "gui − gui_ung"], value="gui − gui_ung", label="object: "
     )
     m_slider = mo.ui.slider(1, config["M"], step=1, value=1, label="m: ", show_value=True, debounce=True)
     n_slider = mo.ui.slider(1, config["N"], step=1, value=min(2, config["N"]), label="n: ", show_value=True, debounce=True)
@@ -126,8 +126,8 @@ def _(
         _gui = np.asarray(channel(select_point(open_store(rollout_dir, "gui", VAR), _sel), config).isel(m=_m), dtype=float)
         if object_dropdown.value == "gui − gt":
             return _gui - _gt
-        if object_dropdown.value == "gui − ung_gui":
-            _twin = channel(select_point(open_store(rollout_dir, "ung_gui", VAR), _sel), config)
+        if object_dropdown.value == "gui − gui_ung":
+            _twin = channel(select_point(open_store(rollout_dir, "gui_ung", VAR), _sel), config)
             _twin = _twin.isel(t=-1) if "t" in _twin.dims else _twin
             return _gui - np.asarray(_twin.isel(m=_m), dtype=float)
         return _gui

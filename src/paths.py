@@ -16,6 +16,7 @@ LOCAL_DATA = ROOT / "local_data"
 CLIM = LOCAL_DATA / "stats" / "era5_240_clim.nc"
 GT = LOCAL_DATA / "era5"
 
+# NOTE: switch between SWITCHDRIVE_DATA or LOCAL_DATA for defining source for notebooks 
 ROLLOUTS = SWITCHDRIVE_DATA / "rollouts"
 print(f"DATA @ {SWITCHDRIVE_DATA}  |  GT_DATA @ {LOCAL_DATA}  |  CLIM @ {CLIM}")
 

@@ -8,7 +8,7 @@ def power_spectrum(field, latitudes=None):
     Same pyshtools Driscoll-Healy expansion as
     geoarches.metrics.spherical_power_spectrum.PowerSpectrum, but for one 2D
     slice instead of a batched torchmetric -- handy for comparing individual
-    states (gt / ung / ung_gui / gui) in the analyze notebook.
+    states (gt / ung / gui_ung / gui) in the analyze notebook.
 
     Args:
         field: 2D array (nlat, nlon) on a regular lat-lon grid.

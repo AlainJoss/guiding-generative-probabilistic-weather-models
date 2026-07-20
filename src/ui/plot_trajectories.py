@@ -15,7 +15,7 @@ def plot_trajectories(
     # selected members
     guided_member: list[float] | None = None,
     unguided_member: list[float] | None = None,
-    unguided_guided_member: list[float] | None = None,
+    guided_unguided_member: list[float] | None = None,
 
     # ensemble bands
     guided_ensemble: list[list[float]] | None = None,
@@ -29,6 +29,7 @@ def plot_trajectories(
     target_trajectory: list[float] | None = None,
     target_guidance_trajectory: list[float] | None = None,
     ground_truth: list[float] | None = None,
+    ground_truth_label: str = "Ground truth",
     reference_trajectory: list[float] | None = None,
 
     # percentage axis, used if y_trajectory is not None
@@ -117,7 +118,7 @@ def plot_trajectories(
 
     guided_member = _as_1d(guided_member, "guided_member", gt0=gt0)
     unguided_member = _as_1d(unguided_member, "unguided_member", gt0=gt0)
-    unguided_guided_member = _as_1d(unguided_guided_member, "unguided_guided_member", gt0=gt0)
+    guided_unguided_member = _as_1d(guided_unguided_member, "guided_unguided_member", gt0=gt0)
 
     mean_unguided_rollout = _as_1d(
         mean_unguided_rollout,
@@ -168,7 +169,7 @@ def plot_trajectories(
         "ground_truth": "#009E73",
         "reference_trajectory": "#E6B800",
         "y": "#7B2CBF",
-        "unguided_guided": "#4A6FA5",
+        "guided_unguided": "#4A6FA5",
         "grid_major": "#D7D7D7",
         "grid_minor": "#EAEAEA",
         "text": "#222222",
@@ -439,12 +440,12 @@ def plot_trajectories(
             y_values.append(guided_member)
 
         # ------------------------------------------------------------
-        # Unguided-guided: point per n + dashed branch from previous guided
+        # Guided-unguided: point per n + dashed branch from previous guided
         # ------------------------------------------------------------
-        if unguided_guided_member is not None:
+        if guided_unguided_member is not None:
             if guided_member is not None:
                 for n_idx in range(1, num_steps):
-                    ug = unguided_guided_member[n_idx]
+                    ug = guided_unguided_member[n_idx]
                     g_prev = guided_member[n_idx - 1]
                     if np.isnan(ug) or np.isnan(g_prev):
                         continue
@@ -453,22 +454,22 @@ def plot_trajectories(
                         [g_prev, ug],
                         linestyle="--",
                         linewidth=1.2,
-                        color=colors["unguided_guided"],
+                        color=colors["guided_unguided"],
                         alpha=0.7,
                         zorder=7,
                         label="_nolegend_",
                     )
             ax.scatter(
                 time_values,
-                unguided_guided_member,
+                guided_unguided_member,
                 s=42,
-                color=colors["unguided_guided"],
+                color=colors["guided_unguided"],
                 edgecolors="white",
                 linewidths=0.8,
                 zorder=9,
-                label=_member_label("Unguided-guided"),
+                label=_member_label("Guided-unguided"),
             )
-            y_values.append(unguided_guided_member)
+            y_values.append(guided_unguided_member)
 
         # ------------------------------------------------------------
         # Ground truth
@@ -481,7 +482,7 @@ def plot_trajectories(
                 linewidth=2.2,
                 color=colors["ground_truth"],
                 alpha=0.70 if planned_equals_ground_truth else 0.95,
-                label="Ground truth",
+                label=ground_truth_label,
                 zorder=7,
             )
             y_values.append(ground_truth)

@@ -107,8 +107,8 @@ def _(
         _lines[_label] = masked_mean(np.asarray(_gui.isel(m=_m), dtype=float), mask)
         _colors[_label] = _color
         if targets_checkbox.value:
-            # per-run target trajectory: (1 + delta_n) * this run's ung_gui twin
-            _twin = channel(select_point(open_store(rollout_dir, "ung_gui", VAR), _sel), config)
+            # per-run target trajectory: (1 + delta_n) * this run's gui_ung twin
+            _twin = channel(select_point(open_store(rollout_dir, "gui_ung", VAR), _sel), config)
             _twin = _twin.isel(t=-1) if "t" in _twin.dims else _twin
             _twin_mm = masked_mean(np.asarray(_twin.isel(m=_m), dtype=float), mask)
             _delta = np.asarray(sweep_values["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], dtype=float)[: len(_twin_mm)]
