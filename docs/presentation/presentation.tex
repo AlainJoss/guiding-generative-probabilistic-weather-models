@@ -431,16 +431,16 @@ p(y|z^t) = \int p(y|x)\, p(x|z^t)\, dx
 \begin{block}{Guided vector field}
 \vspace{-0.6em}
 \begin{gather*}
-\tilde{u}_t = u_t - w\,a_t\, g_t = u_t - \lambda_t\, g_t,
+\tilde{u}_t = u_t - \lambda_t\, g_t, \quad \text{with } \lambda_t := w \cdot a_t \cdot c_t
 \\
 g_t = \nabla_{z^{t}} L(\hat{x}_t) = -\nabla_{z^{t}}\log p(y|z^t)
 \end{gather*}
 \end{block}
 \vspace{-0.4em}
 \begin{itemize}
-    \item exact posterior needs $w=1$ and a path-specific $a_t$
+    \item exact posterior needs $w=1$ and $c_t=1$ with path-specific $a_t$
           \\(e.g.\ $\tfrac{s_t}{1-s_t}$ for linear gaussian probability paths)
-    \item we trade exactness for \emph{control} by nudging $\lambda_t = w \cdot a_t$
+    \item we trade exactness for \emph{control} by nudging $\lambda_t = w \cdot a_t \cdot c_t$
 \end{itemize}
 }
 
@@ -453,8 +453,7 @@ At every flow step $t$:
   \item Score it with the masked loss: $L(\hat{x}_t)$
   \item Take the gradient w.r.t.\ the noisy state:
         $g_t = \nabla_{z^{t}} L(\hat{x}_t)$
-  \item Modify the velocity: $\tilde{u}_t = u_t - \lambda_t\, g_t$
-        \; with strength $\lambda_t = w \cdot a_t$
+  \item Modify the velocity: $\tilde{u}_t = u_t - \lambda_t\, g_t$ with $\lambda_t = w \cdot a_t \cdot c_t$
   \item Take Euler step as usual: $z^{t+1} = z^{t} + h_t\, \tilde{u}_t$
 \end{enumerate}
 
@@ -470,11 +469,11 @@ At every flow step $t$:
   \draw[-{Latex[length=1.8mm]}, trajpurple, very thick, dotted] (O) -- (U)
     node[midway, left, text=trajpurple] {$u_t$};
   \draw[-{Latex[length=1.8mm]}, terracotta, very thick] (U) -- (A)
-    node[midway, above, sloped, text=terracotta] {$-a_t\,g_t$};
+    node[midway, above, sloped, text=terracotta] {$-a_t\cdot g_t$};
   \draw[-{Latex[length=1.8mm]}, terracotta, very thick] (A) -- (B)
-    node[pos=0.4, above, sloped, text=terracotta] {$-w\,a_t\,g_t$};
+    node[pos=0.4, above, sloped, text=terracotta] {$- \lambda_t \cdot g_t$};
   \draw[-{Latex[length=1.8mm]}, trajgreen, very thick] (O) -- (A)
-    node[pos=0.5, above, sloped, text=trajgreen] {$\tilde{u}_t^{\,w=1}$};
+    node[pos=0.48, above, sloped, yshift=-2.5pt, text=trajgreen] {$\tilde{u}_t^{\,w=1, c=1}$};
   \draw[-{Latex[length=2.1mm]}, trajgreen, ultra thick] (O) -- (B)
     node[pos=0.5, below, sloped, text=trajgreen] {$\tilde{u}_t$};
 \end{tikzpicture}%

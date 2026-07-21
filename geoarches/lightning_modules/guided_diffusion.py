@@ -713,13 +713,16 @@ class GuidedFlow(BaseLightningModule):
         seed: int,
         phi: float = 0.1,
     ):
-        # Optimize all lambda_t jointly (no w / a_t split) with Adam on
-        #   J(lambda) = L_gap(z_T) + phi * sum_t ||h_t lambda_t g_t||^2,
-        # the regularizer charging the guidance displacement actually injected.
+        # Optimize the per-step guidance KICK kappa_t = h_t * lambda_t jointly
+        # (no w / a_t split) with Adam on
+        #   J(kappa) = L_gap(z_T) + phi * sum_t ||kappa_t g_t||^2.
+        # Kick space keeps the coordinates comparable and the phi-curvature
+        # uniform: the last flow step has h ~ 0, so lambda_t = kappa_t / h_t is
+        # NOT comparable across steps and would ill-condition a shared lr.
         # Each Adam step costs one forward + one frozen-g adjoint (same memory
         # profile as an FGWNOLR evaluation; no autograd through the unrolled
         # flow). Stops on closed gap, objective plateau, or the eval cap; the
-        # best-J lambda runs the final traced pass with a_t = 1, w_t = lambda_t.
+        # best-J kick runs the final traced pass with a_t = 1, w_t = lambda_t.
         LOSS_THRESHOLD = 1e-6   # gap part considered closed
         REL_TOL = 1e-3          # relative objective plateau
         MAX_EVALS = 30
@@ -729,34 +732,34 @@ class GuidedFlow(BaseLightningModule):
 
         timesteps = self.flow_timesteps()
         T = len(timesteps)
-        h_sq = torch.tensor(
-            [float(self.step_factors(i, timesteps)[2]) ** 2 for i in range(T)],
+        h_vec = torch.tensor(
+            [float(self.step_factors(i, timesteps)[2]) for i in range(T)],
             device=self.device,
         )
 
-        # probe at lambda = 0 (unguided path): its linearization is linear (gap)
-        # + quadratic (reg), minimized in closed form at -dlam / (2 phi h^2 ||g||^2)
+        # probe at kappa = 0 (unguided path): its linearization is linear (gap)
+        # + quadratic (reg), minimized in closed form at -dkap / (2 phi ||g||^2)
         # -- the phi-aware regularized Newton step. Start there (damped) instead
         # of crawling from zero, and match Adam's lr to the discovered scale.
         gap0, dlam0, g_norm2_0, _ = self._flow_loss_and_lambda_grads(
             x_cond, det_pred, delta_t, mask, x_ref, seed, lambdas=[0.0] * T,
         )
         if phi > 0:
-            _denom = (2.0 * phi * h_sq * g_norm2_0).clamp_min(1e-30)
-            lam = (INIT_DAMP * (-dlam0 / _denom)).clamp_(min=0.0)
-            lr = max(LR_MIN, LR_FRAC * float(lam.max()))
+            dkap0 = dlam0 / h_vec  # chain rule: dJ/dkappa = (dJ/dlambda) / h
+            kap = (INIT_DAMP * (-dkap0 / (2.0 * phi * g_norm2_0).clamp_min(1e-30))).clamp_(min=0.0)
+            lr = max(LR_MIN, LR_FRAC * float(kap.max()))
         else:
-            lam = torch.zeros(T, device=self.device)  # unregularized: no closed form
+            kap = torch.zeros(T, device=self.device)  # unregularized: no closed form
             lr = 50.0
         print(
-            f"FGWFREE init: gap(0)={gap0:.6f} |lambda0|max={float(lam.max()):.3f} lr={lr:.3f}",
+            f"FGWFREE init: gap(0)={gap0:.6f} |kappa0|max={float(kap.max()):.3f} lr={lr:.3f}",
             flush=True,
         )
-        optimizer = torch.optim.Adam([lam], lr=lr)
+        optimizer = torch.optim.Adam([kap], lr=lr)
 
-        # lambda = 0 is a legitimate candidate (J = gap0, reg = 0): a bad init
+        # kappa = 0 is a legitimate candidate (J = gap0, reg = 0): a bad init
         # jump can never worsen the final schedule
-        best_J, best_lam = gap0, torch.zeros(T, device=self.device)
+        best_J, best_kap = gap0, torch.zeros(T, device=self.device)
         J_prev = None
         for k in range(MAX_EVALS - 1):  # the probe consumed one evaluation
             if torch.cuda.is_available():
@@ -764,33 +767,34 @@ class GuidedFlow(BaseLightningModule):
 
             gap_loss, dlam, g_norm2, _ = self._flow_loss_and_lambda_grads(
                 x_cond, det_pred, delta_t, mask, x_ref, seed,
-                lambdas=lam.detach().tolist(),
+                lambdas=(kap.detach() / h_vec).tolist(),
             )
-            reg = float((h_sq * lam.detach() ** 2 * g_norm2).sum())
+            reg = float((kap.detach() ** 2 * g_norm2).sum())
             J = gap_loss + phi * reg
             print(
                 f"FGWFREE eval {k}: gap={gap_loss:.6f} reg={reg:.6f} J={J:.6f} "
-                f"|lambda|max={float(lam.detach().abs().max()):.3f}",
+                f"|kappa|max={float(kap.detach().abs().max()):.3f}",
                 flush=True,
             )
 
             if J < best_J:
-                best_J, best_lam = J, lam.detach().clone()
+                best_J, best_kap = J, kap.detach().clone()
             if gap_loss <= LOSS_THRESHOLD:
                 break
             if J_prev is not None and abs(J_prev - J) <= REL_TOL * max(abs(J_prev), 1e-12):
                 break  # objective plateau
             J_prev = J
 
-            # exact frozen-g gradient: adjoint term + analytic regularizer term
-            lam.grad = dlam + 2.0 * phi * h_sq * lam.detach() * g_norm2
+            # exact frozen-g gradient in kick space: adjoint term + reg term
+            kap.grad = dlam / h_vec + 2.0 * phi * kap.detach() * g_norm2
             optimizer.step()
             with torch.no_grad():
-                lam.clamp_(min=0.0)  # same >= 0 projection as w in FGWNOLR
+                kap.clamp_(min=0.0)  # same >= 0 projection as w in FGWNOLR
 
+        best_lam = best_kap / h_vec  # applied multiplier (spikes where h ~ 0)
         print(
             f"FGWFREE best J={best_J:.6f} "
-            f"lambda={[round(float(v), 3) for v in best_lam]}",
+            f"kappa={[round(float(v), 3) for v in best_kap]}",
             flush=True,
         )
 

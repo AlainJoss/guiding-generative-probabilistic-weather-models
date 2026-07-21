@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  20 JUL 2026 16:25
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  21 JUL 2026 15:39
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -840,10 +840,10 @@ Package pdftex.def Info: figures/delta_n.png  used on input line 404.
 <figures/pca_pingpong.png, id=257, 823.878pt x 739.3221pt>
 File: figures/pca_pingpong.png Graphic file (type png)
 <use figures/pca_pingpong.png>
-Package pdftex.def Info: figures/pca_pingpong.png  used on input line 497.
+Package pdftex.def Info: figures/pca_pingpong.png  used on input line 496.
 (pdftex.def)             Requested size: 221.94717pt x 199.16928pt.
 
-Overfull \vbox (5.13788pt too high) detected at line 497
+Overfull \vbox (5.13788pt too high) detected at line 496
  []
 
 [17
@@ -858,7 +858,7 @@ Overfull \vbox (5.13788pt too high) detected at line 497
 <figures/gap-closing.png, id=303, 670.1035pt x 426.393pt>
 File: figures/gap-closing.png Graphic file (type png)
 <use figures/gap-closing.png>
-Package pdftex.def Info: figures/gap-closing.png  used on input line 566.
+Package pdftex.def Info: figures/gap-closing.png  used on input line 565.
 (pdftex.def)             Requested size: 232.59499pt x 148.0036pt.
  [21
 
@@ -915,7 +915,7 @@ Here is how much of TeX's memory you used:
  1141 hyphenation exceptions out of 8191
  128i,20n,122p,488b,967s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmex9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr5.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsi1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0500.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0600.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0700.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0800.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss0900.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfss2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0500.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0700.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx0900.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfsx1000.pfb>
-Output written on presentation.pdf (36 pages, 2603381 bytes).
+Output written on presentation.pdf (36 pages, 2604301 bytes).
 PDF statistics:
  634 PDF objects out of 1000 (max. 8388607)
  482 compressed objects within 5 object streams
