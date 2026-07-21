@@ -723,7 +723,9 @@ class GuidedFlow(BaseLightningModule):
         LOSS_THRESHOLD = 1e-6   # gap part considered closed
         REL_TOL = 1e-3          # relative objective plateau
         MAX_EVALS = 30
-        ADAM_LR = 50.0          # per-coordinate; lambda lives at O(10^2)
+        INIT_DAMP = 0.5         # first-order init overshoots -> take half the jump
+        LR_FRAC = 0.05          # Adam lr as a fraction of the init scale
+        LR_MIN = 1.0
 
         timesteps = self.flow_timesteps()
         T = len(timesteps)
@@ -732,12 +734,31 @@ class GuidedFlow(BaseLightningModule):
             device=self.device,
         )
 
-        lam = torch.zeros(T, device=self.device)
-        optimizer = torch.optim.Adam([lam], lr=ADAM_LR)
+        # probe at lambda = 0 (unguided path): its linearization is linear (gap)
+        # + quadratic (reg), minimized in closed form at -dlam / (2 phi h^2 ||g||^2)
+        # -- the phi-aware regularized Newton step. Start there (damped) instead
+        # of crawling from zero, and match Adam's lr to the discovered scale.
+        gap0, dlam0, g_norm2_0, _ = self._flow_loss_and_lambda_grads(
+            x_cond, det_pred, delta_t, mask, x_ref, seed, lambdas=[0.0] * T,
+        )
+        if phi > 0:
+            _denom = (2.0 * phi * h_sq * g_norm2_0).clamp_min(1e-30)
+            lam = (INIT_DAMP * (-dlam0 / _denom)).clamp_(min=0.0)
+            lr = max(LR_MIN, LR_FRAC * float(lam.max()))
+        else:
+            lam = torch.zeros(T, device=self.device)  # unregularized: no closed form
+            lr = 50.0
+        print(
+            f"FGWFREE init: gap(0)={gap0:.6f} |lambda0|max={float(lam.max()):.3f} lr={lr:.3f}",
+            flush=True,
+        )
+        optimizer = torch.optim.Adam([lam], lr=lr)
 
-        best_J, best_lam = float("inf"), lam.detach().clone()
+        # lambda = 0 is a legitimate candidate (J = gap0, reg = 0): a bad init
+        # jump can never worsen the final schedule
+        best_J, best_lam = gap0, torch.zeros(T, device=self.device)
         J_prev = None
-        for k in range(MAX_EVALS):
+        for k in range(MAX_EVALS - 1):  # the probe consumed one evaluation
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
