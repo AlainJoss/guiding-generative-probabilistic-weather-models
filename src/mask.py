@@ -11,32 +11,21 @@ def _wrap_lon(lon):
     return (lon + 180.0) % 360.0 - 180.0
 
 
-def get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top):
-    H, W = 121, 240
-
-    mu_lon = _wrap_lon((lon_left + lon_right) / 2)
-    mu_lat = (lat_bottom + lat_top) / 2
-
-    # half the box side per axis (matches SPHERICAL's half-diagonal convention)
-    sigma_lon = (lon_right - lon_left) / 2
-    sigma_lat = (lat_top - lat_bottom) /2
-
-    mu_row = (90.0 - mu_lat) / 180.0 * H
-    mu_col = (mu_lon + 180.0) / 360.0 * W
-
-    sigma_row = sigma_lat / 180.0 * H
-    sigma_col = sigma_lon / 360.0 * W
-
-    mu = (mu_row, mu_col)
-    sigma = (sigma_row, sigma_col)
-    return mu, sigma
-
-
-def get_bbox_mask(lon_left, lon_right, lat_bottom, lat_top):
+def get_bbox_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0):
     """
     Normalizes to 1. Boxes may cross the dateline (lon_left/right outside
     [-180, 180] or left > right after wrapping): membership wraps in lon.
+    sigma_div rescales the box about its center with the same extent/sigma_div
+    convention as the elliptical mask (half-side = side / sigma_div): the
+    default 2.0 reproduces the drawn base box, 4.0 halves it, 1.0 doubles it.
     """
+    _mu_lon = (lon_left + lon_right) / 2
+    _mu_lat = (lat_bottom + lat_top) / 2
+    _half_lon = (lon_right - lon_left) / sigma_div
+    _half_lat = (lat_top - lat_bottom) / sigma_div
+    lon_left, lon_right = _mu_lon - _half_lon, _mu_lon + _half_lon
+    lat_bottom, lat_top = _mu_lat - _half_lat, _mu_lat + _half_lat
+
     lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
     lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
 
@@ -60,21 +49,6 @@ def get_bbox_mask(lon_left, lon_right, lat_bottom, lat_top):
     return mask / mask.sum()
 
 
-def get_normal_mask(lon_left, lon_right, lat_bottom, lat_top):
-    mu, sigma = get_mu_sigma(lon_left, lon_right, lat_bottom, lat_top)
-    shape = (121, 240)
-    y, x = np.indices(shape)
-    my, mx = mu
-    sy, sx = sigma
-    H, W = shape
-
-    dx = np.minimum(abs(x - mx), W - abs(x - mx))
-    dy = y - my
-
-    z = np.exp(-0.5 * ((dy / sy) ** 2 + (dx / sx) ** 2))
-    return z / z.sum()
-
-
 def _haversine(lat1, lon1, lat2, lon2):
     # great-circle angle between two points; all arguments in radians
     a = (
@@ -84,50 +58,6 @@ def _haversine(lat1, lon1, lat2, lon2):
     return 2 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
 
 
-def get_spherical_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0):
-    """
-    Isotropic (discrete) Gaussian on the sphere: kernel in great-circle
-    distance from the box center, one scale sigma = box diagonal / sigma_div,
-    normalized to sum to 1. cos(lat) cell-area weights make the masked
-    statistic an AREA-TRUE average on the sphere (the equiangular grid
-    oversamples high latitudes). The kernel center is precompensated
-    poleward by sigma^2 tan(mu_lat) so the PEAK of kernel*cos sits exactly
-    on the chosen center.
-    """
-    lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
-    lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
-
-    lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-    lat_c = 0.5 * (lat_e[:-1] + lat_e[1:])
-
-    lon_grid, lat_grid = np.meshgrid(np.radians(lon_c), np.radians(lat_c))
-
-    mu_lat = np.radians((lat_bottom + lat_top) / 2)
-    mu_lon = np.radians(_wrap_lon((lon_left + lon_right) / 2))
-
-    # one isotropic scale: box diagonal / sigma_div in physical (angular)
-    # units. computed from the side lengths (tangent plane at the center),
-    # NOT from a corner-to-corner haversine, so it stays well-defined when
-    # the box sticks out over a pole (|corner lat| > 90)
-    dlat = np.radians(lat_top - lat_bottom)
-    dlon = np.radians(lon_right - lon_left) * np.cos(mu_lat)
-    sigma = np.hypot(dlat, dlon) / sigma_div
-
-    # precompensate: the cos(lat) weight pulls the product's peak equatorward;
-    # shifting the kernel center poleward by sigma^2 tan(mu) puts the peak of
-    # exp(-d^2/2s^2)*cos(lat) exactly back on mu (stationarity at mu)
-    mu_lat_k = np.clip(
-        mu_lat + sigma**2 * np.tan(mu_lat),
-        np.radians(-89.5), np.radians(89.5),
-    )
-
-    d = _haversine(lat_grid, lon_grid, mu_lat_k, mu_lon)
-
-    z = np.exp(-0.5 * (d / sigma) ** 2)
-    z = z * np.cos(lat_grid)  # cell-area weight -> area-true statistic
-    return (z / z.sum()).astype(np.float32)
-
-
 def get_elliptical_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0):
     """
     Gaussian on the sphere with a DIAGONAL covariance (anisotropic): the
@@ -135,9 +65,9 @@ def get_elliptical_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0)
     east-west components via the initial bearing, each scaled by its own
     sigma = corresponding box side / sigma_div (in physical angular units).
     Reduces to the isotropic behaviour for square boxes; wraps in lon and
-    over the poles like get_spherical_mask. cos(lat) cell-area weights make
-    the masked statistic an area-true average (see get_spherical_mask).
-    Normalized to sum to 1.
+    over the poles. cos(lat) cell-area weights make the masked statistic an
+    AREA-TRUE average on the sphere (the equiangular grid oversamples high
+    latitudes). Normalized to sum to 1.
     """
     lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
     lat_e = np.linspace(90.0, -90.0, 121 + 1, endpoint=True)
@@ -155,8 +85,8 @@ def get_elliptical_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0)
     sig_lat = np.radians(lat_top - lat_bottom) / sigma_div
     sig_lon = np.radians(lon_right - lon_left) * max(np.cos(mu_lat), 1e-3) / sigma_div
 
-    # precompensate the kernel center so the peak of kernel*cos(lat) sits
-    # exactly on mu (see get_spherical_mask)
+    # precompensate the kernel center: the cos(lat) weight pulls the product's
+    # peak equatorward; shifting poleward by sig^2 tan(mu) puts it back on mu
     mu_lat_k = np.clip(
         mu_lat + sig_lat**2 * np.tan(mu_lat),
         np.radians(-89.5), np.radians(89.5),
@@ -222,15 +152,11 @@ def get_mask_tdict(example_tdict: TensorDict, partition: str, var_idx: int, leve
 def get_mask_2d(
     mask_mode: str,
     mask_corners: any,
-    sigma_div: float = 2.0,  # box extent / sigma (SPHERICAL and ELLIPTICAL only)
+    sigma_div: float = 2.0,  # box extent / scale, all modes (2.0 = base box)
 ):
     match mask_mode:
         case "BBOX":
-            mask_2d = get_bbox_mask(*mask_corners)
-        case "GAUSSIAN":
-            mask_2d = get_normal_mask(*mask_corners)
-        case "SPHERICAL":
-            mask_2d = get_spherical_mask(*mask_corners, sigma_div=sigma_div)
+            mask_2d = get_bbox_mask(*mask_corners, sigma_div=sigma_div)
         case "ELLIPTICAL":
             mask_2d = get_elliptical_mask(*mask_corners, sigma_div=sigma_div)
         case _:

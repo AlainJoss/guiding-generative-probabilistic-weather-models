@@ -679,14 +679,14 @@ _NATIVE_UNITS = {
 def to_display_units(array, var, *, is_difference=False):
     """Convert a slice to display units.
 
-    For 2m_temperature in absolute mode: Kelvin -> Celsius.
+    For temperature variables in absolute mode: Kelvin -> Celsius.
     For difference panels: values are unchanged (ΔK ≡ Δ°C), only the
     label changes to °C so the colorbar reads naturally.
 
     Returns (array_display, unit_label).
     """
     native = _NATIVE_UNITS.get(var, "")
-    if var == "2m_temperature":
+    if var in ("2m_temperature", "temperature"):
         if is_difference:
             return array, "°C"
         return np.asarray(array) - 273.15, "°C"

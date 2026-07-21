@@ -39,7 +39,10 @@ def rollout(
     if guidance_flag:
         var_idx = get_var_idx(config.PARTITION, config.VAR)
         level_idx = get_level_idx(config.PARTITION, config.LEVEL)
-        mask_2d = get_mask_2d(config.MASK_MODE, config.MASK_CORNERS)
+        mask_2d = get_mask_2d(
+            config.MASK_MODE, config.MASK_CORNERS,
+            sigma_div=config.sigma_div if config.sigma_div is not None else 2.0,
+        )
 
         delta_trajectory = config.GUIDANCE_DELTA
         mask_tdict = get_mask_tdict(x_cond_init["state"], config.PARTITION, var_idx, level_idx, mask_2d)

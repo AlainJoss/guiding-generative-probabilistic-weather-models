@@ -11,8 +11,7 @@ uv run marimo edit src/ui/contour_demo.py --watch --no-token
 
 Experiment runner:
 ```bash
-python -m src.run --rollout_id 2026-07-14_09:38:59 --rollout_type gui
-python -m src.run --rollout_id 2026-07-15_11:16:27 --rollout_type ung
+python -m src.run --rollout_id 2026-07-20_18:08:33 --rollout_type ung
 ```
 
 latent_trajectories.py

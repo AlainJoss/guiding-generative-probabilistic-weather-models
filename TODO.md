@@ -1,4 +1,27 @@
 # TODOs
+All three methods apply ũ_t = u_t − λ_t g_t with g_t = ∇_{z_t}L(x̂_t). The key structural difference: NOGAP normalizes the gradient, NOLR and FREE apply it raw.
+
+FGWNOLR — raw gradient, fixed profile, one optimized scalar:
+
+$$\lambda_t = w^* , a_t, \qquad a_t = (1-\eta)^{t+1}, \qquad w^* = \arg\min_w L\bigl(z_T(w)\bigr) ;\text{(secant)}$$
+
+No normalization: the realized per-step closure is $\propto |\partial S/\partial z_t|^2$, so the model's sensitivity shapes when guidance bites; $w^*$ only sets the global scale.
+
+FGWNOGAP — Newton step, gradient used as direction only ($|g_t|^2$ cancels its magnitude):
+
+$$\lambda_t = \frac{2, r_t ,(r_t - r_t^{\text{target}})}{h_t ,|g_t|^2}, \qquad r_t^{\text{target}} = (1-\eta)^{t+1} r_0$$
+
+Closed-loop: $r_t$ is re-measured each step, so drift is corrected against the schedule. Normalizing NOLR's gradient would collapse it into (an open-loop) NOGAP — the raw gradient is what keeps them distinct.
+
+FGWFREE — raw gradient like NOLR, but the whole trajectory is free (no $w/a_t$ split):
+
+$$\lambda = \arg\min_{\lambda \ge 0} ; L\bigl(z_T(\lambda)\bigr) + \varphi \sum_{t=0}^{T-1} |h_t \lambda_t g_t|^2$$
+
+solved by Adam with the exact frozen-g gradient
+
+$$\frac{\partial J}{\partial \lambda_t} = -,h_t ,\langle a_{t+1},, g_t\rangle ;+; 2\varphi, h_t^2, \lambda_t ,|g_t|^2$$
+
+where $a_{t+1}$ is the adjoint state. It sits between the two: sensitivity-shaped kicks like NOLR, but a free profile, with $\varphi$ charging the total injected guidance.
 
 Storage requirements:
 M * N 

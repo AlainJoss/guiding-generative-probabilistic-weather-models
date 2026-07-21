@@ -30,7 +30,7 @@ def _():
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
-    from src.ui.map import visualize_map, visualize_mask_3d
+    from src.ui.map import visualize_map, visualize_mask_3d, to_display_units
     from src.ui.plot_trajectory import plot_trajectory
     from src.ui.plot_trajectories import plot_trajectories
 
@@ -45,7 +45,7 @@ def _():
     from src.normalization import XarrayNormalizer
     from src.spectrum import power_spectrum, log_spectral_distance, spectral_bias
 
-    from src.mask import get_masked_mean, get_mask_2d, get_mu_sigma, get_mask_center, get_great_circle_field, get_bbox_mask
+    from src.mask import get_masked_mean, get_mask_2d, get_mask_center, get_great_circle_field, get_bbox_mask
     from src.target import get_target_slices
 
 
@@ -82,6 +82,7 @@ def _():
         plot_trajectories,
         plot_trajectory,
         sweep_coord_label,
+        to_display_units,
         visualize_map,
         visualize_mask_3d,
     )
@@ -258,7 +259,6 @@ def _(
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
             guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="guidance_mode: ")
             delta_trajectory_dropdown = None
-            view_mask_mode_dropdown = None
             sweep_extra_dropdowns = mo.ui.dictionary({})
             sweep_params_widget = None
 
@@ -276,7 +276,6 @@ def _(
             mask_mode_dropdown = mo.ui.dropdown(options=MASK_MODES, value=MASK_MODES[0], label="mask_mode: ")
             guidance_mode_dropdown = mo.ui.dropdown(options=GUIDANCE_METHODS, value=GUIDANCE_METHODS[0], label="guidance_mode: ")
             delta_trajectory_dropdown = None
-            view_mask_mode_dropdown = None
             sweep_extra_dropdowns = mo.ui.dictionary({})
             sweep_params_widget = None
 
@@ -323,15 +322,6 @@ def _(
                 value=next(iter(_dt_options)),
                 label="delta_trajectory: ",
             )
-            # view mask: masked-average VIEW mask, independent of the data-selection
-            # MASK_MODE (which indexes the zarr) -> lets the same states be region-
-            # averaged under either BBOX or GAUSSIAN.
-            view_mask_mode_dropdown = mo.ui.dropdown(
-                options=MASK_MODES,
-                value=experiment_params["MASK_MODE"][0],
-                label="view mask: ",
-            )
-
             # axes with a dedicated named widget above; every other sweep key gets an
             # auto-generated dropdown. .value carries the zarr coord label directly
             # (the value itself, or its integer index for non-scalar / None-bearing axes).
@@ -389,7 +379,6 @@ def _(
         mask_mode_dropdown,
         sweep_extra_dropdowns,
         sweep_params_widget,
-        view_mask_mode_dropdown,
         w_slider,
     )
 
@@ -541,14 +530,17 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
 
 @app.cell
 def _(
+    MASK_MODES,
     config,
     get_mask_2d,
     get_mask_center_pt,
+    mask_mode,
     notebook_mode,
     np,
     side_lat_slider,
     side_lon_slider,
     sigma_div_slider,
+    sweep_extra_dropdowns,
     view_mask_mode,
 ):
     # mask: rectangle = center puck +/- half side lengths
@@ -557,7 +549,7 @@ def _(
             _lon_c, _lat_c = get_mask_center_pt()
             # corners are NOT clamped: the box center must stay on the puck.
             # lon wraps at the dateline; lat may stick out over a pole -- the
-            # mask functions handle both (spherical: over-the-pole distances)
+            # mask functions handle both (elliptical: over-the-pole distances)
             mask_corners = (
                 _lon_c - side_lon_slider.value / 2,
                 _lon_c + side_lon_slider.value / 2,
@@ -566,15 +558,26 @@ def _(
             )
             mask = get_mask_2d(view_mask_mode, mask_corners,
                                sigma_div=sigma_div_slider.value)
-        case "guided_rollout" | "analyze_rollout":
+        case "guided_rollout":
+            # preview of the config-pinned corners under the selected mask mode;
+            # the local slider previews sigma_div (the swept value is set per job)
             mask_corners = config.MASK_CORNERS
-            mask = get_mask_2d(view_mask_mode, mask_corners)
+            mask = get_mask_2d(view_mask_mode, mask_corners,
+                               sigma_div=sigma_div_slider.value)
+        case "analyze_rollout":
+            # the EXPERIMENT mask at the selected sweep point: swept MASK_MODE +
+            # swept sigma_div (default 2.0 for stores without that axis)
+            mask_corners = config.MASK_CORNERS
+            # legacy stores swept with removed modes (GAUSSIAN/SPHERICAL): render with
+            # the closest current mode; the zarr selection still uses the stored label
+            _mm = mask_mode if mask_mode in MASK_MODES else "ELLIPTICAL"
+            mask = get_mask_2d(_mm, mask_corners,
+                               sigma_div=float(sweep_extra_dropdowns.value.get("sigma_div", 2.0)))
         case _:
             pass
     # own-mask-scale region: the mask's own support (weight above 1e-6 of
-    # the peak, i.e. numerically nonzero) -> box for BBOX, blob for gaussian
+    # the peak, i.e. numerically nonzero) -> box for BBOX, blob for elliptical
     mask_region = np.asarray(mask) > 1e-6 * float(np.asarray(mask).max())
-
     return mask, mask_corners, mask_region
 
 
@@ -1062,16 +1065,14 @@ def _(
 
 
 @app.cell
-def _(mask_mode_dropdown, view_mask_mode_dropdown):
+def _(mask_mode_dropdown):
     # mask_mode comes from the dropdown in every mode: authoring selection in
     # unguided/guided, and the sweep selector in analyze. (MASK_MODE is a swept axis,
     # so the scalar config.MASK_MODE is None -- don't read it here.)
     mask_mode = mask_mode_dropdown.value
-    # visualization/masked-average mask: in analyze mode this can differ from the
-    # data-selection mask_mode (which indexes the zarr), so the same states can be
-    # region-averaged under either BBOX or GAUSSIAN. Falls back to mask_mode elsewhere.
-    view_mask_mode = view_mask_mode_dropdown.value if view_mask_mode_dropdown is not None else mask_mode
-    return (view_mask_mode,)
+    # single mask everywhere: the view mask always follows the selected mask mode
+    view_mask_mode = mask_mode
+    return mask_mode, view_mask_mode
 
 
 @app.cell
@@ -1266,6 +1267,7 @@ def _(
     T_slider,
     delta_widget,
     dpi_slider,
+    experiment_params,
     guidance_convergence_t_plot,
     guidance_reference_dropdown,
     inspect_states_widget_make,
@@ -1280,11 +1282,11 @@ def _(
     side_lat_slider,
     side_lon_slider,
     sigma_div_slider,
+    sweep_extra_dropdowns,
     sweep_params_widget,
     traj_row_select,
     trajectories_plot,
     var_dropdown,
-    view_mask_mode_dropdown,
     wa_schedule_widget,
     weather_map,
     zoom_slider,
@@ -1295,13 +1297,14 @@ def _(
         align="start",
     )
 
+    _mask_maps_row = mo.hstack(
+        [weather_map, mask_map, mask_map_3d],
+        justify="start",
+        align="start",
+    )
     mask_widget_maps = mo.vstack([
         mo.hstack([zoom_slider, dpi_slider, side_lon_slider, side_lat_slider, sigma_div_slider], justify="start"),
-        mo.hstack(
-            [weather_map, mask_map, mask_map_3d],
-            justify="start",
-            align="start",
-        ),
+        _mask_maps_row,
     ], align="start")
     # authoring (unguided) exposes the mask coord controls; guided/analyze show only the
     # static, config-pinned mask map (the partition/var/level controls live in the
@@ -1340,7 +1343,11 @@ def _(
                     ),
                 ], align="start")
             ], align="start")
-            mask_widget = mask_widget_maps
+            # config-pinned corners: no side sliders; sigma_div slider previews the mask
+            mask_widget = mo.vstack([
+                mo.hstack([zoom_slider, dpi_slider, sigma_div_slider], justify="start"),
+                _mask_maps_row,
+            ], align="start")
             inspect_states_widget=inspect_states_widget_make
         case "analyze_rollout":
             trajectory_widget=mo.vstack([
@@ -1351,7 +1358,7 @@ def _(
                     justify="start",
                 ),
                 mo.vstack([
-                    mo.hstack([view_mask_mode_dropdown, traj_row_select], justify="start", align="center"),
+                    mo.hstack([traj_row_select], justify="start", align="center"),
                     mo.hstack(
                         [trajectories_plot]
                         + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
@@ -1360,7 +1367,18 @@ def _(
                 ], align="start"),
                 guidance_convergence_t_plot,
             ], align="start")
-            mask_widget = mask_widget_maps
+            # mask section: only the mask-related SWEEP selectors (when actually
+            # swept) + the maps; no authoring commands in analyze mode
+            _mask_sweep_controls = []
+            if len(experiment_params["MASK_MODE"]) > 1:
+                _mask_sweep_controls.append(mask_mode_dropdown)
+            if len(experiment_params.get("sigma_div", [])) > 1:
+                _mask_sweep_controls.append(sweep_extra_dropdowns["sigma_div"])
+            mask_widget = mo.vstack(
+                ([mo.hstack(_mask_sweep_controls, justify="start")] if _mask_sweep_controls else [])
+                + [mo.hstack([zoom_slider, dpi_slider], justify="start"), _mask_maps_row],
+                align="start",
+            )
             inspect_states_widget=inspect_states_widget_make
         case _:
             pass
@@ -1589,6 +1607,7 @@ def _(
         gui_gui_ung = gui_curr - gui_ung_curr
         gui_gt = gui_curr - gt_curr
         gui_ung_gt = gui_ung_curr - gt_curr
+        ung_gt = ung_curr - gt_curr
     return (
         gt_curr,
         gt_gt,
@@ -1596,10 +1615,11 @@ def _(
         gt_ung,
         gui_curr,
         gui_gt,
-        gui_gui,
         gui_gui_ung,
         gui_ung_curr,
+        gui_ung_gt,
         ung_curr,
+        ung_gt,
         ung_prev,
     )
 
@@ -1636,9 +1656,9 @@ def _(
     gt_ung,
     gui_curr,
     gui_gt,
-    gui_gui,
     gui_gui_ung,
     gui_ung_curr,
+    gui_ung_gt,
     map_interactive,
     mask,
     mask_region,
@@ -1648,8 +1668,11 @@ def _(
     np,
     safe_abs_limits,
     show_mask_switch,
+    to_display_units,
     ung_curr,
+    ung_gt,
     ung_prev,
+    var,
     visualize_map,
     white_zero_cmap,
     white_zero_slider,
@@ -1665,6 +1688,7 @@ def _(
                     ("$x_{n}^{ung}$", ung_curr),
                     ("$x_{n-1}^{ung}$", ung_prev),
                 ]
+                absolute_panels = [(_l, to_display_units(_a, var)[0]) for _l, _a in absolute_panels]
 
                 abs_vmin, abs_vmax, abs_center = safe_abs_limits(
                     [arr for _, arr in absolute_panels]
@@ -1777,6 +1801,7 @@ def _(
                     ("$x_{n}^{gui}$", gui_curr),
                     ("$x_{n}^{ung}$", ung_curr),
                 ]
+                absolute_panels = [(_l, to_display_units(_a, var)[0]) for _l, _a in absolute_panels]
 
                 abs_vmin, abs_vmax, abs_center = safe_abs_limits(
                     [arr for _, arr in absolute_panels]
@@ -1822,10 +1847,10 @@ def _(
 
             case "difference":
                 difference_panels = [
-                    ("$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$", gt_gt),
+                    ("$x_{n}^{ung} - x_{n}^{\\text{gt}}$", ung_gt),
+                    ("$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{gt}}$", gui_ung_gt),
                     ("$x_{n}^{gui} - x_{n}^{\\text{gt}}$", gui_gt),
                     ("$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$", gui_gui_ung),
-                    ("$x_{n}^{gui} - x_{n-1}^{gui}$", gui_gui),
                 ]
 
                 diff_vmin = min(float(np.nanmin(arr)) for _, arr in difference_panels)
@@ -1876,8 +1901,8 @@ def _(
                         figsize=(14, 8),
                     )
 
-                gt_gt_map = difference_maps["$x_{n}^{\\text{gt}} - x_{n-1}^{\\text{gt}}$"]
-                gui_gui_map = difference_maps["$x_{n}^{gui} - x_{n-1}^{gui}$"]
+                ung_gt_map = difference_maps["$x_{n}^{ung} - x_{n}^{\\text{gt}}$"]
+                gui_ung_gt_map = difference_maps["$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{gt}}$"]
                 gui_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$"]
                 gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gt}}$"]
             case "sobel_grads":
@@ -2027,12 +2052,13 @@ def _(
         gt_gt_map,
         gt_ung_map,
         gui_gt_map,
-        gui_gui_map,
         gui_map,
+        gui_ung_gt_map,
         gui_ung_map,
         prev_map,
         sobel_diffs_widget,
         sobel_grad_widget,
+        ung_gt_map,
         ung_map,
         ung_prev_map,
     )
@@ -2050,8 +2076,8 @@ def _(
     gt_gt_map,
     gt_ung_map,
     gui_gt_map,
-    gui_gui_map,
     gui_map,
+    gui_ung_gt_map,
     gui_ung_map,
     inspect_row_select,
     level_slider,
@@ -2066,6 +2092,7 @@ def _(
     sobel_diffs_widget,
     sobel_grad_widget,
     sweep_params_widget,
+    ung_gt_map,
     ung_map,
     ung_prev_map,
     var_dropdown,
@@ -2148,8 +2175,8 @@ def _(
 
             case "difference":
                 _rows = [
-                    ("gt_gt / gui_gui", [gt_gt_map, gui_gui_map]),
-                    ("gui_gt / gui_ung", [gui_gt_map, gui_ung_map]),
+                    ("ung_gt / gui_ung_gt", [ung_gt_map, gui_ung_gt_map]),
+                    ("gui_gt / gui_gui_ung", [gui_gt_map, gui_ung_map]),
                 ]
                 inspect_states_widget_make = mo.vstack(
                     [
@@ -2246,6 +2273,7 @@ def _(
     target_guidance_M_N_trajectories,
     target_guidance_trajectory,
     timestamps,
+    to_display_units,
     traj_row_select,
     ung_M_N_trajectories,
     ung_m_trajectory,
@@ -2255,21 +2283,28 @@ def _(
 
     var_check = (var==config.VAR if notebook_mode in ("guided_rollout", "analyze_rollout") else False)
 
+    # display units: K -> degC for temperature variables. Applies to every absolute
+    # trace (members, ensembles, targets, ground truth); the delta trajectories are
+    # relative and stay unchanged.
+    def _disp(_a):
+        return to_display_units(_a, var)[0] if _a is not None else None
+    _unit = to_display_units(0.0, var)[1]
+
     trajectories_plot = plot_trajectories(
         timestamps=timestamps,
         var=var,
         m=m,
         n=n+1,
-        guided_member=gui_m_trajectory if ("guided" in traj_row_select.value) else None,
-        unguided_member=ung_m_trajectory if ("unguided" in traj_row_select.value) else None,
-        guided_unguided_member=gui_ung_m_trajectory if ("guided_unguided" in traj_row_select.value) else None,
-        guided_ensemble=gui_M_N_trajectories if ("dist_bands" in traj_row_select.value) else None,
-        unguided_ensemble=ung_M_N_trajectories if ("dist_bands" in traj_row_select.value) else None,
-        target_ensemble=planned_guidance_trajectories if (("planned_guidance" in traj_row_select.value) and ("dist_bands" in traj_row_select.value) and var_check) else None,
-        target_guidance_ensemble=target_guidance_M_N_trajectories if (("dist_bands" in traj_row_select.value) and ("target_guidance" in traj_row_select.value) and var_check) else None,
-        target_trajectory=planned_guidance_trajectory if (("planned_guidance" in traj_row_select.value) and var_check) else None,
-        target_guidance_trajectory=target_guidance_trajectory if (("target_guidance" in traj_row_select.value) and var_check) else None,
-        ground_truth=gt_trajectory,
+        guided_member=_disp(gui_m_trajectory) if ("guided" in traj_row_select.value) else None,
+        unguided_member=_disp(ung_m_trajectory) if ("unguided" in traj_row_select.value) else None,
+        guided_unguided_member=_disp(gui_ung_m_trajectory) if ("guided_unguided" in traj_row_select.value) else None,
+        guided_ensemble=_disp(gui_M_N_trajectories) if ("dist_bands" in traj_row_select.value) else None,
+        unguided_ensemble=_disp(ung_M_N_trajectories) if ("dist_bands" in traj_row_select.value) else None,
+        target_ensemble=_disp(planned_guidance_trajectories) if (("planned_guidance" in traj_row_select.value) and ("dist_bands" in traj_row_select.value) and var_check) else None,
+        target_guidance_ensemble=_disp(target_guidance_M_N_trajectories) if (("dist_bands" in traj_row_select.value) and ("target_guidance" in traj_row_select.value) and var_check) else None,
+        target_trajectory=_disp(planned_guidance_trajectory) if (("planned_guidance" in traj_row_select.value) and var_check) else None,
+        target_guidance_trajectory=_disp(target_guidance_trajectory) if (("target_guidance" in traj_row_select.value) and var_check) else None,
+        ground_truth=_disp(gt_trajectory),
         ground_truth_label=f"Ground truth ({view_mask_mode})",
         delta_trajectories=(
             ([[0] + list(_t) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
@@ -2281,7 +2316,7 @@ def _(
         show_unguided_mean=False,
         title=f"rollout trajectories",
         subtitle=f"{var} | mask-averaged",
-        ylabel="Mask-averaged value",
+        ylabel=f"Mask-averaged value [{_unit}]" if _unit else "Mask-averaged value",
         figsize=(22, 6),
         dpi=dpi_slider.value
     )
@@ -2396,6 +2431,16 @@ def _(
         except FileNotFoundError:
             res_xr = None  # legacy rollout (pre raw-primitives format)
 
+        # residual denorm scaler c per var (level vars: per-level vector), as in GuidedFlow
+        _rsc = torch.load(STATS_PATH / "deltapred24_aws_denorm.pt", weights_only=False)
+        res_scale_map = {}
+        for _vi, _v in enumerate(VARIABLES_DICT["surface"]):
+            res_scale_map[_v] = float(_rsc["surface"][_vi].squeeze())
+        _lev_np = _rsc["level"].squeeze(-1).squeeze(-1).numpy()
+        for _vi, _v in enumerate(VARIABLES_DICT["level"]):
+            _arr = _lev_np[_vi] * (3.0 if _v == "vertical_velocity" else 1.0)
+            res_scale_map[_v] = xr.DataArray(_arr, dims=("level",), coords={"level": grads_xr.level})
+
         if res_xr is None:
             # ---- LEGACY: applied grads (x s_t), gui_vfs and clean_preds stored directly ----
             clean_preds_xr = get_rollout("clean_preds", rollout_id).sel(sweep_params)
@@ -2425,15 +2470,6 @@ def _(
             _s_da = xr.DataArray(_s_np, dims=("t",), coords={"t": grads_xr.t})
             _h_da = xr.DataArray(_h_np, dims=("t",), coords={"t": grads_xr.t})
 
-            # residual denorm scaler c per var (level vars: per-level vector), as in GuidedFlow
-            _rsc = torch.load(STATS_PATH / "deltapred24_aws_denorm.pt", weights_only=False)
-            _c_map = {}
-            for _vi, _v in enumerate(VARIABLES_DICT["surface"]):
-                _c_map[_v] = float(_rsc["surface"][_vi].squeeze())
-            _lev_np = _rsc["level"].squeeze(-1).squeeze(-1).numpy()
-            for _vi, _v in enumerate(VARIABLES_DICT["level"]):
-                _arr = _lev_np[_vi] * (3.0 if _v == "vertical_velocity" else 1.0)
-                _c_map[_v] = xr.DataArray(_arr, dims=("level",), coords={"level": grads_xr.level})
 
             # exact identities
             gui_vec_xr = grads_xr * lambda_t_xr                 # applied guidance vector per t
@@ -2443,7 +2479,7 @@ def _(
             # clean prediction (physical): gui_final + ((z_t + s_t*u_t) - z_T) * c
             _dev = (res_xr + vfs_xr) - _z_T
             clean_preds_xr = xr.Dataset(
-                {_v: guided_xr[_v] + _dev[_v] * _c_map[_v] for _v in _dev.data_vars}
+                {_v: guided_xr[_v] + _dev[_v] * res_scale_map[_v] for _v in _dev.data_vars}
             ).transpose("m", "n", "t", ...)  # broadcast puts t last; restore trace order
     return (
         clean_preds_xr,
@@ -2452,6 +2488,7 @@ def _(
         gui_ung_xr,
         gui_vec_xr,
         gui_vfs_xr,
+        res_scale_map,
         res_xr,
         vfs_xr,
     )
@@ -2517,6 +2554,7 @@ def _(
     notebook_mode,
     np,
     partition,
+    res_scale_map,
     res_xr,
     sweep_params,
     t,
@@ -2551,11 +2589,8 @@ def _(
         if res_xr is not None:
             _res_mn = get_slices(res_xr, partition, var, level)[m][n]
             res_slice = _res_mn[t]
-            # z_{t+1}: the state entering the next flow step; all-NaN -> flat map at t=T-1
-            res_next_slice = _res_mn[t+1] if t + 1 < len(_res_mn) else np.full_like(np.asarray(res_slice, dtype=float), np.nan)
         else:
             res_slice = np.zeros_like(grads_slices[m][n][t])
-            res_next_slice = np.zeros_like(grads_slices[m][n][t])
         if gui_vec_xr is not None:
             gui_vec_slice = get_slices(gui_vec_xr, partition, var, level)[m][n][t]
         else:
@@ -2581,20 +2616,57 @@ def _(
             if t + 1 < len(vfs_slices[m][n])
             else np.zeros_like(guided_vfs_slice)
         )
+        # naive next-step disagreement in stored-vf units: vf_{t+1} - vf^gui_t
+        # (last step has no t+1 -> all-NaN -> flat zero map downstream)
+        vf_next_gui_diff_slice = (
+            vfs_slices[m][n][t+1] - guided_vfs_slice
+            if t + 1 < len(vfs_slices[m][n])
+            else np.full_like(np.asarray(guided_vfs_slice, dtype=float), np.nan)
+        )
+
+        # ---- physical (denormalized) views: sigma_r = res_scale_map[var] ----
+        _c_sel = res_scale_map[var]
+        c_phys = float(_c_sel.sel(level=level)) if partition == "level" else float(_c_sel)
+        # stored vf traces are already s_t * u_t -> u-hat_t = sigma_r * s_t * u_t
+        vfs_phys_slice = vfs_slice * c_phys
+        guided_vfs_phys_slice = guided_vfs_slice * c_phys
+        vf_gui_next_diff_slice = vf_gui_next_diff_slice * c_phys
+        vf_next_gui_diff_slice = vf_next_gui_diff_slice * c_phys
+        # r-hat_t = sigma_r * (z^t + s_t u_t): the physical clean-residual estimate
+        clean_res_slice = (res_slice + vfs_slice) * c_phys
+        # applied kick in physical units: sigma_r * lambda_t * h_t * grad (last h = s)
+        _h_sched = np.empty_like(_s_sched)
+        _h_sched[:-1] = _s_sched[:-1] - _s_sched[1:]
+        _h_sched[-1] = _s_sched[-1]
+        gui_vec_phys_slice = gui_vec_slice * _h_sched[t] * c_phys
+        # u-hat_{t+1}: next-step unguided velocity, stored x s_{t+1} convention
+        # (sigma_r * s_{t+1} * u_{t+1}); last step has no t+1 -> all-NaN flat map
+        u_next_slice = (
+            vfs_slices[m][n][t+1] * c_phys
+            if t + 1 < len(vfs_slices[m][n])
+            else np.full_like(np.asarray(vfs_slice, dtype=float), np.nan)
+        )
+        # guided step increment: sigma_r * h_t * u_t^gui (stored gui_vf = s_t * u_t^gui,
+        # so multiply by h_t/s_t); running sum over t builds the residual r-hat
+        step_inc_slice = guided_vfs_slice * (_h_sched[t] / _s_sched[t]) * c_phys
+        # masked unguided velocity: the integrand of the mask-weighted mean of u-hat_t
+        masked_vf_slice = vfs_phys_slice * np.asarray(mask)
     return (
         clean_preds_diff_slice,
+        clean_res_slice,
         diff_grads_slice,
         diff_gt_clean_pred_slice,
         diff_gt_gui_ung_slice,
         grads_slice,
         gui_ung_clean_diff_slice,
-        gui_vec_slice,
-        guided_vfs_slice,
+        gui_vec_phys_slice,
+        guided_vfs_phys_slice,
         masked_residual_slice,
-        res_next_slice,
-        res_slice,
+        masked_vf_slice,
+        step_inc_slice,
+        u_next_slice,
         vf_gui_next_diff_slice,
-        vfs_slice,
+        vfs_phys_slice,
     )
 
 
@@ -2608,6 +2680,7 @@ def _(t_slider):
 @app.cell
 def _(
     clean_preds_diff_slice,
+    clean_res_slice,
     contour_checkbox,
     contour_color_dropdown,
     contour_levels_slider,
@@ -2618,17 +2691,18 @@ def _(
     dpi_slider,
     grads_slice,
     gui_ung_clean_diff_slice,
-    gui_vec_slice,
-    guided_vfs_slice,
+    gui_vec_phys_slice,
+    guided_vfs_phys_slice,
     mask,
     masked_residual_slice,
+    masked_vf_slice,
     notebook_mode,
     np,
-    res_next_slice,
-    res_slice,
     show_mask_switch,
+    step_inc_slice,
+    u_next_slice,
     vf_gui_next_diff_slice,
-    vfs_slice,
+    vfs_phys_slice,
     visualize_map,
     white_zero_cmap,
     white_zero_slider,
@@ -2636,7 +2710,11 @@ def _(
     zoom_slider,
 ):
     if notebook_mode not in ("unguided_rollout", "guided_rollout"):
-        diff_vfs_slice = guided_vfs_slice - vfs_slice
+        diff_vfs_slice = guided_vfs_phys_slice - vfs_phys_slice
+
+        # mask-weighted average (mask sums to 1) shown in the vf map titles
+        def _mavg(_a):
+            return float(np.nansum(np.asarray(_a) * np.asarray(mask)))
 
         map_specs = [
             ("diff_gt_gui_ung_map", diff_gt_gui_ung_slice, r"$x_{n}^{\text{gui_ung}} - x_{n}^{\text{gt}}$", -1, 1),
@@ -2644,14 +2722,16 @@ def _(
             ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$", -1, 1),
             ("clean_preds_diff_map", clean_preds_diff_slice, r"$x_t^{\text{gui}} - x_{t-1}^{\text{gui}}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
-            ("vfs_map", vfs_slice, r"$\text{vf}_t$", -0.001, 0.001),
+            ("vfs_map", vfs_phys_slice, rf"$\hat{{u}}_t = \sigma_r\, s_t u_t$ (mask avg {_mavg(vfs_phys_slice):+.3g})", -0.001, 0.001),
             ("masked_residual_map", masked_residual_slice, r"$(\hat{x}^{\text{gui}}_t - (1+\delta_n)\,x^{\text{ref}}) \cdot \text{mask}$", -1, 1),
-            ("guided_vfs_map", guided_vfs_slice, r"$\text{vf}^{\text{gui}}_t$", -0.001, 0.001),
-            ("diff_vfs_map", diff_vfs_slice, r"$\text{vf}^{\text{gui}}_t - \text{vf}_t$", -0.001, 0.001),
-            ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$s_{t+1}(u_{t+1} - u^{\text{gui}}_t)$", -0.001, 0.001),
-            ("res_map", res_slice, r"$z_t$", -1, 1),
-            ("res_next_map", res_next_slice, r"$z_{t+1}$", -1, 1),
-            ("gui_vec_map", gui_vec_slice, r"$\lambda_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
+            ("guided_vfs_map", guided_vfs_phys_slice, rf"$\hat{{u}}^{{\text{{gui}}}}_t$ (mask avg {_mavg(guided_vfs_phys_slice):+.3g})", -0.001, 0.001),
+            ("diff_vfs_map", diff_vfs_slice, r"$\hat{u}^{\text{gui}}_t - \hat{u}_t$", -0.001, 0.001),
+            ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$\sigma_r\, s_{t+1}(u_{t+1} - u^{\text{gui}}_t)$", -0.001, 0.001),
+            ("masked_vf_map", masked_vf_slice, r"$\hat{u}_t \cdot \text{mask}$", -0.001, 0.001),
+            ("u_next_map", u_next_slice, rf"$\hat{{u}}_{{t+1}}$ (mask avg {_mavg(u_next_slice):+.3g})", -0.001, 0.001),
+            ("step_inc_map", step_inc_slice, r"$\sigma_r\, h_t u^{\text{gui}}_t$", -0.001, 0.001),
+            ("clean_res_map", clean_res_slice, r"$\hat{r}_t = \sigma_r\,(z^t + s_t u_t)$", -1, 1),
+            ("gui_vec_map", gui_vec_phys_slice, r"$\sigma_r\,\lambda_t h_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
         ]
 
@@ -2701,25 +2781,29 @@ def _(
         guided_vfs_map = maps["guided_vfs_map"]
         diff_vfs_map = maps["diff_vfs_map"]
         vf_gui_next_diff_map = maps["vf_gui_next_diff_map"]
-        res_map = maps["res_map"]
-        res_next_map = maps["res_next_map"]
+        masked_vf_map = maps["masked_vf_map"]
+        u_next_map = maps["u_next_map"]
+        step_inc_map = maps["step_inc_map"]
+        clean_res_map = maps["clean_res_map"]
         gui_vec_map = maps["gui_vec_map"]
         diff_grads_map = maps["diff_grads_map"]
     return (
+        clean_res_map,
         grads_map,
         gui_ung_clean_diff_map,
         gui_vec_map,
         guided_vfs_map,
         masked_residual_map,
-        res_map,
-        res_next_map,
+        masked_vf_map,
+        step_inc_map,
+        u_next_map,
         vfs_map,
     )
 
 
 @app.cell
 def _(mo):
-    _flow_rows = ["gui_t diffs", "grads", "vfs", "z_t"]
+    _flow_rows = ["gui_t diffs", "r_t", "grads", "vfs", "u_next"]
     flow_row_select = mo.ui.multiselect(_flow_rows, value=_flow_rows, label="charts: ")
     return (flow_row_select,)
 
@@ -2728,13 +2812,14 @@ def _(mo):
 def _(mo):
     # chart-row selector for the Inspect states maps (analyze mode), mirroring the
     # cross-checks / flow-analysis multiselects. Keys cover the absolute + difference rows.
-    _inspect_rows = ["curr / prev", "gui / ung", "gt_gt / gui_gui", "gui_gt / gui_ung"]
+    _inspect_rows = ["curr / prev", "gui / ung", "ung_gt / gui_ung_gt", "gui_gt / gui_gui_ung"]
     inspect_row_select = mo.ui.multiselect(_inspect_rows, value=_inspect_rows, label="charts: ")
     return (inspect_row_select,)
 
 
 @app.cell
 def _(
+    clean_res_map,
     contour_checkbox,
     contour_color_dropdown,
     contour_levels_slider,
@@ -2748,15 +2833,16 @@ def _(
     level_slider,
     m_slider,
     masked_residual_map,
+    masked_vf_map,
     mo,
     n_slider,
     notebook_mode,
     partition_dropdown,
-    res_map,
-    res_next_map,
     show_mask_switch,
+    step_inc_map,
     sweep_params_widget,
     t_slider,
+    u_next_map,
     var_dropdown,
     vfs_map,
     white_zero_slider,
@@ -2800,9 +2886,10 @@ def _(
 
         map_rows = [
             ("gui_t diffs", [gui_ung_clean_diff_map, masked_residual_map]),
+            ("r_t", [step_inc_map, clean_res_map]),
             ("grads", [grads_map, gui_vec_map]),
             ("vfs", [vfs_map, guided_vfs_map]),
-            ("z_t", [res_map, res_next_map]),
+            ("u_next", [masked_vf_map, u_next_map]),
         ]
 
         flow_widget_make = mo.vstack(
@@ -2894,7 +2981,7 @@ def _(mask, mcolors, mo, np, plt, xr):
     def maybe_mask(ds, mode):
         if mode not in ("mask", "!mask"):
             return ds
-        # boolean region at half-maximum: BBOX (0/1) is unchanged; GAUSSIAN is
+        # boolean region at half-maximum: BBOX (0/1) is unchanged; ELLIPTICAL is
         # nonzero everywhere (astype(bool) would be all-True -> "!mask" all-NaN),
         # and its peak is ~1/sum, so the threshold must be relative to max.
         _m = xr.DataArray(
@@ -3405,7 +3492,7 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     # ===== sweep authoring widgets (guided_rollout) =====
     guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["FGWNOLR"], label="GUIDANCE_MODE: ")
     gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF: ")
-    mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["GAUSSIAN"], label="MASK_MODE: ")
+    mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE: ")
 
     # numeric axes -> (start, stop, log_scale, integer)
     # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
@@ -3416,6 +3503,13 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         # eta: shared closure rate for FGWNOLR and FGWNOGAP; a_t = (1 - eta)^(t+1)
         # (FGWNOGAP: fraction of the remaining gap closed per step)
         "eta":            (0.01,  0.1,   False, False),
+        # sigma_div: mask hyper shared by ALL mask modes -- extent / sigma_div
+        # (2.0 = base box, 4.0 = half, 1.0 = double)
+        "sigma_div":      (2.0,   4.0,   False, False),
+        # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
+        "phi":            (0.01,  1.0,   True,  False),
+        # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO secant
+        "fgwrho_w_init":  (1.0,   4.0,   False, False),
     }
 
     _rc = {}
@@ -3455,7 +3549,7 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
 def _(mo):
     side_lon_slider = mo.ui.slider(1.5, 90, step=1.5, value=12, label="lon side: ", show_value=True, debounce=True)
     side_lat_slider = mo.ui.slider(1.5, 60, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
-    sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=1, label="sigma divisor: ", show_value=True)
+    sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=2, label="sigma divisor: ", show_value=True)
     return side_lat_slider, side_lon_slider, sigma_div_slider
 
 

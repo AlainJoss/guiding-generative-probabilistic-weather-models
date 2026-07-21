@@ -12,12 +12,19 @@ GUIDANCE_METHOD_HYPERS = {
     "FGWNOLR": ["fgwnolr_w_init", "eta"],
     # FGWNOGAP: exact per-step gap closure (damped Newton on S = target); eta=1 -> full
     "FGWNOGAP": ["eta"],
+    # FGWFREE: Adam on the full lambda trajectory; phi = kick-energy regularizer strength
+    "FGWFREE": ["phi"],
+    # FGWRHO: secant on the guidance-to-flow ratio w (kick normalized to ||u_t||)
+    "FGWRHO": ["fgwrho_w_init"],
 }
 
+# mask hypers, shared by every mask mode (extent / sigma_div rescaling)
+MASK_HYPERS = ["sigma_div"]
+
 # common hypers
-GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP"]
+GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO"]
 GUI_REFS = ["UNG", "GT"]
-MASK_MODES = ["BBOX", "GAUSSIAN", "SPHERICAL", "ELLIPTICAL"]
+MASK_MODES = ["BBOX", "ELLIPTICAL"]
 
 COMMON_AXES = [
     "MASK_MODE",
@@ -27,7 +34,9 @@ COMMON_AXES = [
 ]
 
 # union over all modes
-SWEEP_AXES = COMMON_AXES + sorted({h for hs in GUIDANCE_METHOD_HYPERS.values() for h in hs})
+SWEEP_AXES = COMMON_AXES + sorted(
+    {h for hs in GUIDANCE_METHOD_HYPERS.values() for h in hs} | set(MASK_HYPERS)
+)
 
 ##### config class #####
 DATETIME_STR_FORMAT = "%Y-%m-%dT%H:%M:%S"
@@ -69,6 +78,17 @@ class RolloutConfig:
     # eta: shared closure rate for FGWNOLR and FGWNOGAP. a_t = (1 - eta)^(t+1);
     # for FGWNOGAP it is the fraction of the remaining gap closed per step (1 = all).
     eta: float | None = None
+
+    # phi: FGWFREE regularizer strength (penalty on the applied guidance kicks)
+    phi: float | None = None
+
+    # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO secant
+    fgwrho_w_init: float | None = None
+
+    # sigma_div: mask extent divisor, shared by ALL mask modes (half-side or
+    # sigma = box extent / sigma_div; 2.0 = base box, 4.0 = half, 1.0 = double).
+    # None -> default 2.0 at the get_mask_2d call site.
+    sigma_div: float | None = None
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 

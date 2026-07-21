@@ -32,7 +32,8 @@ def iter_sweeps(sweep_params: dict[str, list]) -> Iterator[dict]:
     # Mode-restricted product: for each GUIDANCE_MODE value, only that mode's specific
     # hypers vary; axes that belong to *some* mode but not this one are pinned to their
     # index-0 value (the GUIDANCE_MODE coord disambiguates the index-0 writes in the
-    # union zarr). Yields full job dicts (every union key present).
+    # union zarr). Mask hypers (sigma_div) apply to every mask mode, so they vary
+    # unrestricted. Yields full job dicts (every union key present).
     all_keys = list(sweep_params)
 
     # unguided (no GUIDANCE_MODE axis, e.g. ung sweep_params={}): plain product
