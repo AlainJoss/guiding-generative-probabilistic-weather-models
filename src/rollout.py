@@ -9,7 +9,7 @@ from src.utils import (
     get_var_idx, get_level_idx,
 )
 from src.rollout_config import RolloutConfig, GUIDANCE_METHOD_HYPERS
-from src.mask import get_mask_tdict, get_mask_2d
+from src.mask import get_mask_tdict, get_mask_2d, get_masked_mean
 
 from src.utils import create_slice_zarr_container, tdict_to_xr, append_to_zarr, advance_x_cond
 from src.utils import get_gt_rollout, gt_state_to_tdict, append_w_star, append_guidance_schedule
@@ -44,6 +44,8 @@ def rollout(
             sigma_div=config.sigma_div if config.sigma_div is not None else 2.0,
         )
 
+        # GUIDANCE_DELTA holds the target percentage profile p_n; the loss delta is
+        # derived online per step so the target is ABSOLUTE (see the m/n loop).
         delta_trajectory = config.GUIDANCE_DELTA
         mask_tdict = get_mask_tdict(x_cond_init["state"], config.PARTITION, var_idx, level_idx, mask_2d)
         guidance_type = config.GUIDANCE_MODE
@@ -51,6 +53,26 @@ def rollout(
         # N+1 states (initial + N forecasts); guidance step n's valid time is index n+1.
         gt_ds = get_gt_rollout(config.N + 1, config.START_TS) if config.GUI_REF == "GT" else None
         guidance_kwargs = build_guidance_kwargs(guidance_type, sweep_params)
+
+        # baseline masked means anchoring the target trajectory A = (1 + p_n) * base:
+        # GT -> the ground-truth rollout (member-independent, valid time n+1);
+        # UNG -> the unguided baseline rollout of this experiment (per member)
+        if config.GUI_REF == "GT":
+            _base_da = gt_ds[config.VAR]
+            if config.PARTITION == "level":
+                _base_da = _base_da.sel(level=config.LEVEL)
+            base_mm = get_masked_mean(_base_da.to_numpy(), mask_2d)  # (N+1,)
+        else:
+            _ung_path = rollout_dir / "ung.zarr"
+            assert _ung_path.exists(), (
+                "guided rollout needs the unguided baseline; run --rollout_type ung first"
+            )
+            _base_da = xr.open_zarr(_ung_path)[config.VAR]
+            if "t" in _base_da.dims:  # ung stores the full flow trajectory now
+                _base_da = _base_da.isel(t=-1)
+            if config.PARTITION == "level":
+                _base_da = _base_da.sel(level=config.LEVEL)
+            base_mm = get_masked_mean(_base_da.to_numpy(), mask_2d)  # (M, N)
     else:
         delta_trajectory=None
         mask_tdict = None
@@ -75,9 +97,9 @@ def rollout(
             x_hat_curr = x_hat_ung
 
             if guidance_flag:
-                delta_n = delta_trajectory[n]
-                if float(delta_n) == 0.0:
-                    # δ=0 -> no guidance: don't produce a guided state, just copy the
+                p_n = delta_trajectory[n]
+                if float(p_n) == 0.0:
+                    # p=0 -> no guidance: don't produce a guided state, just copy the
                     # unguided online sample into gui (no second sampling pass, no traces)
                     x_hat_gui = x_hat_ung
                     sampling_trace = {}
@@ -88,6 +110,18 @@ def rollout(
                         gt_state_to_tdict(gt_ds, n + 1, flow_model.device)
                         if config.GUI_REF == "GT" else x_ung_field
                     )
+                    # absolute target A = (1 + p_n) * baseline masked mean; the ONLINE
+                    # delta makes the loss target (1 + delta_n) * S(x_ref) == A exactly,
+                    # wherever the online reference drifted. s_ref ~ 0 would only
+                    # inflate delta_n, never the realized target.
+                    A_target = (1.0 + float(p_n)) * float(
+                        base_mm[n + 1] if config.GUI_REF == "GT" else base_mm[m, n]
+                    )
+                    s_ref = float(
+                        (x_ref[config.PARTITION][0, var_idx, level_idx]
+                         .detach().cpu().numpy().astype("float64") * mask_2d).sum()
+                    )
+                    delta_n = A_target / s_ref - 1.0
                     x_hat_gui, sampling_trace = flow_model.sample(
                         guidance_flag=True,
                         guidance_type=guidance_type,
@@ -120,6 +154,20 @@ def rollout(
                 )
                 append_to_zarr(rollout_dir, "gui", save_state)
 
+                # deterministic core of this step. Same x_cond for the online unguided
+                # call, so its trace supplies it when delta=0 skipped the guided pass.
+                det_state = sampling_trace.pop("det_pred", None)
+                if det_state is None:
+                    det_state = ung_trace.get("det_pred")
+                if det_state is not None:
+                    save_state = flow_model.denormalize(det_state).cpu()
+                    save_state = tdict_to_xr(
+                        create_slice_zarr_container(m, n, t_dim=False, sweep_params=sweep_params),
+                        save_state,
+                        t_dim=False
+                    )
+                    append_to_zarr(rollout_dir, "gui_det", save_state)
+
                 # gui_ung is the unguided clean-prediction trajectory over flow steps t
                 # (last slice == final unguided state). Mirrors clean_preds for the guided
                 # pass; clean_prediction already denormalizes, so this is in physical units.
@@ -141,12 +189,25 @@ def rollout(
                     append_to_zarr(rollout_dir, trace_type, save_trace)
 
             else:
-                save_state = flow_model.denormalize(x_hat_ung).cpu()
+                # ung stores the full clean-prediction trajectory over flow steps t
+                # (physical units; last slice == final unguided state, like gui_ung)
+                ung_traj = torch.stack(ung_trace["clean_preds"], dim=0)
                 save_state = tdict_to_xr(
-                    create_slice_zarr_container(m, n, t_dim=False, sweep_params={}),
-                    save_state,
+                    create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params={}),
+                    ung_traj,
+                    t_dim=True
                 )
                 append_to_zarr(rollout_dir, "ung", save_state)
+
+                # deterministic core of this step
+                det_state = ung_trace.get("det_pred")
+                if det_state is not None:
+                    save_state = flow_model.denormalize(det_state).cpu()
+                    save_state = tdict_to_xr(
+                        create_slice_zarr_container(m, n, t_dim=False, sweep_params={}),
+                        save_state,
+                    )
+                    append_to_zarr(rollout_dir, "ung_det", save_state)
 
             # after the last iteration no need to set this again
             if n < config.N-1:

@@ -86,7 +86,8 @@ def get_container_args(rollout_type):
     # tuples: (file type, t_dim_flag)
     match rollout_type:
         case "ung":
-            return [("ung", False)]
+            # ung holds the FULL flow-step trajectory (final state = t=-1 slice)
+            return [("ung", True), ("ung_det", False)]
         case "gui":
             # raw primitives only: grads = dL/dz, vfs = u*s_t, res = noisy state z_t.
             # gui_vec / gui_vf / gui_res / clean_preds are reconstructed in the UI.
@@ -95,6 +96,7 @@ def get_container_args(rollout_type):
                 ("vfs", True),
                 ("res", True),
                 ("gui", False),
+                ("gui_det", False),
                 ("gui_ung", True)
             ]
         case _:
@@ -104,8 +106,8 @@ def get_container_args(rollout_type):
 def written_containers(rollout_type, guidance_mode):
     """Container types a single sweep point actually fills."""
     if rollout_type == "ung":
-        return {"ung"}
-    return {"gui", "gui_ung", "grads", "vfs", "res"}
+        return {"ung", "ung_det"}
+    return {"gui", "gui_det", "gui_ung", "grads", "vfs", "res"}
 
 
 def find_resume_index(rollout_dir, rollout_type, sweep_params):
@@ -146,9 +148,12 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, T, sweep_params):
     ensure_rollout_dir(rollout_id)
 
     for (container_type, t_dim_flag) in container_args:
-        container_ds = create_full_zarr_container(M, N, t_dim_flag, T, sweep_params)
-
         save_path = get_rollout_dir(rollout_id) / f"{container_type}.zarr"
+        # existing containers are kept (a store from a prior run is resumed, not
+        # wiped); only missing ones are created -- e.g. gui_det on older stores
+        if save_path.exists():
+            continue
+        container_ds = create_full_zarr_container(M, N, t_dim_flag, T, sweep_params)
         # compute=False: write only metadata + coords (dask-backed NaN chunks are
         # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
         container_ds.to_zarr(save_path, mode="w", compute=False)
@@ -184,18 +189,18 @@ def main() -> None:
             f"Fix {get_rollout_dir(args.rollout_id) / 'sweep_params.json'}."
         )
 
-    # a store from a prior run is resumed, not recreated: create_zarr_containers
-    # uses mode="w" and would wipe partially-filled sweeps.
+    # create any missing containers; existing ones are kept, so a store from a
+    # prior run is resumed rather than wiped (e.g. gui_det added on older stores
+    # starts empty -> resume probes it and reruns what is needed)
     container_args = get_container_args(args.rollout_type)
-    store_exists = all(
+    any_existing = any(
         (rollout_dir / f"{c}.zarr").exists() for (c, _) in container_args
     )
-
-    if store_exists:
+    create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, T, sweep_params)
+    if any_existing:
         resume_idx = find_resume_index(rollout_dir, args.rollout_type, sweep_params)
-        print("Existing store found, resuming sweep at index %d", resume_idx)
+        print(f"Existing store found, resuming sweep at index {resume_idx}")
     else:
-        create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, T, sweep_params)
         resume_idx = 0
 
     for i, job in enumerate(build_jobs(config, sweep_params)):

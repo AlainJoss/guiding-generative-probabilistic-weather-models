@@ -46,7 +46,6 @@ def _():
     from src.spectrum import power_spectrum, log_spectral_distance, spectral_bias
 
     from src.mask import get_masked_mean, get_mask_2d, get_mask_center, get_great_circle_field, get_bbox_mask
-    from src.target import get_target_slices
 
 
     return (
@@ -74,7 +73,6 @@ def _():
         get_rollout_ids,
         get_slices,
         get_sweep_dict,
-        get_target_slices,
         get_timestamp_from_sliders,
         get_var_idx,
         get_w_star,
@@ -512,16 +510,23 @@ def config_cell(get_config, notebook_mode, rollout_id):
 @app.cell
 def _(get_rollout, notebook_mode, rollout_id, sweep_params):
     # data objects (config lives in its own cell so sweep changes don't re-run it)
+    # NEW ung stores hold the full flow-step trajectory; unguided_xr is the final-state
+    # view (t=-1), ung_traj_xr the full trajectory (None on legacy stores without t).
     match notebook_mode:
         case "unguided_rollout":
             unguided_xr=None
+            ung_traj_xr=None
             guided_xr=None
             # TODO: set everything to None
         case "guided_rollout":
-            unguided_xr = get_rollout("ung", rollout_id)
+            _ung = get_rollout("ung", rollout_id)
+            ung_traj_xr = _ung if "t" in _ung.dims else None
+            unguided_xr = _ung.isel(t=-1) if "t" in _ung.dims else _ung
             guided_xr = None
         case "analyze_rollout":
-            unguided_xr = get_rollout("ung", rollout_id).compute()
+            _ung = get_rollout("ung", rollout_id).compute()
+            ung_traj_xr = _ung if "t" in _ung.dims else None
+            unguided_xr = _ung.isel(t=-1) if "t" in _ung.dims else _ung
             guided_xr = get_rollout("gui", rollout_id).sel(sweep_params).compute()
         case _:
             pass
@@ -587,14 +592,15 @@ def _(
     delta_trajectory_dropdown,
     experiment_params,
     notebook_mode,
-    np,
 ):
-    # delta schedule
+    # target percentage profile p_n (fractions). The absolute target trajectory is
+    # A_n = (1 + p_n) * baseline masked mean; rollout.py derives the loss delta ONLINE
+    # from x_ref so guidance lands exactly on A_n.
     match notebook_mode:
         case "unguided_rollout":
             delta_trajectory=None
         case "guided_rollout":
-            # first authored delta (preview); the full set lives in delta_trajectories
+            # first authored profile (preview); the full set lives in delta_trajectories
             delta_trajectory = delta_trajectories[0]
         case "analyze_rollout":
             # config.GUIDANCE_DELTA is None under sweeping; the swept vectors live in
@@ -602,70 +608,7 @@ def _(
             delta_trajectory = experiment_params["GUIDANCE_DELTA"][delta_trajectory_dropdown.value]
         case _:
             pass
-
-    cumulative_delta_trajectory = (
-        np.cumprod(1 + np.asarray(delta_trajectory, dtype=float)) - 1
-        if delta_trajectory is not None
-        else None
-    )
-    return cumulative_delta_trajectory, delta_trajectory
-
-
-@app.cell
-def _(
-    M,
-    N,
-    config,
-    cumulative_delta_trajectory,
-    get_masked_mean,
-    get_target_slices,
-    guidance_reference,
-    level,
-    m,
-    mask,
-    notebook_mode,
-    partition,
-    rollout_id,
-    timestamp,
-    var,
-):
-    # planned guidance (depends on level/var/partition)
-    match notebook_mode:
-        case "unguided_rollout":
-            planned_guidance_rollout=None
-            planned_guidance_trajectories=None
-            planned_guidance_trajectory=None
-        case "guided_rollout" | "analyze_rollout":
-            if (
-                # GT reference uses the STATE loss (no delta-scaled masked target), so the
-                # planned-guidance preview does not apply -- and GT has N+1 steps vs delta's N.
-                guidance_reference != "GT"
-                and partition == config.PARTITION
-                and var == config.VAR
-                and level == config.LEVEL
-            ):
-                planned_guidance_slices = get_target_slices(
-                    guidance_reference,
-                    rollout_id,
-                    N,
-                    M,
-                    timestamp,
-                    partition,
-                    var,
-                    level,
-                    cumulative_delta_trajectory,
-                    m,
-                )
-                planned_guidance_trajectories = get_masked_mean(planned_guidance_slices, mask)
-                planned_guidance_trajectory = planned_guidance_trajectories[m]
-            else:
-                planned_guidance_rollout = None
-                planned_guidance_slices = None
-                planned_guidance_trajectories = None
-                planned_guidance_trajectory = None
-        case _:
-            pass
-    return planned_guidance_trajectories, planned_guidance_trajectory
+    return (delta_trajectory,)
 
 
 @app.cell
@@ -675,28 +618,39 @@ def _(
     delta_trajectory,
     get_masked_mean,
     get_slices,
-    gui_ung_final_xr,
+    gt_rollout,
+    guidance_reference,
     mask,
     notebook_mode,
     np,
+    unguided_xr,
 ):
-    # guidance-target at config coords (pinned — independent of browsing sliders)
+    # guidance-target at config coords (pinned -- independent of browsing sliders)
     if notebook_mode == "analyze_rollout":
         cfg_clean_preds_slices = get_slices(clean_preds_xr, config.PARTITION, config.VAR, config.LEVEL)
-        cfg_gui_ung_M_N_slices = get_slices(gui_ung_final_xr, config.PARTITION, config.VAR, config.LEVEL)
-        cfg_gui_ung_M_N_trajectories = get_masked_mean(cfg_gui_ung_M_N_slices, mask)
-        cfg_target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * cfg_gui_ung_M_N_trajectories
+        # absolute target A = (1 + p_n) * BASELINE masked mean (GT means for GT reference)
+        _p = np.asarray(delta_trajectory, dtype=float)
+        if guidance_reference == "GT":
+            _cfg_base = np.tile(
+                get_masked_mean(get_slices(gt_rollout, config.PARTITION, config.VAR, config.LEVEL), mask)[1:len(_p) + 1],
+                (config.M, 1),
+            )
+        else:
+            _cfg_base = get_masked_mean(get_slices(unguided_xr, config.PARTITION, config.VAR, config.LEVEL), mask)
+        cfg_target_guidance_M_N_trajectories = (1.0 + _p) * _cfg_base
     return cfg_clean_preds_slices, cfg_target_guidance_M_N_trajectories
 
 
 @app.cell
 def _(
     N,
+    delta_trajectories,
     delta_trajectory,
     get_gt_rollout,
     get_masked_mean,
     get_slices,
     gui_ung_final_xr,
+    guidance_reference,
     guided_xr,
     level,
     m,
@@ -724,8 +678,6 @@ def _(
             gui_m_trajectory = None
 
             gui_ung_m_trajectory = None
-            target_guidance_trajectory = None
-            target_guidance_M_N_trajectories = None
         case "guided_rollout":
             ung_M_N_slices = get_slices(unguided_xr, partition, var, level)
             ung_M_N_trajectories = get_masked_mean(ung_M_N_slices, mask)
@@ -740,8 +692,6 @@ def _(
             gui_m_trajectory = None
 
             gui_ung_m_trajectory = None
-            target_guidance_trajectory = None
-            target_guidance_M_N_trajectories = None
         case "analyze_rollout":
             ung_M_N_slices = get_slices(unguided_xr, partition, var, level)
             ung_M_N_trajectories = get_masked_mean(ung_M_N_slices, mask)
@@ -758,10 +708,6 @@ def _(
             gui_ung_M_N_slices = get_slices(gui_ung_final_xr, partition, var, level)
             gui_ung_M_N_trajectories = get_masked_mean(gui_ung_M_N_slices, mask)
             gui_ung_m_trajectory = gui_ung_M_N_trajectories[m]
-            print(gui_ung_m_trajectory.shape)
-
-            target_guidance_trajectory = (1 + np.asarray(delta_trajectory)) * gui_ung_m_trajectory
-            target_guidance_M_N_trajectories = (1 + np.asarray(delta_trajectory)) * gui_ung_M_N_trajectories
         case _:
             pass
 
@@ -769,6 +715,27 @@ def _(
     gt_rollout = get_gt_rollout(N+1, timestamp)
     gt_N_slices = get_slices(gt_rollout, partition, var, level)
     gt_trajectory = get_masked_mean(gt_N_slices, mask)
+
+    # target guidance: the absolute target trajectory A_n = (1 + p_n) * baseline masked
+    # mean -- the single object formerly split into planned/target guidance. Baseline =
+    # the unguided rollout per member (GT means for a GT reference, member-independent).
+    if notebook_mode in ("guided_rollout", "analyze_rollout"):
+        # guided mode previews EVERY authored profile; analyze mode has the selected one
+        _profiles = delta_trajectories if notebook_mode == "guided_rollout" else [delta_trajectory]
+        _p0 = np.asarray(_profiles[0], dtype=float)
+        if guidance_reference == "GT":
+            _base = np.tile(gt_trajectory[1:len(_p0) + 1], (ung_M_N_trajectories.shape[0], 1))
+        else:
+            _base = ung_M_N_trajectories
+        _targets_all = [(1.0 + np.asarray(_pp, dtype=float)) * _base for _pp in _profiles]
+        target_guidance_M_N_trajectories = _targets_all[0]
+        target_guidance_trajectory = target_guidance_M_N_trajectories[m]
+        # one member-m line per profile, drawn together on the trajectories chart
+        target_guidance_trajectories_all = [_t[m] for _t in _targets_all]
+    else:
+        target_guidance_trajectory = None
+        target_guidance_M_N_trajectories = None
+        target_guidance_trajectories_all = None
     return (
         gt_N_slices,
         gt_rollout,
@@ -778,7 +745,7 @@ def _(
         gui_m_trajectory,
         gui_ung_m_trajectory,
         target_guidance_M_N_trajectories,
-        target_guidance_trajectory,
+        target_guidance_trajectories_all,
         ung_M_N_slices,
         ung_M_N_trajectories,
         ung_m_trajectory,
@@ -954,74 +921,32 @@ def _(M, N, mo):
 
 @app.cell
 def _(mo):
-    # number of delta trajectories to author (each a sweep value of GUIDANCE_DELTA)
-    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="delta trajectories: ", show_value=True)
-    # how each delta is shaped: hand-drawn linear ramp, or relative to the unguided ensemble
-    # band  delta_n = k * sigma_band_n / |mean_n|,  sigma_band_n = (max_n - min_n)/2  (k per candidate;
-    # k=1 pushes the masked mean to the top edge of the unguided ensemble band).
-    delta_mode_dropdown = mo.ui.dropdown(["linear", "band-based"], value="linear", label="delta mode: ")
-    return delta_mode_dropdown, n_deltas_slider
+    # number of target percentage profiles to author (each a sweep value of GUIDANCE_DELTA)
+    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="target percentage profiles: ", show_value=True)
+    return (n_deltas_slider,)
 
 
 @app.cell
-def _(config, delta_mode_dropdown, mo, n_deltas_slider, notebook_mode):
-    # per-delta params. linear: start% / peak% / start@n / stop@n. band-based: one multiplier
-    # k per candidate (delta_n = k * sigma_band_n/|mean_n|, sigma_band_n = (max-min)/2 of the ensemble).
+def _(config, mo, n_deltas_slider, notebook_mode):
+    # per-profile params: start% / peak% / start@n / stop@n (linear ramp)
     if notebook_mode == "guided_rollout":
         _dc = {}
         for _i in range(n_deltas_slider.value):
-            if delta_mode_dropdown.value == "band-based":
-                _dc[f"{_i}.k"] = mo.ui.number(value=1.0, label="k (× band): ")
-            else:
-                _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label="start %: ")
-                _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %: ")
-                _dc[f"{_i}.start_at"] = mo.ui.slider(0, config.N, step=1, value=0, label="start@n: ", show_value=True)
-                _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, config.N, step=1, value=config.N, label=get_label("stop@n", config.N), show_value=True)
+            _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label=f"profile {_i} — start %: ")
+            _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %: ")
+            _dc[f"{_i}.start_at"] = mo.ui.slider(0, config.N, step=1, value=0, label="start@n: ", show_value=True)
+            _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, config.N, step=1, value=config.N, label=get_label("stop@n", config.N), show_value=True)
         delta_controls = mo.ui.dictionary(_dc)
     else:
         delta_controls = mo.ui.dictionary({})
     return (delta_controls,)
 
 
-@app.cell(hide_code=True)
-def delta_std_base(
-    config,
-    get_masked_mean,
-    get_slices,
-    mask,
-    notebook_mode,
-    np,
-    unguided_xr,
-):
-    # unguided ensemble spread at the guidance coords (config var/level + authoring mask):
-    # sigma_band_n = (max_n - min_n)/2 over the M members' masked-average; rel_band_n = sigma_band_n/|mean_n|
-    # is the band-based delta base (k=1 -> target reaches the top edge of the unguided band).
-    # NOTE: MASK_MODE is a separate swept axis but one delta vector is shared across mask modes;
-    # the relative ratio is fairly mask-mode robust, so we use the authoring mask. Needs M > 1.
-    if notebook_mode == "guided_rollout":
-        _base = get_masked_mean(
-            get_slices(unguided_xr, config.PARTITION, config.VAR, config.LEVEL), mask)  # (M, N)
-        delta_band_n = (_base.max(axis=0) - _base.min(axis=0)) / 2.0            # (N,) half band-width
-        delta_mean_n = _base.mean(axis=0)                                       # (N,)
-        delta_rel_band_n = delta_band_n / np.maximum(np.abs(delta_mean_n), 1e-8)  # (N,); guards mean~0
-    else:
-        delta_rel_band_n = None
-    return (delta_rel_band_n,)
-
-
 @app.cell
-def _(
-    N,
-    delta_controls,
-    delta_mode_dropdown,
-    delta_rel_band_n,
-    mo,
-    n_deltas_slider,
-    notebook_mode,
-):
-    # delta trajectories. linear: 0 before start@n, ramp start%->peak% over [start@n, stop@n],
-    # 0 after. band-based: delta_n = k * rel_band_n (k per candidate). Both return length-N lists
-    # indexed by rollout step n (aligned with delta_trajectory[n] in rollout.py).
+def _(N, delta_controls, mo, n_deltas_slider, notebook_mode):
+    # target percentage profiles: 0 before start@n, linear ramp start%->peak% over
+    # [start@n, stop@n], 0 after. Length-N lists of fractions indexed by rollout step n
+    # (aligned with delta_trajectory[n] in rollout.py).
     def _linear_delta(N, start_pct, peak_pct, start_at, stop_at):
         start, peak = start_pct / 100, peak_pct / 100
         out = []
@@ -1035,29 +960,19 @@ def _(
 
     if notebook_mode == "guided_rollout":
         _dv = delta_controls.value
-        if delta_mode_dropdown.value == "band-based":
-            delta_trajectories = [
-                [float(_dv[f"{_i}.k"] * delta_rel_band_n[_n]) for _n in range(N)]
-                for _i in range(n_deltas_slider.value)
-            ]
-            _rows = [
-                mo.hstack([mo.md(f"delta {_i}: "), delta_controls[f"{_i}.k"]], justify="start", align="center")
-                for _i in range(n_deltas_slider.value)
-            ]
-        else:
-            delta_trajectories = [
-                _linear_delta(N, _dv[f"{_i}.start"], _dv[f"{_i}.peak"],
-                              int(_dv[f"{_i}.start_at"]), int(_dv[f"{_i}.stop_at"]))
-                for _i in range(n_deltas_slider.value)
-            ]
-            _rows = [
-                mo.hstack([mo.md(f"delta {_i}: "), delta_controls[f"{_i}.start"], delta_controls[f"{_i}.peak"],
-                           delta_controls[f"{_i}.start_at"], delta_controls[f"{_i}.stop_at"]],
-                          justify="start", align="center")
-                for _i in range(n_deltas_slider.value)
-            ]
-        # controls only; the trajectories are drawn on the rollout-trajectories chart's right axis
-        delta_widget = mo.vstack([mo.hstack([n_deltas_slider, delta_mode_dropdown]), *_rows], align="start")
+        delta_trajectories = [
+            _linear_delta(N, _dv[f"{_i}.start"], _dv[f"{_i}.peak"],
+                          int(_dv[f"{_i}.start_at"]), int(_dv[f"{_i}.stop_at"]))
+            for _i in range(n_deltas_slider.value)
+        ]
+        _rows = [
+            mo.hstack([delta_controls[f"{_i}.start"], delta_controls[f"{_i}.peak"],
+                       delta_controls[f"{_i}.start_at"], delta_controls[f"{_i}.stop_at"]],
+                      justify="start", align="center")
+            for _i in range(n_deltas_slider.value)
+        ]
+        # controls only; the profiles are drawn on the rollout-trajectories chart's right axis
+        delta_widget = mo.vstack([n_deltas_slider, *_rows], align="start")
     else:
         delta_trajectories = []
         delta_widget = None
@@ -1343,9 +1258,9 @@ def _(
                     ),
                 ], align="start")
             ], align="start")
-            # config-pinned corners: no side sliders; sigma_div slider previews the mask
+            # config-pinned corners: no side sliders; mask mode + sigma_div preview the mask
             mask_widget = mo.vstack([
-                mo.hstack([zoom_slider, dpi_slider, sigma_div_slider], justify="start"),
+                mo.hstack([mask_mode_dropdown, zoom_slider, dpi_slider, sigma_div_slider], justify="start"),
                 _mask_maps_row,
             ], align="start")
             inspect_states_widget=inspect_states_widget_make
@@ -2241,8 +2156,8 @@ def _(trajectory_widget):
 def _(mo):
     # chart/trace selector for the rollout-trajectories plot, mirroring the
     # cross-checks / flow-analysis / inspect-states multiselects.
-    _traj_rows = ["unguided", "guided", "guided_unguided", "planned_guidance",
-                  "target_guidance", "delta_trajectory", "dist_bands"]
+    _traj_rows = ["unguided", "guided", "guided_unguided",
+                  "target_guidance", "target_pct_profile", "dist_bands"]
     traj_row_select = mo.ui.multiselect(_traj_rows, value=_traj_rows, label="charts: ")
     return (traj_row_select,)
 
@@ -2256,7 +2171,6 @@ def _():
 @app.cell
 def _(
     config,
-    cumulative_delta_trajectory,
     delta_trajectories,
     delta_trajectory,
     dpi_slider,
@@ -2267,11 +2181,9 @@ def _(
     m,
     n,
     notebook_mode,
-    planned_guidance_trajectories,
-    planned_guidance_trajectory,
     plot_trajectories,
     target_guidance_M_N_trajectories,
-    target_guidance_trajectory,
+    target_guidance_trajectories_all,
     timestamps,
     to_display_units,
     traj_row_select,
@@ -2284,7 +2196,7 @@ def _(
     var_check = (var==config.VAR if notebook_mode in ("guided_rollout", "analyze_rollout") else False)
 
     # display units: K -> degC for temperature variables. Applies to every absolute
-    # trace (members, ensembles, targets, ground truth); the delta trajectories are
+    # trace (members, ensembles, targets, ground truth); the percentage profiles are
     # relative and stay unchanged.
     def _disp(_a):
         return to_display_units(_a, var)[0] if _a is not None else None
@@ -2300,18 +2212,15 @@ def _(
         guided_unguided_member=_disp(gui_ung_m_trajectory) if ("guided_unguided" in traj_row_select.value) else None,
         guided_ensemble=_disp(gui_M_N_trajectories) if ("dist_bands" in traj_row_select.value) else None,
         unguided_ensemble=_disp(ung_M_N_trajectories) if ("dist_bands" in traj_row_select.value) else None,
-        target_ensemble=_disp(planned_guidance_trajectories) if (("planned_guidance" in traj_row_select.value) and ("dist_bands" in traj_row_select.value) and var_check) else None,
         target_guidance_ensemble=_disp(target_guidance_M_N_trajectories) if (("dist_bands" in traj_row_select.value) and ("target_guidance" in traj_row_select.value) and var_check) else None,
-        target_trajectory=_disp(planned_guidance_trajectory) if (("planned_guidance" in traj_row_select.value) and var_check) else None,
-        target_guidance_trajectory=_disp(target_guidance_trajectory) if (("target_guidance" in traj_row_select.value) and var_check) else None,
+        target_guidance_trajectory=[_disp(_t) for _t in target_guidance_trajectories_all] if (("target_guidance" in traj_row_select.value) and var_check) else None,
         ground_truth=_disp(gt_trajectory),
         ground_truth_label=f"Ground truth ({view_mask_mode})",
         delta_trajectories=(
             ([[0] + list(_t) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
              else [[0] + list(delta_trajectory)])
-            if (("delta_trajectory" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
+            if (("target_pct_profile" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
         ),
-        cumulative_delta_trajectory=[0] + list(cumulative_delta_trajectory) if (("delta_trajectory" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None,
         show_guided_mean=False,
         show_unguided_mean=False,
         title=f"rollout trajectories",
@@ -2558,6 +2467,7 @@ def _(
     res_xr,
     sweep_params,
     t,
+    ung_curr,
     var,
     vfs_xr,
 ):
@@ -2599,11 +2509,15 @@ def _(
         # 4
         guided_vfs_slice = guided_vfs_slices[m][n][t]
         vfs_slice = vfs_slices[m][n][t]
-        # residual integrand of the masked loss: mask * (x_hat - (1+delta)*x_ref),
-        # whose spatial sum IS the signed residual r_t that the gradient differentiates
+        # residual integrand of the masked loss: mask * (x_hat - (1+delta_n)*x_ref) with
+        # the ONLINE delta: (1+delta_n)*S(x_ref) == A = (1+p_n) * baseline masked mean,
+        # mirroring rollout.py (GT reference: baseline == x_ref -> scale = 1+p_n exactly)
         _x_ref_slice = gt_curr if sweep_params.get("GUI_REF") == "GT" else gui_ung_curr
-        _delta_n = 1.0 + float(np.asarray(delta_trajectory, dtype=float)[n])
-        masked_residual_slice = (clean_preds_slices[m][n][t] - _delta_n * _x_ref_slice) * np.asarray(mask)
+        _base_slice = gt_curr if sweep_params.get("GUI_REF") == "GT" else ung_curr
+        _A = (1.0 + float(np.asarray(delta_trajectory, dtype=float)[n])) * float(
+            (np.asarray(_base_slice, dtype=float) * np.asarray(mask)).sum())
+        _scale = _A / float((np.asarray(_x_ref_slice, dtype=float) * np.asarray(mask)).sum())
+        masked_residual_slice = (clean_preds_slices[m][n][t] - _scale * _x_ref_slice) * np.asarray(mask)
         # Model reaction to the guidance applied at t, in SAME units: the stored vf
         # traces are each weighted by their own s_t, so the naive vfs[t+1] - gui_vfs[t]
         # is dominated by the s-decay (at the last transition it renders ~= -gui_vfs and
@@ -3372,9 +3286,12 @@ def _(
     a_t_schedule,
     cfg_clean_preds_slices,
     cfg_target_guidance_M_N_trajectories,
+    config,
     dist_bands_checkbox,
     dpi_slider,
     get_masked_mean,
+    get_slices,
+    grads_xr,
     guidance_mode_dropdown,
     lambda_t,
     m,
@@ -3383,42 +3300,35 @@ def _(
     notebook_mode,
     np,
     plt,
-    red,
+    res_scale_map,
     t,
 ):
     if notebook_mode =="analyze_rollout":
+        # Measured waterfall: pre_t = M(x_hat_t(u_t)) - y_n (clean pred with the RAW
+        # velocity), post_t = M(x_hat_t(u_t^gui)) - y_n (with the GUIDED velocity),
+        # reconstructed exactly as post = pre - sigma_r * s_t * lambda_t * M(g_t).
+        # Blue bar: pre_t -> post_t (measured guidance move at t); red bar:
+        # post_t -> pre_{t+1} (measured model reaction). No first-order claim, no 1/r.
         _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
         _diff_per_t = _all_per_t[m]
-        # ---- guidance claim: first-order effect THROUGH the model Jacobian ----
-        # g = dL/dz = 2 r dS/dz, so one guided Euler step (dz = -h*lambda*g) changes the
-        # masked-sum residual by  dS = <dS/dz, dz> = -h * lambda_t * ||g||^2 / (2 r).
-        # This is the linearization the guidance itself is calibrated in: for FGWNOGAP,
-        # post(t) lands EXACTLY on the prescribed schedule r_target = (1-eta)^(t+1) * r_0
-        # (no overshoot by construction, drawn as the dashed reference); for FGW/FGWNOLR
-        # it is the honest one-step claim. The identity-path object mean(gui_vfs-vfs)*c
-        # is misleading here: the loss gradient acts through the network Jacobian, and
-        # its z-space direction can even oppose its effect on the observable.
+        _T_len = len(_diff_per_t)
+
         if lambda_t is not None:
-            # precomputed in the fused `red` pass -> indexing a tiny in-memory array
-            _g2_t = np.asarray(red["grads_l2_full"].isel(m=m, n=n), dtype=float)
-            _s_flow = np.linspace(1000, 1, len(_diff_per_t)) / 1000
-            _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
-            _r_sum = _diff_per_t * float(np.asarray(mask).sum())  # masked-SUM residual (mask sums to 1)
-            _dS = np.where(np.abs(_r_sum) > 1e-12, -_h_flow * lambda_t * _g2_t / (2.0 * _r_sum), 0.0)
-            _post_sel = _diff_per_t + _dS
+            _kick_mm = get_masked_mean(
+                get_slices(grads_xr, config.PARTITION, config.VAR, config.LEVEL)[m][n], mask
+            ).astype(float)                                        # (T,) masked mean of dL/dz
+            _c_sc = res_scale_map[config.VAR]
+            _c_sc = float(_c_sc.sel(level=config.LEVEL)) if config.PARTITION == "level" else float(_c_sc)
+            _s_flow = np.linspace(1000, 1, _T_len) / 1000
+            _post_sel = _diff_per_t - _c_sc * _s_flow * np.asarray(lambda_t, dtype=float) * _kick_mm
         else:
             # rollout predates the guidance_schedule sidecar -> no recorded lambda_t
             _post_sel = np.full_like(_diff_per_t, np.nan)
-        _guidance_move = _post_sel - _diff_per_t          # within-step: achieved(t) - measured(t)
-        _deflection_move = _diff_per_t[1:] - _post_sel[:-1]  # between steps: measured(t+1) - achieved(t)
 
-        _T_len = len(_diff_per_t)
-        _xt = np.arange(1, _T_len + 1).astype(float)   # both points at the same integer t
+        _guidance_move = _post_sel - _diff_per_t          # within-step: guided(t) - raw(t)
+        _deflection_move = _diff_per_t[1:] - _post_sel[:-1]  # between steps: raw(t+1) - guided(t)
 
-        # between-step drift line: post(t) -> pre(t+1)
-        _xz = np.empty(2 * _T_len); _yz = np.empty(2 * _T_len)
-        _xz[0::2], _xz[1::2] = _xt, _xt
-        _yz[0::2], _yz[1::2] = _diff_per_t, _post_sel
+        _xt = np.arange(1, _T_len + 1).astype(float)
 
         _wt = 22.0  # match the rollout trajectories figure width so the stacked plots align
         with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
@@ -3427,16 +3337,14 @@ def _(
                 _ax.fill_between(_xt, _all_per_t.min(axis=0), _all_per_t.max(axis=0),
                                  color="#B7950B", alpha=0.14, linewidth=0, label=f"pre-step range, M={_all_per_t.shape[0]}")
             # waterfall candles anchored ON the trajectory (same units as the axis):
-            # blue = the guidance move at t (ung_t -> gui_t);
-            # red  = the deflection arriving at t (gui_{t-1} -> ung_t)
-            # red bar sits just LEFT of the tick (the realization gap arriving at t),
-            # blue bar just RIGHT of it (the new claim leaving t)
+            # blue bar just RIGHT of the tick (the kick applied at t), red bar just
+            # LEFT of it (the model reaction arriving at t)
             _bar_off = 0.16
             _ax.bar(_xt + _bar_off, _guidance_move, bottom=_diff_per_t, width=0.28,
-                    color="#2E86C1", alpha=0.35, zorder=3, label=r"guidance claim (1st order, via Jacobian)")
+                    color="#2E86C1", alpha=0.35, zorder=3, label=r"guidance move  (post$_t$ − pre$_t$, measured)")
             if _T_len > 1:
                 _ax.bar(_xt[1:] - _bar_off, _deflection_move, bottom=_post_sel[:-1], width=0.28,
-                        color="#C0392B", alpha=0.35, zorder=3, label=r"realization gap  (pre$_{t+1}$ − post$_t$)")
+                        color="#C0392B", alpha=0.35, zorder=3, label=r"model reaction  (pre$_{t+1}$ − post$_t$)")
             # thin drift lines keep the trajectory readable across steps
             for _i in range(_T_len - 1):
                 _ax.plot([_xt[_i], _xt[_i + 1]], [_post_sel[_i], _diff_per_t[_i + 1]],
@@ -3449,10 +3357,10 @@ def _(
                          "--", color="#888888", linewidth=1.2, alpha=0.9, zorder=2,
                          label=r"NOGAP schedule  $r_0\,a_t$")
             _ax.plot(_xt, _post_sel, "D", color="#2E86C1", markersize=5, zorder=6,
-                     label=r"claimed after step $t$")
+                     label=r"after the kick at $t$  $M(\hat{x}_t(u^{\text{gui}}_t)) - y_n$")
             _ax.plot(_xt, _diff_per_t, "o", markerfacecolor="none", markeredgecolor="#B7950B",
                      markeredgewidth=1.8, markersize=8, linestyle="none", zorder=7,
-                     label=r"measured before step $t$  (clean pred)")
+                     label=r"before the kick at $t$  $M(\hat{x}_t(u_t)) - y_n$")
             _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
             _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
             _ax.set_xlim(0.6, _T_len + 0.4)
@@ -3465,6 +3373,8 @@ def _(
             _ax.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
             _fig.tight_layout(rect=(0, 0, 0.82, 1))
         guidance_convergence_t_plot = _fig
+    else:
+        guidance_convergence_t_plot = None
     return (guidance_convergence_t_plot,)
 
 

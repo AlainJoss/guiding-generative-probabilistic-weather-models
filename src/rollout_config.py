@@ -64,7 +64,9 @@ class RolloutConfig:
 
     ### common swept axes
     MASK_MODE: str | None = None
-    GUIDANCE_DELTA: list[float] | None = None  # per-step delta target (non-scalar axis)
+    # target percentage profile p_n vs the reference baseline (non-scalar axis);
+    # the online loss delta is derived per step in rollout.py so the target is absolute
+    GUIDANCE_DELTA: list[float] | None = None
     GUI_REF: str | None = None  # UNG -> TODO: remove if guiding towards gt is not of interest
     GUIDANCE_MODE: str | None = None
 

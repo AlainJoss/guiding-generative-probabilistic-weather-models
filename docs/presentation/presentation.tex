@@ -86,6 +86,7 @@ $\rightarrow$ \textbf{How can these scenarios be generated?}
 \frametitle{High-level objective}
 \textbf{Objective:} simulate \emph{extreme}, yet \emph{plausible} weather scenarios
 \begin{itemize}
+  \item Extreme + plausible == usability requirements
   \item Scenarios: simulate at different intensity levels
   \item Example: 
   \begin{itemize}
@@ -310,6 +311,12 @@ We target \textbf{heatwave} scenarios over specific:
 \begin{itemize}
   \item \textbf{mask}: weights over region + variable of interest
   \item \textbf{forcing trajectory}: masked-average percentage change
+\end{itemize}
+\vfill
+... what does this mean practically?
+\begin{itemize}
+  \item \textbf{mask}: localized change of interest, although change will expand beyond mask --> in evaluation we care about weather being consistent over the region of interest, not globally
+  \item \textbf{forcing trajectory}: explicit definition of heatwave trajectories, and on how to sample relevant ones. For instance: .... (figure) --> we defer this to future work, here we focus on the guidance method and its evaluation, rather than on the definition of appropriate trajectories
 \end{itemize}
 }
 

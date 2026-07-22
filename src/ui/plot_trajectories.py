@@ -132,7 +132,16 @@ def plot_trajectories(
     )
 
     target_trajectory = _as_1d(target_trajectory, "planned_guidance", gt0=gt0)
-    target_guidance_trajectory = _as_1d(target_guidance_trajectory, "target_guidance_trajectory", gt0=gt0)
+    # target guidance: a single trajectory or a list of them (one per authored profile)
+    if target_guidance_trajectory is None:
+        target_guidance_trajectories = None
+    else:
+        _tg = target_guidance_trajectory
+        _is_multi = isinstance(_tg, (list, tuple)) and len(_tg) > 0 and np.ndim(_tg[0]) >= 1
+        target_guidance_trajectories = [
+            _as_1d(_t, f"target_guidance_trajectory[{_j}]", gt0=gt0)
+            for _j, _t in enumerate(list(_tg) if _is_multi else [_tg])
+        ]
     reference_trajectory = _as_1d(reference_trajectory, "reference_trajectory", gt0=gt0)
 
     delta_trajectory = (
@@ -343,20 +352,24 @@ def plot_trajectories(
             y_values.append(target_trajectory)
 
         # ------------------------------------------------------------
-        # Target guidance: (1 + delta_n) * unguided masked mean
+        # Target guidance: A_n = (1 + p_n) * baseline masked mean, one line
+        # per profile (linestyle cycles to keep multiple profiles readable)
         # ------------------------------------------------------------
-        if target_guidance_trajectory is not None:
-            ax.plot(
-                time_values,
-                target_guidance_trajectory,
-                linestyle="-",
-                linewidth=2.0,
-                color=colors["target_guidance"],
-                alpha=0.95,
-                label="Target guidance",
-                zorder=5,
-            )
-            y_values.append(target_guidance_trajectory)
+        if target_guidance_trajectories is not None:
+            _tg_styles = ["-", "--", "-.", ":"]
+            for _j, _traj in enumerate(target_guidance_trajectories):
+                ax.plot(
+                    time_values,
+                    _traj,
+                    linestyle=_tg_styles[_j % len(_tg_styles)],
+                    linewidth=2.0,
+                    color=colors["target_guidance"],
+                    alpha=0.95,
+                    label="Target guidance" if len(target_guidance_trajectories) == 1
+                    else f"Target guidance {_j}",
+                    zorder=5,
+                )
+                y_values.append(_traj)
 
         # ------------------------------------------------------------
         # Mean rollouts

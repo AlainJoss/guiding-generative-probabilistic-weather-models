@@ -290,6 +290,10 @@ class GuidedFlow(BaseLightningModule):
                 **(guidance_kwargs or {}),
             )
 
+        # deterministic core of this step -- persisted as gui_det / ung_det
+        # (rollout.py pops it before stacking the per-t traces)
+        sampling_trace["det_pred"] = det_pred.detach()
+
         x_hat_norm = det_pred + tensordict_apply(
             torch.mul, z, self.residual_to_pangu_scale
         )
