@@ -12,6 +12,8 @@ GUIDANCE_METHOD_HYPERS = {
     "FGWNOLR": ["fgwnolr_w_init", "eta"],
     # FGWNOGAP: exact per-step gap closure (damped Newton on S = target); eta=1 -> full
     "FGWNOGAP": ["eta"],
+    # FGWNORM: unit-gradient NOLR -- prescribed kick norm w*a_t (c_t = 1)
+    "FGWNORM": ["fgwnorm_w_init", "eta"],
     # FGWFREE: Adam on the full lambda trajectory; phi = kick-energy regularizer strength
     "FGWFREE": ["phi"],
     # FGWRHO: secant on the guidance-to-flow ratio w (kick normalized to ||u_t||)
@@ -22,7 +24,7 @@ GUIDANCE_METHOD_HYPERS = {
 MASK_HYPERS = ["sigma_div"]
 
 # common hypers
-GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO"]
+GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO", "FGWNORM"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "ELLIPTICAL"]
 
@@ -84,8 +86,11 @@ class RolloutConfig:
     # phi: FGWFREE regularizer strength (penalty on the applied guidance kicks)
     phi: float | None = None
 
-    # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO secant
+    # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO search
     fgwrho_w_init: float | None = None
+
+    # fgwnorm_w_init: starting kick scale for FGWNORM (kick norm = w*a_t, unit gradient)
+    fgwnorm_w_init: float | None = None
 
     # sigma_div: mask extent divisor, shared by ALL mask modes (half-side or
     # sigma = box extent / sigma_div; 2.0 = base box, 4.0 = half, 1.0 = double).

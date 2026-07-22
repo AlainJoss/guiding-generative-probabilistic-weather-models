@@ -73,18 +73,6 @@ For instance t2m-mslp and mslp-t2m
 
 What we do not do:
 - experiment with multiple variables (and masks correspondingly)
-- extremes that are not smooth, over localized areas, and not medium range -> explain type in report
-
-## THOUGHTS
-
-- What about realism? What does this tell us about the model's learned weather dynamics in the first place? -> some distributional and magnitudal test?
-- The gradient is not a reliable source of information. We can improve it by sampling multiple ones with different noises at each t. However, local dynamics will anyway not comply with the global real weather dynamics. It's like inpainting what we want. Defining global dynamics is feasible only by providing sampled states, but then what's the use of guidance?
-
-14.05
-- The problem I'm having with the targeted guidance is that we can achieve some tail event, but it's not easy at all to assess the realism of the generated weather states, and as a consequence the trajectory as a whole.
-
-08.06 
-- We are bounded by the deterministic prediction in terms of what we can explore
 
 Bug reports:
 - domain all has another bug

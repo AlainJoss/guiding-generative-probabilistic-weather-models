@@ -2,7 +2,7 @@ PWD /Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-
 INPUT /usr/local/texlive/2023/texmf.cnf
 INPUT /usr/local/texlive/2023/texmf-dist/web2c/texmf.cnf
 INPUT /usr/local/texlive/2023/texmf-var/web2c/pdftex/pdflatex.fmt
-INPUT /Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/docs/presentation/presentation.tex
+INPUT presentation.tex
 OUTPUT presentation.log
 INPUT /usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamer.cls
 INPUT /usr/local/texlive/2023/texmf-dist/tex/latex/beamer/beamer.cls

@@ -1128,12 +1128,21 @@ def wa_schedule(
     if eta_modes or _has_recorded:
         _left_label = r"$\lambda_t,\ w_t$"
         if _has_recorded:
-            # schedules actually applied by the run: lambda_t and w_t on the left axis,
-            # a_t and the closed-gap 1 - a_t on the right axis
+            # schedules actually applied by the run: lambda_hat = w*a*c (the KICK NORM)
+            # and the magnitude carrier c_t on the left axis; dimensionless a_t and the
+            # closed-gap gamma_t on the right. The scalar w rides in the label.
+            _left_label = r"$h_t\hat\lambda_t,\ h_t c_t$"
             _sched, _right = {}, {}
             for _meth, _sd in guidance_schedules.items():
-                _sched[rf"$\lambda_t$ — {_meth}"] = list(_sd["lambda_t"])
-                _sched[rf"$w_t$ — {_meth}"] = list(_sd["w_t"])
+                # multiply by h_t: the INJECTED kick per step. Raw lambda_hat conflates
+                # the last step, whose h ~ 0 makes its multiplier huge but its actual
+                # contribution tiny.
+                _T_rec = len(_sd["lambda_hat"])
+                _s_rec = np.linspace(1000, 1, _T_rec) / 1000
+                _h_rec = np.empty_like(_s_rec); _h_rec[:-1] = _s_rec[:-1] - _s_rec[1:]; _h_rec[-1] = _s_rec[-1]
+                _wlab = f" (w={_sd['w_t'][0]:g})" if len(set(_sd["w_t"])) == 1 else ""
+                _sched[rf"$h_t\hat\lambda_t$ — {_meth}{_wlab}"] = (_h_rec * np.asarray(_sd["lambda_hat"], float)).tolist()
+                _sched[rf"$h_t c_t$ — {_meth}"] = (_h_rec * np.asarray(_sd["c_t"], float)).tolist()
                 _a = np.asarray(_sd["a_t"], dtype=float)
                 _right[rf"$a_t$ — {_meth}"] = _a.tolist()
                 # 1 - (1-eta)^t = 1 - a_{t-1} shifted right one step, 0 at t=0
@@ -1149,9 +1158,11 @@ def wa_schedule(
                 _right[rf"$a_t$ ($\eta$={_eta:g})"] = _a.tolist()
                 _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1)).tolist()
                 if "FGWNOLR" in eta_modes:
+                    _s_prev = np.linspace(1000, 1, T) / 1000
+                    _h_prev = np.empty_like(_s_prev); _h_prev[:-1] = _s_prev[:-1] - _s_prev[1:]; _h_prev[-1] = _s_prev[-1]
                     for _w in (fgwnolr_w_choices or [250.0]):
                         _sched[rf"$w_t$ ($w$={_w:g})"] = [float(_w)] * T
-                        _sched[rf"$\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_w * _a).tolist()
+                        _sched[rf"$h_t\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_h_prev * _w * _a).tolist()
             if not _sched:
                 # NOGAP-only: no w/lambda -> put a_t and 1 - a_t on the left
                 _sched, _right, _left_label = _right, None, r"$a_t,\ \gamma_t$"
@@ -1165,7 +1176,7 @@ def wa_schedule(
             right_color=_right_color,
             color_map=_color_map,
             var=_left_label,
-            title=r"Guidance weight schedule  ($\lambda_t = w_t\,a_t$, $a_t=(1-\eta)^{t+1}$)",
+            title=r"Guidance schedule  ($h_t\hat\lambda_t$, $\hat\lambda_t = w\,a_t\,c_t$ — injected kick per step)",
             subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
                       else "preview — before guiding"),
             xlabel="$t$",
@@ -2366,8 +2377,11 @@ def _(
             _lam = np.full((_M, _N, _T), np.nan)
             for _r in _recs:
                 _wv, _av = np.asarray(_r["w_t"], float), np.asarray(_r["a_t"], float)
+                _cv = np.asarray(_r.get("c_t", np.ones_like(_wv)), float)
+                _gv = np.asarray(_r.get("g_norm_t", np.ones_like(_wv)), float)
                 if len(_wv) == _T and _r["m"] < _M and _r["n"] < _N:
-                    _lam[_r["m"], _r["n"], :] = _wv * _av
+                    # raw-gradient multiplier: (w*a*c)/g_norm; legacy records -> w*a
+                    _lam[_r["m"], _r["n"], :] = _wv * _av * _cv / np.where(_gv != 0, _gv, 1.0)
             lambda_t_xr = xr.DataArray(
                 _lam, dims=("m", "n", "t"),
                 coords={"m": grads_xr.m, "n": grads_xr.n, "t": grads_xr.t},
@@ -2415,33 +2429,37 @@ def _(
     sweep_params,
 ):
     # applied guidance weight schedules for the selected (sweep, m, n), recorded per
-    # method into guidance_schedule.json. lambda_t = w_t * a_t is the per-step multiplier
-    # on the raw gradient; for FGWNOGAP a_t is the ACHIEVED remaining-gap fraction and
-    # w_t the implied factor. `guidance_schedules` holds all methods at this selection;
-    # `lambda_t`/`w_t_schedule`/`a_t_schedule` are the selected method's (None for
-    # rollouts predating the sidecar -> charts fall back to the reconstructed preview).
+    # method into guidance_schedule.json. Convention: lambda_hat = w*a_t*c_t multiplies
+    # the UNIT gradient (= the kick norm); the raw-gradient multiplier used by every
+    # reconstruction is lambda_t = lambda_hat / g_norm. Legacy records (no c_t/g_norm_t)
+    # default both to 1, under which w*a IS the raw multiplier as before.
     if notebook_mode == "analyze_rollout":
         # records store the sweep in coord-label form == the notebook sweep_params dict
         _sel = dict(sweep_params)
         _recs = get_guidance_schedule(rollout_id, _sel, m=m, n=n)
-        guidance_schedules = {
-            _r["method"]: {
-                "w_t": np.asarray(_r["w_t"], dtype=float),
-                "a_t": np.asarray(_r["a_t"], dtype=float),
-                "lambda_t": np.asarray(_r["w_t"], dtype=float) * np.asarray(_r["a_t"], dtype=float),
+        guidance_schedules = {}
+        for _r in _recs:
+            _w = np.asarray(_r["w_t"], dtype=float)
+            _a = np.asarray(_r["a_t"], dtype=float)
+            _c = np.asarray(_r.get("c_t", np.ones_like(_w)), dtype=float)
+            _gn = np.asarray(_r.get("g_norm_t", np.ones_like(_w)), dtype=float)
+            _hat = _w * _a * _c
+            guidance_schedules[_r["method"]] = {
+                "w_t": _w, "a_t": _a, "c_t": _c, "g_norm_t": _gn,
+                "lambda_hat": _hat,                                # kick norm
+                "lambda_t": _hat / np.where(_gn != 0, _gn, 1.0),   # raw-gradient multiplier
             }
-            for _r in _recs
-        }
         lambda_t_by_method = {_k: _v["lambda_t"] for _k, _v in guidance_schedules.items()}
         if guidance_mode_dropdown.value in guidance_schedules:
             _mine = guidance_schedules[guidance_mode_dropdown.value]
             w_t_schedule, a_t_schedule, lambda_t = _mine["w_t"], _mine["a_t"], _mine["lambda_t"]
+            c_t_schedule = _mine["c_t"]
         else:
-            w_t_schedule = a_t_schedule = lambda_t = None
+            w_t_schedule = a_t_schedule = lambda_t = c_t_schedule = None
     else:
         guidance_schedules = {}
         lambda_t_by_method = {}
-        w_t_schedule = a_t_schedule = lambda_t = None
+        w_t_schedule = a_t_schedule = lambda_t = c_t_schedule = None
     return a_t_schedule, guidance_schedules, lambda_t, lambda_t_by_method
 
 
@@ -3418,8 +3436,10 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         "sigma_div":      (2.0,   4.0,   False, False),
         # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
         "phi":            (0.01,  1.0,   True,  False),
-        # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO secant
+        # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO search
         "fgwrho_w_init":  (1.0,   4.0,   False, False),
+        # fgwnorm_w_init: FGWNORM kick scale (kick norm = w*a_t on the unit gradient)
+        "fgwnorm_w_init": (5.0,   20.0,  False, False),
     }
 
     _rc = {}

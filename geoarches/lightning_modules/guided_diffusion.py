@@ -22,12 +22,21 @@ class GuidedFlow(BaseLightningModule):
 
     Guidance methods (dispatched by `sample`):
       FGWNOLR - secant search on a constant strength w; lambda_t = w * a_t
-      FGWRHO - secant search on the guidance-to-flow ratio w; per-step kick
+      FGWNORM - NOLR on the unit gradient: c_t = 1, kick norm prescribed as
+                w * a_t; w by parabolic search on the measured loss
+      FGWRHO - parabolic search on the guidance-to-flow ratio w; per-step kick
                normalized to the unguided vf norm on the GUIDED CHANNEL
-               (lambda_t = w * ||u_t||_c / ||g_t||_c)
+               (kick norm = w * ||u_t||_c)
       FGWNOGAP - exact per-step closure of the masked gap along a schedule
       FGWFREE - Adam optimization of the full lambda trajectory with a
                 kick-energy regularizer (no w / a_t split)
+
+    Unified schedule convention: every method applies the UNIT gradient,
+    u~ = u - (w * a_t * c_t) * g/||g||, so lambda_hat = w*a_t*c_t is the kick
+    norm. w = scalar scale, a_t = dimensionless O(1) profile, c_t = measured
+    magnitude carrier (||g|| for NOLR, Newton magnitude for NOGAP, channel
+    flow strength for RHO, ||g||/h for FREE). The sidecar records
+    {w_t, a_t, c_t, g_norm_t}; the raw-gradient multiplier is w*a*c/||g||.
     """
 
     # ---------------------------------------------------------------- init ---
@@ -275,6 +284,7 @@ class GuidedFlow(BaseLightningModule):
         else:
             flows = {
                 "FGWNOLR": self._fgwnolr_flow,
+                "FGWNORM": self._fgwnorm_flow,
                 "FGWRHO": self._fgwrho_flow,
                 "FGWNOGAP": self._fgwnogap_flow,
                 "FGWFREE": self._fgwfree_flow,
@@ -333,17 +343,19 @@ class GuidedFlow(BaseLightningModule):
         w_schedule: list,
         a_schedule: list[float],
         seed: int | None = None,
-        kick_norm_ratio: bool = False,
+        c_fn=None,
     ):
-        # guided sampling with lambda_t = w_schedule[t] * a_schedule[t]; records
-        # the raw trace primitives (grads = dL/dz, vfs = s_t*u_t, res = z_t) and
-        # the applied {w_t, a_t} sidecar -- everything else is reconstructed in
-        # the UI from these. kick_norm_ratio folds ||u_t||/||g_t|| into a_t so the
-        # kick magnitude is w*a*||u_t|| (g as pure direction, FGWRHO).
+        # guided sampling on the UNIT gradient: u~ = u - (w*a_t*c_t) * g/||g||,
+        # so lambda_hat = w*a_t*c_t IS the applied kick norm. c_fn(i, u_t, g_t,
+        # g_norm, h) supplies the magnitude carrier c_t; the default c_t = ||g_t||
+        # reproduces the raw-gradient kick w*a*g exactly (FGWNOLR). Records the
+        # raw trace primitives (grads = dL/dz, vfs = s_t*u_t, res = z_t) and the
+        # {w_t, a_t, c_t, g_norm_t} sidecar; the raw-gradient multiplier used by
+        # reconstructions is w*a*c / g_norm.
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.flow_timesteps()
         sampling_trace = defaultdict(list)
-        w_t_trace, a_t_trace = [], []
+        w_t_trace, a_t_trace, c_t_trace, g_norm_trace = [], [], [], []
 
         for i in tqdm(range(len(timesteps)), desc=f"{guidance_name} sampling"):
             t, s_t, h = self.step_factors(i, timesteps)
@@ -359,12 +371,17 @@ class GuidedFlow(BaseLightningModule):
                 x_hat_t = self.denormalize(x_hat_t_norm)
                 grad_vec = self.guidance_gradient(x_hat_t, x_ref, delta_t, mask, z_t)
 
-            a_t = a_schedule[i]
-            if kick_norm_ratio:
-                a_t = a_t * self._kick_ratio(u_t, grad_vec, mask)
-            gui_step = grad_vec.apply(lambda g: g * (w_schedule[i] * a_t))
+            g_norm = float(torch.sqrt(
+                sum((grad_vec[k].detach() ** 2).sum() for k in grad_vec.keys())
+            ).clamp_min(1e-30))
+            a_t = float(a_schedule[i])
+            c_t = float(c_fn(i, u_t, grad_vec, g_norm, float(h))) if c_fn is not None else g_norm
+            lam_raw = float(w_schedule[i]) * a_t * c_t / g_norm
+            gui_step = grad_vec.apply(lambda g: g * lam_raw)
             w_t_trace.append(float(w_schedule[i]))
-            a_t_trace.append(float(a_t))
+            a_t_trace.append(a_t)
+            c_t_trace.append(c_t)
+            g_norm_trace.append(g_norm)
 
             sampling_trace["grads"].append(grad_vec.detach().cpu())
             sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
@@ -374,13 +391,16 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, h)
 
-        sampling_trace["guidance_schedule"] = {"w_t": w_t_trace, "a_t": a_t_trace}
+        sampling_trace["guidance_schedule"] = {
+            "w_t": w_t_trace, "a_t": a_t_trace,
+            "c_t": c_t_trace, "g_norm_t": g_norm_trace,
+        }
         return z_t, sampling_trace
 
     def _final_guided_pass(
         self, guidance_name, w_schedule, a_schedule,
         x_cond, det_pred, delta_t, mask, x_ref, seed, w_star=None,
-        kick_norm_ratio: bool = False,
+        c_fn=None,
     ):
         # final pass with the optimized schedule, yielding the standard traces
         z_t, sampling_trace = self._guided_flow(
@@ -393,7 +413,7 @@ class GuidedFlow(BaseLightningModule):
             w_schedule=w_schedule,
             a_schedule=a_schedule,
             seed=seed,
-            kick_norm_ratio=kick_norm_ratio,
+            c_fn=c_fn,
         )
         if w_star is not None:
             sampling_trace["w_star"] = float(w_star)  # -> w_star.json sidecar
@@ -579,31 +599,19 @@ class GuidedFlow(BaseLightningModule):
 
     # ---------------- FGWRHO: secant on the guidance-to-flow ratio w ---
 
-    def _fgwrho_flow(
-        self,
-        x_cond,
-        det_pred: TensorDict,
-        delta_t: torch.Tensor,
-        mask: TensorDict,
-        x_ref: TensorDict,
-        seed: int,
-        fgwrho_w_init: float = 1.0,
-    ):
-        # Per-step normalized kick: lambda_t = w * ||u_t|| / ||g_t|| with norms on
-        # the GUIDED CHANNEL, so g is a pure direction and ||kick|| / ||u_t|| = w
-        # where guidance acts (cBottle's rho uses global norms, viable only when
-        # the classifier gradient spans the state).
-        # w is found by successive PARABOLIC INTERPOLATION on the measured loss:
-        # the frozen-ratio analytic dL/dw is biased near the optimum (observed
-        # positive on both sides of the loss minimum), so a secant on it never
-        # settles -- the measured losses are the trustworthy signal. Derivatives
-        # are not needed, so evaluations skip the adjoint pass (~2x cheaper).
+    def _parabolic_w_search(self, name: str, probe_loss, w_init: float):
+        """
+        Derivative-free 1-D minimization of a measured loss over w >= W_MIN:
+        successive parabolic interpolation through the three lowest points, with a
+        bisection fallback for non-convex fits, a trust region of one explored
+        range-width, and convergence when the vertex lands on a known point.
+        probe_loss(w) -> float runs one loss-only guided evaluation.
+        Returns (w_star, best_loss) = the best point actually measured.
+        """
         LOSS_THRESHOLD = 1e-6
         MAX_EVALS = 30
         W_TOL = 1e-3  # relative convergence in w
         W_MIN = 1e-6
-
-        T = len(self.flow_timesteps())
 
         history = []  # (w, loss)
 
@@ -611,17 +619,13 @@ class GuidedFlow(BaseLightningModule):
             w = max(float(w), W_MIN)
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            loss, _, _, _, _ = self._flow_loss_and_lambda_grads(
-                x_cond, det_pred, delta_t, mask, x_ref, seed,
-                lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t, mask),
-                need_grads=False,
-            )
+            loss = float(probe_loss(w))
             history.append((w, loss))
-            print(f"FGWRHO eval: w={w:.4f} loss={loss:.6f}", flush=True)
+            print(f"{name} eval: w={w:.4f} loss={loss:.6f}", flush=True)
             return loss
 
-        probe(max(float(fgwrho_w_init), W_MIN))
-        probe(max(0.9 * float(fgwrho_w_init), W_MIN))
+        probe(max(float(w_init), W_MIN))
+        probe(max(0.9 * float(w_init), W_MIN))
 
         while len(history) < MAX_EVALS:
             if min(l for _, l in history) <= LOSS_THRESHOLD:
@@ -655,15 +659,89 @@ class GuidedFlow(BaseLightningModule):
 
         w_star, best_loss = min(history, key=lambda item: item[1])
         print(
-            f"FGWRHO w*={w_star:.4f} best_loss={best_loss:.6f} "
+            f"{name} w*={w_star:.4f} best_loss={best_loss:.6f} "
             f"history={[(round(w_, 4), round(l_, 6)) for w_, l_ in history]}",
             flush=True,
         )
+        return w_star, best_loss
+
+    def _fgwrho_flow(
+        self,
+        x_cond,
+        det_pred: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_ref: TensorDict,
+        seed: int,
+        fgwrho_w_init: float = 1.0,
+    ):
+        # Per-step normalized kick: lambda_t = w * ||u_t|| / ||g_t|| with norms on
+        # the GUIDED CHANNEL, so g is a pure direction and ||kick|| / ||u_t|| = w
+        # where guidance acts (cBottle's rho uses global norms, viable only when
+        # the classifier gradient spans the state). w is found by parabolic search
+        # on the measured loss (the frozen-ratio analytic dL/dw is biased near the
+        # optimum); evaluations are loss-only, no adjoint pass.
+        T = len(self.flow_timesteps())
+
+        def probe_loss(w):
+            loss, _, _, _, _ = self._flow_loss_and_lambda_grads(
+                x_cond, det_pred, delta_t, mask, x_ref, seed,
+                lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t, mask),
+                need_grads=False,
+            )
+            return loss
+
+        w_star, _ = self._parabolic_w_search("FGWRHO", probe_loss, fgwrho_w_init)
 
         return self._final_guided_pass(
             "FGWRHO", [w_star] * T, [1.0] * T,
             x_cond, det_pred, delta_t, mask, x_ref, seed,
-            w_star=w_star, kick_norm_ratio=True,
+            w_star=w_star,
+            # c = b_t * ||g||: kick norm = w * ||u||_c on the guided channel
+            c_fn=lambda i, u, g, gn, h: self._kick_ratio(u, g, mask) * gn,
+        )
+
+    # ---------- FGWNORM: prescribed kick w*a_t on the unit gradient ---
+
+    def _fgwnorm_flow(
+        self,
+        x_cond,
+        det_pred: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_ref: TensorDict,
+        seed: int,
+        fgwnorm_w_init: float = 5.0,
+        eta: float = 0.5,
+    ):
+        # NOLR with a NORMALIZED gradient: c_t = 1, so the applied kick norm is
+        # exactly w * a_t -- fully prescribed a priori (total injected displacement
+        # = w * sum h_t a_t). The gradient supplies direction only; unlike NOLR the
+        # magnitude never defers to ||g||. w by parabolic search on the measured
+        # loss (loss-only evaluations, no adjoint).
+        T = len(self.flow_timesteps())
+        a_sched = [(1.0 - eta) ** (i + 1) for i in range(T)]
+
+        def _g_norm(g_t):
+            return float(torch.sqrt(
+                sum((g_t[k].detach() ** 2).sum() for k in g_t.keys())
+            ).clamp_min(1e-30))
+
+        def probe_loss(w):
+            loss, _, _, _, _ = self._flow_loss_and_lambda_grads(
+                x_cond, det_pred, delta_t, mask, x_ref, seed,
+                lambdas=lambda i, u_t, g_t: w * a_sched[i] / _g_norm(g_t),
+                need_grads=False,
+            )
+            return loss
+
+        w_star, _ = self._parabolic_w_search("FGWNORM", probe_loss, fgwnorm_w_init)
+
+        return self._final_guided_pass(
+            "FGWNORM", [w_star] * T, a_sched,
+            x_cond, det_pred, delta_t, mask, x_ref, seed,
+            w_star=w_star,
+            c_fn=lambda i, u, g, gn, h: 1.0,  # unit gradient, prescribed kick norm
         )
 
     # ------------------------- FGWNOGAP: exact per-step gap closure ---
@@ -688,7 +766,7 @@ class GuidedFlow(BaseLightningModule):
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.flow_timesteps()
         sampling_trace = defaultdict(list)
-        scale_trace = []
+        scale_trace, g_norm_trace = [], []
 
         for i in tqdm(range(len(timesteps)), desc="FGWNOGAP sampling"):
             t, s_t, h = self.step_factors(i, timesteps)
@@ -702,7 +780,8 @@ class GuidedFlow(BaseLightningModule):
                     z_t, u_t, s_t
                 ) * self.residual_to_pangu_scale
                 x_hat_t = self.denormalize(x_hat_t_norm)
-                loss_ = self.gap_loss(x_hat_t, x_ref, delta_t, mask)
+                r_ = self.masked_residual(x_hat_t, x_ref, delta_t, mask)
+                loss_ = r_ ** 2
                 gui_vec = self.grad_wrt_z(loss_, z_t)
 
             r_det = float(r_.detach())
@@ -714,6 +793,7 @@ class GuidedFlow(BaseLightningModule):
             scale = (2.0 * r_det * (r_det - r_target)) / (h * g_norm2.clamp_min(1e-30))
             gui_step = gui_vec.apply(lambda g: g * scale)
             scale_trace.append(float(scale))
+            g_norm_trace.append(float(torch.sqrt(g_norm2).clamp_min(1e-30)))
 
             print(
                 f"FGWNOGAP step: t={i} r={r_det:.6f} r_target={r_target:.6f} "
@@ -729,12 +809,17 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, h)
 
+        # unit-gradient convention: lambda_hat = w*a*c = ||kick||; `scale` was the
+        # raw-gradient multiplier, so c = scale * ||g|| / a (w = 1: no scale knob)
         a_theory = [(1.0 - eta) ** (i + 1) for i in range(len(scale_trace))]
-        w_impl = [
-            _sc / _a if _a > 0 else float("nan")
-            for _sc, _a in zip(scale_trace, a_theory)
+        c_impl = [
+            _sc * _gn / _a if _a > 0 else float("nan")
+            for _sc, _gn, _a in zip(scale_trace, g_norm_trace, a_theory)
         ]
-        sampling_trace["guidance_schedule"] = {"w_t": w_impl, "a_t": a_theory}
+        sampling_trace["guidance_schedule"] = {
+            "w_t": [1.0] * len(scale_trace), "a_t": a_theory,
+            "c_t": c_impl, "g_norm_t": g_norm_trace,
+        }
 
         return z_t, sampling_trace
 
@@ -842,14 +927,17 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 kap.clamp_(min=0.0)  # same >= 0 projection as w in FGWNOLR
 
-        best_lam = best_kap / h_vec  # applied multiplier (spikes where h ~ 0)
         print(
             f"FGWFREE best J={best_J:.6f} "
             f"kappa={[round(float(v), 3) for v in best_kap]}",
             flush=True,
         )
 
+        # w = kick scale, a_t = learned O(1) kick profile, c = ||g||/h so the
+        # raw-gradient multiplier stays exactly kappa_t / h_t as optimized
+        kap_max = float(best_kap.max().clamp_min(1e-30))
         return self._final_guided_pass(
-            "FGWFREE", best_lam.tolist(), [1.0] * T,
+            "FGWFREE", [kap_max] * T, (best_kap / kap_max).tolist(),
             x_cond, det_pred, delta_t, mask, x_ref, seed,
+            c_fn=lambda i, u, g, gn, h: gn / h,
         )

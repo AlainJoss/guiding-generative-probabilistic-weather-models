@@ -541,10 +541,13 @@ final residual --- and with it the clean state the loss scores (in orange):
 
 \frame{
 \frametitle{Guidance schedule}
-Applied strength factorizes: $\lambda_t = w \cdot a_t$
+Applied strength factorizes: $\lambda_t = w \cdot a_t \cdot c_t$
 \begin{itemize}
   \item $w$ --- guidance scale: \emph{how hard} to push
   \item $a_t$ --- guidance profile: \emph{when} to push
+  \item $c_t$ --- magnitude normalizer: guidance applies the \emph{unit} gradient
+        $g_t/\lVert g_t\rVert$; $c_t$ carries the measured size
+        ($\lVert g_t\rVert$, Newton magnitude, flow norm, \dots)
 \end{itemize}
 \vfill
 \textbf{Gap-closing adaptive profile:} conceptually close a fraction $\eta$ of the remaining gap each step,
@@ -568,12 +571,12 @@ $e_{t+1} = (1-\eta)\, e_t$, such that:
 \centering
 \includegraphics[width=0.8\textwidth]{figures/gap-closing}\\[4pt]
 {\footnotesize Schedule $a_t$ falls while the closed fraction
-$\gamma_t = 1-(1-\eta)^t$ rises; applied strength $\lambda_t = w\,a_t$ on the left axis.}
+$\gamma_t = 1-(1-\eta)^t$ rises; applied strength $\lambda_t = w\,a_t\,c_t$ on the left axis.}
 }
 
 \frame{
 \frametitle{Guidance methods}
-Both steer with $\lambda_t = w \cdot a_t$ on the same profile $a_t=(1-\eta)^{t+1}$.
+Both steer with $\lambda_t = w \cdot a_t \cdot c_t$ on the same profile $a_t=(1-\eta)^{t+1}$.
 
 \vspace{1em}
 They differ only in \emph{how the strength is set}:
@@ -639,7 +642,7 @@ $m$, $M(x)$ & mask, masked average $\sum m \odot x$ \\
 $\delta_n$, $x^{\text{ref}}$ & prescribed change, reference state \\
 $L$, $e_t$ & masked loss, gap to the target \\
 $g_t = \nabla_{z^t} L$ & guidance gradient \\
-$\lambda_t = w \cdot a_t$ & guidance schedule: scale $\times$ profile \\
+$\lambda_t = w \cdot a_t \cdot c_t$ & guidance schedule: scale $\times$ profile $\times$ normalizer \\
 $\eta$ & gap-closing rate per flow step \\
 \end{tabular}
 \end{center}

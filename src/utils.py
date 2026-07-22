@@ -154,13 +154,16 @@ def get_w_star(rollout_id, sweep_sel: dict | None = None, m: int | None = None, 
 
 
 def append_guidance_schedule(rollout_dir, method: str, sweep_params: dict, m: int, n: int,
-                             w_t: list, a_t: list):
+                             w_t: list, a_t: list, c_t: list | None = None,
+                             g_norm_t: list | None = None):
     """Persist the APPLIED guidance weight schedule for one (method, sweep point, m, n).
 
-    Stored in <rollout_dir>/guidance_schedule.json as a list of records
-    {"method", "sweep", "m", "n", "w_t": [...T], "a_t": [...T]}; an existing record for
-    the same (method, sweep, m, n) is replaced (resume-safe). lambda_t = w_t * a_t is
-    the per-step multiplier on the raw gradient."""
+    Stored in <rollout_dir>/guidance_schedule.json as records
+    {"method", "sweep", "m", "n", "w_t", "a_t", "c_t", "g_norm_t"}; an existing record
+    for the same (method, sweep, m, n) is replaced (resume-safe).
+    lambda_hat = w*a*c multiplies the UNIT gradient (= the kick norm); the raw-gradient
+    multiplier is lambda_hat / g_norm. Legacy records lack c_t/g_norm_t: readers
+    default both to 1, under which w*a IS the raw multiplier (old convention)."""
     path = Path(rollout_dir) / "guidance_schedule.json"
     records = json.loads(path.read_text()) if path.exists() else []
     sweep = dict(sweep_params or {})
@@ -171,6 +174,8 @@ def append_guidance_schedule(rollout_dir, method: str, sweep_params: dict, m: in
     records.append({
         "method": method, "sweep": sweep, "m": m, "n": n,
         "w_t": [float(v) for v in w_t], "a_t": [float(v) for v in a_t],
+        "c_t": [float(v) for v in (c_t if c_t is not None else [1.0] * len(w_t))],
+        "g_norm_t": [float(v) for v in (g_norm_t if g_norm_t is not None else [1.0] * len(w_t))],
     })
     path.write_text(json.dumps(records, indent=2))
 
