@@ -23,7 +23,8 @@ class GuidedFlow(BaseLightningModule):
     Guidance methods (dispatched by `sample`):
       FGWNOLR - secant search on a constant strength w; lambda_t = w * a_t
       FGWRHO - secant search on the guidance-to-flow ratio w; per-step kick
-               normalized to the unguided vf norm (lambda_t = w*||u_t||/||g_t||)
+               normalized to the unguided vf norm on the GUIDED CHANNEL
+               (lambda_t = w * ||u_t||_c / ||g_t||_c)
       FGWNOGAP - exact per-step closure of the masked gap along a schedule
       FGWFREE - Adam optimization of the full lambda trajectory with a
                 kick-energy regularizer (no w / a_t split)
@@ -360,7 +361,7 @@ class GuidedFlow(BaseLightningModule):
 
             a_t = a_schedule[i]
             if kick_norm_ratio:
-                a_t = a_t * self._kick_ratio(u_t, grad_vec)
+                a_t = a_t * self._kick_ratio(u_t, grad_vec, mask)
             gui_step = grad_vec.apply(lambda g: g * (w_schedule[i] * a_t))
             w_t_trace.append(float(w_schedule[i]))
             a_t_trace.append(float(a_t))
@@ -398,12 +399,19 @@ class GuidedFlow(BaseLightningModule):
             sampling_trace["w_star"] = float(w_star)  # -> w_star.json sidecar
         return z_t, sampling_trace
 
-    def _kick_ratio(self, u_t, g_t):
-        # ||u_t|| / ||g_t|| over all keys: scaling g by this makes the kick as
-        # large as the unguided velocity (g acts as a pure direction)
-        u_norm = torch.sqrt(sum((u_t[k].detach() ** 2).sum() for k in u_t.keys()))
-        g_norm = torch.sqrt(sum((g_t[k].detach() ** 2).sum() for k in g_t.keys()))
-        return float(u_norm / g_norm.clamp_min(1e-30))
+    def _kick_ratio(self, u_t, g_t, mask):
+        # ||u_t|| / ||g_t|| restricted to the GUIDED CHANNEL (the variable/level
+        # the mask lives on): scaling g by this makes the kick as strong as the
+        # flow where guidance acts. Global norms would hand the kick the whole
+        # 82-channel flow budget, concentrated onto one channel -> state wrecked.
+        u2 = torch.zeros((), device=self.device)
+        g2 = torch.zeros((), device=self.device)
+        for k in mask.keys():
+            sup = (mask[k] != 0).any(dim=-1, keepdim=True).any(dim=-2, keepdim=True)
+            sup = sup.to(u_t[k].dtype)
+            u2 = u2 + (u_t[k].detach() ** 2 * sup).sum()
+            g2 = g2 + (g_t[k].detach() ** 2 * sup).sum()
+        return float(torch.sqrt(u2) / torch.sqrt(g2).clamp_min(1e-30))
 
     # --------------------------------------- shared lambda-gradient eval ---
 
@@ -412,8 +420,9 @@ class GuidedFlow(BaseLightningModule):
     ):
         """
         One guided pass with per-step multipliers lambda_i, returning
-        (gap_loss, dlam, g_norm2, lam_used):
-          gap_loss  final masked loss L(z_T)
+        (gap_loss, dlam, g_norm2, lam_used, resid):
+          gap_loss  final masked loss L(z_T) = resid^2
+          resid     the SIGNED final masked residual e (for Gauss-Newton models)
           dlam[i]   exact dL/dlambda_i under the frozen-g first-order scheme
                     (forward caches leaf z_i and detached g_i; backward is the
                     adjoint loop with one VJP per step)
@@ -458,7 +467,8 @@ class GuidedFlow(BaseLightningModule):
         z_T = z_t.detach().apply(lambda x: x.requires_grad_(True))
         with torch.enable_grad():
             x_hat_gui = self.final_prediction(det_pred, z_T)
-            gap_loss = self.masked_loss(x_hat_gui, x_ref, delta_t, mask)
+            residual = self.masked_residual(x_hat_gui, x_ref, delta_t, mask)
+            gap_loss = residual ** 2
         a = self.grad_wrt_z(gap_loss, z_T)
 
         # backward adjoint loop (g frozen -> dz_{i+1}/dz_i = I + h du/dz)
@@ -477,7 +487,10 @@ class GuidedFlow(BaseLightningModule):
             vjp = self._vjp(u_i, z_i, a)
             a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
 
-        return float(gap_loss.detach().cpu()), dlam.detach(), g_norm2.detach(), lam_used
+        return (
+            float(gap_loss.detach().cpu()), dlam.detach(), g_norm2.detach(),
+            lam_used, float(residual.detach().cpu()),
+        )
 
     # -------------------------- FGWNOLR: secant on a constant strength w ---
 
@@ -503,7 +516,7 @@ class GuidedFlow(BaseLightningModule):
         a_sched = [(1.0 - eta) ** (i + 1) for i in range(len(timesteps))]
 
         def evaluate(w):
-            gap, dlam, _, _ = self._flow_loss_and_lambda_grads(
+            gap, dlam, _, _, _ = self._flow_loss_and_lambda_grads(
                 x_cond, det_pred, delta_t, mask, x_ref, seed,
                 lambdas=[w * a for a in a_sched],
             )
@@ -567,10 +580,11 @@ class GuidedFlow(BaseLightningModule):
         seed: int,
         fgwrho_w_init: float = 1.0,
     ):
-        # Per-step normalized kick: lambda_t = w * ||u_t|| / ||g_t||, so g is a
-        # pure direction and ||kick|| / ||u_t|| = w (cBottle-style ratio rho).
-        # Unlike a fixed rho, w is optimized by the NOLR secant to close the gap;
-        # the temporal profile follows the flow activity ||u_t||.
+        # Per-step normalized kick: lambda_t = w * ||u_t|| / ||g_t|| with norms on
+        # the GUIDED CHANNEL, so g is a pure direction and ||kick|| / ||u_t|| = w
+        # where guidance acts (cBottle's rho uses global norms, viable only when
+        # the classifier gradient spans the state). w is optimized by the NOLR
+        # secant to close the gap; the profile follows the flow activity ||u_t||.
         LOSS_THRESHOLD = 1e-6
         MAX_EVALS = 30
         W_MIN = 1e-6  # never evaluate at exactly 0 (dL/dw needs lambda_i / w)
@@ -578,9 +592,9 @@ class GuidedFlow(BaseLightningModule):
         T = len(self.flow_timesteps())
 
         def evaluate(w):
-            gap, dlam, _, lam_used = self._flow_loss_and_lambda_grads(
+            gap, dlam, _, lam_used, _ = self._flow_loss_and_lambda_grads(
                 x_cond, det_pred, delta_t, mask, x_ref, seed,
-                lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t),
+                lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t, mask),
             )
             # frozen-ratio chain rule: dL/dw = sum_i (lambda_i / w) * dL/dlambda_i
             dw = float(sum((l / w) * d for l, d in zip(lam_used, dlam.tolist())))
@@ -745,15 +759,22 @@ class GuidedFlow(BaseLightningModule):
         # + quadratic (reg), minimized in closed form at -dkap / (2 phi ||g||^2)
         # -- the phi-aware regularized Newton step. Start there (damped) instead
         # of crawling from zero, and match Adam's lr to the discovered scale.
-        gap0, dlam0, g_norm2_0, _ = self._flow_loss_and_lambda_grads(
+        gap0, dlam0, g_norm2_0, _, resid0 = self._flow_loss_and_lambda_grads(
             x_cond, det_pred, delta_t, mask, x_ref, seed, lambdas=[0.0] * T,
         )
-        if phi > 0:
+        if phi > 0 and abs(resid0) > 1e-12:
             dkap0 = dlam0 / h_vec  # chain rule: dJ/dkappa = (dJ/dlambda) / h
-            kap = (INIT_DAMP * (-dkap0 / (2.0 * phi * g_norm2_0).clamp_min(1e-30))).clamp_(min=0.0)
+            _denom = (2.0 * phi * g_norm2_0).clamp_min(1e-30)
+            # Gauss-Newton: the SIGNED gap e is modeled linear and L = e^2 stays
+            # quadratic, so the shrinkage bounds the jump by "close the gap
+            # exactly" as phi -> 0 (the plain linear-loss model promises gap
+            # reductions far beyond zero and detonates the flow at small phi);
+            # for large phi it reduces to the regularized-Newton formula.
+            _shrink = 1.0 / (1.0 + float((dkap0 ** 2 / (4.0 * resid0 ** 2 * _denom)).sum()))
+            kap = (INIT_DAMP * _shrink * (-dkap0 / _denom)).clamp_(min=0.0)
             lr = max(LR_MIN, LR_FRAC * float(kap.max()))
         else:
-            kap = torch.zeros(T, device=self.device)  # unregularized: no closed form
+            kap = torch.zeros(T, device=self.device)  # gap closed or unregularized
             lr = 50.0
         print(
             f"FGWFREE init: gap(0)={gap0:.6f} |kappa0|max={float(kap.max()):.3f} lr={lr:.3f}",
@@ -769,7 +790,7 @@ class GuidedFlow(BaseLightningModule):
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
-            gap_loss, dlam, g_norm2, _ = self._flow_loss_and_lambda_grads(
+            gap_loss, dlam, g_norm2, _, _ = self._flow_loss_and_lambda_grads(
                 x_cond, det_pred, delta_t, mask, x_ref, seed,
                 lambdas=(kap.detach() / h_vec).tolist(),
             )
@@ -783,6 +804,13 @@ class GuidedFlow(BaseLightningModule):
 
             if J < best_J:
                 best_J, best_kap = J, kap.detach().clone()
+            if gap_loss > max(100.0 * gap0, 1e-6):
+                # out of the trust region: gradients on a blown-up path are garbage;
+                # pull kappa halfway back toward the best-known schedule instead
+                with torch.no_grad():
+                    kap.data = 0.5 * (kap.data + best_kap)
+                print(f"FGWFREE backtrack at eval {k}: gap={gap_loss:.3g}", flush=True)
+                continue
             if gap_loss <= LOSS_THRESHOLD:
                 break
             if J_prev is not None and abs(J_prev - J) <= REL_TOL * max(abs(J_prev), 1e-12):
