@@ -27,6 +27,7 @@ def _():
 def _():
     from src.paths import ROLLOUTS
     from src.rollout_config import MASK_MODES, RolloutConfig, GUIDANCE_METHODS, GUI_REFS, GUIDANCE_METHOD_HYPERS
+    from geoarches.lightning_modules.guided_diffusion import A_T_MODES, a_t_profile
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
@@ -49,6 +50,7 @@ def _():
 
 
     return (
+        A_T_MODES,
         GUIDANCE_METHODS,
         GUIDANCE_METHOD_HYPERS,
         GUI_REFS,
@@ -58,6 +60,7 @@ def _():
         RolloutConfig,
         VARIABLES_DICT,
         XarrayNormalizer,
+        a_t_profile,
         dump_json,
         ensure_rollout_dir,
         get_N_timestamps,
@@ -171,6 +174,7 @@ def _(
     NUMERIC_AXES,
     RolloutConfig,
     T,
+    a_t_mode_select,
     compute_axis_values,
     config,
     delta_trajectories,
@@ -219,6 +223,7 @@ def _(
                 "GUIDANCE_MODE": list(guidance_mode_select.value),
                 "GUI_REF": list(gui_ref_select.value),
                 "MASK_MODE": list(mask_mode_select.value),
+                "a_t_mode": list(a_t_mode_select.value) or ["gap-closing"],
                 "GUIDANCE_DELTA": delta_trajectories,
                 **{ax: compute_axis_values(ax, _rv) for ax in NUMERIC_AXES},
             }
@@ -1046,6 +1051,7 @@ def _(day_slider, hour_slider, mo, month_slider, notebook_mode, year_dropdown):
 def _(
     GUIDANCE_METHOD_HYPERS,
     NUMERIC_AXES,
+    a_t_mode_select,
     compute_axis_values,
     gui_ref_select,
     guidance_mode_select,
@@ -1071,7 +1077,7 @@ def _(
     hypers_widget = mo.vstack([
         mo.md("## Sweep"),
         mo.md("**Common categorical**:"),
-        mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select], justify="start"),
+        mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, a_t_mode_select], justify="start"),
         mo.md(f"**Specific**:"),
         *([_sweep_row(ax) for ax in _mode_num] if _mode_num else [mo.md("_none_")]),
     ], align="start")
@@ -1083,6 +1089,8 @@ def _(
 @app.cell
 def wa_schedule(
     T,
+    a_t_mode_select,
+    a_t_profile,
     compute_axis_values,
     experiment_params,
     get_w_star,
@@ -1149,14 +1157,16 @@ def wa_schedule(
             # w_t / lambda_t are solved per step at runtime, so only a_t / 1 - a_t are shown.
             _sched, _right = {}, {}
             _steps = np.arange(1, T + 1)
+            _am_choices = list(a_t_mode_select.value) or ["gap-closing"]
             for _eta in (eta_choices or [0.5]):
-                _a = (1.0 - _eta) ** _steps
-                _right[rf"$a_t$ ($\eta$={_eta:g})"] = _a[:-1].tolist()
-                _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1))[:-1].tolist()
-                if "FGWNOLR" in eta_modes:
-                    for _w in (fgwnolr_w_choices or [250.0]):
-                        _sched[rf"$w_t$ ($w$={_w:g})"] = [float(_w)] * (T - 1)
-                        _sched[rf"$\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
+                for _am in _am_choices:
+                    _a = a_t_profile(_am, _eta, T)
+                    _right[rf"$a_t$ ({_am}, $\eta$={_eta:g})"] = _a[:-1].tolist()
+                    if _am == "gap-closing":
+                        _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1))[:-1].tolist()
+                    if "FGWNOLR" in eta_modes:
+                        for _w in (fgwnolr_w_choices or [250.0]):
+                            _sched[rf"$\lambda_t$ ($w$={_w:g}, {_am}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
             if not _sched:
                 # NOGAP-only: no w/lambda -> put a_t and 1 - a_t on the left
                 _sched, _right, _left_label = _right, None, r"$a_t,\ \gamma_t$"
@@ -3455,11 +3465,12 @@ def _(mo, plt):
 
 
 @app.cell
-def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
+def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     # ===== sweep authoring widgets (guided_rollout) =====
     guidance_mode_select = mo.ui.multiselect(GUIDANCE_METHODS, value=["FGWNOLR"], label="GUIDANCE_MODE: ")
     gui_ref_select = mo.ui.multiselect(GUI_REFS, value=["UNG"], label="GUI_REF: ")
     mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE: ")
+    a_t_mode_select = mo.ui.multiselect(A_T_MODES, value=["gap-closing"], label="A_T_MODE: ")
 
     # numeric axes -> (start, stop, log_scale, integer)
     # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
@@ -3467,9 +3478,9 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
         # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
         "fgwnolr_w_init": (1000.0, 5000.0, False, False),
-        # eta: shared closure rate for FGWNOLR and FGWNOGAP; a_t = (1 - eta)^(t+1)
-        # (FGWNOGAP: fraction of the remaining gap closed per step)
-        "eta":            (0.01,  0.1,   False, False),
+        # eta: shared profile parameter (meaning depends on a_t_mode -- closure rate
+        # for gap-closing, end level for gaussian, inclination for linear/logistic)
+        "eta":            (0.01,  1.0,   False, False),
         # sigma_div: mask hyper shared by ALL mask modes -- extent / sigma_div
         # (2.0 = base box, 4.0 = half, 1.0 = double)
         "sigma_div":      (2.0,   4.0,   False, False),
@@ -3506,6 +3517,7 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
 
     return (
         NUMERIC_AXES,
+        a_t_mode_select,
         compute_axis_values,
         gui_ref_select,
         guidance_mode_select,

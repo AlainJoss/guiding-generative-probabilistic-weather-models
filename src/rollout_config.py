@@ -9,11 +9,11 @@ from typing import Any
 GUIDANCE_METHOD_HYPERS = {
     # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate, no iteration
     # count (optimizes until the hardcoded loss threshold is reached)
-    "FGWNOLR": ["fgwnolr_w_init", "eta"],
-    # FGWNOGAP: exact per-step gap closure (damped Newton on S = target); eta=1 -> full
-    "FGWNOGAP": ["eta"],
+    "FGWNOLR": ["fgwnolr_w_init", "eta", "a_t_mode"],
+    # FGWNOGAP: per-step gap tracking of the prescribed path r_target = a_t * r_0
+    "FGWNOGAP": ["eta", "a_t_mode"],
     # FGWNORM: unit-gradient NOLR -- prescribed kick norm w*a_t (c_t = 1)
-    "FGWNORM": ["fgwnorm_w_init", "eta"],
+    "FGWNORM": ["fgwnorm_w_init", "eta", "a_t_mode"],
     # FGWFREE: Adam on the full lambda trajectory; phi = kick-energy regularizer strength
     "FGWFREE": ["phi"],
     # FGWRHO: secant on the guidance-to-flow ratio w (kick normalized to ||u_t||)
@@ -79,9 +79,14 @@ class RolloutConfig:
     # hardcoded loss threshold is met)
     fgwnolr_w_init: float | None = None  # starting w
 
-    # eta: shared closure rate for FGWNOLR and FGWNOGAP. a_t = (1 - eta)^(t+1);
-    # for FGWNOGAP it is the fraction of the remaining gap closed per step (1 = all).
+    # eta: shared profile parameter for FGWNOLR/FGWNOGAP/FGWNORM; its meaning
+    # depends on a_t_mode (closure rate for gap-closing, end level for gaussian,
+    # inclination for linear/logistic -- see a_t_profile in guided_diffusion.py)
     eta: float | None = None
+
+    # a_t_mode: guidance profile shape (A_T_MODES in guided_diffusion.py:
+    # gaussian/linear/logistic/gap-closing, each with a "-spec" twin)
+    a_t_mode: str | None = None
 
     # phi: FGWFREE regularizer strength (penalty on the applied guidance kicks)
     phi: float | None = None

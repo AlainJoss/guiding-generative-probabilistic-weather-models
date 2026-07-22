@@ -1,6 +1,7 @@
 import math
 from collections import defaultdict
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -14,6 +15,58 @@ from geoarches.lightning_modules.base_module import AvgModule, load_module
 from geoarches.utils.tensordict_utils import tensordict_apply, tensordict_cat
 
 from geoarches.paths import STATS_PATH
+
+# guidance profiles a_t in [floor, 1] over t = 0..T-1; each base mode has a
+# specular twin ("-spec": time reversal; vertical flip for the time-symmetric
+# gaussian). eta is the single shared parameter, used differently per mode.
+A_T_MODES = [
+    "gaussian", "linear", "logistic", "gap-closing",
+    "gaussian-spec", "linear-spec", "logistic-spec", "gap-closing-spec",
+]
+
+
+def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
+    """Guidance profile a_t in [floor, 1] over t = 0..T-1.
+
+    eta in (0, 1] means, per mode:
+      gaussian    end level E = floor + eta*(1-floor) (variance spread: the
+                  bell's tails 'leave the box' as eta grows); peak 1 mid-flow
+      linear      inclination: 1 -> F with F = 1 - eta*(1-floor)
+      logistic    same endpoints as linear (1 -> F), S-shaped in between
+      gap-closing the remaining-gap schedule (1-eta)^(t+1)
+    "-spec" suffix: time reversal (monotone modes) / vertical flip (gaussian).
+    """
+    specular = mode.endswith("-spec")
+    base = mode[:-5] if specular else mode
+    eta = float(np.clip(eta, 1e-6, 1.0))
+    floor = float(np.clip(floor, 0.0, 0.99))
+    x = np.linspace(0.0, 1.0, T)
+
+    if base == "gaussian":
+        end = min(floor + eta * (1.0 - floor), 0.999)
+        sigma = 0.5 / np.sqrt(2.0 * np.log(1.0 / end))
+        a = np.exp(-0.5 * ((x - 0.5) / sigma) ** 2)
+        if specular:
+            a = 1.0 + end - a  # vertical flip: ends at 1, valley at `end`
+        return np.clip(a, floor, 1.0)
+    if base == "linear":
+        finish = 1.0 - eta * (1.0 - floor)
+        a = 1.0 + (finish - 1.0) * x
+    elif base == "logistic":
+        # same endpoints as linear; affinely normalized so the raw logistic
+        # hits them exactly despite its asymptotic tails
+        finish = 1.0 - eta * (1.0 - floor)
+        raw = 1.0 / (1.0 + np.exp(-10.0 * (0.5 - x)))
+        raw = (raw - raw[-1]) / (raw[0] - raw[-1])
+        a = finish + (1.0 - finish) * raw
+    elif base == "gap-closing":
+        a = (1.0 - eta) ** (np.arange(T) + 1)
+    else:
+        raise ValueError(f"unknown a_t mode {mode!r}")
+
+    if specular:
+        a = a[::-1]
+    return np.clip(a, floor, 1.0)
 
 
 class GuidedFlow(BaseLightningModule):
@@ -547,16 +600,17 @@ class GuidedFlow(BaseLightningModule):
         seed: int,
         fgwnolr_w_init: float = 250.0,
         eta: float = 0.5,
+        a_t_mode: str = "gap-closing",
     ):
         # dL/dw is an exact scalar derivative -> solve dL/dw = 0 by secant (no
-        # learning rate, no iteration hyper). a_t = (1-eta)^(t+1) is the NOGAP
-        # closure schedule, used in evaluations AND the final pass. Safeguards:
-        # w >= 0, step growth capped at 3x, eval cap, best-loss w wins.
+        # learning rate, no iteration hyper). a_t = a_t_profile(a_t_mode, eta) is
+        # used in evaluations AND the final pass. Safeguards: w >= 0, step growth
+        # capped at 3x, eval cap, best-loss w wins.
         LOSS_THRESHOLD = 1e-6
         MAX_EVALS = 30
 
         timesteps = self.flow_timesteps()
-        a_sched = [(1.0 - eta) ** (i + 1) for i in range(len(timesteps))]
+        a_sched = a_t_profile(a_t_mode, eta, len(timesteps)).tolist()
 
         def evaluate(w):
             gap, dlam, _, _, _ = self._flow_loss_and_lambda_grads(
@@ -808,6 +862,7 @@ class GuidedFlow(BaseLightningModule):
         seed: int,
         fgwnorm_w_init: float = 5.0,
         eta: float = 0.5,
+        a_t_mode: str = "gap-closing",
     ):
         # NOLR with a NORMALIZED gradient: c_t = 1, so the applied kick norm is
         # exactly w * a_t -- fully prescribed a priori (total injected displacement
@@ -815,7 +870,7 @@ class GuidedFlow(BaseLightningModule):
         # magnitude never defers to ||g||. w by parabolic search on the measured
         # loss (loss-only evaluations, no adjoint).
         T = len(self.flow_timesteps())
-        a_sched = [(1.0 - eta) ** (i + 1) for i in range(T)]
+        a_sched = a_t_profile(a_t_mode, eta, T).tolist()
 
         def _g_norm(g_t):
             return float(torch.sqrt(
@@ -850,16 +905,19 @@ class GuidedFlow(BaseLightningModule):
         x_ref: TensorDict,
         seed: int,
         eta: float = 1.0,
+        a_t_mode: str = "gap-closing",
     ):
         # Anchored gap closure: aim the signed residual at the deterministic
-        # schedule r_target(t) = (1-eta)^(t+1) * r_0 with a Newton step along
-        # g = 2 r dS/dz:  gui_step = 2 r (r - r_target) g / (h ||g||^2).
-        # Drift and overshoot are corrected against the prescribed path; on-path
-        # this reduces to the relative form 2*eta*L/(h*||g||^2). No w and no
-        # learned schedule: the sidecar records a_t = (1-eta)^(t+1) (theoretical)
-        # and w_t = lambda_t / a_t.
+        # remaining-gap PATH r_target(t) = a_t * r_0 (a_t = a_t_profile(a_t_mode,
+        # eta); the classic behavior is a_t_mode="gap-closing" -> (1-eta)^(t+1))
+        # with a Newton step along g = 2 r dS/dz:
+        #   gui_step = 2 r (r - r_target) g / (h ||g||^2).
+        # Drift and overshoot are corrected against the prescribed path. Non-
+        # monotone or non-closing profiles are allowed: the gap then FOLLOWS that
+        # path (it may reopen or stay open at the end, by design).
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.flow_timesteps()
+        a_sched = a_t_profile(a_t_mode, eta, len(timesteps))
         sampling_trace = defaultdict(list)
         scale_trace, g_norm_trace = [], []
 
@@ -882,7 +940,7 @@ class GuidedFlow(BaseLightningModule):
             r_det = float(r_.detach())
             if i == 0:
                 r_0 = r_det
-            r_target = ((1.0 - eta) ** (i + 1)) * r_0
+            r_target = float(a_sched[i]) * r_0
 
             g_norm2 = sum((gui_vec[k] ** 2).sum() for k in gui_vec.keys())
             if i == len(timesteps) - 1:
@@ -909,7 +967,7 @@ class GuidedFlow(BaseLightningModule):
 
         # unit-gradient convention: lambda_hat = w*a*c = ||kick||; `scale` was the
         # raw-gradient multiplier, so c = scale * ||g|| / a (w = 1: no scale knob)
-        a_theory = [(1.0 - eta) ** (i + 1) for i in range(len(scale_trace))]
+        a_theory = [float(a_sched[i]) for i in range(len(scale_trace))]
         c_impl = [
             _sc * _gn / _a if _a > 0 else float("nan")
             for _sc, _gn, _a in zip(scale_trace, g_norm_trace, a_theory)
