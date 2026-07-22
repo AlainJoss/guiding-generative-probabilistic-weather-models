@@ -176,7 +176,7 @@ class GuidedFlow(BaseLightningModule):
         )
 
     def step_factors(self, i, timesteps):
-        # noise level s_t and Euler step size h (last step integrates to 0)
+        # noise level s_t and Euler step size h (last step integrates to 0: h_T~0.001, h_t~0.046)
         t = timesteps[i]
         s_t = t / self.num_train_timesteps
         if i < len(timesteps) - 1:
@@ -417,6 +417,7 @@ class GuidedFlow(BaseLightningModule):
 
     def _flow_loss_and_lambda_grads(
         self, x_cond, det_pred, delta_t, mask, x_ref, seed, lambdas,
+        need_grads: bool = True,
     ):
         """
         One guided pass with per-step multipliers lambda_i, returning
@@ -425,7 +426,8 @@ class GuidedFlow(BaseLightningModule):
           resid     the SIGNED final masked residual e (for Gauss-Newton models)
           dlam[i]   exact dL/dlambda_i under the frozen-g first-order scheme
                     (forward caches leaf z_i and detached g_i; backward is the
-                    adjoint loop with one VJP per step)
+                    adjoint loop with one VJP per step); None if need_grads=False
+                    (skips the whole backward loop, ~2x cheaper)
           g_norm2[i] ||g_i||^2 (for regularizers)
           lam_used  the realized multipliers
 
@@ -469,6 +471,13 @@ class GuidedFlow(BaseLightningModule):
             x_hat_gui = self.final_prediction(det_pred, z_T)
             residual = self.masked_residual(x_hat_gui, x_ref, delta_t, mask)
             gap_loss = residual ** 2
+
+        if not need_grads:
+            return (
+                float(gap_loss.detach().cpu()), None, g_norm2.detach(),
+                lam_used, float(residual.detach().cpu()),
+            )
+
         a = self.grad_wrt_z(gap_loss, z_T)
 
         # backward adjoint loop (g frozen -> dz_{i+1}/dz_i = I + h du/dz)
@@ -583,60 +592,71 @@ class GuidedFlow(BaseLightningModule):
         # Per-step normalized kick: lambda_t = w * ||u_t|| / ||g_t|| with norms on
         # the GUIDED CHANNEL, so g is a pure direction and ||kick|| / ||u_t|| = w
         # where guidance acts (cBottle's rho uses global norms, viable only when
-        # the classifier gradient spans the state). w is optimized by the NOLR
-        # secant to close the gap; the profile follows the flow activity ||u_t||.
+        # the classifier gradient spans the state).
+        # w is found by successive PARABOLIC INTERPOLATION on the measured loss:
+        # the frozen-ratio analytic dL/dw is biased near the optimum (observed
+        # positive on both sides of the loss minimum), so a secant on it never
+        # settles -- the measured losses are the trustworthy signal. Derivatives
+        # are not needed, so evaluations skip the adjoint pass (~2x cheaper).
         LOSS_THRESHOLD = 1e-6
         MAX_EVALS = 30
-        W_MIN = 1e-6  # never evaluate at exactly 0 (dL/dw needs lambda_i / w)
+        W_TOL = 1e-3  # relative convergence in w
+        W_MIN = 1e-6
 
         T = len(self.flow_timesteps())
 
-        def evaluate(w):
-            gap, dlam, _, lam_used, _ = self._flow_loss_and_lambda_grads(
-                x_cond, det_pred, delta_t, mask, x_ref, seed,
-                lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t, mask),
-            )
-            # frozen-ratio chain rule: dL/dw = sum_i (lambda_i / w) * dL/dlambda_i
-            dw = float(sum((l / w) * d for l, d in zip(lam_used, dlam.tolist())))
-            return gap, dw
+        history = []  # (w, loss)
 
-        history = []  # (w, loss, dL/dw)
-        w_prev = max(float(fgwrho_w_init), W_MIN)
-        loss_prev, g_prev = evaluate(w_prev)
-        history.append((w_prev, loss_prev, g_prev))
-        print(f"FGWRHO eval: w={w_prev:.4f} loss={loss_prev:.6f} dL/dw={g_prev:.3e}", flush=True)
-
-        # bootstrap second point: a 10% move against the gradient sign
-        step0 = 0.1 * max(abs(w_prev), 1.0)
-        w_curr = max(w_prev - math.copysign(step0, g_prev), W_MIN)
-
-        while loss_prev > LOSS_THRESHOLD and len(history) < MAX_EVALS:
+        def probe(w):
+            w = max(float(w), W_MIN)
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            loss, _, _, _, _ = self._flow_loss_and_lambda_grads(
+                x_cond, det_pred, delta_t, mask, x_ref, seed,
+                lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t, mask),
+                need_grads=False,
+            )
+            history.append((w, loss))
+            print(f"FGWRHO eval: w={w:.4f} loss={loss:.6f}", flush=True)
+            return loss
 
-            loss_curr, g_curr = evaluate(w_curr)
-            history.append((w_curr, loss_curr, g_curr))
-            print(f"FGWRHO eval: w={w_curr:.4f} loss={loss_curr:.6f} dL/dw={g_curr:.3e}", flush=True)
+        probe(max(float(fgwrho_w_init), W_MIN))
+        probe(max(0.9 * float(fgwrho_w_init), W_MIN))
 
-            if loss_curr <= LOSS_THRESHOLD:
+        while len(history) < MAX_EVALS:
+            if min(l for _, l in history) <= LOSS_THRESHOLD:
                 break
-            denom = g_curr - g_prev
-            if not math.isfinite(denom) or abs(denom) < 1e-20 or w_curr == w_prev:
-                break  # flat derivative or duplicated point -> secant undefined
+            # three lowest-loss points with pairwise-distinct w
+            pts = []
+            for w_, l_ in sorted(history, key=lambda p: p[1]):
+                if all(abs(w_ - pw) > 1e-9 for pw, _ in pts):
+                    pts.append((w_, l_))
+                if len(pts) == 3:
+                    break
+            if len(pts) < 3:
+                w_next = 1.1 * pts[0][0]
+            else:
+                (w1, l1), (w2, l2), (w3, l3) = pts
+                _den = (w1 - w2) * (w1 - w3) * (w2 - w3)
+                _A = (w3 * (l2 - l1) + w2 * (l1 - l3) + w1 * (l3 - l2)) / _den
+                _B = (w3 * w3 * (l1 - l2) + w2 * w2 * (l3 - l1) + w1 * w1 * (l2 - l3)) / _den
+                if not math.isfinite(_A) or _A <= 0:
+                    w_next = 0.5 * (w1 + w2)  # non-convex fit -> bisect the two best
+                else:
+                    w_next = -_B / (2.0 * _A)  # parabola vertex
+            # trust region: stay within the explored range +/- one range-width
+            _lo = min(w_ for w_, _ in history)
+            _hi = max(w_ for w_, _ in history)
+            _span = max(_hi - _lo, W_TOL)
+            w_next = min(max(w_next, max(W_MIN, _lo - _span)), _hi + _span)
+            if any(abs(w_next - w_) <= W_TOL * max(1.0, abs(w_next)) for w_, _ in history):
+                break  # vertex keeps landing on known points -> converged in w
+            probe(w_next)
 
-            step = -g_curr * (w_curr - w_prev) / denom
-            max_step = 3.0 * max(abs(w_curr - w_prev), 1e-6)
-            step = max(-max_step, min(step, max_step))
-
-            w_prev, g_prev, loss_prev = w_curr, g_curr, loss_curr
-            w_curr = max(w_curr + step, W_MIN)
-            if abs(step) < 1e-5:
-                break  # converged in w
-
-        w_star, best_loss, _ = min(history, key=lambda item: item[1])
+        w_star, best_loss = min(history, key=lambda item: item[1])
         print(
             f"FGWRHO w*={w_star:.4f} best_loss={best_loss:.6f} "
-            f"history={[(round(w_, 4), round(l_, 6)) for w_, l_, _ in history]}",
+            f"history={[(round(w_, 4), round(l_, 6)) for w_, l_ in history]}",
             flush=True,
         )
 
@@ -682,8 +702,7 @@ class GuidedFlow(BaseLightningModule):
                     z_t, u_t, s_t
                 ) * self.residual_to_pangu_scale
                 x_hat_t = self.denormalize(x_hat_t_norm)
-                r_ = self.masked_residual(x_hat_t, x_ref, delta_t, mask)
-                loss_ = r_ ** 2
+                loss_ = self.gap_loss(x_hat_t, x_ref, delta_t, mask)
                 gui_vec = self.grad_wrt_z(loss_, z_t)
 
             r_det = float(r_.detach())
