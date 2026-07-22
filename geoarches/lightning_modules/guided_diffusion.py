@@ -665,6 +665,86 @@ class GuidedFlow(BaseLightningModule):
         )
         return w_star, best_loss
 
+    def _from_below_w_search(self, name: str, probe_fn, w_init: float, growth: float = 2.0):
+        """
+        Find the SMALLEST gap-closing w: starting from an undershooting w, grow
+        geometrically until the SIGNED gap e(w) first flips sign, then refine by
+        regula falsi inside the bracket. Approaches the target from below by
+        construction: among the (often flat) set of loss-minimizing w's this
+        returns the minimal intervention, whose mid-flow path does not overshoot.
+        probe_fn(w) -> (loss, signed residual). Returns the best measured point.
+        """
+        LOSS_THRESHOLD = 1e-6
+        MAX_EVALS = 30
+        W_TOL = 1e-3  # relative convergence of the bracket
+        W_MIN = 1e-6
+
+        history = []  # (w, loss, e)
+
+        def probe(w):
+            w = max(float(w), W_MIN)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            loss, e = probe_fn(w)
+            history.append((w, float(loss), float(e)))
+            print(f"{name} eval: w={w:.4f} loss={loss:.6f} e={e:+.4f}", flush=True)
+            return float(loss), float(e)
+
+        def best():
+            w_star, best_loss, _ = min(history, key=lambda p: p[1])
+            print(
+                f"{name} w*={w_star:.4f} best_loss={best_loss:.6f} "
+                f"history={[(round(w_, 4), round(l_, 6)) for w_, l_, _ in history]}",
+                flush=True,
+            )
+            return w_star, best_loss
+
+        loss0, e0 = probe(w_init)
+        if loss0 <= LOSS_THRESHOLD or e0 == 0.0:
+            return best()
+        s0 = math.copysign(1.0, e0)
+
+        # direction probe: if growing w moves |e| AWAY, w_init already overshoots
+        # -> walk downward instead (rare)
+        w_prev, e_prev = max(float(w_init), W_MIN), e0
+        w_curr = w_prev * growth
+        loss, e_curr = probe(w_curr)
+        if loss <= LOSS_THRESHOLD:
+            return best()
+        step_up = not (math.copysign(1.0, e_curr) == s0 and abs(e_curr) > abs(e_prev))
+        if not step_up:
+            w_curr = w_prev / growth
+            loss, e_curr = probe(w_curr)
+            if loss <= LOSS_THRESHOLD:
+                return best()
+
+        # growth phase: geometric steps until the signed gap flips
+        while math.copysign(1.0, e_curr) == s0 and len(history) < MAX_EVALS:
+            w_prev, e_prev = w_curr, e_curr
+            w_curr = w_curr * growth if step_up else w_curr / growth
+            if w_curr < W_MIN:
+                return best()
+            loss, e_curr = probe(w_curr)
+            if loss <= LOSS_THRESHOLD:
+                return best()
+        if math.copysign(1.0, e_curr) == s0:
+            return best()  # never bracketed within the eval budget
+
+        # regula falsi on e(w) inside the bracket (a on the initial side)
+        w_a, e_a, w_b, e_b = w_prev, e_prev, w_curr, e_curr
+        while len(history) < MAX_EVALS and abs(w_b - w_a) > W_TOL * max(1.0, abs(w_b)):
+            w_mid = w_a + (w_b - w_a) * e_a / (e_a - e_b)
+            _margin = 0.05 * abs(w_b - w_a)  # keep strictly inside the bracket
+            w_mid = min(max(w_mid, min(w_a, w_b) + _margin), max(w_a, w_b) - _margin)
+            loss, e_mid = probe(w_mid)
+            if loss <= LOSS_THRESHOLD:
+                return best()
+            if math.copysign(1.0, e_mid) == s0:
+                w_a, e_a = w_mid, e_mid
+            else:
+                w_b, e_b = w_mid, e_mid
+        return best()
+
     def _fgwrho_flow(
         self,
         x_cond,
@@ -673,25 +753,26 @@ class GuidedFlow(BaseLightningModule):
         mask: TensorDict,
         x_ref: TensorDict,
         seed: int,
-        fgwrho_w_init: float = 1.0,
+        fgwrho_w_init: float = 0.1,
     ):
         # Per-step normalized kick: lambda_t = w * ||u_t|| / ||g_t|| with norms on
         # the GUIDED CHANNEL, so g is a pure direction and ||kick|| / ||u_t|| = w
         # where guidance acts (cBottle's rho uses global norms, viable only when
-        # the classifier gradient spans the state). w is found by parabolic search
-        # on the measured loss (the frozen-ratio analytic dL/dw is biased near the
-        # optimum); evaluations are loss-only, no adjoint pass.
+        # the classifier gradient spans the state). w starts at an undershooting
+        # ratio (10%) and grows to the SMALLEST gap-closing value via the signed
+        # gap (from-below search): minimal intervention, no mid-flow overshoot
+        # from an oversized w. Evaluations are loss-only, no adjoint pass.
         T = len(self.flow_timesteps())
 
-        def probe_loss(w):
-            loss, _, _, _, _ = self._flow_loss_and_lambda_grads(
+        def probe_fn(w):
+            loss, _, _, _, resid = self._flow_loss_and_lambda_grads(
                 x_cond, det_pred, delta_t, mask, x_ref, seed,
                 lambdas=lambda i, u_t, g_t: w * self._kick_ratio(u_t, g_t, mask),
                 need_grads=False,
             )
-            return loss
+            return loss, resid
 
-        w_star, _ = self._parabolic_w_search("FGWRHO", probe_loss, fgwrho_w_init)
+        w_star, _ = self._from_below_w_search("FGWRHO", probe_fn, fgwrho_w_init)
 
         return self._final_guided_pass(
             "FGWRHO", [w_star] * T, [1.0] * T,

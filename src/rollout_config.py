@@ -86,7 +86,8 @@ class RolloutConfig:
     # phi: FGWFREE regularizer strength (penalty on the applied guidance kicks)
     phi: float | None = None
 
-    # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO search
+    # fgwrho_w_init: starting guidance-to-flow ratio (10% default: undershoot);
+    # the from-below search grows it to the SMALLEST gap-closing ratio
     fgwrho_w_init: float | None = None
 
     # fgwnorm_w_init: starting kick scale for FGWNORM (kick norm = w*a_t, unit gradient)

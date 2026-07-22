@@ -3437,7 +3437,7 @@ def _(GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
         "phi":            (0.01,  1.0,   True,  False),
         # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO search
-        "fgwrho_w_init":  (1.0,   4.0,   False, False),
+        "fgwrho_w_init":  (0.1,   1.0,   False, False),
         # fgwnorm_w_init: FGWNORM kick scale (kick norm = w*a_t on the unit gradient)
         "fgwnorm_w_init": (5.0,   20.0,  False, False),
     }
