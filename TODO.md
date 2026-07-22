@@ -1,7 +1,5 @@
 # TODOs
-
-
-
+T
 Changed: storage requirements:
 M * N 
 4 * 12 = 48
@@ -67,12 +65,10 @@ For instance t2m-mslp and mslp-t2m
 - Guide using the ground truth and see whether the accuracy of other variables improves.
 - Define an ensemble of G guided models.
 - as baseline run the same eval_pipeline on guided and unguided ensembles in ground truth version and different experimental settings
-- swap rollout_dist_plot with newer version present in analyze.py
-- implement sampling algorithms (AI+RES and FK+S)
-- how to define a realistic mask for the event of interest? lets say, el nino?
 
-What we do not do:
-- experiment with multiple variables (and masks correspondingly)
+Open questions:
+- how to define realistic guidance target trajectory
+- how to define a realistic mask for the event of interest? lets say, el nino?
 
 Bug reports:
 - domain all has another bug

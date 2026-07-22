@@ -37,6 +37,9 @@ class GuidedFlow(BaseLightningModule):
     magnitude carrier (||g|| for NOLR, Newton magnitude for NOGAP, channel
     flow strength for RHO, ||g||/h for FREE). The sidecar records
     {w_t, a_t, c_t, g_norm_t}; the raw-gradient multiplier is w*a*c/||g||.
+    The LAST flow step is never guided in any method: it snaps z onto the
+    predicted residual (h = s), so a kick there would be raw state surgery
+    with no model step left to re-process it.
     """
 
     # ---------------------------------------------------------------- init ---
@@ -374,8 +377,14 @@ class GuidedFlow(BaseLightningModule):
             g_norm = float(torch.sqrt(
                 sum((grad_vec[k].detach() ** 2).sum() for k in grad_vec.keys())
             ).clamp_min(1e-30))
-            a_t = float(a_schedule[i])
-            c_t = float(c_fn(i, u_t, grad_vec, g_norm, float(h))) if c_fn is not None else g_norm
+            if i == len(timesteps) - 1:
+                # the last Euler step snaps z onto the predicted residual (h = s);
+                # a kick there is state surgery no model step can re-process ->
+                # NEVER guided (uniform across methods)
+                a_t, c_t = 0.0, 0.0
+            else:
+                a_t = float(a_schedule[i])
+                c_t = float(c_fn(i, u_t, grad_vec, g_norm, float(h))) if c_fn is not None else g_norm
             lam_raw = float(w_schedule[i]) * a_t * c_t / g_norm
             gui_step = grad_vec.apply(lambda g: g * lam_raw)
             w_t_trace.append(float(w_schedule[i]))
@@ -479,7 +488,10 @@ class GuidedFlow(BaseLightningModule):
             h_cache.append(float(h))
             g_norm2[i] = sum((g_t[k].detach() ** 2).sum() for k in g_t.keys())
 
-            lam_i = float(lambdas(i, u_t, g_t)) if callable(lambdas) else float(lambdas[i])
+            if i == T - 1:
+                lam_i = 0.0  # the last flow step is never guided (see _guided_flow)
+            else:
+                lam_i = float(lambdas(i, u_t, g_t)) if callable(lambdas) else float(lambdas[i])
             lam_used.append(lam_i)
             gui_step = g_t.apply(lambda g: g * lam_i)
             u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
@@ -515,6 +527,8 @@ class GuidedFlow(BaseLightningModule):
                 u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
             vjp = self._vjp(u_i, z_i, a)
             a = tensordict_apply(lambda an, v: an + h * v, a, vjp)
+
+        dlam[-1] = 0.0  # lambda_{T-1} is never applied -> its true derivative is 0
 
         return (
             float(gap_loss.detach().cpu()), dlam.detach(), g_norm2.detach(),
@@ -871,7 +885,10 @@ class GuidedFlow(BaseLightningModule):
             r_target = ((1.0 - eta) ** (i + 1)) * r_0
 
             g_norm2 = sum((gui_vec[k] ** 2).sum() for k in gui_vec.keys())
-            scale = (2.0 * r_det * (r_det - r_target)) / (h * g_norm2.clamp_min(1e-30))
+            if i == len(timesteps) - 1:
+                scale = torch.zeros(())  # the last flow step is never guided
+            else:
+                scale = (2.0 * r_det * (r_det - r_target)) / (h * g_norm2.clamp_min(1e-30))
             gui_step = gui_vec.apply(lambda g: g * scale)
             scale_trace.append(float(scale))
             g_norm_trace.append(float(torch.sqrt(g_norm2).clamp_min(1e-30)))

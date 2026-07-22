@@ -638,7 +638,7 @@ def _(
         else:
             _cfg_base = get_masked_mean(get_slices(unguided_xr, config.PARTITION, config.VAR, config.LEVEL), mask)
         cfg_target_guidance_M_N_trajectories = (1.0 + _p) * _cfg_base
-    return cfg_clean_preds_slices, cfg_target_guidance_M_N_trajectories
+    return (cfg_target_guidance_M_N_trajectories,)
 
 
 @app.cell
@@ -1131,22 +1131,18 @@ def wa_schedule(
             # schedules actually applied by the run: lambda_hat = w*a*c (the KICK NORM)
             # and the magnitude carrier c_t on the left axis; dimensionless a_t and the
             # closed-gap gamma_t on the right. The scalar w rides in the label.
-            _left_label = r"$h_t\hat\lambda_t,\ h_t c_t$"
+            _left_label = r"$\hat\lambda_t,\ c_t$"
             _sched, _right = {}, {}
             for _meth, _sd in guidance_schedules.items():
-                # multiply by h_t: the INJECTED kick per step. Raw lambda_hat conflates
-                # the last step, whose h ~ 0 makes its multiplier huge but its actual
-                # contribution tiny.
-                _T_rec = len(_sd["lambda_hat"])
-                _s_rec = np.linspace(1000, 1, _T_rec) / 1000
-                _h_rec = np.empty_like(_s_rec); _h_rec[:-1] = _s_rec[:-1] - _s_rec[1:]; _h_rec[-1] = _s_rec[-1]
+                # the last flow step is never guided -> its entry is dropped from the
+                # chart (points sit at t = 1..T-1; the axis still spans 0..T)
                 _wlab = f" (w={_sd['w_t'][0]:g})" if len(set(_sd["w_t"])) == 1 else ""
-                _sched[rf"$h_t\hat\lambda_t$ — {_meth}{_wlab}"] = (_h_rec * np.asarray(_sd["lambda_hat"], float)).tolist()
-                _sched[rf"$h_t c_t$ — {_meth}"] = (_h_rec * np.asarray(_sd["c_t"], float)).tolist()
+                _sched[rf"$\hat\lambda_t$ — {_meth}{_wlab}"] = list(_sd["lambda_hat"])[:-1]
+                _sched[rf"$c_t$ — {_meth}"] = list(_sd["c_t"])[:-1]
                 _a = np.asarray(_sd["a_t"], dtype=float)
-                _right[rf"$a_t$ — {_meth}"] = _a.tolist()
+                _right[rf"$a_t$ — {_meth}"] = _a[:-1].tolist()
                 # 1 - (1-eta)^t = 1 - a_{t-1} shifted right one step, 0 at t=0
-                _right[rf"$\gamma_t$ — {_meth}"] = np.concatenate([[0.0], (1.0 - _a)[:-1]]).tolist()
+                _right[rf"$\gamma_t$ — {_meth}"] = np.concatenate([[0.0], (1.0 - _a)[:-1]])[:-1].tolist()
         else:
             # preview: a_t and 1 - a_t on the RIGHT (shared by both methods). NOLR also
             # previews w_t (constant w_init) and lambda_t = w_t * a_t on the LEFT; NOGAP's
@@ -1155,14 +1151,12 @@ def wa_schedule(
             _steps = np.arange(1, T + 1)
             for _eta in (eta_choices or [0.5]):
                 _a = (1.0 - _eta) ** _steps
-                _right[rf"$a_t$ ($\eta$={_eta:g})"] = _a.tolist()
-                _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1)).tolist()
+                _right[rf"$a_t$ ($\eta$={_eta:g})"] = _a[:-1].tolist()
+                _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1))[:-1].tolist()
                 if "FGWNOLR" in eta_modes:
-                    _s_prev = np.linspace(1000, 1, T) / 1000
-                    _h_prev = np.empty_like(_s_prev); _h_prev[:-1] = _s_prev[:-1] - _s_prev[1:]; _h_prev[-1] = _s_prev[-1]
                     for _w in (fgwnolr_w_choices or [250.0]):
-                        _sched[rf"$w_t$ ($w$={_w:g})"] = [float(_w)] * T
-                        _sched[rf"$h_t\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_h_prev * _w * _a).tolist()
+                        _sched[rf"$w_t$ ($w$={_w:g})"] = [float(_w)] * (T - 1)
+                        _sched[rf"$\lambda_t$ ($w$={_w:g}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
             if not _sched:
                 # NOGAP-only: no w/lambda -> put a_t and 1 - a_t on the left
                 _sched, _right, _left_label = _right, None, r"$a_t,\ \gamma_t$"
@@ -1176,12 +1170,18 @@ def wa_schedule(
             right_color=_right_color,
             color_map=_color_map,
             var=_left_label,
-            title=r"Guidance schedule  ($h_t\hat\lambda_t$, $\hat\lambda_t = w\,a_t\,c_t$ — injected kick per step)",
+            title=r"Guidance schedule  ($\hat\lambda_t = w\,a_t\,c_t$ — kick norm on the unit gradient)",
             subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
                       else "preview — before guiding"),
             xlabel="$t$",
             figsize=(10, 6),
+            start_index=1,
         )
+        # axis spans the full flow 0..T even though no point sits at 0 or T
+        _ax_wa = wa_schedule_widget.axes[0] if hasattr(wa_schedule_widget, "axes") else None
+        if _ax_wa is not None:
+            _ax_wa.set_xlim(-0.5, T + 0.5)
+            _ax_wa.set_xticks(np.arange(0, T + 1))
     else:
         wa_schedule_widget = None
     return (wa_schedule_widget,)
@@ -2460,7 +2460,7 @@ def _(
         guidance_schedules = {}
         lambda_t_by_method = {}
         w_t_schedule = a_t_schedule = lambda_t = c_t_schedule = None
-    return a_t_schedule, guidance_schedules, lambda_t, lambda_t_by_method
+    return guidance_schedules, lambda_t_by_method
 
 
 @app.cell
@@ -2559,22 +2559,23 @@ def _(
         # ---- physical (denormalized) views: sigma_r = res_scale_map[var] ----
         _c_sel = res_scale_map[var]
         c_phys = float(_c_sel.sel(level=level)) if partition == "level" else float(_c_sel)
-        # stored vf traces are already s_t * u_t -> u-hat_t = sigma_r * s_t * u_t
-        vfs_phys_slice = vfs_slice * c_phys
-        guided_vfs_phys_slice = guided_vfs_slice * c_phys
+        # stored vf traces are s_t * u_t -> h_t * u_t = vfs * h_t/s_t: the maps show
+        # the PHYSICAL PER-STEP DISPLACEMENT sigma_r * h_t * u_t (not the raw velocity)
+        _h_sched = np.empty_like(_s_sched)
+        _h_sched[:-1] = _s_sched[:-1] - _s_sched[1:]
+        _h_sched[-1] = _s_sched[-1]
+        vfs_phys_slice = vfs_slice * (_h_sched[t] / _s_sched[t]) * c_phys
+        guided_vfs_phys_slice = guided_vfs_slice * (_h_sched[t] / _s_sched[t]) * c_phys
         vf_gui_next_diff_slice = vf_gui_next_diff_slice * c_phys
         vf_next_gui_diff_slice = vf_next_gui_diff_slice * c_phys
         # r-hat_t = sigma_r * (z^t + s_t u_t): the physical clean-residual estimate
         clean_res_slice = (res_slice + vfs_slice) * c_phys
         # applied kick in physical units: sigma_r * lambda_t * h_t * grad (last h = s)
-        _h_sched = np.empty_like(_s_sched)
-        _h_sched[:-1] = _s_sched[:-1] - _s_sched[1:]
-        _h_sched[-1] = _s_sched[-1]
         gui_vec_phys_slice = gui_vec_slice * _h_sched[t] * c_phys
-        # u-hat_{t+1}: next-step unguided velocity, stored x s_{t+1} convention
-        # (sigma_r * s_{t+1} * u_{t+1}); last step has no t+1 -> all-NaN flat map
+        # next-step unguided displacement sigma_r * h_{t+1} * u_{t+1};
+        # last step has no t+1 -> all-NaN flat map
         u_next_slice = (
-            vfs_slices[m][n][t+1] * c_phys
+            vfs_slices[m][n][t+1] * (_h_sched[t+1] / _s_sched[t+1]) * c_phys
             if t + 1 < len(vfs_slices[m][n])
             else np.full_like(np.asarray(vfs_slice, dtype=float), np.nan)
         )
@@ -2654,13 +2655,13 @@ def _(
             ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$", -1, 1),
             ("clean_preds_diff_map", clean_preds_diff_slice, r"$x_t^{\text{gui}} - x_{t-1}^{\text{gui}}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
-            ("vfs_map", vfs_phys_slice, rf"$\hat{{u}}_t = \sigma_r\, s_t u_t$ (mask avg {_mavg(vfs_phys_slice):+.3g})", -0.001, 0.001),
+            ("vfs_map", vfs_phys_slice, rf"$\sigma_r\, h_t u_t$ (mask avg {_mavg(vfs_phys_slice):+.3g})", -0.001, 0.001),
             ("masked_residual_map", masked_residual_slice, r"$(\hat{x}^{\text{gui}}_t - (1+\delta_n)\,x^{\text{ref}}) \cdot \text{mask}$", -1, 1),
-            ("guided_vfs_map", guided_vfs_phys_slice, rf"$\hat{{u}}^{{\text{{gui}}}}_t$ (mask avg {_mavg(guided_vfs_phys_slice):+.3g})", -0.001, 0.001),
-            ("diff_vfs_map", diff_vfs_slice, r"$\hat{u}^{\text{gui}}_t - \hat{u}_t$", -0.001, 0.001),
+            ("guided_vfs_map", guided_vfs_phys_slice, rf"$\sigma_r\, h_t u^{{\text{{gui}}}}_t$ (mask avg {_mavg(guided_vfs_phys_slice):+.3g})", -0.001, 0.001),
+            ("diff_vfs_map", diff_vfs_slice, r"$\sigma_r h_t (u^{\text{gui}}_t - u_t)$", -0.001, 0.001),
             ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$\sigma_r\, s_{t+1}(u_{t+1} - u^{\text{gui}}_t)$", -0.001, 0.001),
-            ("masked_vf_map", masked_vf_slice, r"$\hat{u}_t \cdot \text{mask}$", -0.001, 0.001),
-            ("u_next_map", u_next_slice, rf"$\hat{{u}}_{{t+1}}$ (mask avg {_mavg(u_next_slice):+.3g})", -0.001, 0.001),
+            ("masked_vf_map", masked_vf_slice, r"$\sigma_r h_t u_t \cdot \text{mask}$", -0.001, 0.001),
+            ("u_next_map", u_next_slice, rf"$\sigma_r\, h_{{t+1}} u_{{t+1}}$ (mask avg {_mavg(u_next_slice):+.3g})", -0.001, 0.001),
             ("step_inc_map", step_inc_slice, r"$\sigma_r\, h_t u^{\text{gui}}_t$", -0.001, 0.001),
             ("clean_res_map", clean_res_slice, r"$\hat{r}_t = \sigma_r\,(z^t + s_t u_t)$", -1, 1),
             ("gui_vec_map", gui_vec_phys_slice, r"$\sigma_r\,\lambda_t h_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
@@ -3301,17 +3302,14 @@ def _(
 
 @app.cell
 def _(
-    a_t_schedule,
-    cfg_clean_preds_slices,
     cfg_target_guidance_M_N_trajectories,
     config,
     dist_bands_checkbox,
     dpi_slider,
-    get_masked_mean,
+    get_rollout,
     get_slices,
-    grads_xr,
-    guidance_mode_dropdown,
-    lambda_t,
+    gui_vfs_xr,
+    guided_xr,
     m,
     mask,
     n,
@@ -3319,78 +3317,119 @@ def _(
     np,
     plt,
     res_scale_map,
+    res_xr,
+    rollout_id,
+    sweep_params,
     t,
+    vfs_xr,
 ):
     if notebook_mode =="analyze_rollout":
-        # Measured waterfall: pre_t = M(x_hat_t(u_t)) - y_n (clean pred with the RAW
-        # velocity), post_t = M(x_hat_t(u_t^gui)) - y_n (with the GUIDED velocity),
-        # reconstructed exactly as post = pre - sigma_r * s_t * lambda_t * M(g_t).
-        # Blue bar: pre_t -> post_t (measured guidance move at t); red bar:
-        # post_t -> pre_{t+1} (measured model reaction). No first-order claim, no 1/r.
-        _all_per_t = get_masked_mean(cfg_clean_preds_slices[:, n], mask).astype(float) - cfg_target_guidance_M_N_trajectories[:, n][:, None]
-        _diff_per_t = _all_per_t[m]
-        _T_len = len(_diff_per_t)
-
-        if lambda_t is not None:
-            _kick_mm = get_masked_mean(
-                get_slices(grads_xr, config.PARTITION, config.VAR, config.LEVEL)[m][n], mask
-            ).astype(float)                                        # (T,) masked mean of dL/dz
+        # Euler landings in masked-mean terms, anchored at the pure-noise state:
+        # state_t = M(x_det + sigma_r z_t) - y_n (realized guided path; state_0 = noise;
+        # res trace stores z_t so res[0] is the initial noise), and
+        # land_ung_t = state_t + sigma_r (h_t/s_t) M(s_t u_t): where the RAW flow step
+        # would land. The purple-vs-yellow gap at t+1 IS the guidance contribution.
+        _mask_np = np.asarray(mask)
+        if res_xr is None:
+            with plt.rc_context({"font.size": 10}):
+                _fig, _ax = plt.subplots(figsize=(22.0, 6), dpi=dpi_slider.value)
+                _ax.text(0.5, 0.5, "no res trace on this store (legacy rollout)",
+                         ha="center", va="center", transform=_ax.transAxes)
+                _ax.set_axis_off()
+            guidance_convergence_t_plot = _fig
+        else:
+            _z_mm  = (np.asarray(get_slices(res_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+            _u_mm  = (np.asarray(get_slices(vfs_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+            _gu_mm = (np.asarray(get_slices(gui_vfs_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+            _M_all, _T_len = _z_mm.shape
+            _s_flow = np.linspace(1000, 1, _T_len) / 1000
+            _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
+            _hs = _h_flow / _s_flow
             _c_sc = res_scale_map[config.VAR]
             _c_sc = float(_c_sc.sel(level=config.LEVEL)) if config.PARTITION == "level" else float(_c_sc)
-            _s_flow = np.linspace(1000, 1, _T_len) / 1000
-            _post_sel = _diff_per_t - _c_sc * _s_flow * np.asarray(lambda_t, dtype=float) * _kick_mm
-        else:
-            # rollout predates the guidance_schedule sidecar -> no recorded lambda_t
-            _post_sel = np.full_like(_diff_per_t, np.nan)
 
-        _guidance_move = _post_sel - _diff_per_t          # within-step: guided(t) - raw(t)
-        _deflection_move = _diff_per_t[1:] - _post_sel[:-1]  # between steps: raw(t+1) - guided(t)
+            # M(x_det): from the gui_det store; older stores -> reconstruct from the
+            # final guided state (M(x_det) = M(gui) - sigma_r M(z_T))
+            try:
+                _det_mm = (np.asarray(get_slices(get_rollout("gui_det", rollout_id).sel(sweep_params).compute(),
+                                                 config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+            except (FileNotFoundError, KeyError):
+                _zT_mm = _z_mm[:, -1] + _hs[-1] * _gu_mm[:, -1]
+                _gui_mm = (np.asarray(get_slices(guided_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+                _det_mm = _gui_mm - _c_sc * _zT_mm
 
-        _xt = np.arange(1, _T_len + 1).astype(float)
+            _y = np.asarray(cfg_target_guidance_M_N_trajectories)[:, n]
+            _states = np.empty((_M_all, _T_len + 1))
+            _states[:, :_T_len] = _det_mm[:, None] + _c_sc * _z_mm - _y[:, None]
+            _states[:, _T_len] = _states[:, _T_len - 1] + _c_sc * _hs[-1] * _gu_mm[:, -1]
+            _land_ung = _states[:, :_T_len] + _c_sc * _hs * _u_mm
 
-        _wt = 22.0  # match the rollout trajectories figure width so the stacked plots align
-        with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
-            _fig, _ax = plt.subplots(figsize=(_wt, 6), dpi=dpi_slider.value)
-            if dist_bands_checkbox.value:
-                _ax.fill_between(_xt, _all_per_t.min(axis=0), _all_per_t.max(axis=0),
-                                 color="#B7950B", alpha=0.14, linewidth=0, label=f"pre-step range, M={_all_per_t.shape[0]}")
-            # waterfall candles anchored ON the trajectory (same units as the axis):
-            # blue bar just RIGHT of the tick (the kick applied at t), red bar just
-            # LEFT of it (the model reaction arriving at t)
-            _bar_off = 0.16
-            _ax.bar(_xt + _bar_off, _guidance_move, bottom=_diff_per_t, width=0.28,
-                    color="#2E86C1", alpha=0.35, zorder=3, label=r"guidance move  (post$_t$ − pre$_t$, measured)")
-            if _T_len > 1:
-                _ax.bar(_xt[1:] - _bar_off, _deflection_move, bottom=_post_sel[:-1], width=0.28,
-                        color="#C0392B", alpha=0.35, zorder=3, label=r"model reaction  (pre$_{t+1}$ − post$_t$)")
-            # thin drift lines keep the trajectory readable across steps
-            for _i in range(_T_len - 1):
-                _ax.plot([_xt[_i], _xt[_i + 1]], [_post_sel[_i], _diff_per_t[_i + 1]],
-                         "-", color="#B7950B", alpha=0.5, linewidth=1.1, zorder=4,
-                         label="model drift" if _i == 0 else "_nolegend_")
-            # recorded a_t IS the theoretical remaining-gap schedule for NOGAP, so this
-            # reference stays correct across rollouts regardless of the exponent used
-            if guidance_mode_dropdown.value == "FGWNOGAP" and a_t_schedule is not None:
-                _ax.plot(_xt, _diff_per_t[0] * np.asarray(a_t_schedule, dtype=float),
-                         "--", color="#888888", linewidth=1.2, alpha=0.9, zorder=2,
-                         label=r"NOGAP schedule  $r_0\,a_t$")
-            _ax.plot(_xt, _post_sel, "D", color="#2E86C1", markersize=5, zorder=6,
-                     label=r"after the kick at $t$  $M(\hat{x}_t(u^{\text{gui}}_t)) - y_n$")
-            _ax.plot(_xt, _diff_per_t, "o", markerfacecolor="none", markeredgecolor="#B7950B",
-                     markeredgewidth=1.8, markersize=8, linestyle="none", zorder=7,
-                     label=r"before the kick at $t$  $M(\hat{x}_t(u_t)) - y_n$")
-            _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
-            _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
-            _ax.set_xlim(0.6, _T_len + 0.4)
-            _ax.set_xticks(_xt)
-            _ax.set_xlabel("$t$"); _ax.set_ylabel("masked mean − target")
-            _ax.set_title("Guidance convergence over $t$", loc="left", fontweight="bold")
-            for _sp in ("top", "right"):
-                _ax.spines[_sp].set_visible(False)
-            _ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
-            _ax.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
-            _fig.tight_layout(rect=(0, 0, 0.82, 1))
-        guidance_convergence_t_plot = _fig
+            _xt = np.arange(_T_len + 1).astype(float)
+            _wt = 22.0  # match the rollout trajectories figure width
+            with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
+                _fig, _ax = plt.subplots(figsize=(_wt, 6), dpi=dpi_slider.value)
+                if dist_bands_checkbox.value and _M_all > 1:
+                    _ax.fill_between(_xt, _states.min(axis=0), _states.max(axis=0),
+                                     color="#B7950B", alpha=0.14, linewidth=0, label=f"state range, M={_M_all}")
+                # waterfall candles at every arrival tick t+1, in the old visual
+                # grammar: red = the flow's OWN move (state_t -> unguided landing),
+                # blue = the GUIDANCE move stacked on top (unguided -> guided landing).
+                # The two stack to the full step; circles mark the realized states.
+                _bar_off = 0.16
+                _flow_move = _land_ung[m] - _states[m, :_T_len]
+                _gui_move = _states[m, 1:] - _land_ung[m]
+                _ax.bar(_xt[1:] - _bar_off, _flow_move, bottom=_states[m, :_T_len], width=0.28,
+                        color="#C0392B", alpha=0.35, edgecolor="#C0392B", linewidth=0.5, zorder=3,
+                        label=r"flow move  (state$_t$ $\to$ unguided landing)")
+                _ax.bar(_xt[1:] + _bar_off, _gui_move, bottom=_land_ung[m], width=0.28,
+                        color="#2E86C1", alpha=0.35, edgecolor="#2E86C1", linewidth=0.5, zorder=3,
+                        label=r"guidance move  (unguided $\to$ guided landing)")
+                # thin trajectory line + filled state circles / landing squares
+                _ax.plot(_xt, _states[m], "-", color="#B7950B", alpha=0.5, linewidth=1.1, zorder=4)
+                _ax.plot(_xt, _states[m], "o", color="#B7950B", markeredgecolor="white",
+                         markeredgewidth=0.8, markersize=5.5, linestyle="none", zorder=7,
+                         label=r"state  $M(\hat{x}^{\text{det}}+\sigma_r z_t) - y_n$")
+                _ax.plot(_xt[1:], _land_ung[m], "s", color="#800080", markeredgecolor="white",
+                         markeredgewidth=0.6, markersize=3.8, linestyle="none", zorder=6,
+                         label=r"unguided landing  $M(\hat{x}^{\text{det}}+\sigma_r(z_t+h_t u_t)) - y_n$")
+                _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+                _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)  # step t lands at tick t+1
+                _ax.set_xlim(-1.0, _T_len + 0.4)
+                _ax.set_xticks(_xt)
+                # breathing room so the noise anchor doesn't sit on the axis, then a
+                # direction-arrow strip inside the bottom margin (red row above blue)
+                _ax.margins(y=0.06)
+                _ylo, _yhi = _ax.get_ylim()
+                _yr = _yhi - _ylo
+                _ylo = _ylo - 0.09 * _yr  # dedicated band under the data for the arrows
+                for _moves, _col, _off, _ystrip in (
+                    (_flow_move, "#C0392B", -_bar_off, _ylo + 0.055 * _yr),
+                    (_gui_move, "#2E86C1", +_bar_off, _ylo + 0.022 * _yr),
+                ):
+                    _up = _moves >= 0
+                    _ax.scatter(_xt[1:][_up] + _off, np.full(int(_up.sum()), _ystrip),
+                                marker="^", s=16, color=_col, alpha=0.9, zorder=5)
+                    _ax.scatter(_xt[1:][~_up] + _off, np.full(int((~_up).sum()), _ystrip),
+                                marker="v", s=16, color=_col, alpha=0.9, zorder=5)
+                _ax.set_ylim(_ylo, _yhi)
+                # anchor/end annotations + target label on the zero line
+                _ax.annotate("noise", (_xt[0], _states[m, 0]), textcoords="offset points",
+                             xytext=(0, 10), ha="center", fontsize=8, color="#666666")
+                _ax.annotate("final", (_xt[-1], _states[m, -1]), textcoords="offset points",
+                             xytext=(0, 10), ha="center", fontsize=8, color="#666666")
+                _ax.annotate("target", (_xt[-1], 0.0), textcoords="offset points",
+                             xytext=(30, 0), ha="left", va="center", fontsize=8,
+                             color="#888888", annotation_clip=False)
+                _ax.set_xlabel("$t$"); _ax.set_ylabel("masked mean − target")
+                _ax.set_title("Guidance convergence over $t$", loc="left", fontweight="bold", pad=24)
+                _ax.text(0.0, 1.015, f"per flow step: red = flow move, blue = guidance move   (m={m}, n={n})",
+                         transform=_ax.transAxes, fontsize=9, color="#666666", va="bottom")
+                for _sp in ("top", "right"):
+                    _ax.spines[_sp].set_visible(False)
+                _ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
+                _ax.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
+                _fig.tight_layout(rect=(0, 0, 0.82, 1))
+            guidance_convergence_t_plot = _fig
     else:
         guidance_convergence_t_plot = None
     return (guidance_convergence_t_plot,)
