@@ -37,7 +37,7 @@ def _():
 
     from src.utils import get_var_idx, get_level_idx
     from src.utils import get_now_timestamp, ensure_rollout_dir
-    from src.utils import get_timestamps, get_N_timestamps, get_N_slices, get_slices, get_gt_rollout
+    from src.utils import get_timestamps, get_N_timestamps, get_N_slices as base_get_N_slices, get_slices as base_get_slices, get_gt_rollout
     from src.utils import (
         dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config, sweep_coord_label
     )
@@ -56,11 +56,12 @@ def _():
         GUI_REFS,
         LEVELS_DICT,
         MASK_MODES,
-        PARTITIONS,
         RolloutConfig,
         VARIABLES_DICT,
         XarrayNormalizer,
         a_t_profile,
+        base_get_N_slices,
+        base_get_slices,
         dump_json,
         ensure_rollout_dir,
         get_N_timestamps,
@@ -74,7 +75,6 @@ def _():
         get_now_timestamp,
         get_rollout,
         get_rollout_ids,
-        get_slices,
         get_sweep_dict,
         get_timestamp_from_sliders,
         get_var_idx,
@@ -815,21 +815,22 @@ def _():
 
 
 @app.cell
-def _(partition_dropdown):
-    partition=partition_dropdown.value
-    return (partition,)
-
-
-@app.cell
-def _(level_slider):
-    level=level_slider.value
-    return (level,)
-
-
-@app.cell
-def _(var_dropdown):
-    var=var_dropdown.value
-    return (var,)
+def _(LEVELS_DICT, SURFACE_PAIR, level_slider, var_dropdown):
+    _base_v = var_dropdown.value
+    _lidx = int(level_slider.value)
+    if _lidx == 0:
+        if _base_v in SURFACE_PAIR:
+            var, partition, level, var_valid = SURFACE_PAIR[_base_v], "surface", 0, True
+        elif _base_v == "mean_sea_level_pressure":
+            var, partition, level, var_valid = _base_v, "surface", 0, True
+        else:  # level-only variable: nothing lives at the surface tick
+            var, partition, level, var_valid = _base_v, "level", LEVELS_DICT["level"][0], False
+    else:
+        if _base_v == "mean_sea_level_pressure":  # surface-only: nothing at pressure levels
+            var, partition, level, var_valid = _base_v, "surface", 0, False
+        else:
+            var, partition, level, var_valid = _base_v, "level", LEVELS_DICT["level"][_lidx - 1], True
+    return level, partition, var, var_valid
 
 
 @app.cell
@@ -847,22 +848,16 @@ def _(m_slider):
 
 
 @app.cell
-def _(PARTITIONS, mo):
-    partition_dropdown = mo.ui.dropdown(PARTITIONS, value=PARTITIONS[0], label="partition: ")
-    return (partition_dropdown,)
-
-
-@app.cell
-def _(LEVELS_DICT, VARIABLES_DICT, mo, partition):
-    LEVELS = LEVELS_DICT[partition]
-    level_label = get_label("level", len(LEVELS))
-    level_slider = mo.ui.slider(steps=LEVELS, value=LEVELS[-1], label=level_label, show_value=True, debounce=True)
-    VARIABLES = VARIABLES_DICT[partition]
-    if partition == "surface":
-        DEFAULT_VAR_VALUE = VARIABLES[2]
-    else:
-        DEFAULT_VAR_VALUE = VARIABLES[3]
-    var_dropdown = mo.ui.dropdown(VARIABLES, value=DEFAULT_VAR_VALUE, label="var: ")
+def _(VARIABLES_DICT, mo):
+    # variable selector: no partition dropdown -- the partition is DERIVED from
+    # (variable, level index). Level 0 = surface (paired level vars map to their
+    # surface twin, mslp to itself); 1..13 = the pressure levels in LEVELS_DICT
+    # order. Invalid combinations (surface-only away from 0, level-only at 0)
+    # render every chart of the selected variable empty via the gated slicers.
+    _BASE_VARS = list(VARIABLES_DICT["level"]) + ["mean_sea_level_pressure"]
+    var_dropdown = mo.ui.dropdown(_BASE_VARS, value="temperature", label="var: ")
+    level_slider = mo.ui.slider(0, 13, step=1, value=0, label="level (0 = surface): ",
+                                show_value=True, debounce=True)
     return level_slider, var_dropdown
 
 
@@ -927,7 +922,7 @@ def _(M, N, mo):
 @app.cell
 def _(mo):
     # number of target percentage profiles to author (each a sweep value of GUIDANCE_DELTA)
-    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="target percentage profiles: ", show_value=True)
+    n_deltas_slider = mo.ui.slider(1, 6, step=1, value=1, label="target percentage profiles: ", show_value=True, debounce=True)
     return (n_deltas_slider,)
 
 
@@ -939,8 +934,8 @@ def _(config, mo, n_deltas_slider, notebook_mode):
         for _i in range(n_deltas_slider.value):
             _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label=f"profile {_i} — start %: ")
             _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %: ")
-            _dc[f"{_i}.start_at"] = mo.ui.slider(0, config.N, step=1, value=0, label="start@n: ", show_value=True)
-            _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, config.N, step=1, value=config.N, label=get_label("stop@n", config.N), show_value=True)
+            _dc[f"{_i}.start_at"] = mo.ui.slider(0, config.N, step=1, value=0, label="start@n: ", show_value=True, debounce=True)
+            _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, config.N, step=1, value=config.N, label=get_label("stop@n", config.N), show_value=True, debounce=True)
         delta_controls = mo.ui.dictionary(_dc)
     else:
         delta_controls = mo.ui.dictionary({})
@@ -1091,28 +1086,35 @@ def wa_schedule(
     T,
     a_t_mode_select,
     a_t_profile,
+    cfg_target_guidance_M_N_trajectories,
+    clean_preds_xr,
     compute_axis_values,
+    config,
     experiment_params,
+    get_slices,
     get_w_star,
     guidance_mode_dropdown,
     guidance_mode_select,
     guidance_schedules,
     lambda_t_by_method,
     m,
+    mask,
     n,
     notebook_mode,
     np,
     plot_trajectory,
+    plt,
     rollout_id,
     sweep_params,
     sweep_ranges,
 ):
     # Guidance weight schedule over the flow, beside the rollout trajectories plot.
-    # Separates a_t and the closed-gap fraction gamma_t = 1 - (1-eta)^t (right axis) from w_t and lambda_t (left).
-    # a_t = (1 - eta)^(t+1) is the shared remaining-gap schedule of FGWNOLR and FGWNOGAP
-    # (both depend on eta); gamma_t = 1 - (1-eta)^t is the fraction already closed ENTERING step t
-    # (0 at t=0), matching the chart's 0-based t axis.
-    # guided_rollout: preview at the swept w_init / eta. analyze_rollout: recorded schedules.
+    # a_t = the guidance PROFILE (a_t_profile modes), dimensionless in [0, 1].
+    # guided_rollout: preview at the swept w_init / eta (single-axes plot_trajectory).
+    # analyze_rollout: recorded schedules as two stacked panels -- top: w_t (left) and the
+    # applied kick norm lambda_hat = w*a*c (right twin); bottom: c_t (left, own scale) and
+    # a_t on a fixed 0-1 right twin. The last flow step is never guided -> dropped from
+    # all panels (points at t = 1..T-1; the axis still spans 0..T).
     if notebook_mode == "guided_rollout":
         selected_modes = list(guidance_mode_select.value)
         fgwnolr_w_choices = compute_axis_values("fgwnolr_w_init", sweep_ranges.value)
@@ -1132,57 +1134,109 @@ def wa_schedule(
         eta_choices = []
     eta_modes = [mode for mode in selected_modes if mode in ("FGWNOLR", "FGWNOGAP")]
     _has_recorded = notebook_mode == "analyze_rollout" and bool(lambda_t_by_method)
-    _AT_COLOR, _CLOSED_COLOR = "#7B2CBF", "#E91E63"  # a_t purple, gamma_t (closed fraction) pink
-    if eta_modes or _has_recorded:
+    _AT_COLOR = "#7B2CBF"  # a_t purple
+    if _has_recorded:
+        # schedules actually applied by the run, one linestyle per method
+        _LAM_COLOR, _W_COLOR, _C_COLOR = "#7B2CBF", "#444444", "#0B7285"
+        _wa_styles = ["-", "--", "-.", ":"]
+        # measured remaining gap eps_t = S(x_hat_t) - A on the guided channel,
+        # normalized by the initial gap -> lives on the a_t axis for direct
+        # comparison with the prescribed profile
+        try:
+            _cp_sched = (np.asarray(get_slices(clean_preds_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n]
+                         * np.asarray(mask)).sum(axis=(-1, -2))[m]
+            _A_sched = float(np.asarray(cfg_target_guidance_M_N_trajectories)[m, n])
+            _eps_sched = _cp_sched - _A_sched
+            _eps_rel = _eps_sched / _eps_sched[0] if abs(float(_eps_sched[0])) > 1e-12 else None
+        except Exception:
+            _eps_rel = None
+        _fig_wa, (_ax_wa_top, _ax_wa_bot) = plt.subplots(
+            2, 1, sharex=True, figsize=(10, 7), dpi=180, gridspec_kw={"hspace": 0.14}
+        )
+        _ax_wa_top_r = _ax_wa_top.twinx()
+        _ax_wa_bot_r = _ax_wa_bot.twinx()
+        for _mi, (_meth, _sd) in enumerate(guidance_schedules.items()):
+            _ls = _wa_styles[_mi % len(_wa_styles)]
+            _lam_v = np.asarray(_sd["lambda_hat"], dtype=float)[:-1]
+            _w_v = np.asarray(_sd["w_t"], dtype=float)[:-1]
+            _c_v = np.asarray(_sd["c_t"], dtype=float)[:-1]
+            _a_v = np.asarray(_sd["a_t"], dtype=float)[:-1]
+            _xs = np.arange(len(_lam_v)) + 1
+            _wlab = f" (w={_w_v[0]:g})" if len(set(_w_v)) == 1 else ""
+            _ax_wa_top.plot(_xs, _w_v, _ls, marker="s", markersize=3, color=_W_COLOR,
+                            alpha=0.85, label=rf"$w_t$ — {_meth}{_wlab}")
+            _ax_wa_top_r.plot(_xs, _lam_v, _ls, marker="o", markersize=3.5, color=_LAM_COLOR,
+                              label=rf"$\hat\lambda_t$ — {_meth}")
+            _ax_wa_bot.plot(_xs, _c_v, _ls, marker="o", markersize=3.5, color=_C_COLOR,
+                            label=rf"$c_t$ — {_meth}")
+            _am = str(_sd.get("a_t_mode") or "?")
+            _ax_wa_bot_r.plot(_xs, _a_v, _ls, marker="o", markersize=3,
+                              color=_AT_COLOR, alpha=0.9, label=rf"$a_t$ — {_meth} ({_am})")
+        _eps_axlo = 0.0
+        if _eps_rel is not None:
+            _ax_wa_bot_r.plot(np.arange(1, len(_eps_rel) + 1), _eps_rel, "-o",
+                              markersize=3, linewidth=1.2, color="#E91E63", alpha=0.9,
+                              label=r"$\varepsilon_t/\varepsilon_0$ — measured remaining gap")
+            # per-step gap change (negative = closing); arrives with step t -> tick t
+            _deps_rel = np.diff(_eps_rel)
+            _ax_wa_bot_r.plot(np.arange(2, len(_eps_rel) + 1), _deps_rel, "--o",
+                              markersize=2.5, linewidth=1.0, color="#E91E63", alpha=0.55,
+                              label=r"$\Delta\varepsilon_t/\varepsilon_0$ — per-step change")
+            _eps_axlo = min(0.0, float(np.nanmin(_deps_rel)) * 1.15)
+        _ax_wa_top.set_ylabel(r"$w_t$", color=_W_COLOR)
+        _ax_wa_top_r.set_ylabel(r"$\hat\lambda_t$", color=_LAM_COLOR)
+        _ax_wa_bot.set_ylabel(r"$c_t$", color=_C_COLOR)
+        _ax_wa_bot_r.set_ylabel(r"$a_t$", color=_AT_COLOR)
+        _ax_wa_bot_r.set_ylim(_eps_axlo - 0.02, 1.05)
+        _ax_wa_bot.set_xlabel("$t$")
+        _ax_wa_bot.set_xlim(-0.5, T + 0.5)
+        _ax_wa_bot.set_xticks(np.arange(0, T + 1))
+        for _axx in (_ax_wa_top, _ax_wa_top_r, _ax_wa_bot, _ax_wa_bot_r):
+            _axx.spines["top"].set_visible(False)
+        for _axx in (_ax_wa_top, _ax_wa_bot):
+            _axx.yaxis.grid(True, color="#EAEAEA")
+            _axx.set_axisbelow(True)
+        _ht, _lt = _ax_wa_top.get_legend_handles_labels()
+        _htr, _ltr = _ax_wa_top_r.get_legend_handles_labels()
+        _ax_wa_top.legend(_ht + _htr, _lt + _ltr, frameon=False, fontsize=8)
+        _hb, _lb = _ax_wa_bot.get_legend_handles_labels()
+        _hbr, _lbr = _ax_wa_bot_r.get_legend_handles_labels()
+        _ax_wa_bot.legend(_hb + _hbr, _lb + _lbr, frameon=False, fontsize=8)
+        _fig_wa.suptitle(
+            r"Guidance schedule  ($\hat\lambda_t = w\,a_t\,c_t$ — kick norm on the unit gradient)",
+            x=0.06, y=0.985, ha="left", fontsize=15, fontweight="bold", color="#222222",
+        )
+        _fig_wa.text(0.06, 0.945, rf"recorded from run (m={m}, n={n})",
+                     ha="left", va="top", fontsize=9.5, color="#555555")
+        _fig_wa.subplots_adjust(top=0.9, left=0.09, right=0.91, bottom=0.08)
+        wa_schedule_widget = _fig_wa
+    elif eta_modes:
+        # preview: a_t on the RIGHT (shared by both methods). NOLR also previews
+        # lambda_t = w_t * a_t on the LEFT; NOGAP's w_t / lambda_t are solved per
+        # step at runtime, so only a_t is shown.
         _left_label = r"$\lambda_t,\ w_t$"
-        if _has_recorded:
-            # schedules actually applied by the run: lambda_hat = w*a*c (the KICK NORM)
-            # and the magnitude carrier c_t on the left axis; dimensionless a_t and the
-            # closed-gap gamma_t on the right. The scalar w rides in the label.
-            _left_label = r"$\hat\lambda_t,\ c_t$"
-            _sched, _right = {}, {}
-            for _meth, _sd in guidance_schedules.items():
-                # the last flow step is never guided -> its entry is dropped from the
-                # chart (points sit at t = 1..T-1; the axis still spans 0..T)
-                _wlab = f" (w={_sd['w_t'][0]:g})" if len(set(_sd["w_t"])) == 1 else ""
-                _sched[rf"$\hat\lambda_t$ — {_meth}{_wlab}"] = list(_sd["lambda_hat"])[:-1]
-                _sched[rf"$c_t$ — {_meth}"] = list(_sd["c_t"])[:-1]
-                _a = np.asarray(_sd["a_t"], dtype=float)
-                _right[rf"$a_t$ — {_meth}"] = _a[:-1].tolist()
-                # 1 - (1-eta)^t = 1 - a_{t-1} shifted right one step, 0 at t=0
-                _right[rf"$\gamma_t$ — {_meth}"] = np.concatenate([[0.0], (1.0 - _a)[:-1]])[:-1].tolist()
-        else:
-            # preview: a_t and 1 - a_t on the RIGHT (shared by both methods). NOLR also
-            # previews w_t (constant w_init) and lambda_t = w_t * a_t on the LEFT; NOGAP's
-            # w_t / lambda_t are solved per step at runtime, so only a_t / 1 - a_t are shown.
-            _sched, _right = {}, {}
-            _steps = np.arange(1, T + 1)
-            _am_choices = list(a_t_mode_select.value) or ["gap-closing"]
-            for _eta in (eta_choices or [0.5]):
-                for _am in _am_choices:
-                    _a = a_t_profile(_am, _eta, T)
-                    _right[rf"$a_t$ ({_am}, $\eta$={_eta:g})"] = _a[:-1].tolist()
-                    if _am == "gap-closing":
-                        _right[rf"$\gamma_t$ ($\eta$={_eta:g})"] = (1.0 - (1.0 - _eta) ** (_steps - 1))[:-1].tolist()
-                    if "FGWNOLR" in eta_modes:
-                        for _w in (fgwnolr_w_choices or [250.0]):
-                            _sched[rf"$\lambda_t$ ($w$={_w:g}, {_am}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
-            if not _sched:
-                # NOGAP-only: no w/lambda -> put a_t and 1 - a_t on the left
-                _sched, _right, _left_label = _right, None, r"$a_t,\ \gamma_t$"
-        _gap_color = lambda _k: _CLOSED_COLOR if _k.startswith(r"$\gamma") else _AT_COLOR
-        _color_map = {_k: _gap_color(_k) for _k in _sched} if _right is None else None
-        _right_color = {_k: _gap_color(_k) for _k in _right} if _right is not None else "#7B2CBF"
+        _sched, _right = {}, {}
+        _am_choices = list(a_t_mode_select.value) or ["gap-closing"]
+        for _eta in (eta_choices or [0.5]):
+            for _am in _am_choices:
+                _a = a_t_profile(_am, _eta, T)
+                _right[rf"$a_t$ ({_am}, $\eta$={_eta:g})"] = _a[:-1].tolist()
+                if "FGWNOLR" in eta_modes:
+                    for _w in (fgwnolr_w_choices or [250.0]):
+                        _sched[rf"$\lambda_t$ ($w$={_w:g}, {_am}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
+        if not _sched:
+            # NOGAP-only: no w/lambda -> put a_t on the left
+            _sched, _right, _left_label = _right, None, r"$a_t$"
+        _color_map = {_k: _AT_COLOR for _k in _sched} if _right is None else None
         wa_schedule_widget = plot_trajectory(
             _sched,
             right_trajectory=_right,
             right_label=r"$a_t$",
-            right_color=_right_color,
+            right_color=_AT_COLOR,
             color_map=_color_map,
             var=_left_label,
             title=r"Guidance schedule  ($\hat\lambda_t = w\,a_t\,c_t$ — kick norm on the unit gradient)",
-            subtitle=(rf"recorded from run (m={m}, n={n})" if _has_recorded
-                      else "preview — before guiding"),
+            subtitle="preview — before guiding",
             xlabel="$t$",
             figsize=(10, 6),
             start_index=1,
@@ -1214,10 +1268,10 @@ def _(
     mask_mode_dropdown,
     mo,
     notebook_mode,
-    partition_dropdown,
     side_lat_slider,
     side_lon_slider,
     sigma_div_slider,
+    state_hist_plot,
     sweep_extra_dropdowns,
     sweep_params_widget,
     traj_row_select,
@@ -1228,7 +1282,7 @@ def _(
     zoom_slider,
 ):
     mask_widget_controls = mo.hstack(
-        [partition_dropdown, var_dropdown, level_slider],
+        [var_dropdown, level_slider],
         justify="start",
         align="start",
     )
@@ -1266,7 +1320,7 @@ def _(
                 guidance_reference_dropdown,
                 m_n_widget,
                 mo.hstack(
-                    [partition_dropdown, var_dropdown, level_slider],
+                    [var_dropdown, level_slider],
                     justify="start",
                 ),
                 delta_widget,
@@ -1290,18 +1344,22 @@ def _(
                 sweep_params_widget,
                 m_n_widget,
                 mo.hstack(
-                    [partition_dropdown, var_dropdown, level_slider],
+                    [var_dropdown, level_slider],
                     justify="start",
                 ),
                 mo.vstack([
                     mo.hstack([traj_row_select], justify="start", align="center"),
                     mo.hstack(
                         [trajectories_plot]
-                        + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
+                        + ([state_hist_plot] if state_hist_plot is not None else []),
                         justify="start", align="start",
                     ),
                 ], align="start"),
-                guidance_convergence_t_plot,
+                mo.hstack(
+                    [guidance_convergence_t_plot]
+                    + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
+                    justify="start", align="start",
+                ),
             ], align="start")
             # mask section: only the mask-related SWEEP selectors (when actually
             # swept) + the maps; no authoring commands in analyze mode
@@ -1492,7 +1550,8 @@ def _(mo):
         value=norm_modes[0],
         label="norm mode: ",
     )
-    return (norm_mode_dropdown,)
+    zoom_scale_checkbox = mo.ui.checkbox(label="zoom scale")
+    return norm_mode_dropdown, zoom_scale_checkbox
 
 
 @app.cell
@@ -1503,6 +1562,7 @@ def _(get_mask_center, mask_corners):
 
 @app.cell
 def _(
+    get_rollout,
     get_slices,
     gt_N_slices,
     gui_M_N_slices,
@@ -1511,7 +1571,10 @@ def _(
     m,
     n,
     notebook_mode,
+    np,
     partition,
+    rollout_id,
+    sweep_params,
     ung_M_N_slices,
     var,
 ):
@@ -1538,6 +1601,28 @@ def _(
         gui_ung_curr = gui_ung_slice[m][n]
         gui_ung_prev = gui_ung_slice[m][n-1] if n>0 else gui_ung_slice[m][n]
 
+        # r_n = x_n - x_n^det: realized generative residuals at forecast step n.
+        # The unguided twin's det comes from ung_det.zarr when stored; this experiment
+        # dir lacks it -> fall back to gui_det (exact at n=0, where both rollouts share
+        # the initial state; approximate for n>0). Under the fallback,
+        # r_n^gui - r_n^gui_ung degenerates to exactly x_n^gui - x_n^gui_ung.
+        try:
+            _det_n = get_slices(get_rollout("gui_det", rollout_id).sel(sweep_params).compute(),
+                                partition, var, level)[m][n]
+        except (FileNotFoundError, KeyError):
+            _det_n = np.zeros_like(np.asarray(gui_curr))
+        try:
+            _und_ds = get_rollout("ung_det", rollout_id)
+            _und_n = get_slices(_und_ds.sel({_k: _v for _k, _v in sweep_params.items()
+                                             if _k in _und_ds.dims}).compute(),
+                                partition, var, level)[m][n]
+        except (FileNotFoundError, KeyError):
+            _und_n = _det_n
+        det_n_slice = _det_n  # public: shown as the x_det map in the third diff row
+        gui_det_res = gui_curr - _det_n
+        gui_ung_det_res = gui_ung_curr - _und_n
+        res_gui_minus_ung = gui_det_res - gui_ung_det_res
+
         gt_gt = gt_curr - gt_prev
         gui_gui = gui_curr - gui_prev
         gui_gui_ung = gui_curr - gui_ung_curr
@@ -1545,14 +1630,17 @@ def _(
         gui_ung_gt = gui_ung_curr - gt_curr
         ung_gt = ung_curr - gt_curr
     return (
+        det_n_slice,
         gt_curr,
         gt_gt,
         gt_prev,
         gt_ung,
         gui_curr,
+        gui_det_res,
         gui_gt,
         gui_gui_ung,
         gui_ung_curr,
+        gui_ung_det_res,
         gui_ung_gt,
         ung_curr,
         ung_gt,
@@ -1585,15 +1673,18 @@ def _(
     contour_levels_slider,
     contour_lw_slider,
     cv2,
+    det_n_slice,
     dpi_slider,
     gt_curr,
     gt_gt,
     gt_prev,
     gt_ung,
     gui_curr,
+    gui_det_res,
     gui_gt,
     gui_gui_ung,
     gui_ung_curr,
+    gui_ung_det_res,
     gui_ung_gt,
     map_interactive,
     mask,
@@ -1613,8 +1704,41 @@ def _(
     white_zero_cmap,
     white_zero_slider,
     zoom_centers,
+    zoom_scale_checkbox,
     zoom_slider,
 ):
+    # color-limit helpers: when 'zoom scale' is on, every limits computation is
+    # restricted to the cells visible in the current zoom window (same window math
+    # as apply_zoom in map.py, on the display grid of prepare_era5_plot_grid)
+    _zoom_region = np.ones((121, 240), dtype=bool)
+    if zoom_scale_checkbox.value and int(zoom_slider.value) > 1:
+        _z = int(zoom_slider.value)
+        _lon_span, _lat_span = 360.0 / _z, 180.0 / _z
+        _lo_min = max(-180.0, zoom_centers[0] - _lon_span / 2)
+        _lo_max = min(180.0, zoom_centers[0] + _lon_span / 2)
+        _la_min = max(-90.0, zoom_centers[1] - _lat_span / 2)
+        _la_max = min(90.0, zoom_centers[1] + _lat_span / 2)
+        if _lo_max - _lo_min < _lon_span:
+            if _lo_min <= -180.0:
+                _lo_max = min(180.0, _lo_min + _lon_span)
+            elif _lo_max >= 180.0:
+                _lo_min = max(-180.0, _lo_max - _lon_span)
+        if _la_max - _la_min < _lat_span:
+            if _la_min <= -90.0:
+                _la_max = min(90.0, _la_min + _lat_span)
+            elif _la_max >= 90.0:
+                _la_min = max(-90.0, _la_max - _lat_span)
+        _lat_e_z = np.linspace(90.0, -90.0, 122); _lat_c_z = 0.5 * (_lat_e_z[:-1] + _lat_e_z[1:])
+        _lon_e_z = np.linspace(-180.0, 180.0, 241); _lon_c_z = 0.5 * (_lon_e_z[:-1] + _lon_e_z[1:])
+        _zoom_region = (((_lat_c_z >= _la_min) & (_lat_c_z <= _la_max))[:, None]
+                        & ((_lon_c_z >= _lo_min) & (_lon_c_z <= _lo_max))[None, :])
+
+    def _zoom_lim(_a):
+        return np.where(_zoom_region, _a, np.nan) if zoom_scale_checkbox.value else _a
+
+    def _lim_zoom(_arrs):
+        return safe_abs_limits([_zoom_lim(_a) for _a in _arrs])
+
     if notebook_mode =="guided_rollout":
         match analysis_type_dropdown.value:
             case "absolute":
@@ -1626,7 +1750,7 @@ def _(
                 ]
                 absolute_panels = [(_l, to_display_units(_a, var)[0]) for _l, _a in absolute_panels]
 
-                abs_vmin, abs_vmax, abs_center = safe_abs_limits(
+                abs_vmin, abs_vmax, abs_center = _lim_zoom(
                     [arr for _, arr in absolute_panels]
                 )
 
@@ -1634,10 +1758,10 @@ def _(
 
                 for label, arr in absolute_panels:
                     if norm_mode_dropdown.value == "own_scale":
-                        _v_min, _v_max, _v_center = safe_abs_limits([arr])
+                        _v_min, _v_max, _v_center = _lim_zoom([arr])
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # own limits, restricted to inside the mask (nonzero weights)
-                        _v_min, _v_max, _v_center = safe_abs_limits([np.where(mask_region, arr, np.nan)])
+                        _v_min, _v_max, _v_center = _lim_zoom([np.where(mask_region, arr, np.nan)])
                         arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max, _v_center = abs_vmin, abs_vmax, abs_center
@@ -1673,34 +1797,53 @@ def _(
                     ("$x_{n}^{\\text{gt}} - x_{n}^{\\text{ung}}$", gt_ung),
                 ]
 
-                diff_vmin = min(float(np.nanmin(arr)) for _, arr in difference_panels)
-                diff_vmax = max(float(np.nanmax(arr)) for _, arr in difference_panels)
+                # x_det is an ABSOLUTE field: keep it out of the shared limits, the
+                # zero-anchored clamps and the white-below masking of the true diffs
+                _ABS_PANELS = {"$x_{n}^{\\text{det}}$", "$x_{n}^{\\text{gui_ung}}$", "$x_{n}^{gui}$"}
+                diff_vmin = min(float(np.nanmin(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
+                diff_vmax = max(float(np.nanmax(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
+                # same_scale for the ABSOLUTE panels: shared range across x_det /
+                # x_gui_ung / x_gui (kept separate from the zero-centered diff limits)
+                _abs_dm_arrs = [arr for _lbl, arr in difference_panels if _lbl in _ABS_PANELS]
+                _abs_dm_vmin = min(float(np.nanmin(_zoom_lim(_a))) for _a in _abs_dm_arrs)
+                _abs_dm_vmax = max(float(np.nanmax(_zoom_lim(_a))) for _a in _abs_dm_arrs)
 
                 difference_maps = {}
 
                 for label, arr in difference_panels:
-                    # is_guided_unguided = label == "$x_{t+1}^{guided} - x_{t+1}^{unguided}$"
+                    _is_abs_panel = label in _ABS_PANELS
 
-                    if norm_mode_dropdown.value == "own_scale":
-                        v_min = min(float(np.nanmin(arr)), -1e-12)
-                        v_max = max(float(np.nanmax(arr)), 1e-12)
+                    if _is_abs_panel:
+                        if norm_mode_dropdown.value == "same_scale":
+                            v_min, v_max = _abs_dm_vmin, max(_abs_dm_vmax, _abs_dm_vmin + 1e-12)
+                        elif norm_mode_dropdown.value == "own_mask_scale":
+                            _arr_in = np.where(mask_region, arr, np.nan)
+                            v_min = float(np.nanmin(_zoom_lim(_arr_in)))
+                            v_max = max(float(np.nanmax(_zoom_lim(_arr_in))), v_min + 1e-12)
+                            arr = np.where(mask_region, arr, np.nan)  # outside -> white
+                        else:
+                            v_min = float(np.nanmin(_zoom_lim(arr)))
+                            v_max = max(float(np.nanmax(_zoom_lim(arr))), v_min + 1e-12)
+                    elif norm_mode_dropdown.value == "own_scale":
+                        v_min = min(float(np.nanmin(_zoom_lim(arr))), -1e-12)
+                        v_max = max(float(np.nanmax(_zoom_lim(arr))), 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # EXACT in-mask min/max, regardless of larger values outside
                         _arr_in = np.where(mask_region, arr, np.nan)
-                        v_min = float(np.nanmin(_arr_in))
-                        v_max = max(float(np.nanmax(_arr_in)), v_min + 1e-12)
+                        v_min = float(np.nanmin(_zoom_lim(_arr_in)))
+                        v_max = max(float(np.nanmax(_zoom_lim(_arr_in))), v_min + 1e-12)
                         arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         v_min, v_max = diff_vmin, diff_vmax
                     # zero-inclusion clamp only for the zero-centered modes; own-mask
                     # keeps its exact in-mask range. NaN guard applies to all modes.
-                    if norm_mode_dropdown.value != "own_mask_scale":
+                    if norm_mode_dropdown.value != "own_mask_scale" and not _is_abs_panel:
                         v_min = min(v_min, -1e-12) if np.isfinite(v_min) else -1.0
                         v_max = max(v_max, 1e-12) if np.isfinite(v_max) else 1.0
                     elif not (np.isfinite(v_min) and np.isfinite(v_max)):
                         v_min, v_max = -1.0, 1.0
 
-                    _arr_wz = np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
+                    _arr_wz = arr if _is_abs_panel else np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
                     difference_maps[label] = visualize_map(
                         _arr_wz,
                         cmap=white_zero_cmap,
@@ -1736,10 +1879,11 @@ def _(
                     ("$x_{n}^{\\text{gui_ung}}$", gui_ung_curr),
                     ("$x_{n}^{gui}$", gui_curr),
                     ("$x_{n}^{ung}$", ung_curr),
+                    ("$x_{n}^{\\text{det}}$", det_n_slice),
                 ]
                 absolute_panels = [(_l, to_display_units(_a, var)[0]) for _l, _a in absolute_panels]
 
-                abs_vmin, abs_vmax, abs_center = safe_abs_limits(
+                abs_vmin, abs_vmax, abs_center = _lim_zoom(
                     [arr for _, arr in absolute_panels]
                 )
 
@@ -1747,10 +1891,10 @@ def _(
 
                 for label, arr in absolute_panels:
                     if norm_mode_dropdown.value == "own_scale":
-                        _v_min, _v_max, _v_center = safe_abs_limits([arr])
+                        _v_min, _v_max, _v_center = _lim_zoom([arr])
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # own limits, restricted to inside the mask (nonzero weights)
-                        _v_min, _v_max, _v_center = safe_abs_limits([np.where(mask_region, arr, np.nan)])
+                        _v_min, _v_max, _v_center = _lim_zoom([np.where(mask_region, arr, np.nan)])
                         arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max, _v_center = abs_vmin, abs_vmax, abs_center
@@ -1780,43 +1924,68 @@ def _(
                 prev_map = absolute_maps["$x_{n}^{\\text{gui_ung}}$"]
                 ung_map = absolute_maps["$x_{n}^{ung}$"]
                 gui_map = absolute_maps["$x_{n}^{gui}$"]
+                x_det_abs_map = absolute_maps["$x_{n}^{\\text{det}}$"]
 
             case "difference":
                 difference_panels = [
                     ("$x_{n}^{ung} - x_{n}^{\\text{gt}}$", ung_gt),
                     ("$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{gt}}$", gui_ung_gt),
                     ("$x_{n}^{gui} - x_{n}^{\\text{gt}}$", gui_gt),
-                    ("$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$", gui_gui_ung),
+                    ("$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$  $(r_n^{gui} - r_n^{\\text{gui\\_ung}})$", gui_gui_ung),
+                    ("$r_n^{gui} = x_{n}^{gui} - x_{n}^{\\text{det}}$", gui_det_res),
+                    ("$r_n^{\\text{gui_ung}} = x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{det}}$", gui_ung_det_res),
+                    ("$x_{n}^{\\text{det}}$", to_display_units(det_n_slice, var)[0]),  # absolute field: K -> degC etc.
+                    ("$x_{n}^{\\text{gui_ung}}$", to_display_units(gui_ung_curr, var)[0]),
+                    ("$x_{n}^{gui}$", to_display_units(gui_curr, var)[0]),
                 ]
 
-                diff_vmin = min(float(np.nanmin(arr)) for _, arr in difference_panels)
-                diff_vmax = max(float(np.nanmax(arr)) for _, arr in difference_panels)
+                # x_det is an ABSOLUTE field: keep it out of the shared limits, the
+                # zero-anchored clamps and the white-below masking of the true diffs
+                _ABS_PANELS = {"$x_{n}^{\\text{det}}$", "$x_{n}^{\\text{gui_ung}}$", "$x_{n}^{gui}$"}
+                diff_vmin = min(float(np.nanmin(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
+                diff_vmax = max(float(np.nanmax(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
+                # same_scale for the ABSOLUTE panels: shared range across x_det /
+                # x_gui_ung / x_gui (kept separate from the zero-centered diff limits)
+                _abs_dm_arrs = [arr for _lbl, arr in difference_panels if _lbl in _ABS_PANELS]
+                _abs_dm_vmin = min(float(np.nanmin(_zoom_lim(_a))) for _a in _abs_dm_arrs)
+                _abs_dm_vmax = max(float(np.nanmax(_zoom_lim(_a))) for _a in _abs_dm_arrs)
 
                 difference_maps = {}
 
                 for label, arr in difference_panels:
-                    # is_guided_unguided = label == "$x_{t+1}^{guided} - x_{t+1}^{unguided}$"
+                    _is_abs_panel = label in _ABS_PANELS
 
-                    if norm_mode_dropdown.value == "own_scale":
-                        v_min = min(float(np.nanmin(arr)), -1e-12)
-                        v_max = max(float(np.nanmax(arr)), 1e-12)
+                    if _is_abs_panel:
+                        if norm_mode_dropdown.value == "same_scale":
+                            v_min, v_max = _abs_dm_vmin, max(_abs_dm_vmax, _abs_dm_vmin + 1e-12)
+                        elif norm_mode_dropdown.value == "own_mask_scale":
+                            _arr_in = np.where(mask_region, arr, np.nan)
+                            v_min = float(np.nanmin(_zoom_lim(_arr_in)))
+                            v_max = max(float(np.nanmax(_zoom_lim(_arr_in))), v_min + 1e-12)
+                            arr = np.where(mask_region, arr, np.nan)  # outside -> white
+                        else:
+                            v_min = float(np.nanmin(_zoom_lim(arr)))
+                            v_max = max(float(np.nanmax(_zoom_lim(arr))), v_min + 1e-12)
+                    elif norm_mode_dropdown.value == "own_scale":
+                        v_min = min(float(np.nanmin(_zoom_lim(arr))), -1e-12)
+                        v_max = max(float(np.nanmax(_zoom_lim(arr))), 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # EXACT in-mask min/max, regardless of larger values outside
                         _arr_in = np.where(mask_region, arr, np.nan)
-                        v_min = float(np.nanmin(_arr_in))
-                        v_max = max(float(np.nanmax(_arr_in)), v_min + 1e-12)
+                        v_min = float(np.nanmin(_zoom_lim(_arr_in)))
+                        v_max = max(float(np.nanmax(_zoom_lim(_arr_in))), v_min + 1e-12)
                         arr = np.where(mask_region, arr, np.nan)  # outside -> white
                     else:
                         v_min, v_max = diff_vmin, diff_vmax
                     # zero-inclusion clamp only for the zero-centered modes; own-mask
                     # keeps its exact in-mask range. NaN guard applies to all modes.
-                    if norm_mode_dropdown.value != "own_mask_scale":
+                    if norm_mode_dropdown.value != "own_mask_scale" and not _is_abs_panel:
                         v_min = min(v_min, -1e-12) if np.isfinite(v_min) else -1.0
                         v_max = max(v_max, 1e-12) if np.isfinite(v_max) else 1.0
                     elif not (np.isfinite(v_min) and np.isfinite(v_max)):
                         v_min, v_max = -1.0, 1.0
 
-                    _arr_wz = np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
+                    _arr_wz = arr if _is_abs_panel else np.where(np.abs(arr) <= white_zero_slider.value / 100.0 * float(np.nanmax(np.abs(arr))), np.nan, arr)
                     difference_maps[label] = visualize_map(
                         _arr_wz,
                         cmap=white_zero_cmap,
@@ -1839,8 +2008,13 @@ def _(
 
                 ung_gt_map = difference_maps["$x_{n}^{ung} - x_{n}^{\\text{gt}}$"]
                 gui_ung_gt_map = difference_maps["$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{gt}}$"]
-                gui_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$"]
+                gui_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gui_ung}}$  $(r_n^{gui} - r_n^{\\text{gui\\_ung}})$"]
                 gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gt}}$"]
+                r_n_map = difference_maps["$r_n^{gui} = x_{n}^{gui} - x_{n}^{\\text{det}}$"]
+                r_n_gui_ung_map = difference_maps["$r_n^{\\text{gui_ung}} = x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{det}}$"]
+                x_det_map = difference_maps["$x_{n}^{\\text{det}}$"]
+                x_gui_ung_abs_dmap = difference_maps["$x_{n}^{\\text{gui_ung}}$"]
+                x_gui_abs_dmap = difference_maps["$x_{n}^{gui}$"]
             case "sobel_grads":
                 gradmap_gt_x = cv2.Sobel(gt_curr, cv2.CV_32F, 1, 0, ksize=3)
                 gradmap_gt_y = cv2.Sobel(gt_curr, cv2.CV_32F, 0, 1, ksize=3)
@@ -1865,19 +2039,19 @@ def _(
                     (r"$\|\nabla (x_n^{\text{gui_ung}})\|$", gradmap_gui_ung_mag),
                 ]
 
-                gradmap_mag_vmin = min(float(np.nanmin(gradmap_arr)) for _, gradmap_arr in gradmap_mag_panels)
-                gradmap_mag_vmax = max(float(np.nanmax(gradmap_arr)) for _, gradmap_arr in gradmap_mag_panels)
+                gradmap_mag_vmin = min(float(np.nanmin(_zoom_lim(gradmap_arr))) for _, gradmap_arr in gradmap_mag_panels)
+                gradmap_mag_vmax = max(float(np.nanmax(_zoom_lim(gradmap_arr))) for _, gradmap_arr in gradmap_mag_panels)
 
                 gradmap_figures = []
 
                 for gradmap_title, gradmap_arr in gradmap_mag_panels:
                     if norm_mode_dropdown.value == "own_scale":
-                        _v_min = float(np.nanmin(gradmap_arr))
-                        _v_max = max(float(np.nanmax(gradmap_arr)), _v_min + 1e-12)
+                        _v_min = float(np.nanmin(_zoom_lim(gradmap_arr)))
+                        _v_max = max(float(np.nanmax(_zoom_lim(gradmap_arr))), _v_min + 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         _arr_in = np.where(mask_region, gradmap_arr, np.nan)
-                        _v_min = float(np.nanmin(_arr_in))
-                        _v_max = max(float(np.nanmax(_arr_in)), _v_min + 1e-12)
+                        _v_min = float(np.nanmin(_zoom_lim(_arr_in)))
+                        _v_max = max(float(np.nanmax(_zoom_lim(_arr_in))), _v_min + 1e-12)
                         gradmap_arr = np.where(mask_region, gradmap_arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max = gradmap_mag_vmin, gradmap_mag_vmax
@@ -1935,20 +2109,20 @@ def _(
                     (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla (x_n^{\text{gui_ung}})\|$", sobel_gui_mag - sobel_gui_ung_mag),
                 ]
 
-                sobel_diff_vmin = min(float(np.nanmin(arr)) for _, arr in sobel_diff_panels)
-                sobel_diff_vmax = max(float(np.nanmax(arr)) for _, arr in sobel_diff_panels)
+                sobel_diff_vmin = min(float(np.nanmin(_zoom_lim(arr))) for _, arr in sobel_diff_panels)
+                sobel_diff_vmax = max(float(np.nanmax(_zoom_lim(arr))) for _, arr in sobel_diff_panels)
 
                 sobel_diff_figures = []
 
                 for sobel_diff_title, sobel_diff_arr in sobel_diff_panels:
                     if norm_mode_dropdown.value == "own_scale":
-                        _v_min = min(float(np.nanmin(sobel_diff_arr)), -1e-12)
-                        _v_max = max(float(np.nanmax(sobel_diff_arr)), 1e-12)
+                        _v_min = min(float(np.nanmin(_zoom_lim(sobel_diff_arr))), -1e-12)
+                        _v_max = max(float(np.nanmax(_zoom_lim(sobel_diff_arr))), 1e-12)
                     elif norm_mode_dropdown.value == "own_mask_scale":
                         # EXACT in-mask min/max, regardless of larger values outside
                         _arr_in = np.where(mask_region, sobel_diff_arr, np.nan)
-                        _v_min = float(np.nanmin(_arr_in))
-                        _v_max = max(float(np.nanmax(_arr_in)), _v_min + 1e-12)
+                        _v_min = float(np.nanmin(_zoom_lim(_arr_in)))
+                        _v_max = max(float(np.nanmax(_zoom_lim(_arr_in))), _v_min + 1e-12)
                         sobel_diff_arr = np.where(mask_region, sobel_diff_arr, np.nan)  # outside -> white
                     else:
                         _v_min, _v_max = min(sobel_diff_vmin, -1e-12), max(sobel_diff_vmax, 1e-12)
@@ -1992,11 +2166,16 @@ def _(
         gui_ung_gt_map,
         gui_ung_map,
         prev_map,
+        r_n_gui_ung_map,
+        r_n_map,
         sobel_diffs_widget,
         sobel_grad_widget,
-        ung_gt_map,
         ung_map,
         ung_prev_map,
+        x_det_abs_map,
+        x_det_map,
+        x_gui_abs_dmap,
+        x_gui_ung_abs_dmap,
     )
 
 
@@ -2022,17 +2201,22 @@ def _(
     n_slider,
     norm_mode_dropdown,
     notebook_mode,
-    partition_dropdown,
     prev_map,
+    r_n_gui_ung_map,
+    r_n_map,
     show_mask_switch,
     sobel_diffs_widget,
     sobel_grad_widget,
     sweep_params_widget,
-    ung_gt_map,
     ung_map,
     ung_prev_map,
     var_dropdown,
     white_zero_slider,
+    x_det_abs_map,
+    x_det_map,
+    x_gui_abs_dmap,
+    x_gui_ung_abs_dmap,
+    zoom_scale_checkbox,
     zoom_slider,
 ):
     if notebook_mode == "guided_rollout":
@@ -2040,7 +2224,7 @@ def _(
             mo.hstack([analysis_type_dropdown, dpi_slider], justify="start"),
             mo.hstack([m_slider, n_slider], justify="start"),
             mo.hstack(
-                [partition_dropdown, var_dropdown, level_slider],
+                [var_dropdown, level_slider],
                 justify="start",
             ),
         ]
@@ -2050,7 +2234,7 @@ def _(
                 inspect_states_widget_make = mo.vstack(
                     [
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, zoom_scale_checkbox], justify="start", align="center"),
                         mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         mo.hstack([curr_map, prev_map], justify="start"),
                         mo.hstack([ung_map, ung_prev_map], justify="start"),
@@ -2062,7 +2246,7 @@ def _(
                 inspect_states_widget_make = mo.vstack(
                     [
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, zoom_scale_checkbox], justify="start", align="center"),
                         mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         mo.hstack([gt_gt_map, gt_ung_map], justify="start")
                     ], justify="start",
@@ -2083,7 +2267,7 @@ def _(
             mo.hstack([analysis_type_dropdown, dpi_slider], justify="start"),
             mo.hstack([n_slider, m_slider], justify="start"),
             mo.hstack(
-                [partition_dropdown, var_dropdown, level_slider],
+                [var_dropdown, level_slider],
                 justify="start",
             ),
         ]
@@ -2091,14 +2275,15 @@ def _(
         match analysis_type_dropdown.value:
             case "absolute":
                 _rows = [
-                    ("curr / prev", [curr_map, prev_map]),
-                    ("gui / ung", [gui_map, ung_map]),
+                    ("curr / prev", [curr_map, ung_map]),
+                    ("gui / ung", [gui_map, prev_map]),
+                    ("x_det", [x_det_abs_map]),
                 ]
                 inspect_states_widget_make = mo.vstack(
                     [
                         sweep_params_widget,
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, zoom_scale_checkbox], justify="start", align="center"),
                         mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         inspect_row_select,
                         mo.vstack(
@@ -2111,14 +2296,16 @@ def _(
 
             case "difference":
                 _rows = [
-                    ("ung_gt / gui_ung_gt", [ung_gt_map, gui_ung_gt_map]),
-                    ("gui_gt / gui_gui_ung", [gui_gt_map, gui_ung_map]),
+                    ("gui_ung_gt / r_n^gui_ung", [gui_ung_gt_map, r_n_gui_ung_map]),
+                    ("gui_gt / r_n^gui", [gui_gt_map, r_n_map]),
+                    ("x_det / gui_gui_ung", [x_det_map, gui_ung_map]),
+                    ("x_gui_ung / x_gui", [x_gui_ung_abs_dmap, x_gui_abs_dmap]),
                 ]
                 inspect_states_widget_make = mo.vstack(
                     [
                         sweep_params_widget,
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, zoom_scale_checkbox], justify="start", align="center"),
                         mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         inspect_row_select,
                         mo.vstack(
@@ -2133,7 +2320,7 @@ def _(
                     [
                         sweep_params_widget,
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, zoom_scale_checkbox], justify="start", align="center"),
                         mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         sobel_grad_widget
                     ], justify="start",
@@ -2143,7 +2330,7 @@ def _(
                     [
                         sweep_params_widget,
                         *common_controls,
-                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown], justify="start", align="center"),
+                        mo.hstack([show_mask_switch, zoom_slider, norm_mode_dropdown, zoom_scale_checkbox], justify="start", align="center"),
                         mo.hstack([contour_checkbox, contour_levels_slider, contour_lw_slider, contour_color_dropdown, white_zero_slider], justify="start", align="center"),
                         sobel_diffs_widget
                     ], justify="start",
@@ -2269,6 +2456,7 @@ def _(
     m,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
     red,
     row_keys,
@@ -2282,6 +2470,11 @@ def _(
         vf_norms_plot = plot_trajectory(_vf_traces, title="Vector field norm over $t$",
             subtitle=r"$\|\mathrm{vf}_t\|$ (model vf before the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space, at the selected $n$", step=t + 1, color_map=color_for(_vf_traces), bands=_bands,
             figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True)
+        _ax_fr = vf_norms_plot.axes[0] if hasattr(vf_norms_plot, "axes") and vf_norms_plot.axes else None
+        if _ax_fr is not None:
+            _n_fr = max((len(_v) for _v in _vf_traces.values()), default=1)
+            _ax_fr.set_xlim(-1.0, _n_fr + 0.4)
+            _ax_fr.set_xticks(np.arange(0, _n_fr + 1))
     else:
         vf_norms_plot = None
     return (vf_norms_plot,)
@@ -2295,6 +2488,7 @@ def _(
     m,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
     red,
     row_keys,
@@ -2308,6 +2502,11 @@ def _(
         guided_vf_norms_plot = plot_trajectory(_gvf_traces, title="Guided vector field norm over $t$",
             subtitle=r"$\|\mathrm{vf}^{\mathrm{gui}}_t\|$ (after the guidance kick) — L2 over space, at the selected $n$", step=t + 1, color_map=color_for(_gvf_traces), bands=_bands,
             figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True)
+        _ax_fr = guided_vf_norms_plot.axes[0] if hasattr(guided_vf_norms_plot, "axes") and guided_vf_norms_plot.axes else None
+        if _ax_fr is not None:
+            _n_fr = max((len(_v) for _v in _gvf_traces.values()), default=1)
+            _ax_fr.set_xlim(-1.0, _n_fr + 0.4)
+            _ax_fr.set_xticks(np.arange(0, _n_fr + 1))
     else:
         guided_vf_norms_plot = None
     return (guided_vf_norms_plot,)
@@ -2456,6 +2655,7 @@ def _(
             _hat = _w * _a * _c
             guidance_schedules[_r["method"]] = {
                 "w_t": _w, "a_t": _a, "c_t": _c, "g_norm_t": _gn,
+                "a_t_mode": (_r.get("sweep") or {}).get("a_t_mode"),  # profile shape of this record
                 "lambda_hat": _hat,                                # kick norm
                 "lambda_t": _hat / np.where(_gn != 0, _gn, 1.0),   # raw-gradient multiplier
             }
@@ -2477,6 +2677,7 @@ def _(
 def _(
     clean_preds_xr,
     delta_trajectory,
+    get_rollout,
     get_slices,
     grads_xr,
     gt_curr,
@@ -2484,6 +2685,7 @@ def _(
     gui_ung_xr,
     gui_vec_xr,
     gui_vfs_xr,
+    guided_xr,
     level,
     m,
     mask,
@@ -2493,6 +2695,7 @@ def _(
     partition,
     res_scale_map,
     res_xr,
+    rollout_id,
     sweep_params,
     t,
     ung_curr,
@@ -2546,15 +2749,17 @@ def _(
             (np.asarray(_base_slice, dtype=float) * np.asarray(mask)).sum())
         _scale = _A / float((np.asarray(_x_ref_slice, dtype=float) * np.asarray(mask)).sum())
         masked_residual_slice = (clean_preds_slices[m][n][t] - _scale * _x_ref_slice) * np.asarray(mask)
-        # Model reaction to the guidance applied at t, in SAME units: the stored vf
-        # traces are each weighted by their own s_t, so the naive vfs[t+1] - gui_vfs[t]
-        # is dominated by the s-decay (at the last transition it renders ~= -gui_vfs and
-        # fakes 'undoing'). Compare in u-space and scale by s_{t+1} -- the disagreement's
-        # actual contribution to the next state (its masked mean = the staircase's
-        # deflection segment). Last step: no t+1 -> zero map.
+        # Model reaction to the guidance applied at t, in DISPLACEMENT units: each
+        # vf scaled by its own step size h (stored vf = s*u -> h*u = vf*h/s), so the
+        # map is the change in per-step motion h_{t+1} u_{t+1} - h_t u^gui_t -- did
+        # the model continue the guided move or revert it. Last step: no t+1 -> zero.
         _s_sched = np.linspace(1000, 1, len(vfs_slices[m][n])) / 1000
+        _h_sched = np.empty_like(_s_sched)
+        _h_sched[:-1] = _s_sched[:-1] - _s_sched[1:]
+        _h_sched[-1] = _s_sched[-1]
         vf_gui_next_diff_slice = (
-            vfs_slices[m][n][t+1] - guided_vfs_slice * (_s_sched[t+1] / _s_sched[t])
+            vfs_slices[m][n][t+1] * (_h_sched[t+1] / _s_sched[t+1])
+            - guided_vfs_slice * (_h_sched[t] / _s_sched[t])
             if t + 1 < len(vfs_slices[m][n])
             else np.zeros_like(guided_vfs_slice)
         )
@@ -2571,9 +2776,6 @@ def _(
         c_phys = float(_c_sel.sel(level=level)) if partition == "level" else float(_c_sel)
         # stored vf traces are s_t * u_t -> h_t * u_t = vfs * h_t/s_t: the maps show
         # the PHYSICAL PER-STEP DISPLACEMENT sigma_r * h_t * u_t (not the raw velocity)
-        _h_sched = np.empty_like(_s_sched)
-        _h_sched[:-1] = _s_sched[:-1] - _s_sched[1:]
-        _h_sched[-1] = _s_sched[-1]
         vfs_phys_slice = vfs_slice * (_h_sched[t] / _s_sched[t]) * c_phys
         guided_vfs_phys_slice = guided_vfs_slice * (_h_sched[t] / _s_sched[t]) * c_phys
         vf_gui_next_diff_slice = vf_gui_next_diff_slice * c_phys
@@ -2594,6 +2796,30 @@ def _(
         step_inc_slice = guided_vfs_slice * (_h_sched[t] / _s_sched[t]) * c_phys
         # masked unguided velocity: the integrand of the mask-weighted mean of u-hat_t
         masked_vf_slice = vfs_phys_slice * np.asarray(mask)
+        # ---- x_t objects (Euler LANDING, only *h_t): x_t = x_det + sigma_r*(z_t +
+        # h_t u_t) -- the partial step actually taken, vs x_hat_t = ... + s_t u_t
+        # (complete denoise) used above. det field from the gui_det store; fallback
+        # reconstructs it from the final guided state.
+        try:
+            _det2d = get_slices(get_rollout("gui_det", rollout_id).sel(sweep_params).compute(),
+                                partition, var, level)[m][n]
+        except (FileNotFoundError, KeyError):
+            _gui2d = get_slices(guided_xr, partition, var, level)[m][n]
+            _zT2d = _res_mn[-1] + guided_vfs_slices[m][n][-1] * (_h_sched[-1] / _s_sched[-1])
+            _det2d = _gui2d - c_phys * _zT2d
+        x_land_ung_slice = _det2d + c_phys * (np.asarray(res_slice) + (_h_sched[t] / _s_sched[t]) * np.asarray(vfs_slice))
+        x_land_gui_slice = _det2d + c_phys * (np.asarray(res_slice) + (_h_sched[t] / _s_sched[t]) * np.asarray(guided_vfs_slice))
+        # left map of the x_t row: realized guided landing vs the SAVED gui_ung
+        # trace at the same t (the unguided reference run's trajectory)
+        landing_diff_slice = x_land_gui_slice - np.asarray(_gui_ung_t)
+        masked_residual_land_slice = (x_land_ung_slice - _scale * np.asarray(_x_ref_slice)) * np.asarray(mask)
+        # row-1 left: realized guided landing vs the FINAL unguided state (the
+        # reference the guidance target is built from)
+        gui_land_vs_ung_final_slice = x_land_gui_slice - np.asarray(gui_ung_curr)
+        # row-2 left: the GUIDED partial-step residual (== x_t^gui - x_det)
+        r_land_gui_slice = (np.asarray(res_slice) + (_h_sched[t] / _s_sched[t]) * np.asarray(guided_vfs_slice)) * c_phys
+        # r_t with h_t instead of s_t: the PARTIAL-step residual sigma_r*(z_t + h_t u_t)
+        r_land_slice = (np.asarray(res_slice) + (_h_sched[t] / _s_sched[t]) * np.asarray(vfs_slice)) * c_phys
     return (
         clean_preds_diff_slice,
         clean_res_slice,
@@ -2601,11 +2827,16 @@ def _(
         diff_gt_clean_pred_slice,
         diff_gt_gui_ung_slice,
         grads_slice,
+        gui_land_vs_ung_final_slice,
         gui_ung_clean_diff_slice,
         gui_vec_phys_slice,
         guided_vfs_phys_slice,
+        landing_diff_slice,
+        masked_residual_land_slice,
         masked_residual_slice,
         masked_vf_slice,
+        r_land_gui_slice,
+        r_land_slice,
         step_inc_slice,
         u_next_slice,
         vf_gui_next_diff_slice,
@@ -2633,14 +2864,19 @@ def _(
     diff_gt_gui_ung_slice,
     dpi_slider,
     grads_slice,
+    gui_land_vs_ung_final_slice,
     gui_ung_clean_diff_slice,
     gui_vec_phys_slice,
     guided_vfs_phys_slice,
+    landing_diff_slice,
     mask,
+    masked_residual_land_slice,
     masked_residual_slice,
     masked_vf_slice,
     notebook_mode,
     np,
+    r_land_gui_slice,
+    r_land_slice,
     show_mask_switch,
     step_inc_slice,
     u_next_slice,
@@ -2661,20 +2897,25 @@ def _(
 
         map_specs = [
             ("diff_gt_gui_ung_map", diff_gt_gui_ung_slice, r"$x_{n}^{\text{gui_ung}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$x_t^{\text{gui}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$", -1, 1),
-            ("clean_preds_diff_map", clean_preds_diff_slice, r"$x_t^{\text{gui}} - x_{t-1}^{\text{gui}}$", -1, 1),
+            ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$\hat{x}_t^{\text{gui}} - x_{n}^{\text{gt}}$", -1, 1),
+            ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$\hat{x}_t^{\text{gui}} - \hat{x}_t^{\text{gui\_ung}}$", -1, 1),
+            ("clean_preds_diff_map", clean_preds_diff_slice, r"$\hat{x}_t^{\text{gui}} - \hat{x}_{t-1}^{\text{gui}}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("vfs_map", vfs_phys_slice, rf"$\sigma_r\, h_t u_t$ (mask avg {_mavg(vfs_phys_slice):+.3g})", -0.001, 0.001),
             ("masked_residual_map", masked_residual_slice, r"$(\hat{x}^{\text{gui}}_t - (1+\delta_n)\,x^{\text{ref}}) \cdot \text{mask}$", -1, 1),
             ("guided_vfs_map", guided_vfs_phys_slice, rf"$\sigma_r\, h_t u^{{\text{{gui}}}}_t$ (mask avg {_mavg(guided_vfs_phys_slice):+.3g})", -0.001, 0.001),
             ("diff_vfs_map", diff_vfs_slice, r"$\sigma_r h_t (u^{\text{gui}}_t - u_t)$", -0.001, 0.001),
-            ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$\sigma_r\, s_{t+1}(u_{t+1} - u^{\text{gui}}_t)$", -0.001, 0.001),
+            ("vf_gui_next_diff_map", vf_gui_next_diff_slice, r"$\sigma_r\,(h_{t+1} u_{t+1} - h_t u^{\text{gui}}_t)$", -0.001, 0.001),
             ("masked_vf_map", masked_vf_slice, r"$\sigma_r h_t u_t \cdot \text{mask}$", -0.001, 0.001),
             ("u_next_map", u_next_slice, rf"$\sigma_r\, h_{{t+1}} u_{{t+1}}$ (mask avg {_mavg(u_next_slice):+.3g})", -0.001, 0.001),
             ("step_inc_map", step_inc_slice, r"$\sigma_r\, h_t u^{\text{gui}}_t$", -0.001, 0.001),
             ("clean_res_map", clean_res_slice, r"$\hat{r}_t = \sigma_r\,(z^t + s_t u_t)$", -1, 1),
             ("gui_vec_map", gui_vec_phys_slice, r"$\sigma_r\,\lambda_t h_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
+            ("landing_diff_map", landing_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$  ($x_t^{\text{gui}} = \hat{x}^{\text{det}}+\sigma_r(z_t+h_t u^{\text{gui}}_t)$, gui\_ung from trace)", -1, 1),
+            ("masked_residual_land_map", masked_residual_land_slice, r"$(x_t - (1+\delta_n)\,x^{\text{ref}}) \cdot \text{mask}$", -1, 1),
+            ("gui_land_vs_ung_final_map", gui_land_vs_ung_final_slice, r"$x_t^{\text{gui}} - x_T^{\text{gui\_ung}}$  (landing vs final unguided state)", -1, 1),
+            ("r_land_gui_map", r_land_gui_slice, r"$r_t^{\text{gui}} = \sigma_r\,(z_t + h_t u^{\text{gui}}_t)$", -1, 1),
+            ("r_land_map", r_land_slice, r"$r_t = \sigma_r\,(z_t + h_t u_t)$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),
         ]
 
@@ -2729,16 +2970,20 @@ def _(
         step_inc_map = maps["step_inc_map"]
         clean_res_map = maps["clean_res_map"]
         gui_vec_map = maps["gui_vec_map"]
+        gui_land_vs_ung_final_map = maps["gui_land_vs_ung_final_map"]
+        r_land_gui_map = maps["r_land_gui_map"]
+        r_land_map = maps["r_land_map"]
+        landing_diff_map = maps["landing_diff_map"]
+        masked_residual_land_map = maps["masked_residual_land_map"]
         diff_grads_map = maps["diff_grads_map"]
     return (
-        clean_res_map,
         grads_map,
-        gui_ung_clean_diff_map,
+        gui_land_vs_ung_final_map,
         gui_vec_map,
         guided_vfs_map,
-        masked_residual_map,
-        masked_vf_map,
-        step_inc_map,
+        masked_residual_land_map,
+        r_land_gui_map,
+        r_land_map,
         u_next_map,
         vfs_map,
     )
@@ -2746,7 +2991,7 @@ def _(
 
 @app.cell
 def _(mo):
-    _flow_rows = ["gui_t diffs", "r_t", "grads", "vfs", "u_next"]
+    _flow_rows = ["gui_t diffs", "x_t diffs", "grads", "vfs", "u_next"]
     flow_row_select = mo.ui.multiselect(_flow_rows, value=_flow_rows, label="charts: ")
     return (flow_row_select,)
 
@@ -2755,14 +3000,13 @@ def _(mo):
 def _(mo):
     # chart-row selector for the Inspect states maps (analyze mode), mirroring the
     # cross-checks / flow-analysis multiselects. Keys cover the absolute + difference rows.
-    _inspect_rows = ["curr / prev", "gui / ung", "ung_gt / gui_ung_gt", "gui_gt / gui_gui_ung"]
+    _inspect_rows = ["curr / prev", "gui / ung", "x_det", "gui_ung_gt / r_n^gui_ung", "gui_gt / r_n^gui", "x_det / gui_gui_ung", "x_gui_ung / x_gui"]
     inspect_row_select = mo.ui.multiselect(_inspect_rows, value=_inspect_rows, label="charts: ")
     return (inspect_row_select,)
 
 
 @app.cell
 def _(
-    clean_res_map,
     contour_checkbox,
     contour_color_dropdown,
     contour_levels_slider,
@@ -2770,19 +3014,18 @@ def _(
     dpi_slider,
     flow_row_select,
     grads_map,
-    gui_ung_clean_diff_map,
+    gui_land_vs_ung_final_map,
     gui_vec_map,
     guided_vfs_map,
     level_slider,
     m_slider,
-    masked_residual_map,
-    masked_vf_map,
+    masked_residual_land_map,
     mo,
     n_slider,
     notebook_mode,
-    partition_dropdown,
+    r_land_gui_map,
+    r_land_map,
     show_mask_switch,
-    step_inc_map,
     sweep_params_widget,
     t_slider,
     u_next_map,
@@ -2795,7 +3038,7 @@ def _(
         var_controls = mo.vstack(
             [
                 mo.hstack(
-                    [partition_dropdown, level_slider],
+                    [level_slider],
                     justify="start",
                     align="start",
                 ),
@@ -2828,11 +3071,11 @@ def _(
         )
 
         map_rows = [
-            ("gui_t diffs", [gui_ung_clean_diff_map, masked_residual_map]),
-            ("r_t", [step_inc_map, clean_res_map]),
+            ("gui_t diffs", [gui_land_vs_ung_final_map, masked_residual_land_map]),
+            ("x_t diffs", [r_land_gui_map, r_land_map]),
             ("grads", [grads_map, gui_vec_map]),
             ("vfs", [vfs_map, guided_vfs_map]),
-            ("u_next", [masked_vf_map, u_next_map]),
+            ("u_next", [u_next_map]),
         ]
 
         flow_widget_make = mo.vstack(
@@ -2882,10 +3125,10 @@ def _(mask, mcolors, mo, np, plt, xr):
     aggregate_by_level_checkbox = mo.ui.checkbox(label="aggregate by level")
     aggregate_spatially_dropdown = mo.ui.dropdown(["mask", "!mask"], allow_select_none=True, label="aggregate spatially: ")
     dist_bands_checkbox = mo.ui.checkbox(label="dist bands")
-    _cross_rows = ["masked avg", "grad_norms", "gui_vf_norms", "vf_norms", "angular deflection"]
+    _cross_rows = ["masked avg", "gui vs ung levels", "grad_norms", "gui_vf_norms", "vf_norms", "angular deflection"]
     cross_row_select = mo.ui.multiselect(_cross_rows, value=_cross_rows, label="charts: ")
     differential_checkbox = mo.ui.checkbox(label=r"$\Delta$")
-    abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$", value=True)
+    abs_checkbox = mo.ui.checkbox(label=r"$|\cdot|$")
 
     def n_traces(v, agg):
         if v is None:
@@ -2973,6 +3216,7 @@ def _(mask, mcolors, mo, np, plt, xr):
         return dict(sorted(traces.items(), key=_key)[:k])
 
     return (
+        SURFACE_PAIR,
         abs_checkbox,
         aggregate_by_level_checkbox,
         aggregate_spatially_dropdown,
@@ -3010,7 +3254,7 @@ def _(
 @app.cell
 def _(aggregate_by_level_checkbox, level_var_dropdown, mo, n_traces):
     _kmax = n_traces(level_var_dropdown.value, aggregate_by_level_checkbox.value)
-    top_k_slider = mo.ui.slider(1, _kmax, value=min(5,_kmax), label=get_label("top K", _kmax), show_value=True)
+    top_k_slider = mo.ui.slider(1, _kmax, value=min(5,_kmax), label=get_label("top K", _kmax), show_value=True, debounce=True)
     return (top_k_slider,)
 
 
@@ -3061,6 +3305,7 @@ def _(
     aggregate_spatially_dropdown,
     clean_preds_xr,
     dask,
+    get_rollout,
     grads_xr,
     gt_n_xr,
     gui_ung_final_xr,
@@ -3071,6 +3316,10 @@ def _(
     maybe_mask,
     notebook_mode,
     np,
+    res_scale_map,
+    res_xr,
+    rollout_id,
+    sweep_params,
     vfs_xr,
     xnorm,
     xr,
@@ -3096,6 +3345,25 @@ def _(
         # vf one step later -> vf_t - vf^gui_{t-1}. shift pads the initial step (t=0) -> 0,
         # like the other difference charts.
         _dvf = (vfs_xr - gui_vfs_xr.shift(t=1)).fillna(0.0)
+        # Euler-landing states x_t = x_det + sigma_r*(z_t + (h_t/s_t)*vfs^gui_t):
+        # the first-row over-t chart shows their masked mean minus the gui_ung
+        # reference (normalized). Legacy stores (no res / no gui_det) fall back to
+        # the clean-prediction difference.
+        try:
+            if res_xr is None:
+                raise KeyError("no res trace")
+            _det_up = get_rollout("gui_det", rollout_id).sel(sweep_params)
+            _T_up = res_xr.sizes["t"]
+            _s_up = np.linspace(1000, 1, _T_up) / 1000
+            _h_up = np.empty_like(_s_up); _h_up[:-1] = _s_up[:-1] - _s_up[1:]; _h_up[-1] = _s_up[-1]
+            _hs_up = xr.DataArray(_h_up / _s_up, dims=("t",), coords={"t": res_xr.t})
+            _land_up = xr.Dataset({
+                _v: _det_up[_v] + res_scale_map[_v] * (res_xr[_v] + _hs_up * gui_vfs_xr[_v])
+                for _v in res_xr.data_vars
+            })
+            _land_diff_up = _wnmn(_land_up) - _wnmn(gui_ung_xr)
+        except (FileNotFoundError, KeyError):
+            _land_diff_up = _wnmn(clean_preds_xr) - _wnmn(gui_ung_xr)
         red = {
             "grads_l2": _sq(grads_xr),
             "vfs_l2": _sq(vfs_xr),
@@ -3114,6 +3382,10 @@ def _(
             "clean_gui_ung_denorm": _wmn(clean_preds_xr) - _wmn(gui_ung_xr),
             "gui_gui_ung_wnorm": _wnmn(guided_xr) - _wnmn(gui_ung_final_xr),
             "clean_gui_ung_wnorm": _wnmn(clean_preds_xr) - _wnmn(gui_ung_xr),
+            "land_gui_ung_wnorm": _land_diff_up,
+            # absolute levels (not differences) for the gui-vs-ung over-n chart
+            "gui_wnorm": _wnmn(guided_xr),
+            "ung_final_wnorm": _wnmn(gui_ung_final_xr),
             # full-domain ||dL/dz||^2 per (m, n, t) -- consumed by the convergence plot's
             # through-Jacobian claim; UNMASKED by design (the loss gradient lives everywhere)
             "grads_l2_full": sum(
@@ -3151,6 +3423,8 @@ def _(
     grad_norms_plot,
     gui_mean_n_plot,
     gui_mean_t_plot,
+    gui_ung_lvl_n_plot,
+    gui_ung_lvl_step_t_plot,
     gui_vf_norms_n_plot,
     guided_vf_norms_plot,
     m_slider,
@@ -3176,6 +3450,7 @@ def _(
                     mo.hstack(_row, justify="start")
                     for _key, _row in [
                         ("masked avg", [gui_mean_n_plot, gui_mean_t_plot]),
+                        ("gui vs ung levels", [gui_ung_lvl_n_plot, gui_ung_lvl_step_t_plot]),
                         ("grad_norms", [grad_norms_n_plot, grad_norms_plot]),
                         ("gui_vf_norms", [gui_vf_norms_n_plot, guided_vf_norms_plot]),
                         ("vf_norms", [vf_norms_n_plot, vf_norms_plot]),
@@ -3201,6 +3476,7 @@ def _(
     m,
     n,
     notebook_mode,
+    np,
     plot_trajectory,
     red,
     row_keys,
@@ -3216,6 +3492,11 @@ def _(
             figsize=(_w, 6), prepend_zero=False, start_index=1, mirror_right_axis=True,
         )
         # grad_norms_plot
+        _ax_fr = grad_norms_plot.axes[0] if hasattr(grad_norms_plot, "axes") and grad_norms_plot.axes else None
+        if _ax_fr is not None:
+            _n_fr = max((len(_v) for _v in _traces.values()), default=1)
+            _ax_fr.set_xlim(-1.0, _n_fr + 0.4)
+            _ax_fr.set_xticks(np.arange(0, _n_fr + 1))
     return (grad_norms_plot,)
 
 
@@ -3234,7 +3515,7 @@ def _(
 ):
     if notebook_mode == "analyze_rollout":
 
-        def _plot(title, subtitle, ds, axis, agg, twin_ds=None, rank_ds=None, keys=None):
+        def _plot(title, subtitle, ds, axis, agg, twin_ds=None, rank_ds=None, keys=None, prepend=False):
             if keys is not None:
                 # lock the displayed variables to a caller-provided set (e.g. the matching
                 # over-n chart) so both charts of a row show the SAME traces
@@ -3260,22 +3541,46 @@ def _(
             _colors = color_for(_tr)
             _styles = None
             if twin_ds is not None:
-                # gui_ung twin overlay for the displayed variables: same colors, dotted
+                # gui_ung twin overlay for the displayed variables: same colors, dotted.
+                # "_"-prefixed keys keep the per-variable twins OUT of the legend; one
+                # generic entry is appended after plotting (matches the landing chart)
                 _twin_src, _ = cross_traces(twin_ds, axis, agg, m, **{**cross_ctl, "k": 10**9})
-                _twin = {f"{_k} (gui_ung)": _twin_src[_k] for _k in _tr if _k in _twin_src}
-                _colors |= {_k: _colors[_k.removesuffix(" (gui_ung)")] for _k in _twin}
+                _twin = {f"_{_k} (gui_ung)": _twin_src[_k] for _k in _tr if _k in _twin_src}
+                _colors |= {_k: _colors[_k.removeprefix("_").removesuffix(" (gui_ung)")] for _k in _twin}
                 _styles = {_k: ":" for _k in _twin}
                 _tr = _tr | _twin
             # width scales with the number of steps so the sparse "over n" plots
             # (N points) are not stretched across the same width as "over t" (T points)
             _nsteps = max((len(_v) for _v in _tr.values()), default=1)
             _w = min(22.0, max(8.0, 3.4 + 0.78 * _nsteps))
-            return plot_trajectory(
+            # over-n charts anchor at (0, 0) so N=1 stores still show a segment;
+            # over-t charts keep their contents but get the second-row axis framing
+            # (t=0 tick, axis spanning 0..T)
+            _prep = (axis == "n") or prepend
+            _figp = plot_trajectory(
                 _tr, title=title, subtitle=subtitle, xlabel=f"${axis}$",
                 step=(n + 1 if axis == "n" else t + 1), color_map=_colors, bands=_bands,
-                figsize=(_w, 6), prepend_zero=False, start_index=1,
+                figsize=(_w, 6), prepend_zero=_prep, start_index=0 if _prep else 1,
                 mirror_right_axis=True, linestyle_map=_styles,
             )
+            if axis == "t" and hasattr(_figp, "axes") and _figp.axes:
+                _axp = _figp.axes[0]
+                _axp.set_xlim(-1.0, _nsteps + 0.4)
+                _axp.set_xticks(np.arange(0, _nsteps + 1))
+            if twin_ds is not None and hasattr(_figp, "axes") and _figp.axes:
+                # single generic legend entry for the dotted gui_ung twins
+                _axp0 = _figp.axes[0]
+                _axp0.plot([], [], linestyle=":", color="#888888", linewidth=1.2,
+                           label="unguided (gui_ung)")
+                _hh, _ll = _axp0.get_legend_handles_labels()
+                for _axr in _figp.axes[1:]:
+                    _h2, _l2 = _axr.get_legend_handles_labels()
+                    _hh, _ll = _hh + _h2, _ll + _l2
+                _uni = dict(zip(_ll, _hh))
+                _axp0.legend(_uni.values(), _uni.keys(), loc="center left",
+                             bbox_to_anchor=(1.05, 0.5), frameon=False,
+                             handlelength=2.4, borderaxespad=0.0)
+            return _figp
 
         grad_norms_n_plot = _plot("Gradient norm over $n$", r"$\|\nabla_{z_t} \mathcal{L}_t\|$ — L2 over space and all flow steps $t$", red["grads_l2"], "n", "l2")
         # per-row variable sets, ranked on the over-n cubes (which fold ALL n and t):
@@ -3294,14 +3599,19 @@ def _(
         vf_norms_n_plot = _plot("Vector field norm over $n$", r"$\|\mathrm{vf}_t\|$ (model vf before the guidance kick, $\mathrm{vf} = s_t\,u_t$) — L2 over space and all flow steps $t$", red["vfs_l2"], "n", "l2")
         diff_vfs_t_plot = _plot("Diff (gui vf − ung vf) over $t$", r"$\mathrm{mean}_{\mathrm{spatial}}\,(\mathrm{vf}^{\mathrm{gui}}_t - \mathrm{vf}_t)$", red["dvf_mean"].isel(n=n), "t", "mean")
         gui_mean_n_plot = _plot("Masked average: guided − unguided over $n$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{n}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui\_ung}}_{n})$ — final states per forecast step, normalized units", red["gui_gui_ung_wnorm"], "n", "mean")
-        gui_mean_t_plot = _plot("Masked average: guided − unguided over $t$", r"$\mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui}}_{t}) - \mathrm{mean}_{\mathrm{mask}}\,(\tilde{x}^{\,\mathrm{gui\_ung}}_{t})$ — clean predictions along the flow at the selected $n$, normalized units", red["clean_gui_ung_wnorm"].isel(n=n), "t", "mean", keys=row_keys["masked_avg"])
+        gui_mean_t_plot = _plot("Masked average: guided − unguided over $t$", r"$\mathrm{mean}_{\mathrm{mask}}\,(x^{\,\mathrm{gui}}_{t}) - \mathrm{mean}_{\mathrm{mask}}\,(\hat{x}^{\,\mathrm{gui\_ung}}_{t})$ — Euler-landing states ($\times h_t$) along the flow at the selected $n$, normalized units", red["land_gui_ung_wnorm"].isel(n=n), "t", "mean", keys=row_keys["masked_avg"], prepend=True)
+        # absolute levels: gui (solid) vs gui_ung (dotted twin) for the SAME top-k
+        # variables as the masked-avg row (ranked by aggregated |gui - gui_ung|)
+        gui_ung_lvl_n_plot = _plot("Masked average: guided vs unguided over $n$", r"$\mathrm{mean}_{\mathrm{mask}}$ of final states per forecast step — solid gui, dotted gui\_ung, normalized units", red["gui_wnorm"], "n", "mean", twin_ds=red["ung_final_wnorm"], keys=row_keys["masked_avg"])
     else:
         row_keys = None
+        gui_ung_lvl_n_plot = None
         gui_mean_n_plot = gui_mean_t_plot = vf_angdef_n_plot = vf_angdef_t_plot = grad_norms_n_plot = diff_vfs_t_plot = gui_vf_norms_n_plot = vf_norms_n_plot = None
     return (
         grad_norms_n_plot,
         gui_mean_n_plot,
         gui_mean_t_plot,
+        gui_ung_lvl_n_plot,
         gui_vf_norms_n_plot,
         row_keys,
         vf_angdef_n_plot,
@@ -3320,17 +3630,21 @@ def _(
     get_slices,
     gui_vfs_xr,
     guided_xr,
+    level,
     m,
     mask,
     n,
     notebook_mode,
     np,
+    partition,
     plt,
     res_scale_map,
     res_xr,
     rollout_id,
     sweep_params,
     t,
+    to_display_units,
+    var,
     vfs_xr,
 ):
     if notebook_mode =="analyze_rollout":
@@ -3348,31 +3662,39 @@ def _(
                 _ax.set_axis_off()
             guidance_convergence_t_plot = _fig
         else:
-            _z_mm  = (np.asarray(get_slices(res_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
-            _u_mm  = (np.asarray(get_slices(vfs_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
-            _gu_mm = (np.asarray(get_slices(gui_vfs_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+            _z_mm  = (np.asarray(get_slices(res_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
+            _u_mm  = (np.asarray(get_slices(vfs_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
+            _gu_mm = (np.asarray(get_slices(gui_vfs_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
             _M_all, _T_len = _z_mm.shape
             _s_flow = np.linspace(1000, 1, _T_len) / 1000
             _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
             _hs = _h_flow / _s_flow
-            _c_sc = res_scale_map[config.VAR]
-            _c_sc = float(_c_sc.sel(level=config.LEVEL)) if config.PARTITION == "level" else float(_c_sc)
+            _c_sc = res_scale_map[var]
+            _c_sc = float(_c_sc.sel(level=level)) if partition == "level" else float(_c_sc)
 
             # M(x_det): from the gui_det store; older stores -> reconstruct from the
             # final guided state (M(x_det) = M(gui) - sigma_r M(z_T))
             try:
                 _det_mm = (np.asarray(get_slices(get_rollout("gui_det", rollout_id).sel(sweep_params).compute(),
-                                                 config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+                                                 partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
             except (FileNotFoundError, KeyError):
                 _zT_mm = _z_mm[:, -1] + _hs[-1] * _gu_mm[:, -1]
-                _gui_mm = (np.asarray(get_slices(guided_xr, config.PARTITION, config.VAR, config.LEVEL))[:, n] * _mask_np).sum(axis=(-1, -2))
+                _gui_mm = (np.asarray(get_slices(guided_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
                 _det_mm = _gui_mm - _c_sc * _zT_mm
 
-            _y = np.asarray(cfg_target_guidance_M_N_trajectories)[:, n]
+            _is_tgt = (var == config.VAR) and (partition != "level" or level == config.LEVEL)
+            _msum_pa = float(np.asarray(_mask_np).sum())
+            _y = (np.asarray(cfg_target_guidance_M_N_trajectories)[:, n] if _is_tgt
+                  else np.zeros(_M_all))
             _states = np.empty((_M_all, _T_len + 1))
             _states[:, :_T_len] = _det_mm[:, None] + _c_sc * _z_mm - _y[:, None]
             _states[:, _T_len] = _states[:, _T_len - 1] + _c_sc * _hs[-1] * _gu_mm[:, -1]
             _land_ung = _states[:, :_T_len] + _c_sc * _hs * _u_mm
+            _pa_unit = ""
+            if not _is_tgt:
+                # absolute mask-averaged values, display units (K -> degC etc.)
+                _states, _pa_unit = to_display_units(_states / _msum_pa, var)
+                _land_ung = to_display_units(_land_ung / _msum_pa, var)[0]
 
             _xt = np.arange(_T_len + 1).astype(float)
             _wt = 22.0  # match the rollout trajectories figure width
@@ -3399,10 +3721,18 @@ def _(
                 _ax.plot(_xt, _states[m], "o", color="#B7950B", markeredgecolor="white",
                          markeredgewidth=0.8, markersize=5.5, linestyle="none", zorder=7,
                          label=r"state  $M(\hat{x}^{\text{det}}+\sigma_r z_t) - y_n$")
-                _ax.plot(_xt[1:], _land_ung[m], "s", color="#800080", markeredgecolor="white",
-                         markeredgewidth=0.6, markersize=3.8, linestyle="none", zorder=6,
+                # branching sparks: from each realized state to where the SAVED unguided
+                # vf would land (rollout-trajectories guided_unguided grammar), in the
+                # landing marker's violet
+                for _ti in range(_T_len):
+                    _ax.plot([_xt[_ti], _xt[_ti + 1]], [_states[m, _ti], _land_ung[m, _ti]],
+                             linestyle="--", linewidth=1.2, color="#800080", alpha=0.6,
+                             zorder=5, label="_nolegend_")
+                _ax.plot(_xt[1:], _land_ung[m], "o", color="#800080", markeredgecolor="white",
+                         markeredgewidth=0.8, markersize=5.5, linestyle="none", zorder=6,
                          label=r"unguided landing  $M(\hat{x}^{\text{det}}+\sigma_r(z_t+h_t u_t)) - y_n$")
-                _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+                if _is_tgt:
+                    _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
                 _ax.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)  # step t lands at tick t+1
                 _ax.set_xlim(-1.0, _T_len + 0.4)
                 _ax.set_xticks(_xt)
@@ -3427,12 +3757,15 @@ def _(
                              xytext=(0, 10), ha="center", fontsize=8, color="#666666")
                 _ax.annotate("final", (_xt[-1], _states[m, -1]), textcoords="offset points",
                              xytext=(0, 10), ha="center", fontsize=8, color="#666666")
-                _ax.annotate("target", (_xt[-1], 0.0), textcoords="offset points",
-                             xytext=(30, 0), ha="left", va="center", fontsize=8,
-                             color="#888888", annotation_clip=False)
-                _ax.set_xlabel("$t$"); _ax.set_ylabel("masked mean − target")
-                _ax.set_title("Guidance convergence over $t$", loc="left", fontweight="bold", pad=24)
-                _ax.text(0.0, 1.015, f"per flow step: red = flow move, blue = guidance move   (m={m}, n={n})",
+                if _is_tgt:
+                    _ax.annotate("target", (_xt[-1], 0.0), textcoords="offset points",
+                                 xytext=(30, 0), ha="left", va="center", fontsize=8,
+                                 color="#888888", annotation_clip=False)
+                _ax.set_xlabel("$t$")
+                _ax.set_ylabel("masked mean − target" if _is_tgt else
+                               (f"Mask-averaged value [{_pa_unit}]" if _pa_unit else "Mask-averaged value"))
+                _ax.set_title("Guidance convergence over $t$ — guided vs unguided landings", loc="left", fontweight="bold", pad=24)
+                _ax.text(0.0, 1.015, f"{var} | per flow step: red = flow move, blue = guidance move   (m={m}, n={n})",
                          transform=_ax.transAxes, fontsize=9, color="#666666", va="bottom")
                 for _sp in ("top", "right"):
                     _ax.spines[_sp].set_visible(False)
@@ -3479,7 +3812,7 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
         "fgwnolr_w_init": (1000.0, 5000.0, False, False),
         # eta: shared profile parameter (meaning depends on a_t_mode -- closure rate
-        # for gap-closing, end level for gaussian, inclination for linear/logistic)
+        # for gap-closing, bell depth for gaussian, end level for linear/logistic)
         "eta":            (0.01,  1.0,   False, False),
         # sigma_div: mask hyper shared by ALL mask modes -- extent / sigma_div
         # (2.0 = base box, 4.0 = half, 1.0 = double)
@@ -3496,7 +3829,7 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     for _ax, (_s, _e, _log, _int) in NUMERIC_AXES.items():
         _rc[f"{_ax}.start"] = mo.ui.number(value=_s, label="start: ")
         _rc[f"{_ax}.stop"]  = mo.ui.number(value=_e, label="stop: ")
-        _rc[f"{_ax}.n"]     = mo.ui.slider(1, 20, step=1, value=1, label="n: ", show_value=True)
+        _rc[f"{_ax}.n"]     = mo.ui.slider(1, 20, step=1, value=1, label="n: ", show_value=True, debounce=True)
         _rc[f"{_ax}.log"]   = mo.ui.checkbox(value=_log, label="log")
     sweep_ranges = mo.ui.dictionary(_rc)
 
@@ -3530,7 +3863,7 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
 def _(mo):
     side_lon_slider = mo.ui.slider(1.5, 90, step=1.5, value=12, label="lon side: ", show_value=True, debounce=True)
     side_lat_slider = mo.ui.slider(1.5, 60, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
-    sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=2, label="sigma divisor: ", show_value=True)
+    sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=2, label="sigma divisor: ", show_value=True, debounce=True)
     return side_lat_slider, side_lon_slider, sigma_div_slider
 
 
@@ -3546,6 +3879,350 @@ def _(dpi_slider, mask, visualize_mask_3d, zoom_centers, zoom_slider):
         dpi=dpi_slider.value,
     )
     return (mask_map_3d,)
+
+
+@app.cell
+def _(
+    cfg_target_guidance_M_N_trajectories,
+    color_for,
+    config,
+    dask,
+    dpi_slider,
+    get_rollout,
+    gui_ung_xr,
+    gui_vfs_xr,
+    guided_xr,
+    m,
+    mask,
+    n,
+    notebook_mode,
+    np,
+    plt,
+    res_scale_map,
+    res_xr,
+    rollout_id,
+    row_keys,
+    sweep_params,
+    t,
+    vfs_xr,
+    xnorm,
+    xr,
+):
+    # Guidance convergence per variable: the convergence-waterfall grammar (Euler
+    # landings, red flow move / blue guidance move candles) replicated for the same
+    # top-k variable selection as the masked-avg / gui-vs-ung rows. One panel per
+    # variable, absolute masked-mean units on each panel's own scale; the guided
+    # variable's panel carries the target line. Level-aggregated keys use the plain
+    # level mean (surface twin not folded in, unlike cross_traces).
+    if notebook_mode == "analyze_rollout":
+        if res_xr is None:
+            with plt.rc_context({"font.size": 10}):
+                _fig_cv, _ax_cv = plt.subplots(figsize=(22.0, 4), dpi=dpi_slider.value)
+                _ax_cv.text(0.5, 0.5, "no res trace on this store (legacy rollout)",
+                            ha="center", va="center", transform=_ax_cv.transAxes)
+                _ax_cv.set_axis_off()
+            conv_topk_t_plot = _fig_cv
+            gui_ung_lvl_t_plot = _fig_cv
+            gui_ung_lvl_step_t_plot = _fig_cv
+        else:
+            _mw_cv = xr.DataArray(np.asarray(mask, dtype=float), dims=("latitude", "longitude"),
+                                  coords={"latitude": guided_xr.latitude, "longitude": guided_xr.longitude})
+            try:
+                _det_ds_cv = get_rollout("gui_det", rollout_id).sel(sweep_params)
+            except (FileNotFoundError, KeyError):
+                _det_ds_cv = None  # older store: det reconstructed from the final guided state
+            _keys_cv = list(row_keys["masked_avg"])
+
+            def _cv_parse(k_):
+                if " L" in k_:
+                    _v, _l = k_.rsplit(" L", 1)
+                    return _v, int(_l)
+                return k_, None
+
+            def _cv_mm(da, lev, scale=None):
+                # M operator of the convergence plot: mask-weighted spatial sum at the
+                # selected n; sigma_r scaling applied BEFORE any level mean
+                if scale is not None:
+                    da = da * scale
+                if lev is not None:
+                    da = da.sel(level=lev)
+                elif "level" in da.dims:
+                    da = da.mean("level")
+                return (da.isel(n=n) * _mw_cv).sum(("latitude", "longitude"))
+
+            _lazy_cv = {}
+            for _k in _keys_cv:
+                _v, _lv = _cv_parse(_k)
+                _sc = res_scale_map[_v]
+                _e = dict(
+                    z=_cv_mm(res_xr[_v], _lv, _sc),
+                    u=_cv_mm(vfs_xr[_v], _lv, _sc),
+                    gu=_cv_mm(gui_vfs_xr[_v], _lv, _sc),
+                    ug=_cv_mm(gui_ung_xr[_v], _lv),
+                )
+                if _det_ds_cv is not None:
+                    _e["det"] = _cv_mm(_det_ds_cv[_v], _lv)
+                else:
+                    _e["gui"] = _cv_mm(guided_xr[_v], _lv)
+                _lazy_cv[_k] = _e
+            _flat_cv = dask.compute(_lazy_cv)[0]
+
+            _T_cv = res_xr.sizes["t"]
+            _s_cv = np.linspace(1000, 1, _T_cv) / 1000
+            _h_cv = np.empty_like(_s_cv); _h_cv[:-1] = _s_cv[:-1] - _s_cv[1:]; _h_cv[-1] = _s_cv[-1]
+            _hs_cv = _h_cv / _s_cv
+            _xt_cv = np.arange(_T_cv + 1).astype(float)
+            _tgt_key = config.VAR if config.PARTITION == "surface" else f"{config.VAR} L{config.LEVEL}"
+            _y_cv = float(np.asarray(cfg_target_guidance_M_N_trajectories)[m, n])
+
+            _kcv = len(_keys_cv)
+            with plt.rc_context({"font.size": 9, "legend.fontsize": 8}):
+                _fig_cv, _axs_cv = plt.subplots(_kcv, 1, figsize=(22.0, 2.4 * _kcv + 1.0),
+                                                dpi=dpi_slider.value, sharex=True, squeeze=False)
+                for _pi, _k in enumerate(_keys_cv):
+                    _axc = _axs_cv[_pi, 0]
+                    _d = _flat_cv[_k]
+                    _zmm = np.atleast_2d(np.asarray(_d["z"]))    # (M, T), sigma_r-scaled
+                    _umm = np.atleast_2d(np.asarray(_d["u"]))
+                    _gumm = np.atleast_2d(np.asarray(_d["gu"]))
+                    if "det" in _d:
+                        _detv = float(np.atleast_1d(np.asarray(_d["det"]))[m])
+                    else:
+                        _zT = _zmm[m, -1] + _hs_cv[-1] * _gumm[m, -1]
+                        _detv = float(np.atleast_1d(np.asarray(_d["gui"]))[m]) - _zT
+                    _st = np.empty(_T_cv + 1)
+                    _st[:_T_cv] = _detv + _zmm[m]
+                    _st[_T_cv] = _st[_T_cv - 1] + _hs_cv[-1] * _gumm[m, -1]
+                    _lu = _st[:_T_cv] + _hs_cv * _umm[m]
+                    _fm = _lu - _st[:_T_cv]              # flow move (state_t -> ung landing)
+                    _gm = _st[1:] - _lu                  # guidance move (ung -> gui landing)
+                    _axc.bar(_xt_cv[1:] - 0.16, _fm, bottom=_st[:_T_cv], width=0.28, color="#C0392B",
+                             alpha=0.35, edgecolor="#C0392B", linewidth=0.5, zorder=3, label="flow move")
+                    _axc.bar(_xt_cv[1:] + 0.16, _gm, bottom=_lu, width=0.28, color="#2E86C1",
+                             alpha=0.35, edgecolor="#2E86C1", linewidth=0.5, zorder=3, label="guidance move")
+                    _axc.plot(_xt_cv, _st, "-", color="#B7950B", alpha=0.5, linewidth=1.0, zorder=4)
+                    _axc.plot(_xt_cv, _st, "o", color="#B7950B", markeredgecolor="white",
+                              markeredgewidth=0.7, markersize=4.5, linestyle="none", zorder=7, label="state")
+                    _axc.plot(_xt_cv[1:], _lu, "s", color="#800080", markeredgecolor="white",
+                              markeredgewidth=0.5, markersize=3.2, linestyle="none", zorder=6,
+                              label="unguided landing")
+                    if _k == _tgt_key:
+                        _axc.axhline(_y_cv, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+                        _axc.annotate("target", (_xt_cv[-1], _y_cv), textcoords="offset points",
+                                      xytext=(8, 0), ha="left", va="center", fontsize=8,
+                                      color="#888888", annotation_clip=False)
+                    _axc.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.0,
+                                 alpha=0.7, zorder=2)
+                    _axc.margins(y=0.08)
+                    _ylo_, _yhi_ = _axc.get_ylim(); _yr_ = _yhi_ - _ylo_
+                    _ylo_ = _ylo_ - 0.14 * _yr_          # arrow strip band under the data
+                    for _mv, _cl, _of, _ys in ((_fm, "#C0392B", -0.16, _ylo_ + 0.085 * _yr_),
+                                               (_gm, "#2E86C1", +0.16, _ylo_ + 0.035 * _yr_)):
+                        _up_ = _mv >= 0
+                        _axc.scatter(_xt_cv[1:][_up_] + _of, np.full(int(_up_.sum()), _ys),
+                                     marker="^", s=10, color=_cl, alpha=0.9, zorder=5)
+                        _axc.scatter(_xt_cv[1:][~_up_] + _of, np.full(int((~_up_).sum()), _ys),
+                                     marker="v", s=10, color=_cl, alpha=0.9, zorder=5)
+                    _axc.set_ylim(_ylo_, _yhi_)
+                    _axc.set_ylabel(_k, fontsize=8.5, color=color_for([_k])[_k])
+                    for _sp_ in ("top", "right"):
+                        _axc.spines[_sp_].set_visible(False)
+                    _axc.yaxis.grid(True, color="#D7D7D7", linewidth=0.6, alpha=0.55)
+                _axs_cv[0, 0].legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False)
+                _axs_cv[-1, 0].set_xlabel("$t$")
+                _axs_cv[-1, 0].set_xlim(-1.0, _T_cv + 0.4)
+                _axs_cv[-1, 0].set_xticks(_xt_cv)
+                _axs_cv[0, 0].set_title("Guidance convergence over $t$ — top-k variables", loc="left",
+                                        fontweight="bold", fontsize=13, pad=24)
+                _axs_cv[0, 0].text(0.0, 1.05, f"per flow step: red = flow move, blue = guidance move   (m={m}, n={n})",
+                                   transform=_axs_cv[0, 0].transAxes, fontsize=9, color="#666666", va="bottom")
+                _fig_cv.tight_layout(rect=(0, 0, 0.87, 1))
+            conv_topk_t_plot = _fig_cv
+
+            # --- gui vs ung levels (over t): guided CLEAN PREDICTIONS per top-k
+            # variable, based as the masked difference to the gui_ung reference run's
+            # clean predictions at the same t (comparable across variables, scaled by
+            # each variable's std -- the mean cancels). x_hat = det + sigma_r*(z + s*u):
+            # solid = guided heading (z + s*u_gui, kick included); dashed spark = the
+            # model's raw clean prediction from the same state (saved unguided vf),
+            # branching off the previous guided point. Level-aggregated keys use
+            # level-averaged stats (display approximation).
+            _msum_cv = float(_mw_cv.sum())
+            _lvl_vals = list(np.asarray(res_xr.level.values)) if "level" in res_xr.dims else []
+
+            def _cv_zstats(v_, lv_):
+                _mu, _sd = xnorm._mean[v_], xnorm._std[v_]
+                if np.ndim(_mu) == 1:
+                    if lv_ is None:
+                        return float(np.mean(_mu)), float(np.mean(_sd))
+                    _ix = _lvl_vals.index(lv_)
+                    return float(_mu[_ix]), float(_sd[_ix])
+                return float(_mu), float(_sd)
+
+            _xs_sp = np.arange(1, _T_cv + 1).astype(float)  # step t evaluated -> tick t+1
+            with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 8}):
+                _fig_sp, _ax_sp = plt.subplots(figsize=(22.0, 6), dpi=dpi_slider.value)
+                _cols_sp = color_for(_keys_cv)
+                for _k in _keys_cv:
+                    _v, _lv = _cv_parse(_k)
+                    _d = _flat_cv[_k]
+                    _zmm = np.atleast_2d(np.asarray(_d["z"]))[m]    # sigma_r-scaled M-sums
+                    _umm = np.atleast_2d(np.asarray(_d["u"]))[m]
+                    _gumm = np.atleast_2d(np.asarray(_d["gu"]))[m]
+                    _ugmm = np.atleast_2d(np.asarray(_d["ug"]))[m]  # gui_ung clean preds (physical)
+                    if "det" in _d:
+                        _detv = float(np.atleast_1d(np.asarray(_d["det"]))[m])
+                    else:
+                        _detv = float(np.atleast_1d(np.asarray(_d["gui"]))[m]) - (_zmm[-1] + _hs_cv[-1] * _gumm[-1])
+                    _cpg = _detv + _zmm + _gumm     # guided clean prediction
+                    _cpu = _detv + _zmm + _umm      # model's raw (unguided-vf) clean prediction
+                    _sd_ = _cv_zstats(_v, _lv)[1]
+                    _stn = (_cpg - _ugmm) / _msum_cv / _sd_
+                    _tipn = (_cpu - _ugmm) / _msum_cv / _sd_
+                    _cl = _cols_sp[_k]
+                    _ax_sp.plot(_xs_sp, _stn, "-o", color=_cl, linewidth=1.4, markersize=4.5,
+                                markeredgecolor="white", markeredgewidth=0.7, zorder=6, label=_k)
+                    for _ti in range(1, _T_cv):
+                        _ax_sp.plot([_xs_sp[_ti - 1], _xs_sp[_ti]], [_stn[_ti - 1], _tipn[_ti]],
+                                    linestyle="--", linewidth=1.0, color=_cl, alpha=0.55,
+                                    zorder=4, label="_nolegend_")
+                    _ax_sp.scatter(_xs_sp, _tipn, s=16, color=_cl, alpha=0.75,
+                                   edgecolors="white", linewidths=0.5, zorder=5, label="_nolegend_")
+                _ax_sp.plot([], [], linestyle="--", color="#888888", linewidth=1.0,
+                            label="unguided clean prediction (saved vf)")
+                _ax_sp.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+                _ax_sp.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
+                _ax_sp.set_xlim(0.0, _T_cv + 0.4)
+                _ax_sp.set_xticks(np.arange(0, _T_cv + 1))
+                _ax_sp.set_xlabel("$t$"); _ax_sp.set_ylabel("gui − gui_ung  (normalized units)")
+                _ax_sp.set_title("Masked average: guided vs unguided clean predictions over $t$", loc="left",
+                                 fontweight="bold", pad=24)
+                _ax_sp.text(0.0, 1.015,
+                            f"solid = guided clean predictions minus the unguided reference; dashed spark = the model's raw clean prediction (saved unguided vf)   (m={m}, n={n})",
+                            transform=_ax_sp.transAxes, fontsize=9, color="#666666", va="bottom")
+                for _sp_ in ("top", "right"):
+                    _ax_sp.spines[_sp_].set_visible(False)
+                _ax_sp.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
+                _ax_sp.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False)
+                _fig_sp.tight_layout(rect=(0, 0, 0.87, 1))
+            gui_ung_lvl_t_plot = _fig_sp
+
+            # --- companion: per-step difference between the guided and unguided
+            # ONLINE steps. Both steps start from the same guided state z_t; the
+            # unguided one uses the vf saved before the kick, so the difference is
+            # exactly the guidance move sigma_r*(h_t/s_t)*(vf^gui_t - vf_t) in
+            # masked-mean terms, per variable, std-scaled. The step at t lands at
+            # tick t+1; the last step is never kicked -> 0.
+            _xs_st2 = np.arange(1, _T_cv + 1).astype(float)
+            with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 8}):
+                _fig_sp2, _ax_sp2 = plt.subplots(figsize=(22.0, 6), dpi=dpi_slider.value)
+                for _k in _keys_cv:
+                    _v, _lv = _cv_parse(_k)
+                    _d = _flat_cv[_k]
+                    _umm = np.atleast_2d(np.asarray(_d["u"]))[m]
+                    _gumm = np.atleast_2d(np.asarray(_d["gu"]))[m]
+                    _sd_ = _cv_zstats(_v, _lv)[1]
+                    _stepd = _hs_cv * (_gumm - _umm) / _msum_cv / _sd_
+                    _ax_sp2.plot(_xs_st2, _stepd, "-o", color=_cols_sp[_k], linewidth=1.4,
+                                 markersize=4.5, markeredgecolor="white", markeredgewidth=0.7,
+                                 zorder=6, label=_k)
+                _ax_sp2.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
+                _ax_sp2.axvline(t + 1, color="#222222", linestyle=(0, (4, 4)), linewidth=1.1, alpha=0.7, zorder=2)
+                _ax_sp2.set_xlim(-1.0, _T_cv + 0.4)
+                _ax_sp2.set_xticks(np.arange(0, _T_cv + 1))
+                _ax_sp2.set_xlabel("$t$"); _ax_sp2.set_ylabel("gui − gui_ung step  (normalized units)")
+                _ax_sp2.set_title(r"Masked average: gui − gui_ung online step over $t$",
+                                  loc="left", fontweight="bold", pad=24)
+                _ax_sp2.text(0.0, 1.015,
+                             f"per-step guidance move: sigma_r (h_t/s_t)(vf_gui − vf) from the same state, at the arrival tick t+1   (m={m}, n={n})",
+                             transform=_ax_sp2.transAxes, fontsize=9, color="#666666", va="bottom")
+                for _sp_ in ("top", "right"):
+                    _ax_sp2.spines[_sp_].set_visible(False)
+                _ax_sp2.yaxis.grid(True, color="#D7D7D7", linewidth=0.7, alpha=0.55)
+                _ax_sp2.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False)
+                _fig_sp2.tight_layout(rect=(0, 0, 0.87, 1))
+            gui_ung_lvl_step_t_plot = _fig_sp2
+    else:
+        conv_topk_t_plot = None
+        gui_ung_lvl_t_plot = None
+        gui_ung_lvl_step_t_plot = None
+    return (gui_ung_lvl_step_t_plot,)
+
+
+@app.cell
+def _(
+    det_n_slice,
+    dpi_slider,
+    gui_curr,
+    gui_ung_curr,
+    m,
+    mask,
+    n,
+    notebook_mode,
+    np,
+    plt,
+    to_display_units,
+    var,
+):
+    # Distribution of the deterministic, guided and unguided states at the current
+    # (m, n, var, level) slice, restricted to the mask CORE (half-maximum region --
+    # the box for BBOX, the blob core for ELLIPTICAL; NOT mask_region, whose >1e-6
+    # support spans half the globe for the elliptical tails).
+    if notebook_mode == "analyze_rollout":
+        _hist_specs = [
+            (r"$x_n^{\text{det}}$", det_n_slice, "#666666"),
+            (r"$x_n^{\text{gui}}$", gui_curr, "#0072B2"),
+            (r"$x_n^{\text{gui_ung}}$", gui_ung_curr, "#4A6FA5"),
+        ]
+        _mreg_h = np.asarray(mask) >= 0.5 * float(np.asarray(mask).max())
+        with plt.rc_context({"font.size": 10}):
+            _fig_h, _ax_h = plt.subplots(figsize=(7.5, 6), dpi=dpi_slider.value)
+            _unit_h = ""
+            _any_finite = False
+            for _lbl, _arr, _cl in _hist_specs:
+                _v, _unit_h = to_display_units(np.asarray(_arr, dtype=float), var)
+                _v = np.asarray(_v, dtype=float)[_mreg_h]
+                _v = _v[np.isfinite(_v)]
+                if _v.size == 0:
+                    continue  # invalid var/level selection -> gated slices are all-NaN
+                _any_finite = True
+                _ax_h.hist(_v, bins=40, density=True, histtype="stepfilled",
+                           color=_cl, alpha=0.22, edgecolor=_cl, linewidth=1.4, label=_lbl)
+            if not _any_finite:
+                _ax_h.text(0.5, 0.5, "no data for this selection", ha="center", va="center",
+                           fontsize=11, color="#888888", transform=_ax_h.transAxes)
+            _ax_h.set_xlabel(f"{var} [{_unit_h}]" if _unit_h else var)
+            _ax_h.set_ylabel("density")
+            _ax_h.set_title("State distribution in the mask core", loc="left",
+                            fontweight="bold", fontsize=13, pad=20)
+            _ax_h.text(0.0, 1.01, f"current slice (m={m}, n={n})",
+                       transform=_ax_h.transAxes, fontsize=8.5, color="#666666", va="bottom")
+            for _sp_ in ("top", "right"):
+                _ax_h.spines[_sp_].set_visible(False)
+            _ax_h.yaxis.grid(True, color="#EEEEEE")
+            _ax_h.set_axisbelow(True)
+            _ax_h.legend(frameon=False, fontsize=9)
+            _fig_h.tight_layout()
+        state_hist_plot = _fig_h
+    else:
+        state_hist_plot = None
+    return (state_hist_plot,)
+
+
+@app.cell
+def _(base_get_N_slices, base_get_slices, np, var, var_valid):
+    def _gate_selected(_sl, _var):
+        if not var_valid and _var == var:
+            return np.full(np.asarray(_sl).shape, np.nan)
+        return _sl
+
+    def get_slices(states, partition_, var_, level_):
+        return _gate_selected(base_get_slices(states, partition_, var_, level_), var_)
+
+    def get_N_slices(states, partition_, var_, level_):
+        return _gate_selected(base_get_N_slices(states, partition_, var_, level_), var_)
+
+    return (get_slices,)
 
 
 if __name__ == "__main__":

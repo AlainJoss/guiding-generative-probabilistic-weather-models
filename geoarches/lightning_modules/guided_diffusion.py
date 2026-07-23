@@ -29,9 +29,10 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
     """Guidance profile a_t in [floor, 1] over t = 0..T-1.
 
     eta in (0, 1] means, per mode:
-      gaussian    end level E = floor + eta*(1-floor) (variance spread: the
-                  bell's tails 'leave the box' as eta grows); peak 1 mid-flow
-      linear      inclination: 1 -> F with F = 1 - eta*(1-floor)
+      gaussian    bell depth: end level E = floor + (1-eta)*(1-floor); peak 1
+                  mid-flow (eta->0 flat near 1, eta->1 tails sink to the floor)
+      linear      end level: 1 -> F with F = floor + eta*(1-floor)
+                  (eta->0 drops to the floor, eta->1 stays flat at 1)
       logistic    same endpoints as linear (1 -> F), S-shaped in between
       gap-closing the remaining-gap schedule (1-eta)^(t+1)
     "-spec" suffix: time reversal (monotone modes) / vertical flip (gaussian).
@@ -43,19 +44,19 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
     x = np.linspace(0.0, 1.0, T)
 
     if base == "gaussian":
-        end = min(floor + eta * (1.0 - floor), 0.999)
+        end = min(floor + (1.0 - eta) * (1.0 - floor), 0.999)
         sigma = 0.5 / np.sqrt(2.0 * np.log(1.0 / end))
         a = np.exp(-0.5 * ((x - 0.5) / sigma) ** 2)
         if specular:
             a = 1.0 + end - a  # vertical flip: ends at 1, valley at `end`
         return np.clip(a, floor, 1.0)
     if base == "linear":
-        finish = 1.0 - eta * (1.0 - floor)
+        finish = floor + eta * (1.0 - floor)
         a = 1.0 + (finish - 1.0) * x
     elif base == "logistic":
         # same endpoints as linear; affinely normalized so the raw logistic
         # hits them exactly despite its asymptotic tails
-        finish = 1.0 - eta * (1.0 - floor)
+        finish = floor + eta * (1.0 - floor)
         raw = 1.0 / (1.0 + np.exp(-10.0 * (0.5 - x)))
         raw = (raw - raw[-1]) / (raw[0] - raw[-1])
         a = finish + (1.0 - finish) * raw

@@ -9,6 +9,7 @@ def _():
     import marimo as mo
     import numpy as np
     import matplotlib.pyplot as plt
+
     return mo, np, plt
 
 
@@ -34,9 +35,10 @@ def _(np):
         """Guidance profile a_t in [floor, 1] over t = 0..T-1.
 
         eta in (0, 1] means, per mode:
-          gaussian    end level E = floor + eta*(1-floor): variance spread -- the
-                      bell's tails 'leave the box' as eta grows
-          linear      inclination: finish F = 1 - eta*(1-floor) (eta=1 -> floor)
+          gaussian    bell depth: end level E = floor + (1-eta)*(1-floor); peak 1
+                      mid-flow (eta->0 flat near 1, eta->1 tails sink to the floor)
+          linear      end level: 1 -> F with F = floor + eta*(1-floor)
+                      (eta->0 drops to the floor, eta->1 stays flat at 1)
           logistic    same endpoints as linear (1 -> F), S-shaped in between
           gap-closing the remaining-gap schedule (1-eta)^(t+1)
 
@@ -48,18 +50,18 @@ def _(np):
         x = np.linspace(0.0, 1.0, T)
 
         if mode == "gaussian":
-            end = min(floor + eta * (1.0 - floor), 0.999)
+            end = min(floor + (1.0 - eta) * (1.0 - floor), 0.999)
             sigma = 0.5 / np.sqrt(2.0 * np.log(1.0 / end))
             a = np.exp(-0.5 * ((x - 0.5) / sigma) ** 2)
             if specular:
                 a = 1.0 + end - a  # vertical flip: ends at 1, valley at `end`
         elif mode == "linear":
-            finish = 1.0 - eta * (1.0 - floor)
+            finish = floor + eta * (1.0 - floor)
             a = 1.0 + (finish - 1.0) * x
         elif mode == "logistic":
             # same endpoints as linear, S-shaped; affinely normalized so the raw
             # logistic hits the endpoints exactly despite its asymptotic tails
-            finish = 1.0 - eta * (1.0 - floor)
+            finish = floor + eta * (1.0 - floor)
             k = 10.0
             raw = 1.0 / (1.0 + np.exp(-k * (0.5 - x)))
             raw = (raw - raw[-1]) / (raw[0] - raw[-1])
@@ -72,6 +74,7 @@ def _(np):
         if specular and mode != "gaussian":
             a = a[::-1]
         return np.clip(a, floor, 1.0)
+
     return A_T_MODES, a_t_profile
 
 
@@ -80,7 +83,7 @@ def _(A_T_MODES, mo):
     mode_dropdown = mo.ui.dropdown(A_T_MODES, value="gaussian", label="mode: ")
     specular_checkbox = mo.ui.checkbox(label="specular twin")
     eta_slider = mo.ui.slider(0.01, 1.0, step=0.01, value=0.3, label="eta: ", show_value=True)
-    floor_slider = mo.ui.slider(0.0, 0.2, step=0.01, value=0.01, label="floor: ", show_value=True)
+    floor_slider = mo.ui.slider(0.0, 0.2, step=0.01, value=0.05, label="floor: ", show_value=True)
     T_slider = mo.ui.slider(5, 50, step=1, value=25, label="T: ", show_value=True)
     mo.hstack([mode_dropdown, specular_checkbox, eta_slider, floor_slider, T_slider],
               justify="start", align="center")
@@ -88,7 +91,17 @@ def _(A_T_MODES, mo):
 
 
 @app.cell
-def _(T_slider, a_t_profile, eta_slider, floor_slider, mo, mode_dropdown, np, plt, specular_checkbox):
+def _(
+    T_slider,
+    a_t_profile,
+    eta_slider,
+    floor_slider,
+    mo,
+    mode_dropdown,
+    np,
+    plt,
+    specular_checkbox,
+):
     _T = T_slider.value
     _a = a_t_profile(mode_dropdown.value, eta_slider.value, _T,
                      floor=floor_slider.value, specular=specular_checkbox.value)

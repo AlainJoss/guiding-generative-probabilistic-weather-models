@@ -80,8 +80,8 @@ class RolloutConfig:
     fgwnolr_w_init: float | None = None  # starting w
 
     # eta: shared profile parameter for FGWNOLR/FGWNOGAP/FGWNORM; its meaning
-    # depends on a_t_mode (closure rate for gap-closing, end level for gaussian,
-    # inclination for linear/logistic -- see a_t_profile in guided_diffusion.py)
+    # depends on a_t_mode (closure rate for gap-closing, bell depth for gaussian,
+    # end level for linear/logistic -- see a_t_profile in guided_diffusion.py)
     eta: float | None = None
 
     # a_t_mode: guidance profile shape (A_T_MODES in guided_diffusion.py:
