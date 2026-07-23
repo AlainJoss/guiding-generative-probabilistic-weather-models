@@ -1805,8 +1805,9 @@ def _(
                 # same_scale for the ABSOLUTE panels: shared range across x_det /
                 # x_gui_ung / x_gui (kept separate from the zero-centered diff limits)
                 _abs_dm_arrs = [arr for _lbl, arr in difference_panels if _lbl in _ABS_PANELS]
-                _abs_dm_vmin = min(float(np.nanmin(_zoom_lim(_a))) for _a in _abs_dm_arrs)
-                _abs_dm_vmax = max(float(np.nanmax(_zoom_lim(_a))) for _a in _abs_dm_arrs)
+                # guided mode has no absolute panels -> keep the shared-abs scale inert
+                _abs_dm_vmin = min((float(np.nanmin(_zoom_lim(_a))) for _a in _abs_dm_arrs), default=0.0)
+                _abs_dm_vmax = max((float(np.nanmax(_zoom_lim(_a))) for _a in _abs_dm_arrs), default=1.0)
 
                 difference_maps = {}
 
@@ -1947,8 +1948,9 @@ def _(
                 # same_scale for the ABSOLUTE panels: shared range across x_det /
                 # x_gui_ung / x_gui (kept separate from the zero-centered diff limits)
                 _abs_dm_arrs = [arr for _lbl, arr in difference_panels if _lbl in _ABS_PANELS]
-                _abs_dm_vmin = min(float(np.nanmin(_zoom_lim(_a))) for _a in _abs_dm_arrs)
-                _abs_dm_vmax = max(float(np.nanmax(_zoom_lim(_a))) for _a in _abs_dm_arrs)
+                # guided mode has no absolute panels -> keep the shared-abs scale inert
+                _abs_dm_vmin = min((float(np.nanmin(_zoom_lim(_a))) for _a in _abs_dm_arrs), default=0.0)
+                _abs_dm_vmax = max((float(np.nanmax(_zoom_lim(_a))) for _a in _abs_dm_arrs), default=1.0)
 
                 difference_maps = {}
 

@@ -20,8 +20,8 @@ from geoarches.paths import STATS_PATH
 # specular twin ("-spec": time reversal; vertical flip for the time-symmetric
 # gaussian). eta is the single shared parameter, used differently per mode.
 A_T_MODES = [
-    "gaussian", "linear", "logistic", "gap-closing",
-    "gaussian-spec", "linear-spec", "logistic-spec", "gap-closing-spec",
+    "gaussian", "linear", "logistic", "exponential", "gap-closing", "spike",
+    "gaussian-spec", "linear-spec", "logistic-spec", "exponential-spec", "gap-closing-spec", "spike-spec",
 ]
 
 
@@ -29,12 +29,17 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
     """Guidance profile a_t in [floor, 1] over t = 0..T-1.
 
     eta in (0, 1] means, per mode:
-      gaussian    bell depth: end level E = floor + (1-eta)*(1-floor); peak 1
-                  mid-flow (eta->0 flat near 1, eta->1 tails sink to the floor)
+      gaussian    end level E = floor + eta*(1-floor); peak 1 mid-flow
+                  (eta->0 deep bell with tails at the floor, eta->1 flat)
       linear      end level: 1 -> F with F = floor + eta*(1-floor)
                   (eta->0 drops to the floor, eta->1 stays flat at 1)
       logistic    same endpoints as linear (1 -> F), S-shaped in between
+      exponential same endpoints as linear (1 -> F), geometric decay F^x
+                  (convex: front-loaded drop, flattening toward F)
       gap-closing the remaining-gap schedule (1-eta)^(t+1)
+      spike       guide at ONE step: index round(eta*(T-1)) (eta->0 first step,
+                  eta=1 last tick, which the sampler never guides anyway);
+                  ZERO elsewhere (floor not applied)
     "-spec" suffix: time reversal (monotone modes) / vertical flip (gaussian).
     """
     specular = mode.endswith("-spec")
@@ -43,8 +48,13 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
     floor = float(np.clip(floor, 0.0, 0.99))
     x = np.linspace(0.0, 1.0, T)
 
+    if base == "spike":
+        a = np.zeros(T)
+        a[int(round(eta * (T - 1)))] = 1.0
+        return a[::-1] if specular else a
+
     if base == "gaussian":
-        end = min(floor + (1.0 - eta) * (1.0 - floor), 0.999)
+        end = min(floor + eta * (1.0 - floor), 0.999)
         sigma = 0.5 / np.sqrt(2.0 * np.log(1.0 / end))
         a = np.exp(-0.5 * ((x - 0.5) / sigma) ** 2)
         if specular:
@@ -60,6 +70,10 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
         raw = 1.0 / (1.0 + np.exp(-10.0 * (0.5 - x)))
         raw = (raw - raw[-1]) / (raw[0] - raw[-1])
         a = finish + (1.0 - finish) * raw
+    elif base == "exponential":
+        # geometric decay hitting the linear/logistic endpoints exactly
+        finish = floor + eta * (1.0 - floor)
+        a = finish ** x
     elif base == "gap-closing":
         a = (1.0 - eta) ** (np.arange(T) + 1)
     else:

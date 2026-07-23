@@ -29,17 +29,20 @@ def _(mo):
 
 @app.cell
 def _(np):
-    A_T_MODES = ["gaussian", "linear", "logistic", "gap-closing"]
+    A_T_MODES = ["gaussian", "linear", "logistic", "exponential", "gap-closing", "spike"]
 
     def a_t_profile(mode, eta, T, floor=0.01, specular=False):
         """Guidance profile a_t in [floor, 1] over t = 0..T-1.
 
         eta in (0, 1] means, per mode:
-          gaussian    bell depth: end level E = floor + (1-eta)*(1-floor); peak 1
-                      mid-flow (eta->0 flat near 1, eta->1 tails sink to the floor)
+          gaussian    end level E = floor + eta*(1-floor); peak 1 mid-flow
+                      (eta->0 deep bell with tails at the floor, eta->1 flat)
           linear      end level: 1 -> F with F = floor + eta*(1-floor)
                       (eta->0 drops to the floor, eta->1 stays flat at 1)
           logistic    same endpoints as linear (1 -> F), S-shaped in between
+          exponential same endpoints as linear (1 -> F), geometric decay F^x
+          spike       guide at ONE step: index round(eta*(T-1)) (eta->0 first step,
+                      eta=1 last tick); ZERO elsewhere (floor not applied)
           gap-closing the remaining-gap schedule (1-eta)^(t+1)
 
         specular: time reversal (linear/logistic/gap-closing); the gaussian is
@@ -49,8 +52,12 @@ def _(np):
         floor = float(np.clip(floor, 0.0, 0.99))
         x = np.linspace(0.0, 1.0, T)
 
+        if mode == "spike":
+            a = np.zeros(T)
+            a[int(round(eta * (T - 1)))] = 1.0
+            return a[::-1] if specular else a
         if mode == "gaussian":
-            end = min(floor + (1.0 - eta) * (1.0 - floor), 0.999)
+            end = min(floor + eta * (1.0 - floor), 0.999)
             sigma = 0.5 / np.sqrt(2.0 * np.log(1.0 / end))
             a = np.exp(-0.5 * ((x - 0.5) / sigma) ** 2)
             if specular:
@@ -66,6 +73,12 @@ def _(np):
             raw = 1.0 / (1.0 + np.exp(-k * (0.5 - x)))
             raw = (raw - raw[-1]) / (raw[0] - raw[-1])
             a = finish + (1.0 - finish) * raw
+        elif mode == "exponential":
+            # geometric decay hitting the linear/logistic endpoints exactly:
+            # a(x) = F^x with F = floor + eta*(1-floor) -- convex (front-loaded
+            # drop, then flattening toward the end level F)
+            finish = floor + eta * (1.0 - floor)
+            a = finish ** x
         elif mode == "gap-closing":
             a = (1.0 - eta) ** (np.arange(T) + 1)
         else:
