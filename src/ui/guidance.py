@@ -559,46 +559,165 @@ def _(mo, sweep_params_widget):
 
 @app.cell
 def _(
+    config,
     experiment_params,
+    get_gt_rollout,
+    get_mask_2d,
     get_rollout,
     iter_sweeps,
     mo,
     notebook_mode,
+    np,
     rollout_id,
     sweep_coord_label,
+    xr,
 ):
-    # experiments table: one row per sweep point, ✅ = already run (the zarr
-    # containers are NaN-initialized, so a fully non-NaN region means the sweep ran)
+    # experiments tables (side by side):
+    #   LEFT  -- run status per sweep point (zarrs are NaN-initialized, so
+    #            all-finite = ran)
+    #   RIGHT -- Δtarget per guided (n, m): SIGNED relative miss
+    #            (M(x_gui) - A) / |A - base|, A = (1 + phi_n) * base (rollout.py),
+    #            evaluated with EACH ROW'S OWN mask (MASK_MODE / sigma_div can be
+    #            swept); ❌ marks |Δtarget| > 5%; phi_n = 0 steps not guided -> blank
     if notebook_mode == "analyze_rollout" and rollout_id is not None:
         try:
             _gui_ds = get_rollout("gui", rollout_id)
             _probe_var = list(_gui_ds.data_vars)[0]
         except (FileNotFoundError, KeyError):
             _gui_ds = None
+        try:
+            _ung_ds = get_rollout("ung", rollout_id)
+        except (FileNotFoundError, KeyError):
+            _ung_ds = None
         _swept_axes = [_k for _k, _v in experiment_params.items() if len(_v) > 1]
+        _sweeps = list(iter_sweeps(experiment_params))
+
+        # row order: a_t_mode first IN SWEEP ORDER, then peak@, then sigma_div
+        _am_order = {str(_v): _j for _j, _v in enumerate(experiment_params.get("a_t_mode") or [])}
+
+        def _sort_key(_sw):
+            _rest = [str(_sw[_k]) for _k in _swept_axes
+                     if _k not in ("a_t_mode", "GUIDANCE_DELTA", "sigma_div")]
+            return (_am_order.get(str(_sw.get("a_t_mode", "")), -1),
+                    max(_sw["GUIDANCE_DELTA"]) if "GUIDANCE_DELTA" in _sw else 0.0,
+                    float(_sw.get("sigma_div") or 0.0),
+                    _rest)
+
+        _sweeps.sort(key=_sort_key)
+        _REL_TOL = 0.05  # achieved change may be within 5% of the requested change
 
         def _fmt(_k, _v):
             if _k == "GUIDANCE_DELTA":
                 return f"peak@{100 * max(_v):+.3g}%"
             return str(_v)
 
-        _rows_md = []
-        for _sw in iter_sweeps(experiment_params):
+        _tda2 = None
+        if _gui_ds is not None and config is not None and config.VAR in _gui_ds:
+            _tda2 = _gui_ds[config.VAR]
+            if "level" in _tda2.dims:
+                _tda2 = _tda2.sel(level=config.LEVEL)
+
+        # per-row mask + per-mask baselines anchoring A = (1 + phi_n) * base
+        _mask_cache, _base_cache = {}, {}
+
+        def _row_mask(_sw):
+            _mm2 = str(_sw.get("MASK_MODE") or config.MASK_MODE or "BBOX")
+            _sg2 = float(_sw.get("sigma_div") or config.sigma_div or 2.0)
+            _key = (_mm2, _sg2)
+            if _key not in _mask_cache:
+                _mask_cache[_key] = xr.DataArray(
+                    np.asarray(get_mask_2d(_mm2, config.MASK_CORNERS, sigma_div=_sg2)),
+                    dims=("latitude", "longitude"),
+                    coords={"latitude": _gui_ds.latitude, "longitude": _gui_ds.longitude})
+            return _key, _mask_cache[_key]
+
+        def _base_for(_key, _mda2):
+            if _key in _base_cache:
+                return _base_cache[_key]
+            _b2 = None
+            if config.GUI_REF == "GT":
+                _gt2 = get_gt_rollout(config.N + 1, config.START_TS)[config.VAR]
+                if "level" in _gt2.dims:
+                    _gt2 = _gt2.sel(level=config.LEVEL)
+                _b2 = np.asarray((_gt2.astype("float64") * _mda2)
+                                 .sum(("latitude", "longitude")).compute())[1:]  # (N,)
+            elif _ung_ds is not None and config.VAR in _ung_ds:
+                _u2 = _ung_ds[config.VAR]
+                if "t" in _u2.dims:
+                    _u2 = _u2.isel(t=-1)
+                if "level" in _u2.dims:
+                    _u2 = _u2.sel(level=config.LEVEL)
+                _b2 = np.asarray((_u2.astype("float64") * _mda2)
+                                 .sum(("latitude", "longitude")).compute())  # (M, N)
+            _base_cache[_key] = _b2
+            return _b2
+
+        _rans, _rels = [], []
+        for _sw in _sweeps:
             _sel = {_k: sweep_coord_label(_k, _v, experiment_params) for _k, _v in _sw.items()}
+            _ran = False
             if _gui_ds is not None:
                 try:
                     _ran = bool(_gui_ds[_probe_var].sel(_sel).notnull().all().compute())
                 except (KeyError, ValueError):
                     _ran = False
-            else:
-                _ran = False
-            _rows_md.append(
-                "| " + ("✅" if _ran else "") + " | "
-                + " | ".join(_fmt(_k, _sw[_k]) for _k in _swept_axes) + " |"
-            )
-        _header = "| run | " + " | ".join(_swept_axes) + " |"
-        _sep = "|" + "---|" * (len(_swept_axes) + 1)
-        experiments_table = mo.md("\n".join([_header, _sep, *_rows_md]))
+            _rans.append(_ran)
+            _r = None
+            if _ran and _tda2 is not None:
+                try:
+                    _mkey, _mda2 = _row_mask(_sw)
+                    _b2 = _base_for(_mkey, _mda2)
+                    if _b2 is not None:
+                        _g2 = np.asarray((
+                            _tda2.sel({_k: _v for _k, _v in _sel.items() if _k in _tda2.dims})
+                            .astype("float64") * _mda2).sum(("latitude", "longitude")).compute())
+                        _r = {}
+                        for _n2, _p2 in enumerate(_sw.get("GUIDANCE_DELTA") or []):
+                            if _n2 >= _g2.shape[1] or float(_p2) == 0.0:
+                                continue  # phi_n = 0 -> step not guided
+                            _bb = _b2[_n2] if _b2.ndim == 1 else _b2[:, _n2]
+                            _aa = (1.0 + float(_p2)) * _bb
+                            _gp = np.maximum(np.abs(float(_p2) * _bb), 1e-12)  # |A - base|
+                            _rr = np.atleast_1d((_g2[:, _n2] - _aa) / _gp)
+                            for _m2 in range(_g2.shape[0]):
+                                if np.isfinite(_rr[_m2]):
+                                    _r[(_n2, _m2)] = float(_rr[_m2])
+                except (KeyError, ValueError):
+                    _r = None
+            _rels.append(_r)
+
+        _ax_cells = lambda _sw: " | ".join(_fmt(_k, _sw[_k]) for _k in _swept_axes)
+
+        _run_md = ["| run | " + " | ".join(_swept_axes) + " |",
+                   "|" + "---|" * (len(_swept_axes) + 1)]
+        for _ran, _sw in zip(_rans, _sweeps):
+            _run_md.append("| " + ("✅" if _ran else "") + " | " + _ax_cells(_sw) + " |")
+
+        _nm_cols = sorted({_nm for _r in _rels if _r for _nm in _r})
+
+        def _cell(_r, _nm):
+            if not _r or _nm not in _r:
+                return ""
+            _v = _r[_nm]
+            return ("" if abs(_v) <= _REL_TOL else "❌ ") + f"{100 * _v:+.1f}%"
+
+        if _nm_cols:
+            _tgt_md = ["| " + " | ".join(_swept_axes) + " | "
+                       + " | ".join(f"n={_n2}, m={_m2}" for _n2, _m2 in _nm_cols) + " |",
+                       "|" + "---|" * (len(_swept_axes) + len(_nm_cols))]
+            for _r, _sw in zip(_rels, _sweeps):
+                _tgt_md.append("| " + _ax_cells(_sw) + " | "
+                               + " | ".join(_cell(_r, _nm) for _nm in _nm_cols) + " |")
+            _tgt_view = mo.md("\n".join(_tgt_md))
+        else:
+            _tgt_view = mo.md(r"*(no baseline store -- $\Delta$target unavailable)*")
+
+        experiments_table = mo.hstack(
+            [mo.vstack([mo.md("**runs**"), mo.md("\n".join(_run_md))], align="start"),
+             mo.vstack([mo.md(r"**$\Delta$target** -- signed relative miss "
+                              r"$(M(x^{gui}) - A)\,/\,|A - \mathrm{base}|$; ❌ marks $|\cdot| > 5\%$"),
+                        _tgt_view], align="start")],
+            justify="start", align="start", gap=2.0, wrap=True)
     else:
         experiments_table = None
     experiments_table
@@ -1134,7 +1253,7 @@ def _(config, mo, n_deltas_slider, notebook_mode):
         _dc = {}
         for _i in range(n_deltas_slider.value):
             _dc[f"{_i}.start"]    = mo.ui.number(value=0.0, label=f"profile {_i} — start %: ")
-            _dc[f"{_i}.peak"]     = mo.ui.number(value=5.0, label="peak %: ")
+            _dc[f"{_i}.peak"]     = mo.ui.number(value=0.1, label="peak %: ")
             _dc[f"{_i}.start_at"] = mo.ui.slider(0, config.N, step=1, value=0, label="start@n: ", show_value=True, debounce=True)
             _dc[f"{_i}.stop_at"]  = mo.ui.slider(1, config.N, step=1, value=config.N, label=get_label("stop@n", config.N), show_value=True, debounce=True)
         delta_controls = mo.ui.dictionary(_dc)
@@ -4487,13 +4606,13 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     NUMERIC_AXES = {
         # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
         # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
-        "fgwnolr_w_init": (1000.0, 5000.0, False, False),
+        "fgwnolr_w_init": (5000.0, 10000.0, False, False),
         # eta: shared profile parameter (meaning depends on a_t_mode -- closure rate
         # for gap-closing, bell depth for gaussian, end level for linear/logistic)
         "eta":            (0.01,  1.0,   False, False),
         # sigma_div: mask hyper shared by ALL mask modes -- extent / sigma_div
         # (2.0 = base box, 4.0 = half, 1.0 = double)
-        "sigma_div":      (2.0,   4.0,   False, False),
+        "sigma_div":      (0.5,   4.0,   False, False),
         # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
         "phi":            (0.01,  1.0,   True,  False),
         # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO search

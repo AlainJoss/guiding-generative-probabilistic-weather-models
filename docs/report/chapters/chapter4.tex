@@ -41,6 +41,16 @@ In the weather domain however, we can define a target that can be closed by tuni
 
 This is great because instead of tuning the guidance strength to find a range of plausible results, we can define what plausible results look like a priori (guidance target sampling trajectory defined through historical data and plausibility tests), and optimize the guidance strength to achieve this target. 
 
+
+
+We essentially have a very similar setting to the guided diffusion for precipitation paper, but we make it more general in these ways:
+\begin{itemize}
+    \item we define a guidance target explictly, in contrast to observe results across different lambdas
+    \item we experiment with different $a_t$ trajectories, in addition to guiding computing the gradient at the first step
+    \item we test level of intensity by shifting the intenisty parameter from the flow (lambda) to the trajectory definition ($phi_n$)
+    \item Our loss is driven to zero in terms of the difference from the target, instead of being minimized iteratively (a more explicit way to encode the target scenario)
+\end{itemize}
+
 \section{Guidance method}
 
 Assumption about using the gradient.

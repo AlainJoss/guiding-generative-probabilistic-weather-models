@@ -6,11 +6,11 @@
 \contentsline {section}{\numberline {4.1}Mask}{5}{section.4.1}%
 \contentsline {section}{\numberline {4.2}Target trajectory}{5}{section.4.2}%
 \contentsline {section}{\numberline {4.3}Guidance loss}{6}{section.4.3}%
-\contentsline {section}{\numberline {4.4}Guidance method}{6}{section.4.4}%
+\contentsline {section}{\numberline {4.4}Guidance method}{7}{section.4.4}%
 \contentsline {section}{\numberline {4.5}Guidance algorithms}{7}{section.4.5}%
 \contentsline {subsection}{\numberline {4.5.1}CLOSE-GAP}{7}{subsection.4.5.1}%
 \contentsline {subsection}{\numberline {4.5.2}OPTIMIZE-GAIN}{7}{subsection.4.5.2}%
 \contentsline {subsection}{\numberline {4.5.3}OPTIMIZE-SCHEDULE}{7}{subsection.4.5.3}%
-\contentsline {chapter}{\numberline {5}Related Work}{8}{chapter.5}%
+\contentsline {chapter}{\numberline {5}Related Work}{9}{chapter.5}%
 \contentsline {chapter}{Appendices}{}{section*.5}
-\contentsline {chapter}{\numberline {A}Appendix}{10}{appendix.A}%
+\contentsline {chapter}{\numberline {A}Appendix}{11}{appendix.A}%

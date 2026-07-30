@@ -61,6 +61,7 @@ def _():
         np,
         plot_trajectory,
         plt,
+        residual_scaler,
         sweep_coord_label,
         to_display_units,
         visualize_map,
@@ -168,46 +169,81 @@ def _(
     SWEEP,
     config,
     get_gt_rollout,
+    get_mask_2d,
     iter_sweeps,
-    mask_np,
     mo,
     np,
     stores,
     sweep_coord_label,
     xr,
 ):
-    # experiments table (guidance-notebook view): one row per sweep point,
-    # ✅ = fully run (the zarr containers are NaN-initialized, so all-finite = ran)
-    # 🎯 = guidance target achieved: worst RELATIVE miss over all guided (m, n),
-    #      |M(x_gui) - A| / |A - base| = |e| / |phi_n * base|, within 5% of the
-    #      requested change (much more generous than the optimizer's 1e-6 on e^2)
+    # experiments tables (Experiment section, side by side):
+    #   LEFT  -- run status per sweep point (zarrs are NaN-initialized, so
+    #            all-finite = ran)
+    #   RIGHT -- Δtarget per guided (n, m): SIGNED relative miss
+    #            (M(x_gui) - A) / |A - base|, A = (1 + phi_n) * base (rollout.py);
+    #            ❌ marks |Δtarget| > 5%; phi_n = 0 steps are not guided -> blank
     if stores["gui"] is not None:
         _probe_var = list(stores["gui"].data_vars)[0]
         _swept_axes = [_k for _k, _v in SWEEP.items() if isinstance(_v, list) and len(_v) > 1]
+        _sweeps = list(iter_sweeps(SWEEP))
+
+        # row order: a_t_mode first IN SWEEP ORDER (as authored in the selector),
+        # then peak@ (GUIDANCE_DELTA), then sigma_div, then any remaining axes
+        _am_order = {str(_v): _j for _j, _v in enumerate(SWEEP.get("a_t_mode") or [])}
+
+        def _sort_key(_sw):
+            _rest = [str(_sw[_k]) for _k in _swept_axes
+                     if _k not in ("a_t_mode", "GUIDANCE_DELTA", "sigma_div")]
+            return (_am_order.get(str(_sw.get("a_t_mode", "")), -1),
+                    max(_sw["GUIDANCE_DELTA"]) if "GUIDANCE_DELTA" in _sw else 0.0,
+                    float(_sw.get("sigma_div") or 0.0),
+                    _rest)
+
+        _sweeps.sort(key=_sort_key)
 
         _REL_TOL = 0.05  # achieved change may be within 5% of the requested change
         _tda = stores["gui"][config.VAR]
         if "level" in _tda.dims:
             _tda = _tda.sel(level=config.LEVEL)
-        _mda = xr.DataArray(mask_np, dims=("latitude", "longitude"),
-                            coords={"latitude": stores["gui"].latitude,
-                                    "longitude": stores["gui"].longitude})
-        # baseline masked means anchoring A = (1 + phi_n) * base (rollout.py)
-        _base = None
-        if config.GUI_REF == "GT":
-            _gt_t = get_gt_rollout(config.N + 1, config.START_TS)[config.VAR]
-            if "level" in _gt_t.dims:
-                _gt_t = _gt_t.sel(level=config.LEVEL)
-            _b = (_gt_t.astype("float64") * _mda).sum(("latitude", "longitude")).compute()
-            _base = np.asarray(_b)[1:]  # guidance step n -> valid time n+1; (N,)
-        elif stores["ung"] is not None and config.VAR in stores["ung"]:
-            _uda = stores["ung"][config.VAR]
-            if "t" in _uda.dims:
-                _uda = _uda.isel(t=-1)
-            if "level" in _uda.dims:
-                _uda = _uda.sel(level=config.LEVEL)
-            _base = np.asarray((_uda.astype("float64") * _mda)
-                               .sum(("latitude", "longitude")).compute())  # (M, N)
+
+        # each row is evaluated with ITS OWN mask (MASK_MODE / sigma_div can be
+        # swept axes, and the rollout target uses that row's mask); baselines
+        # anchoring A = (1 + phi_n) * base (rollout.py) are cached per mask
+        _mask_cache, _base_cache = {}, {}
+
+        def _row_mask(_sw):
+            _mm2 = str(_sw.get("MASK_MODE") or config.MASK_MODE or "BBOX")
+            _sg2 = float(_sw.get("sigma_div") or config.sigma_div or 2.0)
+            _key = (_mm2, _sg2)
+            if _key not in _mask_cache:
+                _mask_cache[_key] = xr.DataArray(
+                    np.asarray(get_mask_2d(_mm2, config.MASK_CORNERS, sigma_div=_sg2)),
+                    dims=("latitude", "longitude"),
+                    coords={"latitude": stores["gui"].latitude,
+                            "longitude": stores["gui"].longitude})
+            return _key, _mask_cache[_key]
+
+        def _base_for(_key, _mda2):
+            if _key in _base_cache:
+                return _base_cache[_key]
+            _b2 = None
+            if config.GUI_REF == "GT":
+                _gt_t = get_gt_rollout(config.N + 1, config.START_TS)[config.VAR]
+                if "level" in _gt_t.dims:
+                    _gt_t = _gt_t.sel(level=config.LEVEL)
+                _b2 = np.asarray((_gt_t.astype("float64") * _mda2)
+                                 .sum(("latitude", "longitude")).compute())[1:]  # (N,)
+            elif stores["ung"] is not None and config.VAR in stores["ung"]:
+                _uda = stores["ung"][config.VAR]
+                if "t" in _uda.dims:
+                    _uda = _uda.isel(t=-1)
+                if "level" in _uda.dims:
+                    _uda = _uda.sel(level=config.LEVEL)
+                _b2 = np.asarray((_uda.astype("float64") * _mda2)
+                                 .sum(("latitude", "longitude")).compute())  # (M, N)
+            _base_cache[_key] = _b2
+            return _b2
 
 
         def _fmt_sw(_k, _v):
@@ -216,43 +252,77 @@ def _(
             return str(_v)
 
 
-        def _tgt_cell(_sel3, _phis):
-            # worst relative miss |e| / |A - base| across guided steps vs the 5% allowance
+        def _rel_miss(_sel3, _phis, _sw):
+            # {(n, m): signed relative miss}; None when no baseline is available
+            _key, _mda2 = _row_mask(_sw)
+            _base = _base_for(_key, _mda2)
             if _base is None:
-                return "?"
-            _gm = np.asarray((_tda.sel(_sel3).astype("float64") * _mda)
+                return None
+            _gm = np.asarray((_tda.sel(_sel3).astype("float64") * _mda2)
                              .sum(("latitude", "longitude")).compute())  # (M, N)
-            _worst, _any = 0.0, False
+            _out = {}
             for _n2, _p2 in enumerate(_phis):
                 if _n2 >= _gm.shape[1] or float(_p2) == 0.0:
                     continue  # phi_n = 0 -> step not guided (rollout.py copies ung)
-                _any = True
                 _b2 = _base[_n2] if _base.ndim == 1 else _base[:, _n2]
+                _a2 = (1.0 + float(_p2)) * _b2
                 _gap = np.maximum(np.abs(float(_p2) * _b2), 1e-12)  # |A - base|
-                _rel = np.abs(_gm[:, _n2] - (1.0 + float(_p2)) * _b2) / _gap
-                _worst = max(_worst, float(np.nanmax(_rel)))
-            if not _any:
-                return ""
-            return ("🎯" if _worst <= _REL_TOL else "❌") + f" {100 * _worst:.1f}%"
+                _r = np.atleast_1d((_gm[:, _n2] - _a2) / _gap)
+                for _m2 in range(_gm.shape[0]):
+                    if np.isfinite(_r[_m2]):
+                        _out[(_n2, _m2)] = float(_r[_m2])
+            return _out
 
 
-        _rows_md = []
-        for _sw in iter_sweeps(SWEEP):
+        _rans, _rels = [], []
+        for _sw in _sweeps:
             _sel2 = {_k: sweep_coord_label(_k, _v, SWEEP) for _k, _v in _sw.items()}
             try:
                 _ran = bool(stores["gui"][_probe_var].sel(_sel2).notnull().all().compute())
             except (KeyError, ValueError):
                 _ran = False
+            _rans.append(_ran)
             try:
-                _tcell = _tgt_cell({_k: _v for _k, _v in _sel2.items() if _k in _tda.dims},
-                                   _sw.get("GUIDANCE_DELTA") or []) if _ran else ""
+                _rels.append(_rel_miss({_k: _v for _k, _v in _sel2.items() if _k in _tda.dims},
+                                       _sw.get("GUIDANCE_DELTA") or [], _sw) if _ran else None)
             except (KeyError, ValueError):
-                _tcell = ""
-            _rows_md.append("| " + ("✅" if _ran else "") + " | " + _tcell + " | "
-                            + " | ".join(_fmt_sw(_k, _sw[_k]) for _k in _swept_axes) + " |")
-        _header = "| run | target | " + " | ".join(_swept_axes) + " |"
-        _sep = "|" + "---|" * (len(_swept_axes) + 2)
-        experiments_table_ic = mo.md("\n".join([_header, _sep, *_rows_md]))
+                _rels.append(None)
+
+        _ax_cells = lambda _sw: " | ".join(_fmt_sw(_k, _sw[_k]) for _k in _swept_axes)
+
+        # LEFT: run table
+        _run_md = ["| run | " + " | ".join(_swept_axes) + " |",
+                   "|" + "---|" * (len(_swept_axes) + 1)]
+        for _ran, _sw in zip(_rans, _sweeps):
+            _run_md.append("| " + ("✅" if _ran else "") + " | " + _ax_cells(_sw) + " |")
+
+        # RIGHT: Δtarget table over the union of guided (n, m) columns
+        _nm_cols = sorted({_nm for _r in _rels if _r for _nm in _r})
+
+
+        def _cell(_r, _nm):
+            if not _r or _nm not in _r:
+                return ""
+            _v = _r[_nm]
+            return ("🎯" if abs(_v) <= _REL_TOL else "❌ ") + f"{100 * _v:+.1f}%"
+
+
+        if _nm_cols:
+            _tgt_md = ["| " + " | ".join(_swept_axes) + " | "
+                       + " | ".join(f"n={_n2}, m={_m2}" for _n2, _m2 in _nm_cols) + " |",
+                       "|" + "---|" * (len(_swept_axes) + len(_nm_cols))]
+            for _r, _sw in zip(_rels, _sweeps):
+                _tgt_md.append("| " + _ax_cells(_sw) + " | "
+                               + " | ".join(_cell(_r, _nm) for _nm in _nm_cols) + " |")
+            _tgt_view = mo.md("\n".join(_tgt_md))
+        else:
+            _tgt_view = mo.md(r"*(no baseline store -- $\Delta$target unavailable)*")
+
+        experiments_table_ic = mo.hstack(
+            [mo.vstack([mo.md("**runs**"), mo.md("\n".join(_run_md))], align="start"),
+             mo.vstack([mo.md(r"**$\Delta$target**"),
+                        _tgt_view], align="start")],
+            justify="start", align="start", gap=2.0, wrap=True)
     else:
         experiments_table_ic = None
     experiments_table_ic
@@ -586,11 +656,18 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(dpi_slider, mo, sweep_params_row_ic, weather_n_slider, zoom_slider):
+def _(
+    contour_color_dropdown,
+    dpi_slider,
+    mo,
+    sweep_params_row_ic,
+    weather_n_slider,
+    zoom_slider,
+):
     mo.vstack([
         mo.md(r"""## Mask"""),
         sweep_params_row_ic(),
-        mo.hstack([zoom_slider, weather_n_slider, dpi_slider], justify="start", align="center"),
+        mo.hstack([zoom_slider, weather_n_slider, dpi_slider, contour_color_dropdown], justify="start", align="center"),
     ], align="start")
     return
 
@@ -600,6 +677,7 @@ def _(
     add_map_stats_ic,
     base_sel,
     config,
+    contour_color_dropdown,
     cool_half_cmap,
     dpi_slider,
     get_gt_rollout,
@@ -640,7 +718,7 @@ def _(
         title=f"{config.VAR} | level={config.LEVEL}" + (f" | [{_w_unit}]" if _w_unit else ""),
         mask_2d=mask, show_mask=True,
         contour_2d=None if str(base_sel.get("MASK_MODE", "BBOX")) == "BBOX" else mask,
-        contour_levels=8, contour_color="black", contour_linewidth=0.5,
+        contour_levels=8, contour_color=contour_color_dropdown.value, contour_linewidth=0.5,
         zoom=zoom_slider.value, zoom_center_lon=_lon_c, zoom_center_lat=_lat_c,
         figsize=(10, 5.5), dpi=dpi_slider.value, interactive=False,
     )
@@ -654,7 +732,7 @@ def _(
         vmin=_mmin if _mmin < _mmax else -0.001, vmax=_mmax if _mmin < _mmax else 0.001,
         center=(None if _mmin == 0.0 else 0.5 * (_mmin + _mmax)) if _mmin < _mmax else 0.0,
         title="mask", contour_2d=None if str(base_sel.get("MASK_MODE", "BBOX")) == "BBOX" else mask_np,
-        contour_levels=8, contour_color="black", contour_linewidth=0.5,
+        contour_levels=8, contour_color=contour_color_dropdown.value, contour_linewidth=0.5,
         zoom=zoom_slider.value, zoom_center_lon=_lon_c, zoom_center_lat=_lat_c,
         figsize=(10, 5.5), dpi=dpi_slider.value, interactive=False,
     )
@@ -1488,11 +1566,18 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    contour_color_dropdown = mo.ui.dropdown(["dimgray", "white", "black"], value="black", label="contour color: ")
+    return (contour_color_dropdown,)
+
+
+@app.cell(hide_code=True)
 def _(
     chart_mode_dropdown,
     charts_displayed_dropdown,
     compare_by_dropdown,
     contour_checkbox,
+    contour_color_dropdown,
     contour_levels_slider,
     dpi_slider,
     m_slider,
@@ -1509,7 +1594,7 @@ def _(
         sweep_params_row_ic(),
         mo.hstack([xgui_var_dropdown, compare_by_dropdown, chart_mode_dropdown, m_slider], justify="start", align="center"),
         mo.hstack([xgui_norm_mode_dropdown, xgui_zoom_scale_checkbox, zoom_slider, dpi_slider, stats_scope_dropdown], justify="start", align="center"),
-        mo.hstack([show_mask_switch, contour_checkbox, contour_levels_slider, charts_displayed_dropdown], justify="start", align="center"),
+        mo.hstack([show_mask_switch, contour_checkbox, contour_levels_slider, contour_color_dropdown, charts_displayed_dropdown], justify="start", align="center"),
     ], align="start")
     return
 
@@ -1525,6 +1610,7 @@ def _(
     compare_by_dropdown,
     config,
     contour_checkbox,
+    contour_color_dropdown,
     contour_levels_slider,
     cool_half_cmap,
     delta_labels,
@@ -1610,7 +1696,7 @@ def _(
             _d, cmap=_cmap, vmin=_vmin, vmax=_vmax, center=_center,
             mask_2d=mask, show_mask=show_mask_switch.value, title=_title,
             contour_2d=_d if contour_checkbox.value else None,
-            contour_levels=contour_levels_slider.value, contour_color="dimgray",
+            contour_levels=contour_levels_slider.value, contour_color=contour_color_dropdown.value,
             contour_linewidth=0.4, figsize=(7.0, 3.9), dpi=dpi_slider.value,
             zoom=zoom_slider.value, zoom_center_lon=_clon, zoom_center_lat=_clat,
             interactive=False,
@@ -1890,6 +1976,391 @@ def _(
     else:
         norms_cross_block = None
     norms_cross_block
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Latent trajectories (PCA)
+
+    Guided clean-pred trajectories $\hat{x}_t$ (mask-bbox pixels, flattened) in a fixed PCA
+    frame of daily ERA5 states (gray cloud). **Solid**: guided; **dashed**: the run's same-seed
+    `gui_ung` twin; **★** GT at the valid day; **○** the independent unguided rollout's final.
+    Pick what to **compare** (intensity, $n$, …) — compared values fan out as fading greens;
+    everything else is pinned.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
+    # ===== latent trajectories: rollout records, bbox latents, PCA frame =====
+    from datetime import datetime as _lt_datetime, timedelta as _lt_timedelta
+    from src.ui.comparison import (
+        channel as _lt_channel,
+        clean_pred_branches as _lt_branches,
+        clean_pred_trajectory as _lt_trajf,
+        gt_states as _lt_gt_states,
+        load_rollout as _lt_load_rollout,
+        open_store as _lt_open_store,
+        select_point as _lt_select_point,
+        sweep_points as _lt_sweep_points,
+    )
+
+    _lt_dir, _lt_cfg, lt_sweep_values, _lt_records, _lt_mask = _lt_load_rollout(ROLLOUT_ID)
+    lt_points = _lt_sweep_points(lt_sweep_values, _lt_records)
+    _lt_VAR, _lt_LEVEL = _lt_cfg["VAR"], _lt_cfg["LEVEL"]
+    _lt_start = _lt_datetime.fromisoformat(_lt_cfg["START_TS"])
+    _lt_c = residual_scaler(_lt_cfg["PARTITION"], _lt_VAR, _lt_LEVEL)
+
+    # bbox footprint of the mask at half max -> flattened feature vectors
+    _lt_rows, _lt_cols = np.where(np.asarray(_lt_mask) >= 0.5 * float(np.asarray(_lt_mask).max()))
+    _LT_BBOX = (slice(int(_lt_rows.min()), int(_lt_rows.max()) + 1),
+                slice(int(_lt_cols.min()), int(_lt_cols.max()) + 1))
+
+
+    def lt_bbox_latent(_field):
+        _field = np.asarray(_field, dtype=float)
+        return _field[..., _LT_BBOX[0], _LT_BBOX[1]].reshape(*_field.shape[:-2], -1)
+
+
+    def _lt_gt_cloud(_days_back):
+        # daily GT states ending just before the rollout start (shrinks if short)
+        _err = None
+        for _days in (_days_back, _days_back // 2, _days_back // 4, 7):
+            try:
+                _da = _lt_channel(get_gt_rollout(_days, _lt_start - _lt_timedelta(days=_days + 2))[_lt_VAR], _lt_cfg)
+                return lt_bbox_latent(_da.values)
+            except Exception as _e:
+                _err = _e
+        raise RuntimeError(f"no GT cloud loadable: {_err}")
+
+
+    lt_pca_cloud = _lt_gt_cloud(60)
+    _lt_mu = lt_pca_cloud.mean(axis=0)
+    _lt_u, _lt_sv, _lt_vt = np.linalg.svd(lt_pca_cloud - _lt_mu, full_matrices=False)
+    _lt_basis = _lt_vt[:3].T
+    lt_pca_project = lambda _x: (_x - _lt_mu) @ _lt_basis
+    lt_pca_evr = (_lt_sv ** 2 / (_lt_sv ** 2).sum())[:3]
+    lt_pca_cloud_proj = lt_pca_project(lt_pca_cloud)
+    lt_pca_targets = lt_bbox_latent(np.asarray(
+        _lt_channel(_lt_gt_states(_lt_cfg)[_lt_VAR], _lt_cfg).isel(time=slice(1, None)), dtype=float))
+    try:
+        _lt_ung = _lt_channel(_lt_open_store(_lt_dir, "ung", _lt_VAR), _lt_cfg).isel(m=0)
+        if "t" in _lt_ung.dims:
+            _lt_ung = _lt_ung.isel(t=-1)  # independent unguided FINAL states
+        lt_pca_ung_finals = lt_bbox_latent(np.asarray(_lt_ung, dtype=float))
+    except FileNotFoundError:
+        lt_pca_ung_finals = None
+
+
+    def lt_guided_latents(_sel, _m, _n):
+        _t = _lt_trajf(_lt_dir, _lt_records, _sel, _m, _n, _lt_VAR, _lt_c, level=_lt_LEVEL)
+        return None if _t is None else lt_bbox_latent(_t)
+
+
+    def lt_branch_latents(_sel, _m, _n):
+        _p = _lt_branches(_lt_dir, _lt_records, _sel, _m, _n, _lt_VAR, _lt_c, level=_lt_LEVEL)
+        return None if _p is None else (lt_bbox_latent(_p[0]), lt_bbox_latent(_p[1]))
+
+
+    def lt_twin_latents(_sel, _m, _n):
+        _tw = _lt_channel(_lt_select_point(_lt_open_store(_lt_dir, "gui_ung", _lt_VAR), _sel), _lt_cfg)
+        return lt_bbox_latent(np.asarray(_tw.isel(m=_m, n=_n), dtype=float))
+
+
+    def lt_delta_of(_sel):
+        return np.asarray(lt_sweep_values["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], dtype=float)[:N_STEPS]
+
+
+    print(f"cloud: {lt_pca_cloud.shape} | EVR(3): {float(lt_pca_evr.sum()):.3f} | runs: {len(lt_points)}")
+    return (
+        lt_branch_latents,
+        lt_delta_of,
+        lt_guided_latents,
+        lt_pca_cloud_proj,
+        lt_pca_evr,
+        lt_pca_project,
+        lt_pca_targets,
+        lt_pca_ung_finals,
+        lt_points,
+        lt_twin_latents,
+    )
+
+
+@app.cell(hide_code=True)
+def _(lt_points, mo):
+    _axis_vals = {}
+    for _sel in lt_points.values():
+        for _k, _v in _sel.items():
+            _axis_vals.setdefault(_k, {})[str(_v)] = _v
+    lt_varying_axes = [_k for _k, _vs in _axis_vals.items() if len(_vs) > 1]
+    lt_compare_dropdown = mo.ui.dropdown(
+        lt_varying_axes + ["n", "gui_ung"],
+        value=("GUIDANCE_DELTA" if "GUIDANCE_DELTA" in lt_varying_axes
+               else (lt_varying_axes + ["n", "gui_ung"])[0]),
+        label="compare: ",
+    )
+    return (lt_compare_dropdown,)
+
+
+@app.cell(hide_code=True)
+def _(lt_points, mo):
+    _axis_vals = {}
+    for _sel in lt_points.values():
+        for _k, _v in _sel.items():
+            _axis_vals.setdefault(_k, {})[str(_v)] = _v
+    lt_pin_dropdowns = mo.ui.dictionary({
+        _k: mo.ui.dropdown(list(_vs), value=list(_vs)[0], label=f"{_k}: ")
+        for _k, _vs in _axis_vals.items() if len(_vs) > 1
+    })
+    return (lt_pin_dropdowns,)
+
+
+@app.cell(hide_code=True)
+def _(N_STEPS, mo):
+    lt_n_slider = mo.ui.slider(1, N_STEPS, step=1, value=min(2, N_STEPS), label="n: ", show_value=True, debounce=True)
+    return (lt_n_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    lt_elev_slider = mo.ui.slider(0, 90, step=5, value=25, label="elev: ", show_value=True, debounce=True)
+    return (lt_elev_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    lt_azim_slider = mo.ui.slider(-180, 180, step=5, value=-60, label="azim: ", show_value=True, debounce=True)
+    return (lt_azim_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    lt_zoom_traj_checkbox = mo.ui.checkbox(label="zoom to trajectories")
+    return (lt_zoom_traj_checkbox,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    lt_zoom_pad_slider = mo.ui.slider(-0.4, 2.0, step=0.05, value=0.12, label="zoom pad: ", show_value=True, debounce=True)
+    return (lt_zoom_pad_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    lt_lw_plain_slider = mo.ui.slider(0.1, 5.0, step=0.1, value=1.5, label="solid lw: ", show_value=True, debounce=True)
+    return (lt_lw_plain_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    lt_lw_dash_slider = mo.ui.slider(0.1, 4.0, step=0.1, value=1.0, label="dashed lw: ", show_value=True, debounce=True)
+    return (lt_lw_dash_slider,)
+
+
+@app.cell(hide_code=True)
+def _(
+    N_STEPS,
+    delta_labels,
+    dpi_slider,
+    lt_azim_slider,
+    lt_branch_latents,
+    lt_compare_dropdown,
+    lt_delta_of,
+    lt_elev_slider,
+    lt_guided_latents,
+    lt_lw_dash_slider,
+    lt_lw_plain_slider,
+    lt_n_slider,
+    lt_pca_cloud_proj,
+    lt_pca_evr,
+    lt_pca_project,
+    lt_pca_targets,
+    lt_pca_ung_finals,
+    lt_pin_dropdowns,
+    lt_points,
+    lt_twin_latents,
+    lt_zoom_pad_slider,
+    lt_zoom_traj_checkbox,
+    m_slider,
+    mo,
+    np,
+    plt,
+    sweep_params_row_ic,
+):
+    # ===== 3D PCA trajectories (ported from latent_trajectories.py) =====
+    _m = int(m_slider.value)
+    _cmp = lt_compare_dropdown.value
+    _pins = lt_pin_dropdowns.value
+
+
+    def _fmt_val(_k, _v):
+        if _k == "GUIDANCE_DELTA":
+            try:
+                return delta_labels.get(int(_v), f"δ#{_v}")
+            except (TypeError, ValueError):
+                return f"δ#{_v}"
+        return f"{_k}={_v}"
+
+
+    def _sort_key(_v):
+        try:
+            return (0, float(_v), "")
+        except (TypeError, ValueError):
+            return (1, 0.0, str(_v))
+
+
+    _gcmap = plt.get_cmap("Greens")
+
+
+    def _fade(_i, _total):
+        return _gcmap(0.7) if _total <= 1 else _gcmap(0.30 + 0.65 * _i / (_total - 1))
+
+
+    def _match(_sel, _skip):
+        return all(str(_sel[_k]) == _pins[_k] for _k in _pins if _k != _skip)
+
+
+    # curves: (label, color, guided latents, twin latents, n index)
+    _curves = []
+    _branch_pair = None
+    if _cmp == "n":
+        _sel = next((_s for _l, _s in lt_points.items() if _match(_s, None)), None)
+        if _sel is not None:
+            _ns = [_i for _i in range(N_STEPS) if lt_delta_of(_sel)[_i] != 0]
+            for _j, _ni in enumerate(_ns):
+                _g = lt_guided_latents(_sel, _m, _ni)
+                if _g is not None and np.isfinite(_g).any():
+                    _curves.append((f"{_ni + 1}", _fade(_j, len(_ns)), _g, lt_twin_latents(_sel, _m, _ni), _ni))
+    elif _cmp == "gui_ung":
+        # one pinned run vs its unguided (gui_ung) counterpart, both first-class
+        _n = lt_n_slider.value - 1
+        _sel = next((_s for _l, _s in lt_points.items() if _match(_s, None)), None)
+        if _sel is not None:
+            _branch_pair = lt_branch_latents(_sel, _m, _n)
+            _tw = lt_twin_latents(_sel, _m, _n)
+            if _tw is not None and np.isfinite(_tw).any():
+                _curves.append(("gui_ung", "#1F77B4", _tw, None, _n))
+    else:
+        _n = lt_n_slider.value - 1
+        _matched = sorted(
+            ((_l, _s) for _l, _s in lt_points.items() if _match(_s, _cmp)),
+            key=lambda ls: _sort_key(ls[1].get(_cmp)),
+        )
+        for _j, (_l, _s) in enumerate(_matched):
+            _g = lt_guided_latents(_s, _m, _n)
+            if _g is not None and np.isfinite(_g).any():
+                _curves.append((_fmt_val(_cmp, _s.get(_cmp)), _fade(_j, len(_matched)), _g, lt_twin_latents(_s, _m, _n), _n))
+
+
+    def _make_fig(_branch_style):
+        """One complete 3D figure; _branch_style: None | "chain" | "pingpong"."""
+        _fig = plt.figure(figsize=(24, 16), dpi=dpi_slider.value)
+        _ax3 = _fig.add_subplot(projection="3d")
+        _ax3.scatter(*lt_pca_cloud_proj.T, color="#BBBBBB", s=14, alpha=0.5, depthshade=False,
+                     label=f"ERA5 cloud ({lt_pca_cloud_proj.shape[0]} days)")
+        _groups = []
+        for _label, _color, _g, _tw, _ni in _curves:
+            _gp = lt_pca_project(_g)
+            _ax3.plot(*_gp.T, "-", color=_color, linewidth=1.2 * lt_lw_plain_slider.value, alpha=0.9, label=_label)
+            _ax3.scatter(*_gp.T, s=np.linspace(8, 46, len(_gp)), color=_color, alpha=0.9, depthshade=False)
+            _ax3.scatter(*_gp[-1], marker=("o" if _label == "gui_ung" else "D"), s=100, color="black", edgecolors="white", depthshade=False)
+            _ax3.text(*_gp[-1], f"    {_label}", color="black", fontsize=9, fontweight="bold")
+            if _tw is not None:
+                _up = lt_pca_project(_tw)
+                _ax3.plot(*_up.T, "--", color=_color, linewidth=lt_lw_dash_slider.value, alpha=0.6, label="_nolegend_")
+                _ax3.scatter(*_up[-1], marker="o", s=100, color="black", alpha=0.85, edgecolors="white", depthshade=False)
+                _ax3.text(*_up[-1], f"    {_label} (gui_ung)", color="black", fontsize=9, fontweight="bold")
+                _groups.append(_up)
+            _groups.append(_gp)
+        if _cmp == "gui_ung" and _branch_pair is not None:
+            _bp, _kp = lt_pca_project(_branch_pair[0]), lt_pca_project(_branch_pair[1])
+            _gcol = "#B05C3A"  # terracotta for the gui branch elements
+            if _branch_style == "pingpong":
+                # TRUE event path: kick (base_t -> gui_t) solid green;
+                # pull-back (gui_t -> base_{t+1}) dotted grey
+                for _t in range(len(_bp)):
+                    _seg = np.stack([_bp[_t], _kp[_t]])
+                    _ax3.plot(*_seg.T, "-", color=_gcol, linewidth=lt_lw_plain_slider.value, alpha=0.9,
+                              label=("gui" if _t == 0 else "_nolegend_"))
+                    if _t + 1 < len(_bp):
+                        _seg = np.stack([_kp[_t], _bp[_t + 1]])
+                        _ax3.plot(*_seg.T, ":", color="#800080", linewidth=0.7 * lt_lw_dash_slider.value, alpha=0.8, label="_nolegend_")
+                _gpath = np.vstack([_bp[:1], _kp])
+                _ax3.plot(*_gpath.T, "-", color="#2CA02C", linewidth=lt_lw_plain_slider.value,
+                          alpha=0.75, label="_nolegend_")
+            else:
+                # gui chain: start -> gui_0 -> gui_1 -> ...; dotted grey dead-end
+                # branches gui_t -> base_{t+1} (counterfactual pull-backs)
+                _gpath = np.vstack([_bp[:1], _kp])
+                _ax3.plot(*_gpath.T, "-", color="#2CA02C", linewidth=lt_lw_plain_slider.value, alpha=0.9, label="gui")
+                for _t in range(len(_bp) - 1):
+                    _seg = np.stack([_kp[_t], _bp[_t + 1]])
+                    _ax3.plot(*_seg.T, ":", color="#800080", linewidth=0.7 * lt_lw_dash_slider.value, alpha=0.8, label="_nolegend_")
+            _ax3.scatter(*_kp.T, s=np.linspace(8, 46, len(_kp)), color=_gcol, alpha=0.9, depthshade=False)
+            _ax3.scatter(*_bp.T, s=14, color="#800080", alpha=0.9, depthshade=False, label="gui_ung_over_t")
+            _ax3.scatter(*_kp[-1], marker="D", s=100, color="black", edgecolors="white", depthshade=False)
+            _ax3.text(*_kp[-1], "    gui", color="black", fontsize=9, fontweight="bold")
+            _groups.extend([_bp, _kp])
+        # shared starting latent (all curves at one n start from the same seed)
+        if _curves:
+            _sp = lt_pca_project(_curves[0][2])[0]
+            _ax3.scatter(*_sp, marker="o", s=40, color="black", depthshade=False)
+            _ax3.text(*_sp, "    start", color="black", fontsize=9, fontweight="bold")
+        for _ni in sorted({_c[4] for _c in _curves}):
+            _tp = lt_pca_project(lt_pca_targets[_ni])
+            _ax3.scatter(*_tp, marker="*", s=100, color="black", depthshade=False)
+            _ax3.text(*_tp, "    gt", color="black", fontsize=9, fontweight="bold")
+            _groups.append(_tp[None, :])
+            if lt_pca_ung_finals is not None:
+                _op = lt_pca_project(lt_pca_ung_finals[_ni])
+                _ax3.scatter(*_op, marker="o", s=100, facecolors="none", edgecolors="#111111",
+                             linewidths=2.0, depthshade=False)
+                _ax3.text(*_op, "    ung", color="#111111", fontsize=9, fontweight="bold")
+                _groups.append(_op[None, :])
+        if lt_zoom_traj_checkbox.value and _groups:
+            _pts = np.vstack(_groups)
+            _lo, _hi = _pts.min(axis=0), _pts.max(axis=0)
+            _pad = lt_zoom_pad_slider.value * float((_hi - _lo).max())
+            _ax3.set_xlim(_lo[0] - _pad, _hi[0] + _pad)
+            _ax3.set_ylim(_lo[1] - _pad, _hi[1] + _pad)
+            _ax3.set_zlim(_lo[2] - _pad, _hi[2] + _pad)
+        _ax3.set_xlabel("PC1"); _ax3.set_ylabel("PC2"); _ax3.set_zlabel("PC3")
+        _pin_desc = ", ".join(_fmt_val(_k, _pins[_k]) for _k in _pins if _k != _cmp)
+        _style_tag = f"  |  {_branch_style}" if _branch_style else ""
+        _ax3.set_title(
+            f"compare {_cmp}{_style_tag}  |  {_pin_desc}  (m={_m}, EVR={lt_pca_evr.sum():.0%})",
+            loc="left",
+        )
+        _ax3.view_init(elev=lt_elev_slider.value, azim=lt_azim_slider.value)
+        _ax3.legend(loc="upper left", fontsize=8)
+        plt.close(_fig)
+        return _fig
+
+
+    _pca_fig = _make_fig("chain" if _cmp == "gui_ung" else None)
+    _pca_fig2 = _make_fig("pingpong") if (_cmp == "gui_ung" and _branch_pair is not None) else None
+
+    mo.vstack(
+        [
+            sweep_params_row_ic(),
+            mo.hstack(
+                [lt_compare_dropdown] + [lt_pin_dropdowns[_k] for _k in lt_pin_dropdowns.value if _k != _cmp]
+                + ([lt_n_slider] if _cmp != "n" else []) + [m_slider],
+                justify="start", align="start",
+            ),
+            mo.hstack(
+                [lt_elev_slider, lt_azim_slider, dpi_slider, lt_lw_plain_slider, lt_lw_dash_slider,
+                 lt_zoom_traj_checkbox, lt_zoom_pad_slider],
+                justify="start", align="start",
+            ),
+            mo.hstack([_pca_fig] + ([_pca_fig2] if _pca_fig2 is not None else []),
+                      justify="start", align="start"),
+        ],
+        align="start",
+    )
     return
 
 
