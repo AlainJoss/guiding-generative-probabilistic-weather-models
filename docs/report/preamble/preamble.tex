@@ -1,39 +1,114 @@
-% Packages
+%----------------------------------------------------------------------------------------
+%	PACKAGES
+%----------------------------------------------------------------------------------------
+\usepackage[left=1in, right=1in]{geometry}
+\usepackage[Lenny]{fncychap}            % chapter heading design
 \usepackage[utf8]{inputenc}
-% \usepackage[T1]{fontenc}
-% \usepackage{fontspec}
 \usepackage[T1]{fontenc}
-\usepackage{xcolor}
-% \usepackage{manuscript,lipsum}
-% \usepackage{inconsolata} % Narrower, better for line breaks
-% \renewcommand{\familydefault}{\ttdefault}
-% \usepackage[htt]{hyphenat}
-\usepackage{lmodern}
 \usepackage[english]{babel}
-\usepackage{geometry}
-\usepackage{parskip}
+\usepackage{amsmath, amssymb, mathtools}
+\usepackage{bm}                          % bold math
+\usepackage{siunitx}                     % proper scientific notation
+\sisetup{text-series-to-math = true, propagate-math-font = true}
+\usepackage{csquotes}
+\usepackage{fancyhdr}                    % custom headers and footers
+\usepackage{appendix}                    % \appendixpage
+\usepackage{etoolbox}                    % patching commands
+\usepackage{setspace}                    % line spacing
 \usepackage{graphicx}
-\usepackage{amsmath,amssymb}
+\usepackage{listings}
+\usepackage{tabularx, rotating, booktabs}
+\usepackage[margin=10pt, font=small, labelfont=bf, labelsep=endash]{caption}
+\usepackage{subcaption}
+\usepackage{float}
 \usepackage{enumitem}
-\usepackage{hyperref}
-\usepackage{fancyhdr}
-\usepackage{titlesec}
-\usepackage{url}
-\usepackage{cite}
-\usepackage{algorithm}
-\usepackage{algpseudocode}
+\setlist[description]{style=nextline}
+\usepackage{xparse}
+\usepackage{hyperref}                    % must be loaded at the end
+\usepackage{cleveref}                    % \cref, load after hyperref
 
-% Page Layout
-\setlength{\headheight}{15pt}
-\geometry{margin=1in}
+%----------------------------------------------------------------------------------------
+%	BIBLIOGRAPHY
+%----------------------------------------------------------------------------------------
+\usepackage[
+  backend=biber,
+  style=numeric,
+  natbib=false,
+]{biblatex}
+\addbibresource{thesis.bib}
+
+\hypersetup{hidelinks}
+
+%----------------------------------------------------------------------------------------
+%	FONT AND LAYOUT
+%----------------------------------------------------------------------------------------
+\setlength{\parindent}{0pt}
+\setlength{\textwidth}{6.6in}
+\setlength{\textheight}{8.8in}
+\setlength{\topmargin}{-0.1in}
+\setlength{\oddsidemargin}{0in}
+\setlength{\parskip}{1mm}
+
+% sectsty overrides the fncychap chapter design: keeps chapter/section
+% headings plain bold black (drop it to get the Lenny style back)
+\usepackage{sectsty}
+
+% remove page number on \appendixpage
+\makeatletter
+\patchcmd{\@chap@pppage}{\thispagestyle{plain}}{\thispagestyle{empty}}{}{}
+\makeatother
+
+%----------------------------------------------------------------------------------------
+%	HEADERS AND FOOTERS
+%----------------------------------------------------------------------------------------
+% plain style for unnumbered front/back matter sections
+\fancypagestyle{firststyle}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}
+  \fancyfoot[C]{\thepage}}
+
 \pagestyle{fancy}
-\fancyhf{}
-\fancyhead[L]{Master Thesis - Notes}
 \fancyhead[R]{\thepage}
+\fancyhead[L]{\rightmark}
+\fancyfoot[L]{Alain Joss}
+\fancyfoot[C]{}
+\fancyfoot[R]{Master's Thesis}
 
+% signature line with dots
+\NewDocumentCommand \dotbox {o O{.5\linewidth} m O{3ex} O{\linewidth}}
+{
+  \begin{minipage}{7cm}
+    \makebox[7cm][l]{\,.\dotfill}
+    \\
+    \makebox[7cm][l]{\,#3}
+  \end{minipage}
+}
 
-% Title Formatting
-\titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{1em}{}
+%----------------------------------------------------------------------------------------
+%	TITLE PAGE
+%----------------------------------------------------------------------------------------
+\newcommand*{\titleGP}{\begingroup
+\centering
+\vspace*{3\baselineskip}
 
-\usepackage{tikz}
-\usetikzlibrary{positioning,arrows.meta}
+\rule{\textwidth}{1.6pt}\vspace*{-\baselineskip}\vspace*{2pt}
+\rule{\textwidth}{0.4pt}\\[\baselineskip]
+{\LARGE\scshape
+Guided Flow Matching for\\[0.3\baselineskip]
+Extreme Weather Scenarios}\\[0.2\baselineskip]
+\rule{\textwidth}{0.4pt}\vspace*{-\baselineskip}\vspace{3.2pt}
+\rule{\textwidth}{1.6pt}\\[2\baselineskip]
+\scshape
+Master's Thesis\\[2\baselineskip]
+Author\\[1.5\baselineskip]
+{\Large \textbf{Alain Joss}}\\[6pt]
+\small \texttt{alain.joss@uzh.ch}\par
+\vspace*{2\baselineskip}
+Supervisors\\[1.5\baselineskip]
+{\Large Maxim Samarin\\[8pt]
+\Large Shirin Goshtasbpour\\[8pt]
+\Large Prof.\ Dr.\ Guillaume Obozinski\\[8pt]
+\small Swiss Data Science Center\par}
+\vfill
+{\scshape Date of Submission: \today}\\[0.3\baselineskip]
+\endgroup}

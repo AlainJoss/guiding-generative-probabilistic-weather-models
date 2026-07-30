@@ -450,6 +450,11 @@ def plot_map_static(
     if show:
         plt.show()
 
+    # Release the figure from pyplot's global registry so building many panels in a
+    # loop doesn't accumulate open figures (memory growth + the ">20 figures" warning).
+    # The Figure object stays valid and renders fine (marimo formats it via savefig).
+    plt.close(fig)
+
     return fig, ax
 
 

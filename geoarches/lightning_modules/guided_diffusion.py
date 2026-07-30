@@ -22,6 +22,8 @@ from geoarches.paths import STATS_PATH
 A_T_MODES = [
     "gaussian", "linear", "logistic", "exponential", "gap-closing", "spike",
     "gaussian-spec", "linear-spec", "logistic-spec", "exponential-spec", "gap-closing-spec", "spike-spec",
+    # spike@k: guide ONLY at the k-th flow step (1-based; eta is ignored)
+    *[f"spike@{k}" for k in range(1, 11)],
 ]
 
 
@@ -40,6 +42,9 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
       spike       guide at ONE step: index round(eta*(T-1)) (eta->0 first step,
                   eta=1 last tick, which the sampler never guides anyway);
                   ZERO elsewhere (floor not applied)
+      spike@k     guide at ONE step: the k-th flow step (1-based, so spike@1 is
+                  the first step); eta is IGNORED, ZERO elsewhere; k past the
+                  last tick is clipped to it (never guided by the sampler)
     "-spec" suffix: time reversal (monotone modes) / vertical flip (gaussian).
     """
     specular = mode.endswith("-spec")
@@ -47,6 +52,12 @@ def a_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
     eta = float(np.clip(eta, 1e-6, 1.0))
     floor = float(np.clip(floor, 0.0, 0.99))
     x = np.linspace(0.0, 1.0, T)
+
+    if base.startswith("spike@"):
+        k = int(base.split("@", 1)[1])
+        a = np.zeros(T)
+        a[int(np.clip(k - 1, 0, T - 1))] = 1.0
+        return a[::-1] if specular else a
 
     if base == "spike":
         a = np.zeros(T)

@@ -7,10 +7,35 @@ M * N * T
 4 * 12 * 25 = 1200
 1 state: 6.9MB
 3 * M * N + 4 * M * N * T
-ung: 
-gui: 
-ung_gui: 
-sampling trace: 
+
+
+New whiteboard:
+- compare mask region and not mask region rmSE and other metrics
+- write marimo slidable latex formulas with values used in experiments
+- try a new stop guide @ across different phi levels and assert whether they reconverge
+- how to better initialize w? is there a relation with land portion, gradient norm, ...?
+- test also wind variable on larger mask to recreate cyclones
+- guide towards gt and measure RMSE inside and outside
+- represent historical distribution in cross-var checks and implement sampler from historical dist for setup unguided diffusion
+- the square bbox weights should also be weighted according to the latitude and longitude, and great sphere distance
+- Correct the rankings or use a mode for them in the cross var section
+- keep ranking of not diff in diff mode under cross var checks
+- delta should be the notation for the applied perturbation (guidance vector)
+- Use M=5 for final experiments
+- Push: 
+    - temperature land-mass instead of total temperature mass
+    - (soft) maximum value
+- compare total guidance across methods
+- score guidance by push and gradient informativeness
+- w depends on the mass that is being pushed and the schedule
+- r^gui looks suspiscious
+- if guide t1000 does 2tm follow equivalently?
+- fully rebuild data API to retrieve gt needed for experiment and save in folder
+- make views to visualize things side by side
+- make gifs for levels (pressure level) / steps (n)
+- can we run batches of guided experiments or is the GPU already maxed out?
+
+
 
 Random:
 - better describe the UI and make 

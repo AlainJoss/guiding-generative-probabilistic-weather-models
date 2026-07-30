@@ -110,20 +110,6 @@ def plot_trajectory(
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
         # ------------------------------------------------------------
-        # Vertical grid lines at every timestep
-        # ------------------------------------------------------------
-        for tick in x:
-            ax.axvline(
-                tick,
-                color=colors["grid_major"],
-                linestyle="-",
-                linewidth=0.65,
-                alpha=0.28,
-                label="_nolegend_",
-                zorder=0,
-            )
-
-        # ------------------------------------------------------------
         # Zero line
         # ------------------------------------------------------------
         ax.axhline(
@@ -251,30 +237,7 @@ def plot_trajectory(
 
         ax.set_ylim(final_ymin, final_ymax)
 
-        if step is not None:
-            ax.axvline(
-                step,
-                color=colors["text"],
-                linestyle=(0, (4, 4)),
-                linewidth=1.2,
-                alpha=0.75,
-                label="_nolegend_",
-                zorder=10,
-            )
-
-            ax.annotate(
-                f"{xlabel}={step}",
-                xy=(step, 1.0),
-                xycoords=("data", "axes fraction"),
-                xytext=(6, -8),
-                textcoords="offset points",
-                ha="left",
-                va="top",
-                fontsize=9,
-                color=colors["text"],
-                alpha=0.85,
-                zorder=12,
-            )
+        # (no current-step vertical marker: the step is not wired onto the chart)
 
 
         # ------------------------------------------------------------

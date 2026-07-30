@@ -46,7 +46,8 @@
 % \logo{\includegraphics[width=1.5cm]{logo}}
 
 % empty short title [] -> nothing shown in the sidebar
-\title[]{An Unreasonably Cheap Algorithm to Generate Extreme Weather Events}
+\title[]{Guided Flow Matching for\\[0.3\baselineskip]
+Extreme Weather Generation}
 \author[]{Alain Joss}
 \institute{SDSC}
 \date{\today}
@@ -103,7 +104,7 @@ $\rightarrow$ \textbf{How can these scenarios be generated?}
   \item \emph{Extreme}
   \begin{itemize}
     \item unlikely ($\rightarrow$ difficult to predict) and disruptive
-    \item tails of the climatological and forecasting distribution
+    \item tails of the climatological (and forecasting) distribution
   \end{itemize}
   \item \emph{Plausible}
   \begin{itemize}
@@ -157,15 +158,15 @@ $\rightarrow$ 3 key differences:
     \item images $\rightarrow$ final image obtained one-shot
     \item weather $\rightarrow$ \textbf{multi-step trajectory} (video-alike, but not really \dots)
   \end{itemize}
-  \item \textbf{Evaluation:}
-  \begin{itemize}
-    \item image $\rightarrow$ visual appeal
-    \item weather $\rightarrow$ qualitative (visual) $+$ quantitative \textbf{plausibility} tests
-  \end{itemize}
   \item \textbf{Target:}
   \begin{itemize}
     \item image $\rightarrow$ inherent to a specific task (ground-truth available)
     \item weather $\rightarrow$ unclear a priori (\textbf{designed})
+  \end{itemize}
+  \item \textbf{Evaluation:}
+  \begin{itemize}
+    \item image $\rightarrow$ visual appeal
+    \item weather $\rightarrow$ qualitative (visual) $+$ quantitative \textbf{plausibility} tests
   \end{itemize}
 \end{itemize}
 }
@@ -310,13 +311,13 @@ $\rightarrow$ In our work we modify (d):
 We target \textbf{heatwave} scenarios over specific:
 \begin{itemize}
   \item \textbf{mask}: weights over region + variable of interest
-  \item \textbf{forcing trajectory}: masked-average percentage change
+  \item \textbf{intervention profile} $\phi_n$: masked-average percentage change
 \end{itemize}
 \vfill
 ... what does this mean practically?
 \begin{itemize}
   \item \textbf{mask}: localized change of interest, although change will expand beyond mask --> in evaluation we care about weather being consistent over the region of interest, not globally
-  \item \textbf{forcing trajectory}: explicit definition of heatwave trajectories, and on how to sample relevant ones. For instance: .... (figure) --> we defer this to future work, here we focus on the guidance method and its evaluation, rather than on the definition of appropriate trajectories
+  \item \textbf{intervention profile}: explicit definition of heatwave trajectories, and on how to sample relevant ones. For instance: .... (figure) --> we defer this to future work, here we focus on the guidance method and its evaluation, rather than on the definition of appropriate trajectories
 \end{itemize}
 }
 
@@ -325,6 +326,7 @@ We target \textbf{heatwave} scenarios over specific:
 \begin{columns}[T]
 \begin{column}{0.52\textwidth}
 \textbf{Mask:}
+Report also square box weighting.
 \begin{itemize}
   % \mbox forbids line breaks inside each bullet
   \item \mbox{Place bounding box:}
@@ -349,8 +351,8 @@ We target \textbf{heatwave} scenarios over specific:
   % variable-of-interest slice (thin, highlighted)
   \begin{scope}[shift={(0.29,0.22)}]
     \draw[fill=kugreenlys]    (0,0) rectangle (1.7,1.0);
-    \draw[fill=kugreenlys!60] (0,1.0) -- (0.06,1.045) -- (1.76,1.045) -- (1.7,1.0) -- cycle;
-    \draw[fill=kugreenlys!45] (1.7,0) -- (1.76,0.045) -- (1.76,1.045) -- (1.7,1.0) -- cycle;
+    \draw[fill=kugreenlys]    (0,1.0) -- (0.06,1.045) -- (1.76,1.045) -- (1.7,1.0) -- cycle;
+    \draw[fill=kugreenlys]    (1.7,0) -- (1.76,0.045) -- (1.76,1.045) -- (1.7,1.0) -- cycle;
   \end{scope}
   % front slab (half of the remaining fields)
   \draw[fill=kugreenlyslyslys]    (0,0) rectangle (1.7,1.0);
@@ -397,7 +399,22 @@ m \;=\; \frac{\tilde{m}}{\sum_{\mathrm{lat},\mathrm{lon}} \tilde{m}}
 }
 
 \frame{
-\frametitle{Forcing trajectory}
+\frametitle{Mask (BBOX)}
+Alternative mask mode: uniform weights over the bounding box itself.
+\begin{itemize}
+  \item $\mathbb{B} =$ the placed bounding box (membership wraps in lon)
+  \item same $\cos(\mathrm{lat})$ cell-area weight $\rightarrow$ area-true average on the sphere
+\end{itemize}
+\vspace{0.5em}
+\[
+\tilde{m} \;=\; \mathbf{1}\bigl\{(\mathrm{lat},\mathrm{lon}) \in \mathbb{B}\bigr\}\,\cos(\mathrm{lat}),
+\qquad
+m \;=\; \frac{\tilde{m}}{\sum_{\mathrm{lat},\mathrm{lon}} \tilde{m}}
+\]
+}
+
+\frame{
+\frametitle{Intervention profile}
 % \textbf{Change trajectory:}
 \begin{itemize}
   \item over an $N$-step timeframe
@@ -510,7 +527,7 @@ A guided sampling trajectory in PCA latent-space:
   M(x) &\;=\; \sum m \odot x
         \qquad\text{\footnotesize masked average}\\[6pt]
   L    &\;=\; \Big(\, \underbrace{M(\hat{x}_t)}_{\text{current}}
-        \;-\; \underbrace{(1+\delta)\,M(x^{\text{ref}})}_{\text{target}} \,\Big)^{2}
+        \;-\; \underbrace{(1+\phi_n)\,M(x^{\text{ref}})}_{\text{target}} \,\Big)^{2}
         \;=\; e_t^{\,2}
 \end{align*}
 \vfill
@@ -518,7 +535,7 @@ A guided sampling trajectory in PCA latent-space:
 \begin{tabular}{@{}r@{\quad}l@{}}
   $\hat{x}_t$      & clean-state estimate at flow step $t$ (where we are)\\[3pt]
   $x^{\text{ref}}$ & unguided forecast (or ground truth)\\[3pt]
-  $\delta$         & target shift --- the imposed change\\[3pt]
+  $\phi_n$         & intervention profile --- the imposed change\\[3pt]
   $e_t$            & the \textbf{gap}: signed difference, driven to zero\\
 \end{tabular}
 \end{center}
@@ -616,7 +633,7 @@ Fix the profile $a_t$; tune scale $w$ against final loss at step $T$:
   \item Compute final loss as function of $w$:
         \[
         L_{\text{final}}(w) = L\bigl(x^{\text{gui}}_{T}(w)\bigr)
-        = \Bigl( M\bigl(x^{\text{gui}}_{T}(w)\bigr) - (1+\delta)\,M(x^{\text{ref}}) \Bigr)^{2}
+        = \Bigl( M\bigl(x^{\text{gui}}_{T}(w)\bigr) - (1+\phi_n)\,M(x^{\text{ref}}) \Bigr)^{2}
         \]
   \item Iteratively solve $\frac{dL_{\text{final}}}{dw} = 0$ by the secant method 
   \item Stop when the final loss is closed, then rerun once at $w^{*}$
@@ -639,7 +656,7 @@ $z^t$, $u_t$ & noisy residual latent, its velocity \\
 $s_t$, $h_t$ & noise level, Euler step size \\
 $\hat{x}_t$ & clean-state estimate at flow step $t$ \\[4pt]
 $m$, $M(x)$ & mask, masked average $\sum m \odot x$ \\
-$\delta_n$, $x^{\text{ref}}$ & prescribed change, reference state \\
+$\phi_n$, $x^{\text{ref}}$ & intervention profile, reference state \\
 $L$, $e_t$ & masked loss, gap to the target \\
 $g_t = \nabla_{z^t} L$ & guidance gradient \\
 $\lambda_t = w \cdot a_t \cdot c_t$ & guidance schedule: scale $\times$ profile $\times$ normalizer \\
@@ -662,7 +679,7 @@ $M$ & number of ensemble members \\
 $N$ & number of rollout steps \\
 $T$ & number of flow steps per rollout step \\
 Reference & unguided forecast \\
-$\{\delta_n\}_{n=1}^{N}$ & prescribed target change trajectory \\
+$\{\phi_n\}_{n=1}^{N}$ & intervention profile \\
 $a_t$ & guidance profile \\
 Mask & target region and variable \\
 Mask mode & BBOX or Gaussian mask \\
@@ -675,7 +692,7 @@ Mask mode & BBOX or Gaussian mask \\
 \begin{itemize}
   \item Compare guidance methods and $\eta$
   \item Compare $\eta$ for OPTIMIZE-STRENGTH mode
-  \item Compare change levels $\{\delta_n\}_{n=1}^{N}$
+  \item Compare intervention profiles $\{\phi_n\}_{n=1}^{N}$
   \item Compare BBOX and Gaussian mask
   \item Compare different masks and start times
   \item Compare different profiles $a_t$
@@ -762,7 +779,7 @@ sampling and its own trade-offs.
   \item \textbf{Results}: define results of interest and prepare charts + tables + final experiments 
   \item \textbf{Real heatwaves} as targets: Canada 2021, this year's over Europe
   \item A \textbf{baseline}: shift the state directly instead of a gradient update
-        (universal guidance)
+        (shift-based guidance)
   \item A \textbf{distributional, climatology-based} definition of the change
         trajectory
   \item \textbf{Mask-size experiments}: vary the mask size around the same epicenter

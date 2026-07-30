@@ -1,0 +1,24 @@
+\chapter{Problem Setting}
+
+We explicitly define a heatwave in order to design guidance methods. 
+This means that we decide to represent a specific subset of state trajectoriesin this work.
+However, our method is flexible to any kind of target: you can swap your definition of the event you want to replicate and use the guidance to generate that kind of event.
+This really only affects the target definition.
+
+This choice enables us to side step the problem that guiding towards a classifier's gradients or minimizing / maximizing a certain variable and stopping when we achieved the wanted result.
+If we specify the carachteristic of the wanted result we side step this problem entirely.
+The problem then shifts to retrieve a representative set of the event we have in mind.
+This is however a requirement for the first methodology.
+So we could say that the problem shifts towards defining an appropriate algorithm that can achieve a representative state similar to the specified set.
+Making this step explicit directly enables us to then compare the results against this set,
+and characterize its flaws / benefits directly.
+
+It is really important to understand how to evaluate what we are doing here.
+Since we are aiming at a specific region of interest, and we are guiding only wrt the region of interest, 
+we are loosing the global coherence of the weather states.
+We shall thus evaluate the ability of our method to generate locally coherent weather scenarios, over the region of interest.
+
+In this work we focus on designing a simple guidance method and empirically test its parameters and the properties of the results generated across different settings.
+We put less weight on the physical realism of the definition of the guidance target and the realism of the generated trajectories,
+and defer this to a separate line of work.
+Though, we have these two in mind when designing the guidance method throughout.

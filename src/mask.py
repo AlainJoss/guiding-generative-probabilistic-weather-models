@@ -13,7 +13,9 @@ def _wrap_lon(lon):
 
 def get_bbox_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0):
     """
-    Normalizes to 1. Boxes may cross the dateline (lon_left/right outside
+    cos(lat) cell-area weighted (like the elliptical mask), normalized to 1:
+    the masked statistic is an AREA-TRUE average on the sphere. Boxes may
+    cross the dateline (lon_left/right outside
     [-180, 180] or left > right after wrapping): membership wraps in lon.
     sigma_div rescales the box about its center with the same extent/sigma_div
     convention as the elliptical mask (half-side = side / sigma_div): the
@@ -46,7 +48,8 @@ def get_bbox_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0):
     lat_mask = (lat_grid >= max(lat_bottom, -90.0)) & (lat_grid <= min(lat_top, 90.0))
 
     mask = (lon_mask & lat_mask).astype(np.float32)
-    return mask / mask.sum()
+    mask = mask * np.cos(np.radians(lat_grid))  # cell-area weight -> area-true statistic
+    return (mask / mask.sum()).astype(np.float32)
 
 
 def _haversine(lat1, lon1, lat2, lon2):

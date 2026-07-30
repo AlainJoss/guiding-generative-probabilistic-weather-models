@@ -16,6 +16,7 @@ def plot_trajectories(
     guided_member: list[float] | None = None,
     unguided_member: list[float] | None = None,
     guided_unguided_member: list[float] | None = None,
+    det_member: list[float] | None = None,
 
     # ensemble bands
     guided_ensemble: list[list[float]] | None = None,
@@ -55,9 +56,17 @@ def plot_trajectories(
     # multiple delta trajectories (each aligned to the N+1 time points); plotted on
     # the right axis. Takes precedence over the single delta_trajectory above.
     delta_trajectories: list[list[float]] | None = None,
+    # add value/delta hlines-to-axis on the target-guidance plan line(s). Guided
+    # preview mode has no guided member, so the plan carries the annotation instead.
+    annotate_target_guidance: bool = False,
 ):
     num_steps = len(timestamps)
-    time_values = pd.to_datetime(timestamps)
+    # x-axis is the forecast step index n (0..num_steps-1), not the dates
+    time_values = np.arange(num_steps)
+    # deterministic x-limits so the guided guide-lines can reach the y-axis (left spine);
+    # left margin slightly wider so the annotations clear the first data point
+    _x_pad = 0.02 * max(num_steps - 1, 1)
+    _x_left = -1.6 * _x_pad
 
     if n is not None and not (0 <= n < num_steps):
         raise ValueError(f"n must be in [0, {num_steps - 1}], got n={n}")
@@ -119,6 +128,7 @@ def plot_trajectories(
     guided_member = _as_1d(guided_member, "guided_member", gt0=gt0)
     unguided_member = _as_1d(unguided_member, "unguided_member", gt0=gt0)
     guided_unguided_member = _as_1d(guided_unguided_member, "guided_unguided_member", gt0=gt0)
+    det_member = _as_1d(det_member, "det_member", gt0=gt0)
 
     mean_unguided_rollout = _as_1d(
         mean_unguided_rollout,
@@ -172,13 +182,15 @@ def plot_trajectories(
 
     colors = {
         "guided": "#0072B2",
-        "unguided": "#6E6E6E",
+        "unguided": "#8B5A2B",
         "target": "#D55E00",
         "target_guidance": "#B7950B",
         "ground_truth": "#009E73",
         "reference_trajectory": "#E6B800",
         "y": "#7B2CBF",
-        "guided_unguided": "#4A6FA5",
+        "guided_unguided": "#800080",
+        "det": "#AAAAAA",
+        "pct": "#FF7F0E",
         "grid_major": "#D7D7D7",
         "grid_minor": "#EAEAEA",
         "text": "#222222",
@@ -270,6 +282,52 @@ def plot_trajectories(
                 )
                 y_values.append(ens_mean)
 
+        def _annotate_to_axis(traj, color, ung=None):
+            # dashed horizontal guide from each point to the y-axis, labelled with the
+            # value, the day delta Δ^day (from the previous step), the unguided gap
+            # Δ^ung (vs the unguided member at the same step) and their cumulative
+            # counterparts (Δ^day_cum = total change since n=0; Δ^ung_cum = the gap
+            # integrated over steps, degree-day style). Shared by the guided member
+            # (analyze mode) and the target-guidance plan (guided-preview mode).
+            _ref = traj[0]  # initial (n=0) point: cumulative-delta baseline
+            _ung_cum = 0.0
+            for _i, (_xi, _yi) in enumerate(zip(time_values, traj)):
+                if np.isnan(_yi):
+                    continue
+                ax.plot(
+                    [_x_left, _xi],
+                    [_yi, _yi],
+                    linestyle="--",
+                    linewidth=0.8,
+                    color=color,
+                    alpha=0.35,
+                    zorder=1,
+                    label="_nolegend_",
+                )
+                _prev = traj[_i - 1] if _i > 0 else np.nan
+                _dtxt = "" if np.isnan(_prev) else rf", $\Delta^{{\mathrm{{day}}}}{_yi - _prev:+.2f}$"
+                _cumtxt = "" if (_i == 0 or np.isnan(_ref)) else rf", $\Delta^{{\mathrm{{day}}}}_{{\mathrm{{cum}}}}{_yi - _ref:+.2f}$"
+                _ungtxt = _ungcumtxt = ""
+                if ung is not None and _i < len(ung) and not np.isnan(ung[_i]):
+                    _gap = _yi - ung[_i]
+                    _ung_cum += _gap
+                    if _i > 0:
+                        _ungtxt = rf", $\Delta^{{\mathrm{{ung}}}}{_gap:+.2f}$"
+                        _ungcumtxt = rf", $\Delta^{{\mathrm{{ung}}}}_{{\mathrm{{cum}}}}{_ung_cum:+.2f}$"
+                # label sits just right of the y-axis, at the height of the guide line
+                ax.annotate(
+                    rf"{_yi:.2f}{_dtxt}{_ungtxt}{_cumtxt}{_ungcumtxt}",
+                    xy=(0.0, _yi),
+                    xycoords=("axes fraction", "data"),
+                    xytext=(3, 2),
+                    textcoords="offset points",
+                    ha="left",
+                    va="bottom",
+                    fontsize=7,
+                    color=color,
+                    zorder=11,
+                )
+
         # ------------------------------------------------------------
         # Ensemble bands
         # ------------------------------------------------------------
@@ -356,7 +414,9 @@ def plot_trajectories(
         # per profile (linestyle cycles to keep multiple profiles readable)
         # ------------------------------------------------------------
         if target_guidance_trajectories is not None:
-            _tg_styles = ["-", "--", "-.", ":"]
+            # always dashed (never solid) so the target line stays visible when it
+            # overlaps the solid guided line
+            _tg_styles = ["--", "-.", ":", (0, (3, 1, 1, 1))]
             for _j, _traj in enumerate(target_guidance_trajectories):
                 ax.plot(
                     time_values,
@@ -370,6 +430,8 @@ def plot_trajectories(
                     zorder=5,
                 )
                 y_values.append(_traj)
+                if annotate_target_guidance:
+                    _annotate_to_axis(_traj, colors["target_guidance"])
 
         # ------------------------------------------------------------
         # Mean rollouts
@@ -450,6 +512,9 @@ def plot_trajectories(
                     pe.Normal(),
                 ],
             )
+            # dashed horizontal guide from each guided point to the y-axis, labelled
+            # with the value and the day/unguided deltas
+            _annotate_to_axis(guided_member, colors["guided"], ung=unguided_member)
             y_values.append(guided_member)
 
         # ------------------------------------------------------------
@@ -485,6 +550,39 @@ def plot_trajectories(
             y_values.append(guided_unguided_member)
 
         # ------------------------------------------------------------
+        # Deterministic: point per n + dashed branch from previous guided
+        # (same grammar as guided_unguided, in grey)
+        # ------------------------------------------------------------
+        if det_member is not None:
+            if guided_member is not None:
+                for n_idx in range(1, num_steps):
+                    dv = det_member[n_idx]
+                    g_prev = guided_member[n_idx - 1]
+                    if np.isnan(dv) or np.isnan(g_prev):
+                        continue
+                    ax.plot(
+                        [time_values[n_idx - 1], time_values[n_idx]],
+                        [g_prev, dv],
+                        linestyle="--",
+                        linewidth=1.2,
+                        color=colors["det"],
+                        alpha=0.8,
+                        zorder=6,
+                        label="_nolegend_",
+                    )
+            ax.scatter(
+                time_values,
+                det_member,
+                s=42,
+                color=colors["det"],
+                edgecolors="white",
+                linewidths=0.8,
+                zorder=8,
+                label=_member_label("Deterministic (gui_det)"),
+            )
+            y_values.append(det_member)
+
+        # ------------------------------------------------------------
         # Ground truth
         # ------------------------------------------------------------
         if ground_truth is not None:
@@ -517,60 +615,13 @@ def plot_trajectories(
             y_values.append(reference_trajectory)
 
         # ------------------------------------------------------------
-        # Vertical grid lines
+        # Axis styling  (x-axis = forecast step n; no vertical n/t markers)
         # ------------------------------------------------------------
-        for step_idx, step_time in enumerate(time_values):
-            if n is not None and step_idx == n:
-                continue
-
-            ax.axvline(
-                step_time,
-                color=colors["grid_major"],
-                linestyle="-",
-                linewidth=0.65,
-                alpha=0.28,
-                label="_nolegend_",
-                zorder=0,
-            )
-
-        # ------------------------------------------------------------
-        # Current n marker and automatic delta annotation
-        # ------------------------------------------------------------
-        if n is not None:
-            ax.axvline(
-                time_values[n],
-                color=colors["n_marker"],
-                linestyle=(0, (4, 4)),
-                linewidth=1.2,
-                alpha=0.75,
-                label="_nolegend_",
-                zorder=10,
-            )
-
-            ax.annotate(
-                f"n={n}",
-                xy=(time_values[n], 1.0),
-                xycoords=("data", "axes fraction"),
-                xytext=(6, -8),
-                textcoords="offset points",
-                ha="left",
-                va="top",
-                fontsize=9,
-                color=colors["n_marker"],
-                alpha=0.85,
-                zorder=12,
-            )
-
-        # ------------------------------------------------------------
-        # Axis styling
-        # ------------------------------------------------------------
-        ax.set_xlabel("Forecast time")
+        ax.set_xlabel("$n$")
         ax.set_ylabel(ylabel if ylabel is not None else var)
 
-        locator = mdates.AutoDateLocator(minticks=4, maxticks=8)
-        formatter = mdates.ConciseDateFormatter(locator)
-        ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(formatter)
+        ax.set_xticks(time_values)
+        ax.set_xlim(_x_left, (num_steps - 1) + _x_pad)
 
         ax.yaxis.set_minor_locator(AutoMinorLocator(2))
 
@@ -646,8 +697,8 @@ def plot_trajectories(
                     _dt,
                     linestyle="-",
                     linewidth=1.6,
-                    color=colors["y"],
-                    alpha=0.5 if _single else 0.7,
+                    color=colors["pct"],
+                    alpha=0.95,
                     label="Percentage change" if _single else f"delta {_i}",
                     zorder=4,
                 )

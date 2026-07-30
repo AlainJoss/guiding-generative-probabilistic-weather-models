@@ -41,7 +41,7 @@ dependencies = [
     "dask (>=2024.12.1,<2025.0.0)",
     "seaborn (>=0.13.2,<0.14.0)",
     "gcsfs (>=2025.5.1,<2026.0.0)",
-    "marimo[lsp]>=0.20.4",
+    "marimo[lsp,recommended]>=0.20.4",
     "wigglystuff>=0.2.37",
     "scikit-learn>=1.8.0",
     "altair>=6.0.0",
@@ -121,4 +121,4 @@ geoarches-eval = 'geoarches.evaluation.eval_multistep:main'
 custom_css = ["src/ui/sand.css"]
 
 [tool.marimo.runtime]
-output_max_bytes = 20_000_000
+output_max_bytes = 500_000_000

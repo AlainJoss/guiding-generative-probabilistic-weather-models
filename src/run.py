@@ -87,7 +87,7 @@ def get_container_args(rollout_type):
     match rollout_type:
         case "ung":
             # ung holds the FULL flow-step trajectory (final state = t=-1 slice)
-            return [("ung", True), ("ung_det", False)]
+            return [("ung", True)]
         case "gui":
             # raw primitives only: grads = dL/dz, vfs = u*s_t, res = noisy state z_t.
             # gui_vec / gui_vf / gui_res / clean_preds are reconstructed in the UI.
@@ -106,7 +106,7 @@ def get_container_args(rollout_type):
 def written_containers(rollout_type, guidance_mode):
     """Container types a single sweep point actually fills."""
     if rollout_type == "ung":
-        return {"ung", "ung_det"}
+        return {"ung"}
     return {"gui", "gui_det", "gui_ung", "grads", "vfs", "res"}
 
 

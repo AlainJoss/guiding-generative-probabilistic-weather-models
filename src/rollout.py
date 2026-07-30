@@ -199,16 +199,6 @@ def rollout(
                 )
                 append_to_zarr(rollout_dir, "ung", save_state)
 
-                # deterministic core of this step
-                det_state = ung_trace.get("det_pred")
-                if det_state is not None:
-                    save_state = flow_model.denormalize(det_state).cpu()
-                    save_state = tdict_to_xr(
-                        create_slice_zarr_container(m, n, t_dim=False, sweep_params={}),
-                        save_state,
-                    )
-                    append_to_zarr(rollout_dir, "ung_det", save_state)
-
             # after the last iteration no need to set this again
             if n < config.N-1:
                 x_cond = advance_x_cond(x_cond, x_hat_curr)
