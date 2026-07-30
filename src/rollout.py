@@ -42,6 +42,7 @@ def rollout(
         mask_2d = get_mask_2d(
             config.MASK_MODE, config.MASK_CORNERS,
             sigma_div=config.sigma_div if config.sigma_div is not None else 2.0,
+            mask_shift=config.mask_shift or "none",
         )
 
         # GUIDANCE_DELTA holds the target percentage profile p_n; the loss delta is

@@ -4,11 +4,13 @@
 
 The mask is a set of weigths (sum to 1) over a tensor having the same dimension as the weather states, non-zero at the variable and region of interest.
 
+We experimented with a gaussian mask, but realized in our experiments that the best thing to do is equal weighting inside the region.
 The correct way to define the region of interest is to choose a greater mask size instead of using some weighting scheme fading out of an epicenter. The mask size should be chosen to cover the entire area of interest, ensuring that all relevant data is included in the analysis. A larger mask size can help to reduce noise and improve the accuracy of the results, while a smaller mask size may exclude important information. It is important to carefully consider the appropriate mask size for each specific application to achieve optimal results.
 Either way we (most probably) loose the global coherence for the guided weather states, so we might as well define directly the region of interest with a mask. 
 Additionally, this enables us to actually make statements about "the region of interest",
 having equal weights everywhere.
 Introducing different weigths might bias the generation in a way that is not desired.
+
 
 
 \section{Target trajectory}

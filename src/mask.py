@@ -152,11 +152,32 @@ def get_mask_tdict(example_tdict: TensorDict, partition: str, var_idx: int, leve
     return mask
 
 
+def shift_corners(mask_corners, mask_shift: str = "none"):
+    """Translate (lon_left, lon_right, lat_bottom, lat_top) by a pixel shift.
+
+    mask_shift is "none" or "dir@px" with dir in {right, left, up, down};
+    1 px = 1.5 deg on the 240x121 grid. The mask builders re-apply their own
+    lon wrap / pole clamp and cos(lat) area weights at the shifted location.
+    """
+    if not mask_shift or mask_shift == "none":
+        return mask_corners
+    direction, px = mask_shift.split("@", 1)
+    step = 1.5 * float(px)
+    dlon = {"right": step, "left": -step}.get(direction, 0.0)
+    dlat = {"up": step, "down": -step}.get(direction, 0.0)
+    if dlon == 0.0 and dlat == 0.0:
+        raise ValueError(f"Invalid mask_shift {mask_shift!r} (dir must be right/left/up/down)")
+    lon_left, lon_right, lat_bottom, lat_top = mask_corners
+    return (lon_left + dlon, lon_right + dlon, lat_bottom + dlat, lat_top + dlat)
+
+
 def get_mask_2d(
     mask_mode: str,
     mask_corners: any,
     sigma_div: float = 2.0,  # box extent / scale, all modes (2.0 = base box)
+    mask_shift: str = "none",  # "none" or "dir@px" translation (1 px = 1.5 deg)
 ):
+    mask_corners = shift_corners(mask_corners, mask_shift)
     match mask_mode:
         case "BBOX":
             mask_2d = get_bbox_mask(*mask_corners, sigma_div=sigma_div)

@@ -122,7 +122,8 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
     if _mm not in MASK_MODES:
         _mm = "ELLIPTICAL"
     _sigma_div = float(sweep_point.get("sigma_div", 2.0) or 2.0)
-    mask = get_mask_2d(_mm, config.MASK_CORNERS, sigma_div=_sigma_div)
+    _mask_shift = str(sweep_point.get("mask_shift") or "none")
+    mask = get_mask_2d(_mm, config.MASK_CORNERS, sigma_div=_sigma_div, mask_shift=_mask_shift)
 
     # --- reconstruction (new-format identities) ---
     if res_xr is None:

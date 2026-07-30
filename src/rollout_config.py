@@ -20,8 +20,8 @@ GUIDANCE_METHOD_HYPERS = {
     "FGWRHO": ["fgwrho_w_init"],
 }
 
-# mask hypers, shared by every mask mode (extent / sigma_div rescaling)
-MASK_HYPERS = ["sigma_div"]
+# mask hypers, shared by every mask mode (extent rescaling / pixel translation)
+MASK_HYPERS = ["sigma_div", "mask_shift"]
 
 # common hypers
 GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO", "FGWNORM"]
@@ -102,6 +102,11 @@ class RolloutConfig:
     # sigma = box extent / sigma_div; 2.0 = base box, 4.0 = half, 1.0 = double).
     # None -> default 2.0 at the get_mask_2d call site.
     sigma_div: float | None = None
+
+    # mask_shift: mask translation, shared by ALL mask modes: "none" or
+    # "dir@px" with dir in {right, left, up, down} (1 px = 1.5 deg).
+    # None -> "none" at the get_mask_2d call site.
+    mask_shift: str | None = None
 
     # NOTE: implementing from_dict and to_dict in this abstruse way, such that I can convert datetime objects
 

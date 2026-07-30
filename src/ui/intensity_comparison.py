@@ -215,10 +215,11 @@ def _(
         def _row_mask(_sw):
             _mm2 = str(_sw.get("MASK_MODE") or config.MASK_MODE or "BBOX")
             _sg2 = float(_sw.get("sigma_div") or config.sigma_div or 2.0)
-            _key = (_mm2, _sg2)
+            _ms2 = str(_sw.get("mask_shift") or getattr(config, "mask_shift", None) or "none")
+            _key = (_mm2, _sg2, _ms2)
             if _key not in _mask_cache:
                 _mask_cache[_key] = xr.DataArray(
-                    np.asarray(get_mask_2d(_mm2, config.MASK_CORNERS, sigma_div=_sg2)),
+                    np.asarray(get_mask_2d(_mm2, config.MASK_CORNERS, sigma_div=_sg2, mask_shift=_ms2)),
                     dims=("latitude", "longitude"),
                     coords={"latitude": stores["gui"].latitude,
                             "longitude": stores["gui"].longitude})
@@ -359,8 +360,13 @@ def _(
     def delta_sel(_i):
         return {**base_sel, "GUIDANCE_DELTA": sweep_coord_label("GUIDANCE_DELTA", SWEEP["GUIDANCE_DELTA"][_i], SWEEP)}
 
+    from src.mask import shift_corners as _shift_corners_ic
+
+    # effective corners under the PINNED mask_shift (zoom centers track the mask)
+    mask_corners_ic = _shift_corners_ic(config.MASK_CORNERS, str(base_sel.get("mask_shift") or "none"))
     mask = get_mask_2d(str(base_sel.get("MASK_MODE", "BBOX")), config.MASK_CORNERS,
-                       sigma_div=float(base_sel.get("sigma_div", 2.0)))
+                       sigma_div=float(base_sel.get("sigma_div", 2.0)),
+                       mask_shift=str(base_sel.get("mask_shift") or "none"))
     mask_np = np.asarray(mask)
 
     # lazy store handles (full datasets; sliced per delta/var below)
@@ -371,7 +377,7 @@ def _(
         except FileNotFoundError:
             _stores[_s] = None
     stores = _stores
-    return base_sel, delta_sel, mask, mask_np, stores
+    return base_sel, delta_sel, mask, mask_corners_ic, mask_np, stores
 
 
 @app.cell(hide_code=True)
@@ -463,6 +469,7 @@ def _(
     config,
     delta_sel,
     get_gt_rollout,
+    mask_corners_ic,
     mask_np,
     mo,
     np,
@@ -580,8 +587,8 @@ def _(
             _a = np.where(mask_np >= 0.5 * float(mask_np.max()), _a, np.nan)
         elif _scope == "zoom" and int(zoom_slider.value) > 1:
             _z = int(zoom_slider.value)
-            _clon = 0.5 * (config.MASK_CORNERS[0] + config.MASK_CORNERS[1])
-            _clat = 0.5 * (config.MASK_CORNERS[2] + config.MASK_CORNERS[3])
+            _clon = 0.5 * (mask_corners_ic[0] + mask_corners_ic[1])
+            _clat = 0.5 * (mask_corners_ic[2] + mask_corners_ic[3])
             if _clon > 180.0:
                 _clon -= 360.0
             _lsp, _tsp = 360.0 / _z, 180.0 / _z
@@ -685,6 +692,7 @@ def _(
     mask,
     mask3d_azim_slider,
     mask3d_elev_slider,
+    mask_corners_ic,
     mask_np,
     mo,
     np,
@@ -697,8 +705,8 @@ def _(
     zoom_slider,
 ):
     # mask-section charts, 1:1 style with the guidance notebook
-    _lon_c = 0.5 * (config.MASK_CORNERS[0] + config.MASK_CORNERS[1])
-    _lat_c = 0.5 * (config.MASK_CORNERS[2] + config.MASK_CORNERS[3])
+    _lon_c = 0.5 * (mask_corners_ic[0] + mask_corners_ic[1])
+    _lat_c = 0.5 * (mask_corners_ic[2] + mask_corners_ic[3])
     if _lon_c > 180.0:
         _lon_c -= 360.0
     _gt_roll = get_gt_rollout(config.N + 1, config.START_TS)
@@ -1608,7 +1616,6 @@ def _(
     chart_mode_dropdown,
     charts_displayed_dropdown,
     compare_by_dropdown,
-    config,
     contour_checkbox,
     contour_color_dropdown,
     contour_levels_slider,
@@ -1620,6 +1627,7 @@ def _(
     get_slices,
     m_slider,
     mask,
+    mask_corners_ic,
     mask_np,
     mo,
     np,
@@ -1688,8 +1696,8 @@ def _(
             _cmap, _center = warm_half_cmap, None
         else:
             _cmap, _center = cool_half_cmap, None
-        _clon = 0.5 * (config.MASK_CORNERS[0] + config.MASK_CORNERS[1])
-        _clat = 0.5 * (config.MASK_CORNERS[2] + config.MASK_CORNERS[3])
+        _clon = 0.5 * (mask_corners_ic[0] + mask_corners_ic[1])
+        _clat = 0.5 * (mask_corners_ic[2] + mask_corners_ic[3])
         if _clon > 180.0:
             _clon -= 360.0
         _res = visualize_map(
@@ -1730,8 +1738,8 @@ def _(
         if not xgui_zoom_scale_checkbox.value or int(zoom_slider.value) <= 1:
             return _a
         _z = int(zoom_slider.value)
-        _clon = 0.5 * (config.MASK_CORNERS[0] + config.MASK_CORNERS[1])
-        _clat = 0.5 * (config.MASK_CORNERS[2] + config.MASK_CORNERS[3])
+        _clon = 0.5 * (mask_corners_ic[0] + mask_corners_ic[1])
+        _clat = 0.5 * (mask_corners_ic[2] + mask_corners_ic[3])
         if _clon > 180.0:
             _clon -= 360.0
         _lat_e = np.linspace(90.0, -90.0, 122); _lat_cw = 0.5 * (_lat_e[:-1] + _lat_e[1:])

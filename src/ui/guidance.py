@@ -301,6 +301,8 @@ def _(
     level,
     mask_corners,
     mask_mode_select,
+    mask_shift_px_slider,
+    mask_shift_select,
     notebook_mode,
     partition,
     rollout_id,
@@ -339,6 +341,8 @@ def _(
                 "GUI_REF": list(gui_ref_select.value),
                 "MASK_MODE": list(mask_mode_select.value),
                 "a_t_mode": list(a_t_mode_select.value) or ["gap-closing"],
+                "mask_shift": [_d if _d == "none" else f"{_d}@{int(mask_shift_px_slider.value)}"
+                               for _d in (list(mask_shift_select.value) or ["none"])],
                 "GUIDANCE_DELTA": delta_trajectories,
                 **{ax: compute_axis_values(ax, _rv) for ax in NUMERIC_AXES},
             }
@@ -623,10 +627,11 @@ def _(
         def _row_mask(_sw):
             _mm2 = str(_sw.get("MASK_MODE") or config.MASK_MODE or "BBOX")
             _sg2 = float(_sw.get("sigma_div") or config.sigma_div or 2.0)
-            _key = (_mm2, _sg2)
+            _ms2 = str(_sw.get("mask_shift") or getattr(config, "mask_shift", None) or "none")
+            _key = (_mm2, _sg2, _ms2)
             if _key not in _mask_cache:
                 _mask_cache[_key] = xr.DataArray(
-                    np.asarray(get_mask_2d(_mm2, config.MASK_CORNERS, sigma_div=_sg2)),
+                    np.asarray(get_mask_2d(_mm2, config.MASK_CORNERS, sigma_div=_sg2, mask_shift=_ms2)),
                     dims=("latitude", "longitude"),
                     coords={"latitude": _gui_ds.latitude, "longitude": _gui_ds.longitude})
             return _key, _mask_cache[_key]
@@ -877,7 +882,8 @@ def _(
             # the closest current mode; the zarr selection still uses the stored label
             _mm = mask_mode if mask_mode in MASK_MODES else "ELLIPTICAL"
             mask = get_mask_2d(_mm, mask_corners,
-                               sigma_div=float(sweep_extra_dropdowns.value.get("sigma_div", 2.0)))
+                               sigma_div=float(sweep_extra_dropdowns.value.get("sigma_div", 2.0)),
+                               mask_shift=str(sweep_extra_dropdowns.value.get("mask_shift") or "none"))
         case _:
             pass
     # own-mask-scale region at HALF-MAXIMUM (same convention as maybe_mask and the
@@ -1374,6 +1380,8 @@ def _(
     gui_ref_select,
     guidance_mode_select,
     mask_mode_select,
+    mask_shift_px_slider,
+    mask_shift_select,
     mo,
     notebook_mode,
     sweep_ranges,
@@ -1392,11 +1400,16 @@ def _(
     _selected_modes = guidance_mode_select.value
     _mode_num = list(dict.fromkeys(h for _m in _selected_modes for h in _MODE_HYPERS[_m] if h in NUMERIC_AXES))
 
+    _ms_vals = [_d if _d == "none" else f"{_d}@{int(mask_shift_px_slider.value)}"
+                for _d in (list(mask_shift_select.value) or ["none"])]
+
     hypers_widget = mo.vstack([
         mo.md("## Sweep"),
         mo.md("**Common**:"),
         mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, a_t_mode_select], justify="start"),
         _sweep_row("sigma_div"),
+        mo.hstack([mask_shift_select, mask_shift_px_slider, mo.md(f"-> `{_ms_vals}`")],
+                  justify="start", align="center"),
         mo.md("**Specific**:"),
         *([_sweep_row(ax) for ax in _mode_num] if _mode_num else [mo.md("_none_")]),
     ], align="start")
@@ -1725,6 +1738,8 @@ def _(
                 _mask_sweep_controls.append(mask_mode_dropdown)
             if len(experiment_params.get("sigma_div", [])) > 1:
                 _mask_sweep_controls.append(sweep_extra_dropdowns["sigma_div"])
+            if len(experiment_params.get("mask_shift", [])) > 1:
+                _mask_sweep_controls.append(sweep_extra_dropdowns["mask_shift"])
             mask_widget = mo.vstack(
                 ([mo.hstack(_mask_sweep_controls, justify="start")] if _mask_sweep_controls else [])
                 + [mo.hstack([zoom_slider, dpi_slider], justify="start"), _mask_maps_row],
@@ -4653,6 +4668,18 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         mask_mode_select,
         sweep_ranges,
     )
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mask_shift_select = mo.ui.multiselect(["none", "right", "up", "down", "left"], value=["none"], label="MASK_SHIFT: ")
+    return (mask_shift_select,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mask_shift_px_slider = mo.ui.slider(1, 10, step=1, value=3, label="shift px: ", show_value=True, debounce=True)
+    return (mask_shift_px_slider,)
 
 
 @app.cell
