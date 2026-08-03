@@ -10,6 +10,8 @@ M * N * T
 
 
 New whiteboard:
+
+- attempt wind
 - compare mask region and not mask region rmSE and other metrics
 - write marimo slidable latex formulas with values used in experiments
 - try a new stop guide @ across different phi levels and assert whether they reconverge

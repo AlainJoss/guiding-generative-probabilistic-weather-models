@@ -1,0 +1,81 @@
+\chapter{Guidance design}\label{ch:guide}
+
+\section{General method}
+
+Building on the idea of classifier guidance we identify following 
+
+Assumption about using the gradient.
+We explicitly assume that in order to produce realistic result we have to tie the perturbations to the models' gradient.
+We use the none-gradient tied perturbations as baseline for all our experiments.
+
+The hope is also that the gradient is informative in the sense that:
+if a method pushes a not secondary target variable to a certain distribution / average value, we would also expect that if we push this variable to the achieved average value, that the previously targeted variable would achieve the same result.
+This we explicitly test in test5.
+
+The base guidance algorithm we use works as follows:
+...
+
+\section{Guidance loss}
+
+The loss we use to guide the generative model is defined as follows:
+...
+
+One of the main contributions of this thesis is the realization that in the weather domain, we can define a guidance target, which can be achieved precisely.
+By precisely I mean that the loss can be driven to zero.
+While in the image domain, there is always a ground truth during training, at inference we play with different guidance strengths to identify a range where the generated images are good looking.
+In the weather domain however, we can define a target that can be closed by tuning the guidance strength.
+
+This is great because instead of tuning the guidance strength to find a range of plausible results, we can define what plausible results look like a priori (guidance target sampling trajectory defined through historical data and plausibility tests), and optimize the guidance strength to achieve this target. 
+
+
+
+We essentially have a very similar setting to the guided diffusion for precipitation paper, but we make it more general in these ways:
+\begin{itemize}
+    \item we define a guidance target explictly, in contrast to observe results across different lambdas
+    \item we experiment with different $a_t$ trajectories, in addition to guiding computing the gradient at the first step
+    \item we test level of intensity by shifting the intenisty parameter from the flow (lambda) to the trajectory definition ($phi_n$)
+    \item Our loss is driven to zero in terms of the difference from the target, instead of being minimized iteratively (a more explicit way to encode the target scenario)
+\end{itemize}
+
+\section{Guidance algorithms}
+
+In this section we develop different variants of classifier free guidance, which we adapt to this setting.
+We explore the different variants, tune them, expose their flaws, assess their computational requirements, and compare their respective trade off.
+In the end we close in on the most promising method in terms of reliability and computational requirements, 
+evaluated both in terms of theoretical cost, but also in terms of practical factors such as difficulty of tunining and potential need for multiple runs.
+
+\subsection{CLOSE-GAP}
+
+Greedy
+
+Step is normalized to close the gap as prescribed by the guidance schedule.
+
+
+\subsection{OPTIMIZE-SCHEDULE}
+
+The step is allowed to take the gradient norm into consideration.
+The schedule is optimized to minimize the loss while also complying to a regularization term.
+Possible regularization terms include the total guidance.
+We can dream up arbitrary penalty terms such as angular defelction, ... .
+
+The problem of this optimization is that the gradient applyed for the guidance at each step changes with respect to the schedule.
+The optimization is therefore highly non-convex and very hard to solve.
+In fact, the optimizer will converge very fast to a local minimum, highly influenced by the initialization of the schedule.
+
+LBFGS
+
+
+\subsection{OPTIMIZE-GAIN}
+
+Secant method
+
+The step is allowed to take the gradient norm into consideration.
+Since the loss is almost linear with respect to the guidance strength, we can use a secant method to find the guidance strength that minimizes the loss.
+
+In this case we define the secant method as follows:
+
+\subsection{Comparison}
+
+TABLE
+
+Given the analyzed properties of the algorithms, in all our experiments we will make use of the latter presented method.

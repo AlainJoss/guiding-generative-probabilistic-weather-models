@@ -370,6 +370,7 @@ class GuidedFlow(BaseLightningModule):
                 "FGWRHO": self._fgwrho_flow,
                 "FGWNOGAP": self._fgwnogap_flow,
                 "FGWFREE": self._fgwfree_flow,
+                "UG": self._ug_flow,
             }
             if guidance_type not in flows:
                 raise ValueError(f"Unknown guidance_type: {guidance_type}")
@@ -520,6 +521,93 @@ class GuidedFlow(BaseLightningModule):
             u2 = u2 + (u_t[k].detach() ** 2 * sup).sum()
             g2 = g2 + (g_t[k].detach() ** 2 * sup).sum()
         return float(torch.sqrt(u2) / torch.sqrt(g2).clamp_min(1e-30))
+
+    # ------------------------ UG: Universal-Guidance backward shift --------
+
+    def _ug_flow(
+        self,
+        x_cond,
+        det_pred: TensorDict,
+        delta_t: torch.Tensor,
+        mask: TensorDict,
+        x_ref: TensorDict,
+        seed: int,
+        eta: float = 0.5,
+        a_t_mode: str = "spike@1",
+    ):
+        # Backward universal guidance (Bansal et al., arXiv 2302.07121, Eq. 7/9)
+        # adapted to the residual flow: at a_t-gated steps, apply the CLOSED-FORM
+        # loss-minimizing clean-space shift instead of a gradient kick. For the
+        # quadratic masked loss L = (S(x_hat) - A)^2 with linear S, the paper's
+        # m-step GD from Delta=0 converges to the minimum-norm exact solution
+        #   Delta_x = -e * M / ||M||^2   (e = signed residual, M = mask weights,
+        # denormalized units), which zeroes the residual of the implied clean
+        # prediction. The paper's epsilon substitution (Eq. 9) becomes a velocity
+        # correction: x_hat = denorm(det + (z + s*u) * rtps)  =>
+        #   Delta_u = Delta_x / (data_std * rtps * s_t),   u <- u + a_t * Delta_u.
+        # No outer optimization, no w; the remaining (contractive) flow acts on
+        # the shift untouched -- the contrast to FGWNOLR's optimized kick.
+        # Schedule semantics: the kick is along the MASK PATTERN, not the unit
+        # gradient; c_t = ||Delta_u|| so lambda_hat = w*a_t*c_t is the applied
+        # kick norm (w_t = 1 throughout). No w_star sidecar (nothing optimized).
+        z_t = self.init_noise(x_cond, seed)
+        timesteps = self.flow_timesteps()
+        a_sched = a_t_profile(a_t_mode, eta, len(timesteps)).tolist()
+        m2 = float(sum((mask[k] ** 2).sum() for k in mask.keys()))
+        sampling_trace = defaultdict(list)
+        w_t_trace, a_t_trace, c_t_trace, g_norm_trace = [], [], [], []
+
+        for i in tqdm(range(len(timesteps)), desc="UG sampling"):
+            t, s_t, h = self.step_factors(i, timesteps)
+            z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
+
+            with torch.enable_grad():
+                time_embedding = self.embed_time(x_cond, t)
+                input_state = self.velocity_input(z_t, x_cond)
+                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
+                x_hat_t_norm = det_pred + self.euler_step(
+                    z_t, u_t, s_t
+                ) * self.residual_to_pangu_scale
+                x_hat_t = self.denormalize(x_hat_t_norm)
+                # recorded for the traces only; the UG kick needs no gradients
+                grad_vec = self.guidance_gradient(x_hat_t, x_ref, delta_t, mask, z_t)
+
+            g_norm = float(torch.sqrt(
+                sum((grad_vec[k].detach() ** 2).sum() for k in grad_vec.keys())
+            ).clamp_min(1e-30))
+            # the last Euler step snaps z onto the predicted residual (h = s);
+            # NEVER guided (uniform convention across methods)
+            a_t = 0.0 if i == len(timesteps) - 1 else float(a_sched[i])
+
+            e = float(self.masked_residual(x_hat_t.detach(), x_ref, delta_t, mask))
+            delta_x = mask.apply(lambda m: (-e / m2) * m)  # exact minimum-norm shift
+            delta_u = (delta_x / self.data_std / self.residual_to_pangu_scale).apply(
+                lambda x: x / float(s_t)
+            )
+            c_t = float(torch.sqrt(
+                sum((delta_u[k].detach() ** 2).sum() for k in delta_u.keys())
+            ))
+
+            w_t_trace.append(1.0)
+            a_t_trace.append(a_t)
+            c_t_trace.append(c_t)
+            g_norm_trace.append(g_norm)
+            sampling_trace["grads"].append(grad_vec.detach().cpu())
+            sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
+            sampling_trace["res"].append(z_t.detach().cpu())
+
+            if a_t != 0.0:
+                # guided_velocity subtracts gui_vec, so pass -a_t * Delta_u
+                gui_step = delta_u.apply(lambda x: (-a_t) * x)
+                u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
+            with torch.no_grad():
+                z_t = self.euler_step(z_t, u_t, h)
+
+        sampling_trace["guidance_schedule"] = {
+            "w_t": w_t_trace, "a_t": a_t_trace,
+            "c_t": c_t_trace, "g_norm_t": g_norm_trace,
+        }
+        return z_t, sampling_trace
 
     # --------------------------------------- shared lambda-gradient eval ---
 

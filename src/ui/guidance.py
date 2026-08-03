@@ -845,6 +845,8 @@ def _(
     get_mask_2d,
     get_mask_center_pt,
     mask_mode,
+    mask_shift_preview_dropdown,
+    mask_shift_px_slider,
     notebook_mode,
     np,
     side_lat_slider,
@@ -870,10 +872,14 @@ def _(
                                sigma_div=sigma_div_slider.value)
         case "guided_rollout":
             # preview of the config-pinned corners under the selected mask mode;
-            # the local slider previews sigma_div (the swept value is set per job)
+            # local controls preview sigma_div and the mask shift (the swept
+            # values are set per job)
             mask_corners = config.MASK_CORNERS
+            _pv_shift = ("none" if mask_shift_preview_dropdown.value == "none"
+                         else f"{mask_shift_preview_dropdown.value}@{int(mask_shift_px_slider.value)}")
             mask = get_mask_2d(view_mask_mode, mask_corners,
-                               sigma_div=sigma_div_slider.value)
+                               sigma_div=sigma_div_slider.value,
+                               mask_shift=_pv_shift)
         case "analyze_rollout":
             # the EXPERIMENT mask at the selected sweep point: swept MASK_MODE +
             # swept sigma_div (default 2.0 for stores without that axis)
@@ -1634,6 +1640,8 @@ def _(
     mask_map,
     mask_map_3d,
     mask_mode_dropdown,
+    mask_shift_preview_dropdown,
+    mask_shift_px_slider,
     mo,
     notebook_mode,
     side_lat_slider,
@@ -1703,9 +1711,11 @@ def _(
                     ),
                 ], align="start")
             ], align="start")
-            # config-pinned corners: no side sliders; mask mode + sigma_div preview the mask
+            # config-pinned corners: no side sliders; mask mode, sigma_div and the
+            # shift preview render the mask as a job would build it
             mask_widget = mo.vstack([
-                mo.hstack([mask_mode_dropdown, zoom_slider, dpi_slider, sigma_div_slider], justify="start"),
+                mo.hstack([mask_mode_dropdown, zoom_slider, dpi_slider, sigma_div_slider,
+                           mask_shift_preview_dropdown, mask_shift_px_slider], justify="start"),
                 _mask_maps_row,
             ], align="start")
             inspect_states_widget=inspect_states_widget_make
@@ -4680,6 +4690,12 @@ def _(mo):
 def _(mo):
     mask_shift_px_slider = mo.ui.slider(1, 10, step=1, value=3, label="shift px: ", show_value=True, debounce=True)
     return (mask_shift_px_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mask_shift_preview_dropdown = mo.ui.dropdown(["none", "right", "up", "down", "left"], value="none", label="preview shift: ")
+    return (mask_shift_preview_dropdown,)
 
 
 @app.cell

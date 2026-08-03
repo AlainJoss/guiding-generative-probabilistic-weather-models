@@ -1,0 +1,17 @@
+\chapter{Discussion}\label{ch:discussion}
+
+The algorithm doesn't produce diverse results, because the gradients are really stable.
+This has to do with the fact that we have learned one and only one flow model (transition function).
+If we had multiple residual diffusion model, we would expect the possible effects to be more diverse.
+However, the second interpretation might be that the gradient provides with the information about the most likely direction of change (which is true under the learned data distribution).
+
+This happens because the guidance vector is a scaled version of the flow model's gradient wrt to the noisy state.
+The gradient is stable across the full trajectory, because the only variable inputs are the noise itself and the timestep of the flow.
+The stochasticity of the noise is not enough to produce diverse results.
+The direction of the gradient is always the same. If we say "let the masked average go up by phi percent", the only thing that changes is the magnitude of the gradient, but not its direction, which is specified by the Jacobian.
+
+This is in contrast to guidance settings.
+
+Shift between atmosphere and stratosphere.
+
+Put here all observations

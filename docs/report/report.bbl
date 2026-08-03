@@ -16,5 +16,178 @@
   {}
 \endgroup
 
+
+\refsection{0}
+  \datalist[entry]{nty/global//global/global}
+    \entry{benhamu2024dflow}{inproceedings}{}
+      \name{author}{6}{}{%
+        {{hash=ba96cca118e3b647b33f897be2f3d05c}{%
+           family={Ben-Hamu},
+           familyi={B\bibinithyphendelim H\bibinitperiod},
+           given={Heli},
+           giveni={H\bibinitperiod}}}%
+        {{hash=bd719e92cebaeac3266aae242851b0d5}{%
+           family={Puny},
+           familyi={P\bibinitperiod},
+           given={Omri},
+           giveni={O\bibinitperiod}}}%
+        {{hash=392591856940aee2897c65ba822d427b}{%
+           family={Gat},
+           familyi={G\bibinitperiod},
+           given={Itai},
+           giveni={I\bibinitperiod}}}%
+        {{hash=8b4f260513035df036170e50abb8a1a2}{%
+           family={Karrer},
+           familyi={K\bibinitperiod},
+           given={Brian},
+           giveni={B\bibinitperiod}}}%
+        {{hash=490b1b9a870cc899f1e279cac96865ef}{%
+           family={Singer},
+           familyi={S\bibinitperiod},
+           given={Uriel},
+           giveni={U\bibinitperiod}}}%
+        {{hash=007e1ec9be65793d22967618e750f5a2}{%
+           family={Lipman},
+           familyi={L\bibinitperiod},
+           given={Yaron},
+           giveni={Y\bibinitperiod}}}%
+      }
+      \strng{namehash}{0feaf8d4429dd2d358e3fd6058dfcb9c}
+      \strng{fullhash}{533d5560dcc2576f4799ed0ca456d137}
+      \strng{bibnamehash}{0feaf8d4429dd2d358e3fd6058dfcb9c}
+      \strng{authorbibnamehash}{0feaf8d4429dd2d358e3fd6058dfcb9c}
+      \strng{authornamehash}{0feaf8d4429dd2d358e3fd6058dfcb9c}
+      \strng{authorfullhash}{533d5560dcc2576f4799ed0ca456d137}
+      \field{sortinit}{B}
+      \field{sortinithash}{d7095fff47cda75ca2589920aae98399}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{International Conference on Machine Learning (ICML)}
+      \field{title}{{D-Flow}: Differentiating through Flows for Controlled Generation}
+      \field{year}{2024}
+    \endentry
+    \entry{lipman2023flow}{inproceedings}{}
+      \name{author}{5}{}{%
+        {{hash=007e1ec9be65793d22967618e750f5a2}{%
+           family={Lipman},
+           familyi={L\bibinitperiod},
+           given={Yaron},
+           giveni={Y\bibinitperiod}}}%
+        {{hash=9db211fe28b9db15bc04d29bedf2e03f}{%
+           family={Chen},
+           familyi={C\bibinitperiod},
+           given={Ricky\bibnamedelimb T.\bibnamedelimi Q.},
+           giveni={R\bibinitperiod\bibinitdelim T\bibinitperiod\bibinitdelim Q\bibinitperiod}}}%
+        {{hash=ba96cca118e3b647b33f897be2f3d05c}{%
+           family={Ben-Hamu},
+           familyi={B\bibinithyphendelim H\bibinitperiod},
+           given={Heli},
+           giveni={H\bibinitperiod}}}%
+        {{hash=9754396c9b0fc2f09bd396146fbf2ef3}{%
+           family={Nickel},
+           familyi={N\bibinitperiod},
+           given={Maximilian},
+           giveni={M\bibinitperiod}}}%
+        {{hash=0cfb9d1b56ab35847c5459562f1bc06e}{%
+           family={Le},
+           familyi={L\bibinitperiod},
+           given={Matt},
+           giveni={M\bibinitperiod}}}%
+      }
+      \strng{namehash}{2448e85d4cbf68d0dd4d49f90ff7baf7}
+      \strng{fullhash}{49da98f371ceb8c3d569918c0f1720db}
+      \strng{bibnamehash}{2448e85d4cbf68d0dd4d49f90ff7baf7}
+      \strng{authorbibnamehash}{2448e85d4cbf68d0dd4d49f90ff7baf7}
+      \strng{authornamehash}{2448e85d4cbf68d0dd4d49f90ff7baf7}
+      \strng{authorfullhash}{49da98f371ceb8c3d569918c0f1720db}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{International Conference on Learning Representations (ICLR)}
+      \field{title}{Flow Matching for Generative Modeling}
+      \field{year}{2023}
+    \endentry
+    \entry{liu2023flowgrad}{inproceedings}{}
+      \name{author}{4}{}{%
+        {{hash=d53ef2e8b31ba793777ed523666df345}{%
+           family={Liu},
+           familyi={L\bibinitperiod},
+           given={Xingchao},
+           giveni={X\bibinitperiod}}}%
+        {{hash=3f0b28325bfc2b05afe3f42c7c5193ea}{%
+           family={Wu},
+           familyi={W\bibinitperiod},
+           given={Lemeng},
+           giveni={L\bibinitperiod}}}%
+        {{hash=40f8923944f9a0847ab6da9de1ba61c4}{%
+           family={Ye},
+           familyi={Y\bibinitperiod},
+           given={Mao},
+           giveni={M\bibinitperiod}}}%
+        {{hash=e8c0010ab32e4255b70bd8d9fefdf5cd}{%
+           family={Liu},
+           familyi={L\bibinitperiod},
+           given={Qiang},
+           giveni={Q\bibinitperiod}}}%
+      }
+      \strng{namehash}{7465d1681b0fec8ce4bd46a75ef54fd0}
+      \strng{fullhash}{5c4cedf97b0acfb07f50616458d7edc1}
+      \strng{bibnamehash}{7465d1681b0fec8ce4bd46a75ef54fd0}
+      \strng{authorbibnamehash}{7465d1681b0fec8ce4bd46a75ef54fd0}
+      \strng{authornamehash}{7465d1681b0fec8ce4bd46a75ef54fd0}
+      \strng{authorfullhash}{5c4cedf97b0acfb07f50616458d7edc1}
+      \field{sortinit}{L}
+      \field{sortinithash}{7c47d417cecb1f4bd38d1825c427a61a}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)}
+      \field{title}{{FlowGrad}: Controlling the Output of Generative {ODEs} with Gradients}
+      \field{year}{2023}
+    \endentry
+    \entry{wang2025trainingfree}{inproceedings}{}
+      \name{author}{5}{}{%
+        {{hash=53013d40dd6429f0e9d70b7b62412a77}{%
+           family={Wang},
+           familyi={W\bibinitperiod},
+           given={Luran},
+           giveni={L\bibinitperiod}}}%
+        {{hash=95ce53b44d77a255b5e72b99d1aba7ab}{%
+           family={Cheng},
+           familyi={C\bibinitperiod},
+           given={Chaoran},
+           giveni={C\bibinitperiod}}}%
+        {{hash=eceb07d12040cdf8599a4cf76b346ebd}{%
+           family={Liao},
+           familyi={L\bibinitperiod},
+           given={Yizhen},
+           giveni={Y\bibinitperiod}}}%
+        {{hash=eb48cbf67deadc6d21567eb370a4397f}{%
+           family={Qu},
+           familyi={Q\bibinitperiod},
+           given={Yanru},
+           giveni={Y\bibinitperiod}}}%
+        {{hash=dfe9a9cb3ae774fdbf9487004721b7c5}{%
+           family={Liu},
+           familyi={L\bibinitperiod},
+           given={Ge},
+           giveni={G\bibinitperiod}}}%
+      }
+      \strng{namehash}{63db8428c64f8e0ad4b90b939d3ef8f9}
+      \strng{fullhash}{47de2698bdbd5422a70acb297ef84444}
+      \strng{bibnamehash}{63db8428c64f8e0ad4b90b939d3ef8f9}
+      \strng{authorbibnamehash}{63db8428c64f8e0ad4b90b939d3ef8f9}
+      \strng{authornamehash}{63db8428c64f8e0ad4b90b939d3ef8f9}
+      \strng{authorfullhash}{47de2698bdbd5422a70acb297ef84444}
+      \field{sortinit}{W}
+      \field{sortinithash}{4315d78024d0cea9b57a0c6f0e35ed0d}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{booktitle}{International Conference on Learning Representations (ICLR)}
+      \field{title}{Training-Free Guided Flow-Matching with Optimal Control}
+      \field{year}{2025}
+    \endentry
+  \enddatalist
+\endrefsection
 \endinput
 

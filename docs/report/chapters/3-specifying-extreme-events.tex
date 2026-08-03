@@ -1,0 +1,57 @@
+\chapter{Specifying events of interest}\label{ch:specify}
+
+
+\section{Focus events in this project}
+
+While we focus on surface temperature, the method we develop is general.
+However, in order to specify extreme events in other variable, we would require a higher expertise.
+So here we heavily focus on the methodology itself, leaving exploration of other variables to experts in the field.
+
+It is really important to understand how to evaluate what we are doing here.
+Since we are aiming at a specific region of interest, and we are guiding only wrt the region of interest, 
+we are loosing the global coherence of the weather states.
+We shall thus evaluate the ability of our method to generate locally coherent weather scenarios, over the region of interest.
+
+\section{Mask}
+
+The mask is a set of weigths (sum to 1) over a tensor having the same dimension as the weather states, non-zero at the variable and region of interest.
+
+We experimented with a gaussian mask, but realized in our experiments that the best thing to do is equal weighting inside the region.
+The correct way to define the region of interest is to choose a greater mask size instead of using some weighting scheme fading out of an epicenter. The mask size should be chosen to cover the entire area of interest, ensuring that all relevant data is included in the analysis. A larger mask size can help to reduce noise and improve the accuracy of the results, while a smaller mask size may exclude important information. It is important to carefully consider the appropriate mask size for each specific application to achieve optimal results.
+Either way we (most probably) loose the global coherence for the guided weather states, so we might as well define directly the region of interest with a mask. 
+Additionally, this enables us to actually make statements about "the region of interest",
+having equal weights everywhere.
+Introducing different weigths might bias the generation in a way that is not desired.
+
+
+
+\section{Target trajectory}
+
+In order to define plausible average trajectories of change, we define following procedure:
+1. Select start state
+2. Define mask
+3. Retrieve historical states that are consistent with the start state and the mask (+- some tolerance)
+4. Compute the distribution of average trajectories of change for the historical states
+5. Filter a quantile of the distribution to define the target trajectory (e.g. 0.95 quantile for extreme events)
+6. Define a gaussian distribution at each time step of the target trajectory, with mean equal to the target trajectory and variance equal to the variance of the historical states at that time step.
+7. Sample enough trajectories from the gaussian distribution to define a set of target trajectories that will be used to guide the generative model.
+8. Select the target trajectories of interest in terms of extremeness to build scenarios.
+9. Save the trajectories and corresponding states used to define the sampling distribution. These will be used to evaluate the plausibility of the generated trajectories as means of comparison.
+10. Run benchmark tests and evaluate.
+
+This heuristic enables us to anchor the guidance target and define a benchmark at the same time.
+More concretly, we avoid the issue of having to tune the strength of the guidance to achieve a certain plausible result.
+We reverse the problem by defining the plausible result first and then designing an algorithm to achieve that result and checking that both the algorithm and its result are well behaved.
+
+We explicitly define a heatwave in order to design guidance methods. 
+This means that we decide to represent a specific subset of state trajectoriesin this work.
+However, our method is flexible to any kind of target: you can swap your definition of the event you want to replicate and use the guidance to generate that kind of event.
+This really only affects the target definition.
+
+This choice enables us to side step the problem that guiding towards a classifier's gradients or minimizing / maximizing a certain variable and stopping when we achieved the wanted result.
+If we specify the carachteristic of the wanted result we side step this problem entirely.
+The problem then shifts to retrieve a representative set of the event we have in mind.
+This is however a requirement for the first methodology.
+So we could say that the problem shifts towards defining an appropriate algorithm that can achieve a representative state similar to the specified set.
+Making this step explicit directly enables us to then compare the results against this set,
+and characterize its flaws / benefits directly.

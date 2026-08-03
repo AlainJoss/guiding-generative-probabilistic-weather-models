@@ -18,13 +18,16 @@ GUIDANCE_METHOD_HYPERS = {
     "FGWFREE": ["phi"],
     # FGWRHO: secant on the guidance-to-flow ratio w (kick normalized to ||u_t||)
     "FGWRHO": ["fgwrho_w_init"],
+    # UG: backward Universal Guidance (arXiv 2302.07121) -- closed-form
+    # loss-minimizing clean-space shift, a_t-gated (eta only shapes non-@ modes)
+    "UG": ["eta", "a_t_mode"],
 }
 
 # mask hypers, shared by every mask mode (extent rescaling / pixel translation)
 MASK_HYPERS = ["sigma_div", "mask_shift"]
 
 # common hypers
-GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO", "FGWNORM"]
+GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO", "FGWNORM", "UG"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "ELLIPTICAL"]
 

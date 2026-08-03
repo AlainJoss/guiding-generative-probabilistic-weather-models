@@ -1,16 +1,57 @@
 \babel@toc {english}{}\relax 
 \contentsline {chapter}{\numberline {1}Introduction}{1}{chapter.1}%
-\contentsline {chapter}{\numberline {2}Technical Background}{3}{chapter.2}%
-\contentsline {chapter}{\numberline {3}Problem Setting}{4}{chapter.3}%
-\contentsline {chapter}{\numberline {4}Guidance Design}{5}{chapter.4}%
-\contentsline {section}{\numberline {4.1}Mask}{5}{section.4.1}%
-\contentsline {section}{\numberline {4.2}Target trajectory}{5}{section.4.2}%
-\contentsline {section}{\numberline {4.3}Guidance loss}{6}{section.4.3}%
-\contentsline {section}{\numberline {4.4}Guidance method}{7}{section.4.4}%
-\contentsline {section}{\numberline {4.5}Guidance algorithms}{7}{section.4.5}%
-\contentsline {subsection}{\numberline {4.5.1}CLOSE-GAP}{7}{subsection.4.5.1}%
-\contentsline {subsection}{\numberline {4.5.2}OPTIMIZE-GAIN}{7}{subsection.4.5.2}%
-\contentsline {subsection}{\numberline {4.5.3}OPTIMIZE-SCHEDULE}{8}{subsection.4.5.3}%
-\contentsline {chapter}{\numberline {5}Related Work}{9}{chapter.5}%
-\contentsline {chapter}{Appendices}{}{section*.5}
-\contentsline {chapter}{\numberline {A}Appendix}{11}{appendix.A}%
+\contentsline {chapter}{\numberline {2}Background}{3}{chapter.2}%
+\contentsline {section}{\numberline {2.1}Flow matching}{3}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Guidance methods}{4}{section.2.2}%
+\contentsline {subsubsection}{Classifier guidance}{4}{section*.5}%
+\contentsline {subsection}{\numberline {2.2.1}Backpropagating through the ODE}{4}{subsection.2.2.1}%
+\contentsline {subsubsection}{FlowGrad}{4}{section*.6}%
+\contentsline {subsubsection}{D-Flow}{4}{section*.7}%
+\contentsline {subsubsection}{Control paper}{4}{section*.8}%
+\contentsline {subsection}{\numberline {2.2.2}Classifier guidance}{4}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Guidance schedules}{5}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}Generative weather models}{5}{section.2.3}%
+\contentsline {section}{\numberline {2.4}ArchesWeather}{5}{section.2.4}%
+\contentsline {subsection}{\numberline {2.4.1}Dataset}{5}{subsection.2.4.1}%
+\contentsline {subsection}{\numberline {2.4.2}Architecture}{5}{subsection.2.4.2}%
+\contentsline {subsection}{\numberline {2.4.3}Training}{5}{subsection.2.4.3}%
+\contentsline {subsection}{\numberline {2.4.4}Evaluation}{5}{subsection.2.4.4}%
+\contentsline {section}{\numberline {2.5}Guidance in weather modeling}{5}{section.2.5}%
+\contentsline {chapter}{\numberline {3}Specifying events of interest}{7}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Focus events in this project}{7}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Mask}{7}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Target trajectory}{8}{section.3.3}%
+\contentsline {chapter}{\numberline {4}Guidance design}{10}{chapter.4}%
+\contentsline {section}{\numberline {4.1}General method}{10}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Guidance loss}{10}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Guidance algorithms}{11}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}CLOSE-GAP}{11}{subsection.4.3.1}%
+\contentsline {subsection}{\numberline {4.3.2}OPTIMIZE-SCHEDULE}{11}{subsection.4.3.2}%
+\contentsline {subsection}{\numberline {4.3.3}OPTIMIZE-GAIN}{12}{subsection.4.3.3}%
+\contentsline {subsection}{\numberline {4.3.4}Comparison}{12}{subsection.4.3.4}%
+\contentsline {chapter}{\numberline {5}Evaluation}{13}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Flow-time assessment}{14}{section.5.1}%
+\contentsline {subsection}{\numberline {5.1.1}Parameters}{14}{subsection.5.1.1}%
+\contentsline {subsection}{\numberline {5.1.2}Tests}{14}{subsection.5.1.2}%
+\contentsline {section}{\numberline {5.2}Weather time tests}{15}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Parameters}{15}{subsection.5.2.1}%
+\contentsline {subsubsection}{Region of interest}{16}{section*.9}%
+\contentsline {subsubsection}{Variable of interest}{16}{section*.10}%
+\contentsline {subsubsection}{Intervention profile}{16}{section*.11}%
+\contentsline {subsection}{\numberline {5.2.2}Tests}{16}{subsection.5.2.2}%
+\contentsline {subsubsection}{Method tests}{16}{section*.12}%
+\contentsline {subsubsection}{Realism tests}{17}{section*.13}%
+\contentsline {chapter}{\numberline {6}Experiments}{19}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Flow time evaluation}{19}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Weather time evaluation}{19}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Use cases}{19}{section.6.3}%
+\contentsline {subsection}{\numberline {6.3.1}Europa 2020-06-01}{19}{subsection.6.3.1}%
+\contentsline {subsection}{\numberline {6.3.2}Australia 2020-01-01}{19}{subsection.6.3.2}%
+\contentsline {subsection}{\numberline {6.3.3}North America 2020-07-01}{19}{subsection.6.3.3}%
+\contentsline {chapter}{\numberline {7}Discussion}{20}{chapter.7}%
+\contentsline {chapter}{\numberline {8}Conclusion}{21}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Summary}{21}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Future Directions}{21}{section.8.2}%
+\contentsline {section}{\numberline {8.3}Conclusive Remarks}{21}{section.8.3}%
+\contentsline {chapter}{Appendices}{}{section*.14}
+\contentsline {chapter}{\numberline {A}Code-base structure}{23}{appendix.A}%
