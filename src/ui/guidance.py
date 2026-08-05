@@ -1627,6 +1627,7 @@ def wa_schedule(
 def _(
     M_N_widget,
     T_slider,
+    climatology_rolling_slider,
     delta_widget,
     dpi_slider,
     experiment_params,
@@ -1655,6 +1656,7 @@ def _(
     var_dropdown,
     wa_schedule_widget,
     weather_map,
+    year_trajectory_plot,
     zoom_slider,
 ):
     mask_widget_controls = mo.hstack(
@@ -1689,8 +1691,9 @@ def _(
                 mask_widget_controls,
                 M_N_widget,
                 m_n_widget,
-                mo.hstack([traj_row_select, dpi_slider], justify="start"),
-                trajectories_plot
+                mo.hstack([traj_row_select, dpi_slider, climatology_rolling_slider], justify="start"),
+                trajectories_plot,
+                year_trajectory_plot,
             ])
             inspect_states_widget=None
         case "guided_rollout":
@@ -1783,6 +1786,7 @@ def _(mo):
 def _(
     add_map_stats,
     config,
+    cool_half_cmap,
     dpi_slider,
     get_slices,
     gt_rollout,
@@ -1801,6 +1805,7 @@ def _(
     var,
     view_mask_mode,
     visualize_map,
+    warm_half_cmap,
     white_zero_cmap,
     zoom_centers,
     zoom_slider,
@@ -1817,16 +1822,23 @@ def _(
         weather_slices = get_slices(gt_rollout, mask_partition, mask_var, mask_level)
         # display units (K -> degC for temperature), like every other absolute map
         weather_slices, _weather_unit = to_display_units(weather_slices, mask_var)
+        _wmin, _wmax = float(np.min(weather_slices)), float(np.max(weather_slices))
+        if _wmin < 0.0 < _wmax:            # white anchored at 0 (guidance abs-field convention)
+            _wcmap, _wcenter = white_zero_cmap, 0.0
+        elif _wmin >= 0.0:
+            _wcmap, _wcenter = warm_half_cmap, None
+        else:
+            _wcmap, _wcenter = cool_half_cmap, None
         weather_map = visualize_map(
             weather_slices[n],
             suptitle=f"{timestamps[n]}",
             title=f"partition={mask_partition} | var={mask_var} | level={mask_level}"
             + (f" | [{_weather_unit}]" if _weather_unit else ""),
             interactive=map_interactive,
-            cmap=white_zero_cmap,
-            vmin=np.min(weather_slices),
-            vmax=np.max(weather_slices),
-            center=0.5 * (np.min(weather_slices) + np.max(weather_slices)),
+            cmap=_wcmap,
+            vmin=_wmin,
+            vmax=_wmax,
+            center=_wcenter,
             puck_center=(
                 (mask_corners[0] + mask_corners[1]) / 2,
                 (mask_corners[2] + mask_corners[3]) / 2,
@@ -5112,6 +5124,81 @@ def _(
     else:
         reductions_ready = False
     return (reductions_ready,)
+
+
+@app.cell
+def _(
+    get_masked_mean,
+    get_slices,
+    hour_slider,
+    level,
+    mask,
+    notebook_mode,
+    partition,
+    to_display_units,
+    trajectories_section_checkbox,
+    var,
+    year_dropdown,
+):
+    from src.utils import get_xr_dataset
+
+    # unguided-authoring only: mask-averaged <var> across the FULL YEAR at the selected
+    # hour of day. 6-hourly ERA5 GT -> filter to the chosen hour -> one point per day, then
+    # mask-average. Kept separate from the plot so the rolling-window slider re-plots
+    # without reloading the year. Mirrors the gt_trajectory build (get_slices + masked_mean).
+    if trajectories_section_checkbox.value and notebook_mode == "unguided_rollout":
+        _ds = get_xr_dataset(year_dropdown.value)
+        _ds_h = _ds.sel(time=_ds.time.dt.hour == hour_slider.value)
+        year_dates = _ds_h["time"].values
+        year_series, year_unit = to_display_units(
+            get_masked_mean(get_slices(_ds_h, partition, var, level), mask), var
+        )
+    else:
+        year_dates = year_series = year_unit = None
+
+    return year_dates, year_series, year_unit
+
+
+@app.cell
+def _(mo):
+    climatology_rolling_slider = mo.ui.slider(
+        1, 31, value=7, step=1, label="rolling avg (days): ", show_value=True, debounce=True
+    )
+
+    return (climatology_rolling_slider,)
+
+
+@app.cell
+def _(
+    climatology_rolling_slider,
+    dpi_slider,
+    hour_slider,
+    var,
+    year_dates,
+    year_dropdown,
+    year_series,
+    year_unit,
+):
+    from src.ui.plot_climatology import plot_climatology
+
+    # full-year mask climatology with a rolling-average overlay and hottest-window marker;
+    # the rolling-window slider only re-runs this cell (the year load lives upstream).
+    if year_series is not None:
+        year_trajectory_plot = plot_climatology(
+            year_dates,
+            year_series,
+            rolling_days=climatology_rolling_slider.value,
+            var=var,
+            unit=year_unit,
+            title="Mask climatology (full year @ selected hour)",
+            subtitle=f"{var} | mask-averaged | {hour_slider.value:02d}Z | {year_dropdown.value}",
+            figsize=(22, 6),
+            dpi=dpi_slider.value,
+        )
+    else:
+        year_trajectory_plot = None
+
+    return (year_trajectory_plot,)
 
 
 if __name__ == "__main__":

@@ -1,154 +1,81 @@
 \chapter{Evaluation}\label{ch:eval}
 
-To evaluate the performance of our guidance algorithm we need to test the two requirements we have set for it: extremeness and realism.
+We evaluate our guidance method against the two requirements we set for it: \emph{achievement}, the ability to reach the specified target, and \emph{realism}, the physical plausibility of the states it generates.
 
-The first concern is whether the algorithm is able to achieve the target, and how well it does so.
-This entails testing the algorithm's ability to drive the gap to zero, and how well it does so across different settings.
-We will test the algorithm for convergence, stability, and trajectory deviation.
-These tests adress will help to unveil potential failure modes of the algorithm and showcase which algorithm design choices are more adequate for different settings.
+The first requirement concerns whether the algorithm reaches the target, and how well it does so across settings. We test this through convergence, stability, and trajectory deviation, which together expose the failure modes of the algorithm and reveal which design choices are more adequate overall.
 
-The second concern is whether the generated states are realistic, in terms of temporal, spatial, vertical, and cross-variable coherence.
+The second requirement concerns whether the generated states are realistic, in terms of temporal, spatial, vertical, and cross-variable coherence.
 
+The evaluation is organised as a funnel. In \emph{flow-time} we assess the sampling dynamics of the algorithm variants and guidance schedules, and select the most promising method. In \emph{weather-time} we then characterise the parameters of the experimental setting, select the settings that produce the most desirable results, and finally validate the realism of the generated trajectories. \Cref{ch:experiments} carries out each stage in turn and reports the concrete settings and results; this chapter defines only \emph{what} we test and \emph{how} we score it.
 
---- redundant second sentence, to merge
-In our experiments we will test these properties analyzing the impact of the single parameters of our experimental setting.
-In particular we will test different modes or ranges for the single parameters and then assess these properties and report on them.
-
---- ass covering part if I don't manage to perform the realism quantitative tests
-In this work we focus on designing a simple guidance method and empirically test its parameters and the properties of the results generated across different settings.
-We put less emphasis on the physical realism of the definition of the guidance target and the realism of the generated trajectories,
-and defer this to a separate line of work.
-Though, we have these two in mind when designing the guidance method throughout.
-
-In addition to these tests, in the discussion we will also discuss different aspects of the results, such as the diversity of the generated trajectories, and the informativeness of the gradient, and other aspects that are not directly tested in the evaluation framework, but are of interest to the overall evaluation of the method and its potential applications.
+Alongside these tests, the discussion examines further aspects that the framework does not measure directly---such as the diversity of the generated trajectories and the informativeness of the gradient---but that bear on the overall value of the method and its applications.
 
 \section{Flow-time assessment}
-
-\subsection{Parameters}
-
-In flow-time tests we assess:
-\begin{itemize}
-    \item The algorithm variants
-    \item Different guidance schedules
-\end{itemize}
-with the purpose of selecting the most promising method to perform the final experiments with.
-
-The selection is based on the following criteria.
+Here we assess the algorithm variants and the guidance schedules, with the purpose of selecting the most promising method and parameters for the next set of experiments. 
+Before asking whether the method produces realistic results, we first have to establish that it works: that it reaches the target, does so reliably across settings, and does so in a stable manner.
 
 \subsection{Tests}
 
-Before testiong whether our algorithm produces realistic results we have to check that it actually works.
-That is, it achieves the set target, it does so reliably across different settings, and it does so in a stable manner.
+We test the achievement requirement and well--behaveheadness of the trajectory for different guidance algorithms through the following tests:
 
-In particular we are interested in testing following:
+\begin{description}
+    \item[T1 -- Convergence] The gap to the target is driven to zero. We report the mean and standard deviation of the final gap.
+    \item[T2 -- Stability] The trajectory is free of oscillatory behaviour. We measure this simply with respect to the pushback measured in the average trajectory (gui vs. ung steps).
+    \item[T3 -- Trajectory deviation] The guided trajectory does not deviate excessively from the unguided one. We report the distance between the two in PCA latent space, and the cosine similarity between the steps.
+    \item[T4 -- Tuning complexity] The algorithm parameters can be tuned reliably such that it combines its theoretical desirable properties to its practical applicability (TODO: should be the name of the test).
+\end{description}
 
-\begin{itemize}
-    \item The algorithm converges reliably.
-    \item The algorithm doesn't have an oscillatory behaviour in terms of the average trajectory, and in terms of the flow angles and magnitudes of the vector field.
-    (the flow trajectory doesn't deviate too much from the unguided trajectory).
-\end{itemize}
+It's not clear a priori whether total guidance needed to achieve the target is also something to aim for.
+For completeness we add this in the stability test reports.
 
---- merge the two paragraphs in a single enumeration, can then refer the test by numbers, give the test a clear identifier
+We use these tests as criteria to select the most promising method and its an adequate set of parameters for the tests at weather time.
 
---- remove the across runs from the bullets
-We will tests these properties with following metrics across different runs:
-\begin{itemize}
-    \item The gap to the target is driven to zero, and we report the average and std of the gap across different runs.
-    \item The flow angles and magnitudes are reported across the flow steps, and we report the average and std of the angles and magnitudes across different runs.
-    \item The flow trajectory is compared to the unguided trajectory in PCA latent space, and we report the average and std of the distance between the two trajectories across different runs.
-\end{itemize}
+\section{Weather-time assessment}
 
-Method selection criteria:
-\begin{itemize}
-    \item Total amount of guidance applied across the flow steps
-    \item The pushback from the unguided trajectory
-    \item Computational and memory requirements
-    \item The number of hyperparameters to tune, and the difficulty of tuning them
-    \item The number of runs required to achieve the target across different settings 
-    \item The guidance method is robust to different settings, in the sense that it can achieve the target across different settings, and it does so in a stable manner.
-\end{itemize}
+In weather-time we first characterise the parameters of the experimental setting---to describe their properties and to select settings for the larger experiments---and then validate the realism of the resulting trajectories. 
+Throughout, we pay special attention to the diversity of the produced results as a secondary property of interest, alongside realism.
 
-It's here that we test the developed algorithms and their different variants across different parameter settings, and select the most promising one for the final experiments.
+\subsection{Parameter characterisation tests}
 
+In the following we provide a set of qualitative tests to better understand the role of the main parameters of the guidance at weather time.
+We test parameters in isolation, using the remaining parameters as controls. We proceed in three stages, examining in turn the region of interest, the variable of interest, and the intervention profile.
+For each we show different charts and metrics to expose what happens across these settings.
 
-\section{Weather time tests}
+--- maybe here is where the baseline would shine.
 
-\subsection{Parameters}
-
-In an initial phase of the evaluation we want to test parameters in isolation, to both describe their properties, but also to select relevant settings for larger experiments.
-We can test these changes by combining them in bigger experiments, that enable us to use other parameters as control.
-
-We start by testing different parameters of the region of interest such as mask centers and sizes across different start states.
-We then examine how reproducible are the generated target variable patterns by pushing its most correlated variable instead.
-We finally proceed to test intervention across different intensity profiles. 
-
-Throughout these initial experiments we will change start states while setting N=2 and M=3, such that we can control for effects produced by setting N=1,
-and effects related to the specific seed, while keeping computational and memory requirements lowest possible.
-
-These experiments will help us understand the properties of the guidance algorithm we developed, and how its parameters influence the results.
-As for the guidance method, the described quantitative tests will help us in selecting parameters that produce the most desirable results under this lense.
+The reason for these tests is mostly to enhance our intuition about the role of each parameter, and provide a guideline on to select parameters for the large use cases we aim to produce with this work.
 
 \subsubsection{Region of interest}
-\begin{itemize}
-    \item different sizes, same center
-    \item different center, same size
-    \item different regions across globe
-\end{itemize}
-
+Here we assess variability of results by changing size, shift (from center), and coast-land covering of region of the interest.
 
 \subsubsection{Variable of interest}
-For reasons of simplicitly we explicitly only on heatwaves here. 
-However, to assess the gradient informativeness we push also other variables in the attempt to reproduce the same pattern on the first experiment.
-This might also open up a way to produce more diverse results. 
-\begin{itemize}
-    \item Temperature first and then push corresponding top-k variables to previosly generated values.
-\end{itemize}
+For simplicity we focus on heatwaves, and therefore on surface temperature. 
+To probe the informativeness of the gradient, in this test we push the most correlated variables in an attempt to reproduce the pattern obtained by pushing temperature directly. 
 
 \subsubsection{Intervention profile}
-\begin{itemize}
-    \item Push to different intensities
-    \item Assess what happens when you stop pushing (do states reconverge to unguided trajectory?)
-\end{itemize}
+Here we assess the degradation of the target patterns across intensity profiles.
+The intuition is that at some point things should brake down in some trivial way. 
 
+\subsection{Realism tests}
 
-\subsection{Tests}
+Once the guidance method and its parameters are selected, we assess the realism of the generated trajectories. Realism is central to this work, because we deliberately guide the generative model, possibly outside its training distribution. The tests themselves, however, are not specific to this work: they concern the general problem of evaluating the coherence of data-driven models, namely that the generated states should be consistent with the ground-truth dataset in both the guided and unguided settings.
 
-Once we have selected the guidance method and its parameters, we want to assess the realism, in addition to other properties, of the generated trajectories.
-In particular we want to test the following properties.
+We assess coherence to the ground-truth dataset along four dimensions:
 
-\subsubsection{Method tests}
-\begin{itemize}
-    \item The gradient is informative, in the sense that if we push a not secondary target variable to a certain distribution / average value, we would also expect that if we push this variable to the achieved average value, that the previously targeted variable would achieve the same result.
-    \item Diversity test: the generated trajectories are diverse, in the sense that they are not all the same, and they cover a range of possible outcomes.
-\end{itemize}
+\begin{description}
+    \item[T4 (Temporal).] Transitions of a variable across weather steps should be smooth.
+    \item[T5 (Spatial).] Patterns over the region of interest should be spatially coherent.
+    \item[T6 (Vertical).] Patterns should be coherent across pressure levels. 
+    We test this using a level rank coherence metric.
+    \item[T7 (Cross-variable).] Patterns should be coherent with the learned weather transition function across variables.
+    However, this is difficult to test quantitatively, we thus only make a qualitative assessment. (TODO: use the expert knowledge here)
+\end{description}
 
-\subsubsection{Realism tests}
+We benchmark these properties against the ground-truth data as anchor (reference set), and against the unguided forecast as baseline, comparing unguided, guided-minus-unguided, and guided states. For T4--T6 we compute difference maps along the axis of interest and report the min, mean, max, and standard deviation across maps. For T7 we compute the cross-variable distributions over the weather steps of the ground-truth data, and report the deviation of the unguided, guided-minus-unguided, and guided states from their average.
 
-Realism tests are of high importance in this work, since we are explicitly guiding the generative model possibly outside of its training distribution.
-However, these tests are not particular to this work.
-In fact they concern the general problem of evaluating the coherence of data driven models.
-That is, the generated states' properties should be consistent with the ground truth dataset, both in the guided and unguided settings.
+For all four tests we average over the experiments and report the mean and standard deviation across runs. This indicates whether the generated extremes are faithful to the data distribution. A subtle but important point: for this to be meaningful, the base forecast must have missed the potential heat spots. The extreme is not only about the average---which the forecast most likely covers faithfully---but about the extreme spots, so both the mean and the max must be tested.
 
-We design set of tests to assess the coherence to the ground truth dataset of the output trajectories across following dimensions:
-
-\begin{itemize}
-    \item temporally (transitions across the same variable should be smooth)
-    \item spatially (region of interest)
-    \item vertically (pressure levels)
-    \item across variables (patterns should be coherent to the learned weather transition function)
-\end{itemize}
-
-We will benchmark these properties against the ground-truth data (anchor) and measure the difference between unguided, guided-unguided, and guided states.
-For the first three concerns we compute difference maps in the axis of interest and measure min, mean, max, and std across maps.
-For the last property we measure all the cross-variable distributions over the weather steps of the ground truth data, and then report the deviation from the average of the unguided, guided-unguided, and guided states.
-
-For all four tests we average over different experiments and report the avg and std over all runs.
-This will hopefully give us an indication of whether the generated extremes are faithful to the data distribution.
-
-(Remember, in order for this to work the base-forecast have to have missed potential heat spots --> the extreme is not only about the average, wich the forecast will most probably cover faithfully, but about the extreme spots (max). Both of to be tested anyway.)
-
-Here a visualization summarizing these tests:
---- commented out for speed of compilation
+% Summary visualisation of the weather-time tests --- commented out for compilation speed
 % \begin{figure}[H]
 %     \centering
 %     \includegraphics[width=0.2\textwidth]{figures/weather-time-tests.png}
@@ -156,5 +83,4 @@ Here a visualization summarizing these tests:
 %     \label{fig:weather-time-tests}
 % \end{figure}
 
-
-In the next chapter we will expose the settings for the final experiments, and present the relevant results, and then proceed to discuss them in the following chapter.
+\Cref{ch:experiments} sets out the concrete settings for each stage of this framework and reports the results, which \Cref{ch:discussion} then discusses.

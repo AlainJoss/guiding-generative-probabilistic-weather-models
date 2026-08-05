@@ -443,13 +443,13 @@ p(z^t|y) \propto p(y|z^t)\,p(z^t)\\
 \end{gather*}
 \vspace{-1.0em}
 \begin{itemize}
-    \item define likelihood: $p(y|x) \propto e^{-L(x)}$ where $x:=\hat{x}_T$
+    \item define likelihood: $p(y|x) \propto e^{-\mathcal{L}(x)}$ where $x:=\hat{x}_T$
 \end{itemize}
 \vspace{-0.8em}
 \begin{gather*}
 p(y|z^t) = \int p(y|x)\, p(x|z^t)\, dx
-         = \mathbb{E}_{x|z^t}\!\left[\, e^{-L(x)} \right]
-\approx e^{-L(\hat{x}_t)}
+         = \mathbb{E}_{x|z^t}\!\left[\, e^{-\mathcal{L}(x)} \right]
+\approx e^{-\mathcal{L}(\hat{x}_t)}
 \end{gather*}
 \vspace{-1.0em}
 \begin{block}{Guided vector field}
@@ -457,7 +457,7 @@ p(y|z^t) = \int p(y|x)\, p(x|z^t)\, dx
 \begin{gather*}
 \tilde{u}_t = u_t - \lambda_t\, g_t, \quad \text{with } \lambda_t := w \cdot a_t \cdot c_t
 \\
-g_t = \nabla_{z^{t}} L(\hat{x}_t) = -\nabla_{z^{t}}\log p(y|z^t)
+g_t = \nabla_{z^{t}} \mathcal{L}(\hat{x}_t) = -\nabla_{z^{t}}\log p(y|z^t)
 \end{gather*}
 \end{block}
 \vspace{-0.4em}
@@ -474,9 +474,9 @@ At every flow step $t$:
 \begin{enumerate}
   \item Estimate the clean state from the current noisy residual:
         $\hat{x}_t = \hat{x}^{\text{det}} + \hat{r}_t$
-  \item Score it with the masked loss: $L(\hat{x}_t)$
+  \item Score it with the masked loss: $\mathcal{L}(\hat{x}_t)$
   \item Take the gradient w.r.t.\ the noisy state:
-        $g_t = \nabla_{z^{t}} L(\hat{x}_t)$
+        $g_t = \nabla_{z^{t}} \mathcal{L}(\hat{x}_t)$
   \item Modify the velocity: $\tilde{u}_t = u_t - \lambda_t\, g_t$ with $\lambda_t = w \cdot a_t \cdot c_t$
   \item Take Euler step as usual: $z^{t+1} = z^{t} + h_t\, \tilde{u}_t$
 \end{enumerate}
@@ -526,7 +526,7 @@ A guided sampling trajectory in PCA latent-space:
 \begin{align*}
   M(x) &\;=\; \sum m \odot x
         \qquad\text{\footnotesize masked average}\\[6pt]
-  L    &\;=\; \Big(\, \underbrace{M(\hat{x}_t)}_{\text{current}}
+  \mathcal{L}    &\;=\; \Big(\, \underbrace{M(\hat{x}_t)}_{\text{current}}
         \;-\; \underbrace{(1+\phi_n)\,M(x^{\text{ref}})}_{\text{target}} \,\Big)^{2}
         \;=\; e_t^{\,2}
 \end{align*}
@@ -542,7 +542,6 @@ A guided sampling trajectory in PCA latent-space:
 \vfill
 Gradient flows \emph{through the model} into $z_t$: the network Jacobian
 spreads the correction over the whole field.
-\vfill
 }
 
 \frame{
@@ -611,7 +610,7 @@ No scale $w$ --- at every step choose $\lambda_t$ to close the gap \emph{exactly
 \begin{itemize}
   \item Aim at the prescribed remaining gap:
         $e_t^{\text{target}} = (1-\eta)^{t+1}\, e_0$
-  \item Land there in one move along $g_t=\nabla_{z_t}L$:
+  \item Land there in one move along $g_t=\nabla_{z_t}\mathcal{L}$:
         \begin{equation*}
           \lambda_t = \frac{2\, e_t \left( e_t - e_t^{\text{target}} \right)}{h_t\, \lVert g_t \rVert^2}
         \end{equation*}
@@ -632,7 +631,7 @@ Fix the profile $a_t$; tune scale $w$ against final loss at step $T$:
   \item Run the whole guided flow at constant $w$: $\lambda_t = w \cdot a_t$
   \item Compute final loss as function of $w$:
         \[
-        L_{\text{final}}(w) = L\bigl(x^{\text{gui}}_{T}(w)\bigr)
+        \mathcal{L}_{\text{final}}(w) = \mathcal{L}\bigl(x^{\text{gui}}_{T}(w)\bigr)
         = \Bigl( M\bigl(x^{\text{gui}}_{T}(w)\bigr) - (1+\phi_n)\,M(x^{\text{ref}}) \Bigr)^{2}
         \]
   \item Iteratively solve $\frac{dL_{\text{final}}}{dw} = 0$ by the secant method 
@@ -657,8 +656,8 @@ $s_t$, $h_t$ & noise level, Euler step size \\
 $\hat{x}_t$ & clean-state estimate at flow step $t$ \\[4pt]
 $m$, $M(x)$ & mask, masked average $\sum m \odot x$ \\
 $\phi_n$, $x^{\text{ref}}$ & intervention profile, reference state \\
-$L$, $e_t$ & masked loss, gap to the target \\
-$g_t = \nabla_{z^t} L$ & guidance gradient \\
+$\mathcal{L}$, $e_t$ & masked loss, gap to the target \\
+$g_t = \nabla_{z^t} \mathcal{L}$ & guidance gradient \\
 $\lambda_t = w \cdot a_t \cdot c_t$ & guidance schedule: scale $\times$ profile $\times$ normalizer \\
 $\eta$ & gap-closing rate per flow step \\
 \end{tabular}

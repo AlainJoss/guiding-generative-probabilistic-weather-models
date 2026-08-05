@@ -1,5 +1,21 @@
 \chapter{Discussion}\label{ch:discussion}
 
+\section{Mask}
+
+
+We experimented with a gaussian mask, but realized in our experiments that the best thing to do is equal weighting inside the region.
+The correct way to define the region of interest is to choose a greater mask size instead of using some weighting scheme fading out of an epicenter. The mask size should be chosen to cover the entire area of interest, ensuring that all relevant data is included in the analysis. A larger mask size can help to reduce noise and improve the accuracy of the results, while a smaller mask size may exclude important information. It is important to carefully consider the appropriate mask size for each specific application to achieve optimal results.
+Either way we (most probably) loose the global coherence for the guided weather states, so we might as well define directly the region of interest with a mask. 
+Additionally, this enables us to actually make statements about "the region of interest",
+having equal weights everywhere.
+Introducing different weigths might bias the generation in a way that is not desired.
+
+We will see that including or not a specific area will change the guided patterns substantially.
+This however is consistent with the notion of "region of interest".
+If we consider a greater area for the changes, the changes will be applied respectively.
+
+\section{...}
+
 The algorithm doesn't produce diverse results, because the gradients are really stable.
 This has to do with the fact that we have learned one and only one flow model (transition function).
 If we had multiple residual diffusion model, we would expect the possible effects to be more diverse.

@@ -1,17 +1,76 @@
 \chapter{Experiments}\label{ch:experiments}
 
+This chapter carries out the evaluation framework of \Cref{ch:eval}. Each section follows the same pattern: we first state the concrete settings, then report the results and the decision they lead to. Tests are referenced by the identifiers introduced in \Cref{ch:eval} (T1--T7).
 
-\section{Flow time evaluation}
+For all experiments we select the region of interest and retrieve the state corresponding at the start of the heatwave reaching the highest temperatures over the mask with selection criteria being the highest rolling window sum over 5 days.  
 
-\section{Weather time evaluation}
+\section{Flow-time evaluation}\label{sec:exp-flow}
 
-\section{Use cases}
+\subsection{Setup}
 
-For final use cases we then fix most of the aformentioned parameters and increase N and M, producing the experiments we had in mind when setting the goals of the project. 
+Here we assess the performance of the three proposed guidance algorithms with following setup:
+\begin{itemize}[noitemsep]
+    \item 3 different starting states with different masks (Europe, America, Australia)
+    \item N=2, M=3
+    \item 2 intensity levels (+0.25\%, +0.75\%)
+    \item 2 a\_t schedules (spike, closegap($\eta=1$))
+\end{itemize}
 
-\subsection{Europa 2020-06-01}
+
+\subsection{Achievement tests}
+% T1 convergence, T2 stability, T3 trajectory deviation.
+% Apply the selection criteria and select the guidance algorithm and schedule
+% used in the remainder of the experiments.
+
+The difficulty of tuning the first and second algorithm make them less suitable than the third one.
+Regarding algorithm 1, having a lower computational complexity is useless in practice if we then have to perform multiple costly runs.
+Regarding algorithm 2, having a desirability requirement encoded in the loss itself only complicate things. 
+Tuning the optimization of this algorithms outweights the benefits, and induces a much higher cost in practical terms to the algorithm.
+
+At later stages, the gradient becomes more similar to the mask (is more diluted, less sparse), which makes the guided pattern at the end of the flow be more spread.
+
+Using a spike@1 approach is essentially equivalent to shifting the starting point of the flow trajectory (especially for the region over the mask) and let particle flow across the learned ODE.
+
+What we observe is that the model doesn't necessarily pushes back against us.
+In contrary, when the method is tuned well, the model will do most of the pushing itself (look at this in percentage).
+
+
+\section{Weather-time evaluation}\label{sec:exp-weather}
+
+Throughout the weather-time experiments we vary the start state while fixing $N=2$ and $M=3$: this controls for the effects of $N=1$ and for seed-specific effects, while keeping computational and memory requirements as low as possible.
+
+Note that we will use the same experiments for the parameter characterization tests and for the realism tests.
+
+--- the realism tests could simply be used in each parameter subsection
+
+\subsection{Parameter characterisation tests}
+
+\subsubsection{Region of interest}
+% Setup: different sizes at same center; different centers at same size.
+% Control: different regions across the globe.
+% Results.
+
+\subsubsection{Variable of interest}
+% Setup: push temperature first, then push top-k correlated variables to the
+% previously generated values.
+% Control: push top-k variables first, then temperature to previously generated values.
+% Results: gradient informativeness across variables; effect on diversity.
+
+\subsubsection{Intervention profile}
+% Setup: push to different intensities.
+% Control: different mask.
+% Results: degradation of patterns and diversity across intensity profiles.
+
+\subsection{Realism tests}
+% T4 temporal, T5 spatial, T6 vertical, T7 cross-variable coherence.
+% Benchmark against ground-truth anchor and unguided baseline.
+
+\section{Use cases}\label{sec:exp-usecases}
+
+For the final use cases we fix the parameters selected above and increase $N$ and $M$, producing the experiments we had in mind when setting the goals of the project.
+
+\subsection{Europe 2020-06-01}
 
 \subsection{Australia 2020-01-01}
 
 \subsection{North America 2020-07-01}
-
