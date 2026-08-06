@@ -12,12 +12,8 @@ GUIDANCE_METHOD_HYPERS = {
     "FGWNOLR": ["fgwnolr_w_init", "eta", "a_t_mode"],
     # FGWNOGAP: per-step gap tracking of the prescribed path r_target = a_t * r_0
     "FGWNOGAP": ["eta", "a_t_mode"],
-    # FGWNORM: unit-gradient NOLR -- prescribed kick norm w*a_t (c_t = 1)
-    "FGWNORM": ["fgwnorm_w_init", "eta", "a_t_mode"],
     # FGWFREE: Adam on the full lambda trajectory; phi = kick-energy regularizer strength
     "FGWFREE": ["phi"],
-    # FGWRHO: secant on the guidance-to-flow ratio w (kick normalized to ||u_t||)
-    "FGWRHO": ["fgwrho_w_init"],
     # UG: backward Universal Guidance (arXiv 2302.07121) -- closed-form
     # loss-minimizing clean-space shift, a_t-gated (eta only shapes non-@ modes)
     "UG": ["eta", "a_t_mode"],
@@ -27,7 +23,7 @@ GUIDANCE_METHOD_HYPERS = {
 MASK_HYPERS = ["sigma_div", "mask_shift"]
 
 # common hypers
-GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "FGWRHO", "FGWNORM", "UG"]
+GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "UG"]
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "ELLIPTICAL"]
 
@@ -54,13 +50,23 @@ def string_to_datetime(timestamp: str):
     return datetime.strptime(timestamp, DATETIME_STR_FORMAT)
 
 
+# fields (de)serialized as datetime <-> string in to_dict/from_dict
+DATETIME_FIELDS = ("START_TS", "WINDOW_START", "WINDOW_END", "HEATWAVE_START", "HEATWAVE_END")
+
+
 @dataclass
 class RolloutConfig:
     ### fixed params (config.json only, not swept)
     M: int | None = None
     N: int | None = None
     T: int | None = None  # number of flow/sampling steps (lower = faster, for testing)
-    START_TS: datetime | None = None
+    START_TS: datetime | None = None  # rollout initial condition (= WINDOW_START for the earliest start)
+
+    # event context (same across all per-start subdir configs; describe the heatwave + padded window)
+    WINDOW_START: datetime | None = None  # heatwave_start - N_minus
+    WINDOW_END: datetime | None = None  # heatwave_end + N_plus (= common END_TS for the start sweep)
+    HEATWAVE_START: datetime | None = None
+    HEATWAVE_END: datetime | None = None
 
     PARTITION: str | None = None
     LEVEL: int | None = None
@@ -82,7 +88,7 @@ class RolloutConfig:
     # hardcoded loss threshold is met)
     fgwnolr_w_init: float | None = None  # starting w
 
-    # eta: shared profile parameter for FGWNOLR/FGWNOGAP/FGWNORM; its meaning
+    # eta: shared profile parameter for FGWNOLR/FGWNOGAP/UG; its meaning
     # depends on a_t_mode (closure rate for gap-closing, bell depth for gaussian,
     # end level for linear/logistic -- see a_t_profile in guided_diffusion.py)
     eta: float | None = None
@@ -93,13 +99,6 @@ class RolloutConfig:
 
     # phi: FGWFREE regularizer strength (penalty on the applied guidance kicks)
     phi: float | None = None
-
-    # fgwrho_w_init: starting guidance-to-flow ratio (10% default: undershoot);
-    # the from-below search grows it to the SMALLEST gap-closing ratio
-    fgwrho_w_init: float | None = None
-
-    # fgwnorm_w_init: starting kick scale for FGWNORM (kick norm = w*a_t, unit gradient)
-    fgwnorm_w_init: float | None = None
 
     # sigma_div: mask extent divisor, shared by ALL mask modes (half-side or
     # sigma = box extent / sigma_div; 2.0 = base box, 4.0 = half, 1.0 = double).
@@ -115,12 +114,19 @@ class RolloutConfig:
 
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "RolloutConfig":
-        ts = config.get("START_TS")
-        kwargs = {k: config.get(k) for k in cls.__dataclass_fields__ if k != "START_TS"}
-        kwargs["START_TS"] = string_to_datetime(ts) if ts is not None else None
+        kwargs = {}
+        for k in cls.__dataclass_fields__:
+            v = config.get(k)
+            if k in DATETIME_FIELDS and v is not None:
+                v = string_to_datetime(v)
+            kwargs[k] = v
         return cls(**kwargs)
 
     def to_dict(self) -> dict[str, Any]:
-        out = {k: getattr(self, k) for k in self.__dataclass_fields__}
-        out["START_TS"] = datetime_to_string(self.START_TS) if self.START_TS is not None else None
+        out = {}
+        for k in self.__dataclass_fields__:
+            v = getattr(self, k)
+            if k in DATETIME_FIELDS and v is not None:
+                v = datetime_to_string(v)
+            out[k] = v
         return out

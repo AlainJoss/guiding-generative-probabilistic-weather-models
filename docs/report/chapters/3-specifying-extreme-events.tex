@@ -1,69 +1,97 @@
 \chapter{Specifying events of interest}\label{ch:specify}
 
+In this chapter we expose how we choose to specify events of interest, that is, how we set the guidance target.
 
-\section{Focus event of this project}
+At this point it is important to recall that in this thesis we narrow the focus on heatwaves, and will present the methods accordingly.
+However, the method we develop is variable agnostic (and model agnostic), and could be tuned to generate other types of extreme events, such as hurricanes, flods, etc., following a very similar logic.
 
-In this thesis we explicitly set the focus on the heatwave event (TODO: state this in the intro directly).
-However, the method we develop is variable agnostic, and could be used and tuned to generate other extreme events of interest following a very similar logic.
+As previewed in the introduction, we are interested in guiding the base forecasts by targeting a trajectory of masked averages over the selected variable and region of interest. 
+In our specific use case, we target an increase in the average temperature over a certain region, over $N$ weather steps.
 
-We narrow the focus on purpose with the purpose of keeping the need for expert evaluation as far as possible from this project, 
-in which we want to focus on the methodology itself.
+We will spend this chapter explaining how we define the relevant knobs (target parameters) of our heuristic
+and conclude by examining the induced objects and their relations.
 
-\section{Mask}
 
-In our setup we are interested in generating a heatwave scenario in a specific region of interest.
-This means, we want to guide the base forecast to generate higher temperatures over the selected region.
+\section{Target variable and region: mask}
 
-We define the region of interest as a simple bounding box, which defines a set of weigths (sum to 1) over a tensor having the same dimension as the weather states, non-zero at the variable and region of interest.
+We define the region of interest as a simple bounding box around pixels in the $121\times240$ rectangular spatial grid.
+A pixel is either included or excluded from the mask.
 
-It is really important to understand how to evaluate what we are doing here.
-Since we are aiming at a specific region of interest, and we are guiding only wrt the region of interest, 
-we are loosing the global coherence of the weather states.
-We shall thus evaluate the ability of our method to generate locally coherent weather scenarios, over the region of interest.
+This approach has three benefits. 
+Firstly, magnitudes of different objects are comparable across mask sizes.
+Secondly, it enables us to efficiently compute any average of choice inside the mask region.
+While the mask has non-zero weigths only at the target variable field, the mask region can be used to compute arbitrary objects, such as the average of other variables but not only, that have the same longitudinal and latitudinal coordinates as the target variable.
+Finally, defining a region with equal weights inside the mask avoids biasing the guidance inside the region, making it clear what area we are targeting in the first place.
+Take the opposite for understanding: if we defined a Bell-shaped mask, it wouldn't be clear what region we are spefing exactly, and we would be biasing the generation in un unpredictable manner, making it difficult to predict different across shapes. 
+
+Every pixel is weighted in proportion to the area it covers, so that the masked average is a true area average and not biased towards the poles. 
+This is the latitude weighting scheme of WeatherBench 2~\parencite{rasp2024weatherbench2}, also used in the model's training loss.
+
+We index grid pixels by $i\in\{1,\dots,121\}$ in the latitude direction and $j\in\{1,\dots,240\}$ in the longitude direction, which give us coordinates $(\lambda_j,\varphi_i)$.
+We denote the box indicator by $k_{ij}$ ($1$ inside the region, $0$ outside), and cell area by $a_i$ at latitude $\varphi_i$. The pixel weights are then
+$$
+m(\lambda_j,\varphi_i)=\frac{k_{ij}\,a_i}{\sum_{i',j'} k_{i'j'}\,a_{i'}},\qquad a_i=\int_{\beta_i^{-}}^{\beta_i^{+}}\cos\varphi\,\mathrm{d}\varphi,
+$$
+where $[\beta_i^{-},\beta_i^{+}]$ is the latitude band of row $i$, so that $a_i$ is the exact area of the cell. 
+As a consequence cells at the equator now (correctly) carry more weight than ones at the poles.
 
 \section{Target trajectory}
 
-In the following we define a climatological heuristic to define the target trajectory.
+Once we have specified the variable and region of interest, we still have to define the target mask-averaged values, which we want to guide the model towards:
+a scalar trajectory over $N$ weather steps.
 
-In order to define plausible average trajectories of change, we define following procedure:
-1. Select start state
-2. Define mask
-3. Retrieve historical states that are consistent with the start state and the mask (+- some tolerance)
-4. Compute the distribution of average trajectories of change for the historical states
-5. Filter a quantile of the distribution to define the target trajectory (e.g. 0.95 quantile for extreme events)
-6. Define a gaussian distribution at each time step of the target trajectory, with mean equal to the target trajectory and variance equal to the variance of the historical states at that time step.
-7. Sample enough trajectories from the gaussian distribution to define a set of target trajectories that will be used to guide the generative model.
-8. Select the target trajectories of interest in terms of extremeness to build scenarios.
-9. Save the trajectories and corresponding states used to define the sampling distribution. These will be used to evaluate the plausibility of the generated trajectories as means of comparison.
-10. Run benchmark tests and evaluate.
+But how can we specify valid target trajectories in the sense of climatologically plausible ones? 
+The answer really depends on the specific use case we have in mind, which would call for different heuristics.
+We might come up with arbitrary sampling strategy based on historical trajectories that we can query from the dataset at hand.
 
-This heuristic enables us to anchor the guidance target and define a benchmark at the same time.
-More concretly, we avoid the issue of having to tune the strength of the guidance to achieve a certain plausible result.
-We reverse the problem by defining the plausible result first and then designing an algorithm to achieve that result and checking that both the algorithm and its result are well behaved.
+To simplify matters, in this thesis we define target trajectories as a linear percentage increase from the current state to a prescribed maximum w.r.t. base forecast at a specified step $N-H$.
+Concretly, we prescribe the target trajectory $\{y_n\}_{n=1}^N$ as follows:
+\begin{align}
+    y_n &= \rho_n \cdot \mathcal{M}(x^\text{ung}_n) \\
+    \rho_n&= \frac{\rho_{N-H}}{N} \quad \text{if } n \leq N-H \text{ else } 0
+\end{align}
 
-We explicitly define a heatwave in order to design guidance methods. 
-This means that we decide to represent a specific subset of state trajectoriesin this work.
-However, our method is flexible to any kind of target: you can swap your definition of the event you want to replicate and use the guidance to generate that kind of event.
-This really only affects the target definition.
+Defining the trajectory using the percentage approach enables us to analyze different levels of intensities across different settings more easily.
+What we are in fact doing though, is defining the target temperatures.
+% --- restart the discussion here and get the explanation of what we are doing right: we are considering any heatwave, that doesn't have to be extreme, but we consider extreme heatwave in the sense of the anomaly factor (ACC) and use that to generate a heatwave in higher quantiles wrt to the ACC factor.
+% --- this is probably a good way to define the extremeness of the event and experiment with the same area but different heatwaves and reason in terms of quantiles
+% --- this is however only relevant for the use cases, start with the simplest: pick the area, look at the climatology and define extremeness values to push even higher the 3 most extreme heatwaves at that area.
 
-This choice enables us to side step the problem that guiding towards a classifier's gradients or minimizing / maximizing a certain variable and stopping when we achieved the wanted result.
-If we specify the carachteristic of the wanted result we side step this problem entirely.
-The problem then shifts to retrieve a representative set of the event we have in mind.
-This is however a requirement for the first methodology.
-So we could say that the problem shifts towards defining an appropriate algorithm that can achieve a representative state similar to the specified set.
-Making this step explicit directly enables us to then compare the results against this set,
-and characterize its flaws / benefits directly.
+% Since we are guiding the base forecast, the simplest thing to do is to define a linear increase in the average value with respect to the unguided forecast, 
+% such that if we hit the target at each step, we reach a final difference corresponding to the specified trajectory last step.
 
-Note that this whole pipeline enables us to sample trajectories wrt to the historical data.
-However, we can define arbitrary targets for our method, which we will do in chapter 6 when testing the method.
-In chapter 6.3 we will explore the usage of this heuristic detached from the method evaluation, in the context of the use cases we are actually interested in generating.
+% --- remove the rest and reinsert only if time, but now it's time to prioritize
 
-\section{Pipeline summary}
+% In the following we define a climatological heuristic to define the target trajectory.
 
-In summary we are explicitly defining our event of interest in terms of the average temperature over a specified area of interest, w.r.t. the climatology over the same area from the year 2020 to today.
+% In order to define plausible average trajectories of change, we define following procedure:
+% 1. Select start state
+% 2. Define mask
+% 3. Retrieve historical states that are consistent with the start state and the mask (+- some tolerance)
+% 4. Compute the distribution of average trajectories of change for the historical states
+% 5. Filter a quantile of the distribution to define the target trajectory (e.g. 0.95 quantile for extreme events)
+% 6. Define a gaussian distribution at each time step of the target trajectory, with mean equal to the target trajectory and variance equal to the variance of the historical states at that time step.
+% 7. Sample enough trajectories from the gaussian distribution to define a set of target trajectories that will be used to guide the generative model.
+% 8. Select the target trajectories of interest in terms of extremeness to build scenarios.
+% 9. Save the trajectories and corresponding states used to define the sampling distribution. These will be used to evaluate the plausibility of the generated trajectories as means of comparison.
+% 10. Run benchmark tests and evaluate.
 
---- the concretization of our approach maybe go under experiments?
+% This heuristic enables us to anchor the guidance target and define a benchmark at the same time.
+% More concretly, we avoid the issue of having to tune the strength of the guidance to achieve a certain plausible result.
+% We reverse the problem by defining the plausible result first and then designing an algorithm to achieve that result and checking that both the algorithm and its result are well behaved.
 
---- maybe we don't need a summary section in the first place.
+Explicitly defining a target trajectory allows us to separates clearly the target of the guidance, and the search for optimal parameters of the guidance method.
+While the papers summarized in chapter 2 all play around with different guidance strengths to achieve different results, we take an orthogonal approach:
+we prescribe different guidance objectives, and then retrieve the most adequate parameters that bring us there in a separate step.
+These two definitions are really equivalent in terms of the retrieved parameters and the produced outcome under the same guidance framework, however,
+the latter approach has following benefit: 
+if we we can define desired outcomes a priori, we do not have to tune parameters and discard experiments that do not achieve desired results, we can optimize them directly.
 
---- put here a viz
+This simple realization is the main contribution of our work. The rest of the contributions are developed as a consequence.
+
+\section{Pipeline overview}
+
+We have said that we guide with respect to the base forecast, that we define a variable and a region of interest, and that we prescribe the target trajectory for the masked-average that we want to guide towards.
+In practical terms this means that we will specify the start state we are interested in, produce the base forecast rollout over prescribed $N$ steps, and then define our target trajectory (or multiple ones) for the guidance.
+We can visualize this scheme as follows.
+

@@ -63,6 +63,7 @@ dependencies = [
     "opencv-python-headless>=4.13.0.92",
     "python-language-server>=0.26.1",
     "earthkit-data>=1.1.0",
+    "owslib>=0.35.0",
 ]
 
 

@@ -84,3 +84,10 @@ For all four tests we average over the experiments and report the mean and stand
 % \end{figure}
 
 \Cref{ch:experiments} sets out the concrete settings for each stage of this framework and reports the results, which \Cref{ch:discussion} then discusses.
+
+\section{Method Validation}
+
+This approach can be used to guide any state towards an extreme over the specified mask.
+
+To validate that the method is doing something sensible we can retrieve real heatwaves from the test dataset (everything that is not included in the train set), 
+and observe what the model is doing.

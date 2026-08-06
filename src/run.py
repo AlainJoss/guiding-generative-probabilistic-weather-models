@@ -9,6 +9,7 @@ import xarray as xr
 from src.rollout import rollout
 from src.rollout_config import RolloutConfig, GUIDANCE_METHOD_HYPERS
 from src.utils import get_model, get_config, get_sweep_dict, get_rollout_dir, ensure_rollout_dir
+from src.utils import get_dict_from_json
 from src.utils import get_device
 from src.utils import create_full_zarr_container, sweep_coord_label
 
@@ -158,26 +159,22 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, T, sweep_params):
         # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
         container_ds.to_zarr(save_path, mode="w", compute=False)
 
-def main() -> None:
-    args = parse_args()
-
-    print("Loading model")
-    flow_model = get_model(get_device())
-
-    config = get_config(args.rollout_id)
-    rollout_dir = get_rollout_dir(args.rollout_id)
+def run_one(rollout_id: str, rollout_type: str, flow_model) -> None:
+    """Run the full sweep for a single rollout dir (one config.json + zarr stores)."""
+    config = get_config(rollout_id)
+    rollout_dir = get_rollout_dir(rollout_id)
 
     # number of flow/sampling steps comes from the config (set in unguided mode);
     # fall back to 25 for older configs that predate the T field.
     T = config.T if config.T is not None else 25
 
-    match args.rollout_type:
+    match rollout_type:
         case "ung":
             guidance_flag=False
             sweep_params = {}
         case "gui":
             guidance_flag=True
-            sweep_params = get_sweep_dict(args.rollout_id)
+            sweep_params = get_sweep_dict(rollout_id)
         case _:
             pass
 
@@ -186,19 +183,19 @@ def main() -> None:
         assert len(values) == len(unique), (
             f"sweep_params['{key}'] has duplicate values {values}; "
             f"each sweep axis must be uniquely valued or the zarr region write fails. "
-            f"Fix {get_rollout_dir(args.rollout_id) / 'sweep_params.json'}."
+            f"Fix {rollout_dir / 'sweep_params.json'}."
         )
 
     # create any missing containers; existing ones are kept, so a store from a
     # prior run is resumed rather than wiped (e.g. gui_det added on older stores
     # starts empty -> resume probes it and reruns what is needed)
-    container_args = get_container_args(args.rollout_type)
+    container_args = get_container_args(rollout_type)
     any_existing = any(
         (rollout_dir / f"{c}.zarr").exists() for (c, _) in container_args
     )
-    create_zarr_containers(args.rollout_type, args.rollout_id, config.M, config.N, T, sweep_params)
+    create_zarr_containers(rollout_type, rollout_id, config.M, config.N, T, sweep_params)
     if any_existing:
-        resume_idx = find_resume_index(rollout_dir, args.rollout_type, sweep_params)
+        resume_idx = find_resume_index(rollout_dir, rollout_type, sweep_params)
         print(f"Existing store found, resuming sweep at index {resume_idx}")
     else:
         resume_idx = 0
@@ -211,6 +208,24 @@ def main() -> None:
         print("Running %s", job.label)
 
         rollout(rollout_dir, guidance_flag, job.config, flow_model, T, job.sweep)
-        
+
+
+def main() -> None:
+    args = parse_args()
+
+    print("Loading model")
+    flow_model = get_model(get_device())
+
+    # A multi-start experiment holds an OUTER config.json with {"STARTS": [...]} and one
+    # subdir per start_ts; loop those subdirs. A plain rollout dir (no STARTS) runs directly.
+    outer = get_dict_from_json(get_rollout_dir(args.rollout_id) / "config.json")
+    if "STARTS" in outer:
+        for s in outer["STARTS"]:
+            print(f"=== start {s} ===")
+            run_one(f"{args.rollout_id}/{s}", args.rollout_type, flow_model)
+    else:
+        run_one(args.rollout_id, args.rollout_type, flow_model)
+
+
 if __name__ == "__main__":
     main()

@@ -169,6 +169,8 @@ def apply_zoom(
     zoom>1  -> zoom into (center_lon, center_lat) by shrinking the visible window
     """
     zoom = max(1, int(zoom))
+    if zoom <= 1:
+        return  # zoom=1 -> keep the full extent (all grid points) set by draw_base_map
 
     full_lon_span = 360.0
     full_lat_span = 180.0
@@ -473,6 +475,9 @@ def make_interactive_map(
     puck_center=(-4.0, 40.0),
     side_lon=12.0,
     side_lat=10.0,
+    zoom=1,
+    zoom_center_lon=0.0,
+    zoom_center_lat=0.0,
 ):
     # single puck = rectangle CENTER; side lengths come from the sliders
     plt.rcParams["font.family"] = "Menlo"
@@ -508,6 +513,12 @@ def make_interactive_map(
         lon_right = lon_c + side_lon / 2
         lat_bottom = max(-90.0, lat_c - side_lat / 2)
         lat_top = min(90.0, lat_c + side_lat / 2)
+        # snap the box to the display-grid cell edges so it lands exactly on pixel boundaries
+        _le = np.linspace(-180.0, 180.0, 241)
+        _la = np.linspace(90.0, -90.0, 122)
+        _snap = lambda v, e: float(e[int(np.argmin(np.abs(e - v)))])
+        lon_left, lon_right = _snap(lon_left, _le), _snap(lon_right, _le)
+        lat_bottom, lat_top = _snap(lat_bottom, _la), _snap(lat_top, _la)
 
         # +/-360 copies so a box crossing the dateline continues on the
         # other side (the axes clip whatever falls outside the map)
@@ -521,6 +532,14 @@ def make_interactive_map(
                 linewidth=1.5,
                 zorder=10,
             ))
+
+        # zoom follows the puck (= box centre): shrink the visible window by 1/zoom,
+        # same integer convention as apply_zoom (zoom=1 -> full map)
+        _z = max(1, int(zoom))
+        if _z > 1:
+            _lon_span, _lat_span = 360.0 / _z, 180.0 / _z
+            ax.set_xlim(max(-180.0, lon_c - _lon_span / 2), min(180.0, lon_c + _lon_span / 2))
+            ax.set_ylim(max(-90.0, lat_c - _lat_span / 2), min(90.0, lat_c + _lat_span / 2))
 
         # Important: do not call fig.tight_layout() here.
 
@@ -638,6 +657,9 @@ def visualize_map(
             puck_center=puck_center,
             side_lon=side_lon,
             side_lat=side_lat,
+            zoom=zoom,
+            zoom_center_lon=zoom_center_lon,
+            zoom_center_lat=zoom_center_lat,
         )
 
     return plot_map_static(

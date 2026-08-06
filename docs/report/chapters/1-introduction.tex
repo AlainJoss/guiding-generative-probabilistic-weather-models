@@ -52,3 +52,25 @@ technical background on flow matching, guidance, generative weather models, and 
 the target event, designing the guidance, and defining the evaluation. \Cref{ch:experiments}
 presents the experiments and \Cref{ch:discussion} discusses them. \Cref{ch:conclusion} concludes
 with a summary, directions for future work, and final remarks.
+
+--- state previously that our event of interest are heatwaves
+
+--- events in the future can be much more extreme that in the past -> see tsnumami Fukushima, wildfires, ...
+Everything is unfolding in front of our eyes I'm writing this paper.
+We are thus interested in exploiting the capability of diffusion models to guide towards more extreme extreme events of the past.
+We want to exploit the learned transition function to make the guided trajectory a coherent sequence of weather states, across time, pressure levels, spatially, and of course across variables (realistic and representative covariation).
+In other words, we want to generate an extreme event, as we would have measured it from ground truth data.
+
+--- explain somewhere that everything runs on two clocks.
+
+Here we might have in mind multiple ways to use this 
+
+If our method is succesful, these are two usage modalities that come to mind w.r.t. to extreme temperatures:
+\begin{itemize}[noitemsep]
+    \item Define extreme trajectories from the current state into the future. TODO: include presentation reasoning about mapping bottlenecks
+    \item Take past heatwaves and guide them towards even higher extremes.
+\end{itemize}
+For both use cases we might sample multiple trajectories at multiple intensity levels to guide towards.
+
+--- Specify that guidance looks promising particularly in the context of extreme events, but is not specific to them.
+It could be used to generate any alternative weather scenario that diverges from the base forecast.

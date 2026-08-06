@@ -145,6 +145,120 @@
       \field{title}{{FlowGrad}: Controlling the Output of Generative {ODEs} with Gradients}
       \field{year}{2023}
     \endentry
+    \entry{rasp2024weatherbench2}{article}{}
+      \name{author}{18}{}{%
+        {{hash=efd094084aea9f50452afbd6b9dc910c}{%
+           family={Rasp},
+           familyi={R\bibinitperiod},
+           given={Stephan},
+           giveni={S\bibinitperiod}}}%
+        {{hash=4a22828b76006f42d747b699d2ef5167}{%
+           family={Hoyer},
+           familyi={H\bibinitperiod},
+           given={Stephan},
+           giveni={S\bibinitperiod}}}%
+        {{hash=08fd7cbc2c64482b4a32a0fc0a6be49b}{%
+           family={Merose},
+           familyi={M\bibinitperiod},
+           given={Alexander},
+           giveni={A\bibinitperiod}}}%
+        {{hash=c263204f2c286e737d052f90f44bd1bf}{%
+           family={Langmore},
+           familyi={L\bibinitperiod},
+           given={Ian},
+           giveni={I\bibinitperiod}}}%
+        {{hash=5a63429a6e1733e8f3f4dc71cbb6eec9}{%
+           family={Battaglia},
+           familyi={B\bibinitperiod},
+           given={Peter},
+           giveni={P\bibinitperiod}}}%
+        {{hash=aa93c782c5336d4826af3cd70779c20d}{%
+           family={Russell},
+           familyi={R\bibinitperiod},
+           given={Tyler},
+           giveni={T\bibinitperiod}}}%
+        {{hash=cfe62c9365c523ba7d4f7fd1147cff41}{%
+           family={Sanchez-Gonzalez},
+           familyi={S\bibinithyphendelim G\bibinitperiod},
+           given={Alvaro},
+           giveni={A\bibinitperiod}}}%
+        {{hash=f707d1ba325f8da4d60a896f9bc5088d}{%
+           family={Yang},
+           familyi={Y\bibinitperiod},
+           given={Vivian},
+           giveni={V\bibinitperiod}}}%
+        {{hash=0dbba85c17cea9d5fcd34852d1719e0f}{%
+           family={Carver},
+           familyi={C\bibinitperiod},
+           given={Rob},
+           giveni={R\bibinitperiod}}}%
+        {{hash=c9d6e39f1c064cc423956a9a5d39c743}{%
+           family={Agrawal},
+           familyi={A\bibinitperiod},
+           given={Shreya},
+           giveni={S\bibinitperiod}}}%
+        {{hash=acb3a778a740efb3034bbb5252fdb7f3}{%
+           family={Chantry},
+           familyi={C\bibinitperiod},
+           given={Matthew},
+           giveni={M\bibinitperiod}}}%
+        {{hash=cd7cc26f94e26bd4296d9ebbebfca923}{%
+           family={Ben\bibnamedelima Bouallegue},
+           familyi={B\bibinitperiod\bibinitdelim B\bibinitperiod},
+           given={Zied},
+           giveni={Z\bibinitperiod}}}%
+        {{hash=1bfe3443b0b08e9a166b07fa7572baec}{%
+           family={Dueben},
+           familyi={D\bibinitperiod},
+           given={Peter},
+           giveni={P\bibinitperiod}}}%
+        {{hash=c664ef9d48048630c164472dcc2ad61f}{%
+           family={Bromberg},
+           familyi={B\bibinitperiod},
+           given={Carla},
+           giveni={C\bibinitperiod}}}%
+        {{hash=078a5ca2fb3ef14cdbd223386a481a4d}{%
+           family={Sisk},
+           familyi={S\bibinitperiod},
+           given={Jared},
+           giveni={J\bibinitperiod}}}%
+        {{hash=3172eb3b8aa2b3963fadf810bebc0af8}{%
+           family={Barrington},
+           familyi={B\bibinitperiod},
+           given={Luke},
+           giveni={L\bibinitperiod}}}%
+        {{hash=6ef605f07451581b563de3f07e8f0664}{%
+           family={Bell},
+           familyi={B\bibinitperiod},
+           given={Aaron},
+           giveni={A\bibinitperiod}}}%
+        {{hash=86e3e396d826309a838ac02c93e21550}{%
+           family={Sha},
+           familyi={S\bibinitperiod},
+           given={Fei},
+           giveni={F\bibinitperiod}}}%
+      }
+      \strng{namehash}{49600217daf7a956877dac334fa55c53}
+      \strng{fullhash}{a7660d8f651581c97f7970935dc3ccc2}
+      \strng{bibnamehash}{49600217daf7a956877dac334fa55c53}
+      \strng{authorbibnamehash}{49600217daf7a956877dac334fa55c53}
+      \strng{authornamehash}{49600217daf7a956877dac334fa55c53}
+      \strng{authorfullhash}{a7660d8f651581c97f7970935dc3ccc2}
+      \field{sortinit}{R}
+      \field{sortinithash}{5e1c39a9d46ffb6bebd8f801023a9486}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{journaltitle}{Journal of Advances in Modeling Earth Systems}
+      \field{number}{6}
+      \field{title}{{WeatherBench 2}: A Benchmark for the Next Generation of Data-Driven Global Weather Models}
+      \field{volume}{16}
+      \field{year}{2024}
+      \field{pages}{e2023MS004019}
+      \range{pages}{-1}
+      \verb{doi}
+      \verb 10.1029/2023MS004019
+      \endverb
+    \endentry
     \entry{wang2025trainingfree}{inproceedings}{}
       \name{author}{5}{}{%
         {{hash=53013d40dd6429f0e9d70b7b62412a77}{%

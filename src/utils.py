@@ -204,23 +204,24 @@ def get_config(rollout_id: str) -> RolloutConfig:
 
 
 def get_rollout_ids(rollout_type: str):
-    experiments = Path(ROLLOUTS).glob("2026*")
-
-    def has_config(path: Path) -> bool:
-        return (path / "config.json").exists()
-
-    def has_file(path: Path, type_: str) -> bool:
-        return any(path.glob(f"**/{type_}.zarr"))
-
-    experiments = sorted(
-        [
-            p.name
-            for p in experiments
-            if has_config(p) and has_file(p, rollout_type)
-        ],
-        reverse=True,
-    )
-    return experiments
+    # A multi-start experiment is an OUTER dir whose config.json holds {"STARTS": [...]} and
+    # one subdir per start_ts (each a normal rollout). Expand those into "<exp_id>/<start_ts>"
+    # ids; legacy single rollouts (zarr + config.json directly in the dir) stay as "<exp_id>".
+    # Direct (non-recursive) zarr check so an outer dir is never matched by a child's zarr.
+    ids = []
+    for p in Path(ROLLOUTS).glob("2026*"):
+        cfg = p / "config.json"
+        if not cfg.exists():
+            continue
+        d = get_dict_from_json(cfg)
+        if "STARTS" in d:
+            for s in d["STARTS"]:
+                sub = p / s
+                if (sub / "config.json").exists() and (sub / f"{rollout_type}.zarr").exists():
+                    ids.append(f"{p.name}/{s}")
+        elif (p / f"{rollout_type}.zarr").exists():
+            ids.append(p.name)
+    return sorted(ids, reverse=True)
 
 
 ##### write files #####

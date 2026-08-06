@@ -55,7 +55,7 @@ def _():
 def _():
     from src.paths import ROLLOUTS
     from src.rollout_config import MASK_MODES, RolloutConfig, GUIDANCE_METHODS, GUI_REFS, GUIDANCE_METHOD_HYPERS
-    from geoarches.lightning_modules.guided_diffusion import A_T_MODES, a_t_profile
+    from geoarches.lightning_modules.guided_diffusion import A_T_MODES, alpha_t_profile
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
@@ -89,7 +89,7 @@ def _():
         RolloutConfig,
         VARIABLES_DICT,
         XarrayNormalizer,
-        a_t_profile,
+        alpha_t_profile,
         base_get_N_slices,
         base_get_slices,
         build_reductions_store,
@@ -4652,10 +4652,6 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         "sigma_div":      (0.5,   4.0,   False, False),
         # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
         "phi":            (0.01,  1.0,   True,  False),
-        # fgwrho_w_init: starting guidance-to-flow ratio for the FGWRHO search
-        "fgwrho_w_init":  (0.1,   1.0,   False, False),
-        # fgwnorm_w_init: FGWNORM kick scale (kick norm = w*a_t on the unit gradient)
-        "fgwnorm_w_init": (5.0,   20.0,  False, False),
     }
 
     _rc = {}

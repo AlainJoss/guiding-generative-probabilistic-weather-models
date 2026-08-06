@@ -1,10 +1,11 @@
 \chapter{Guidance design}\label{ch:guide}
 
 We start the chapter with the derivation of the general outline of the algorithm we will use for guidance.
-We then proceed in exposing different ways to specify its two main components: the loss and the strength-schedules.
-Importantly, the specific choices about the loss and the strength-schedule define the concrete algorithm variants that we derive from the general method.
+We then proceed in exposing different ways to specify its two main components: the loss and the strength-schedule.
+Importantly, the specific choice of loss and strength-schedule defines the concrete algorithm variants that we derive from the general method.
+Like the class-object relationship in programming, where the object is a specific instance of the abstract class.
 
-\section{Guidance base method}
+\section{Base guidance method}
 
 \subsection{Classifier guidance}
 In our use case we want to generate weather states and guide them towards an extreme event of our choice (in our case increasing temperature).
@@ -22,9 +23,18 @@ p(z^t \mid y) &\propto p(y \mid z^t)\, p(z^t), \\
 
 
 \subsection{Adapting classifier guidance}
-Originally the object $p(y \mid z^t)$ was computed using a classifier trained on the same set of images used to learn the data distribution.
-In our setting we define the target property through a loss $\mathcal{L}(\hat{x}_t)$ instead, which we make dependent on the clean prediction $\hat{x}_t$ at flow time $t$. 
-Note, with this formulation we can compute the loss at any step of the flow on $x_t$ with $0<t<T$ and on the final clean prediction $x_T$.
+
+---Since this map from $x_0$ to $x_1$ is a single deterministic and differentiable trajectory, its output can be steered by differentiating a
+target loss through the flow---the mechanism on which our guidance builds (\Cref{ch:guide}).
+---A key finding is that in order to make guidance actually work, we have to abandon probability land, by increasing the strength of the guidance.
+In fact, when we start to play with $lambda$, the guided output is not a sample of the conditional probability distribution anymore. 
+
+
+In our setting, the output quantity is continuos, so we cannot use classifier guidance in its raw form.
+We could theoretically label classess of events and train a separate network, but decide upon a simpler approach.
+
+We define the target property $y$ with the help of a loss $\mathcal{L}(\hat{x}_t)$, dependent on the clean prediction $\hat{x}_t$. 
+Note that, with this formulation, we can compute the loss at any step of the flow on $x_t$ with $0<t<T$ and on the final clean prediction $x_T$.
 We define the likelihood through this loss, $p(y \mid x) \propto e^{-\mathcal{L}(x)}$ with $x := \hat{x}_T$ the clean state, and approximate the intractable expectation by the clean-state estimate at the current flow step $t$,
 \begin{align*}
 p(y \mid z^t) = \int p(y \mid x)\, p(x \mid z^t)\, dx
@@ -42,24 +52,7 @@ Substituting this approximation in the bayesian formula we get:
 - \nabla_{z^t}\mathcal{L}(\hat{x}_t)
 \end{align*}
 
-\subsection{Guidance strength-schedule}
-
-Researchers in the image domain recognized that in order to obtain the aspired results,
-the guidance vector has to be scaled.
-The most naive way to accomplish this is to simply scale the guidance terms uniformly throughout the flow by multiplying by a constant $w$.
-Others apply a strength schedule $\lambda_t$.
-Others apply a normalization to step, such that the guidance vector represents a fix fraction of the unguided vector field.
-
-The question for which guidance schedule is most optimal remains unanswered.
-In \ref{...} develop variants of the base algorithm we will present next, testing empirically good choices for $\{\lambda\}_{t=1}^T$.
-
-Note that for $\lambda_t \neq 1$ for $t=1,\dots, T$, the exact posterior the guided results stops being a sample from the posterior distribution.
-In this sense we trade this mathematical reasoning for control.
-
-
---- put this in the appendix or simply cite the MIT notes
-
-In the context of flow matching, we can translate this form into:
+In the context of flow matching, this general formulation translates to:
 \begin{align*}
     \tilde{u}(z_t) &= u(z_t) - a_t \nabla_{z_t} \log p(y|z_t) \\
     &= u(z_t) - a_t \nabla_{z^t}\mathcal{L}(\hat{x}_t)
@@ -67,20 +60,44 @@ In the context of flow matching, we can translate this form into:
 
 where $a_t = ...$ in the specific context of our model.
 
-Applying the same reasoning about the guidance schedule in this context we rewrite the formula as
+This means that to sample from the approximate posterior distribution we simply have to compute the right term at the specific step in the flow. 
+
+\subsection{Guidance strength-schedule}
+
+Researchers in the image domain recognized that in order to obtain the aspired results,
+the guidance vector has to be scaled up.
+
+To unify the notation we can express this idea as follow: replace $a_t$ with a general guidance strength-schedule $\lambda_t$,
+which we can decompose 
+\begin{equation}
+    \lambda_t := w \cdot \alpha_t \cdot c_t
+\end{equation}
+with:
+\begin{itemize}[noitemsep]
+    \item $w$: guidance strength (time independent)
+    \item $\alpha_t$: guidance profile
+    \item $c_t$: a general step normalization constant (specific to different guidance algorithms)
+\end{itemize}
+Under this decomposition we would retrieve the approximate posterior sampling by setting $w=1$, $\{\alpha_t\}_{t=1}^T=\{a_t\}_{t=1}^T$, and $c_t=1$.
+Note that for $\lambda_t \neq a_t$ for $t=1,\dots, T$, the guided results stops being a sample from the posterior distribution.
+In this sense we trade mathematical reasoning for control.
+
+Different approaches to scale guidance have been to:
+\begin{itemize}[noitemsep]
+    \item scale up $w$
+    \item change the default profile schedule to an arbitrary $\alpha_t$
+    \item normalize the step to satisfy a certain constraint, such as setting $\{\lambda_t\}_{t=1}^T$ s.t. the guidance vector represents a fix fraction of the unguided vector field.
+\end{itemize}
+
+The question for which guidance schedule is most optimal remains unanswered.
+
+Applying this to our context:
 \begin{align*}
     \tilde{u}(z_t) &= u(z_t) - a_t \nabla_{z_t} \log p(y|z_t) \\
     &= u(z_t) - \lambda_t \nabla_{z^t}\mathcal{L}(\hat{x}_t)
 \end{align*}
-In this context, we can decompose $\lambda_t := w \cdot a_t \cdot c_t$.
-In our experiments we then use following nomenclature:
-\begin{itemize}[noitemsep]
-    \item $\lambda_t$: guidance schedule
-    \item $w$: guidance strength (time independent)
-    \item $a_t$: guidance profile, which doesn't have to be tied to the derivate $a_t$ (TODO: use other form?)
-    \item $c_t$: a step normalization constant, specified by the specific guidance algorithm  
-\end{itemize}
 
+In \ref{...} develop variants of the base algorithm we will present next, testing empirically appropriate choices for $\{\lambda\}_{t=1}^T$ from different perspectives.
 
 \subsection{Base algorithm}
 
@@ -94,9 +111,9 @@ Putting it all together we have described following base algorithm:
 \end{enumerate}
 
 Two design choices define the method:
-\begin{itemize}[noitemsep]
-  \item the \textbf{masked loss} --- what to push and where;
-  \item the \textbf{guidance schedule} --- how hard and when.
+\begin{itemize}[noitemsep]  
+    \item the \textbf{guidance schedule} --- how hard and when.
+    \item the \textbf{masked loss} --- what to push and where;
 \end{itemize}
 
 Our implicit assumption here is that the gradient encodes the most likely shift to be applied under the learned data distribution to achieve the set target.
@@ -111,8 +128,13 @@ We have thus defined previously the mask and the target profile in \Cref{ch:spec
 In the next we will address how these are used by the masked loss.
 We then address the question regarding the guidance schedule in the subsections exposing the three developed guidance algorithms.
 
+\section{Guidance design choices}
 
-\section{Guidance loss}
+\subsection{Guidance schedule}
+
+--- present here the relation between the three parts of $lambda$ and the fact that the $\alpha_t$ curve can always be rescaled between 0 and 1, s.t. different curves are the same (the relative strength between the steps is what counts here). 
+
+\subsection{Guidance loss}
 
 One of the main contributions of this thesis is the realization that in the weather domain, we can define a guidance target, which can be achieved precisely.
 By precisely I mean that the loss can be driven to zero.
@@ -137,8 +159,8 @@ We realize that since we are pushing the base forecast (gui--ung object), this i
 \begin{align*}
     \mathcal{L}
         &\;=\; \Big(\, \underbrace{\mathcal{M}(\hat{x}_t)}_{\text{current}}
-        \;-\; \underbrace{(1+\phi_n)\,\mathcal{M}(x^{\text{gui\_ung}})}_{\text{target}} \,\Big)^{2} \\
-        $\phi_n &\;=\; \frac{\mathcal{M}(x^{\text{gui\_ung}})-y}{\mathcal{M}(x^{\text{gui\_ung}})} $
+        \;-\; \underbrace{(1+\phi)\,\mathcal{M}(x^{\text{gui\_ung}})}_{\text{target}} \,\Big)^{2} \\
+        \phi &\;=\; \frac{\mathcal{M}(x^{\text{gui\_ung}})-y}{\mathcal{M}(x^{\text{gui\_ung}})} 
 \end{align*}
 where  $\phi_n$ is the intervention profile (the imposed change) in percetage.
 The reason to do this is that it provides a practical way to visualize guided results against the base forecast from different perspectives, which also include $\phi$.
@@ -161,7 +183,7 @@ We essentially have a very similar setting to the guided diffusion for precipita
     \item Our loss is driven to zero in terms of the difference from the target, instead of being minimized iteratively (a more explicit way to encode the target scenario)
 \end{itemize}
 
-\section{Guidance schedule (specific algorithms)}
+\section{Specific guidance methods (instances)}
 
 In this section we develop different variants of classifier free guidance, which we adapt to this setting.
 We explore the different variants, tune them, expose their flaws, assess their computational requirements, and compare their respective trade off.
@@ -191,10 +213,11 @@ The method thus trades its efficient greedyness, with the need to tune $\eta$, b
 
 \subsection{OPTIMIZE-SCHEDULE}
 
-We try to overcome the issue of the fix step sizes, by trying to optimize $\lambda$.
-We can encode the well-behaviourness criteria directly into the loss function, by penalizing the total guidance needed to reach the set target.
-Ideally this would not generate the iscillatory behaviour, since then we would need to guide downwards.
-We could dream up arbitrary penalty terms such as angular defelction, ... but we keep it simple and start experimenting with this term here.
+We attempt to overcome the issue of the fix step sizes by optimizing for $\lambda_t$ directly.
+To do so we add a regularization term to the loss to encode a well-behaviourness criteria of our choice.
+We could dream up arbitrary penalty terms such as angular defelction, ... .
+For simplicity we choose to penalize the total guidance needed to reach the set target.
+Ideally this would not generate the iscillatory behaviour, since then we would need to guide downwards in that case.
 
 We add the regularization term to the loss as follows:
 ...
