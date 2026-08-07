@@ -7,22 +7,16 @@ Like the class-object relationship in programming, where the object is a specifi
 
 \section{Base guidance method}
 
-\subsection{Classifier guidance}
-In our use case we want to generate weather states and guide them towards an extreme event of our choice (in our case increasing temperature).
-That is, we want to condition the generation on the property $y$, which encodes our preferences (target), in our case, the specification of extremeness level.
-In our context, unconditional generation is framed as sampling from the learned data distribution.
-The same way, the problem of guided generation can be framed as sampling from a from a posterior distribution.
+\subsection{Adapting DPS}
 
-Concretly, conditioning the residual latent $z^t$ on a target property $y$ gives
+One popular approach is to model it with a loss function as $p_t(y | \hat{x}_t) \propto \exp(-\mathcal{L}(\hat{x}_t, y))$
+such that
 \begin{align*}
-p(z^t \mid y) &\propto p(y \mid z^t)\, p(z^t), \\
-\nabla_{z^t}\log p(z^t \mid y)
-&= \nabla_{z^t}\log p(z^t)
-+ \nabla_{z^t}\log p(y \mid z^t).
+    u_t(z_t|y) &\approx u_t(z_t) + a_t \nabla_{z_t} \log p_t(y | \hat{x}_t) \\
+    &= u_t(z_t) + a_t \nabla_{z_t} \log \exp(-\mathcal{L}(\hat{x}_t, y)) \\
+    &= u_t(z_t) - a_t \nabla_{z_t} \mathcal{L}(\hat{x}_t, y)
 \end{align*}
-
-
-\subsection{Adapting classifier guidance}
+which is also the approach we will take, see chapter 4.
 
 ---Since this map from $x_0$ to $x_1$ is a single deterministic and differentiable trajectory, its output can be steered by differentiating a
 target loss through the flow---the mechanism on which our guidance builds (\Cref{ch:guide}).
@@ -30,12 +24,21 @@ target loss through the flow---the mechanism on which our guidance builds (\Cref
 In fact, when we start to play with $lambda$, the guided output is not a sample of the conditional probability distribution anymore. 
 
 
-In our setting, the output quantity is continuos, so we cannot use classifier guidance in its raw form.
-We could theoretically label classess of events and train a separate network, but decide upon a simpler approach.
+In our context we want to generate weather states and guide them towards an extreme event of our choice (in our case increasing temperature).
+Using the defininition of classifier guidance provided in chapter 2, we can design the loss function to achieve this objective.
 
-We define the target property $y$ with the help of a loss $\mathcal{L}(\hat{x}_t)$, dependent on the clean prediction $\hat{x}_t$. 
-Note that, with this formulation, we can compute the loss at any step of the flow on $x_t$ with $0<t<T$ and on the final clean prediction $x_T$.
-We define the likelihood through this loss, $p(y \mid x) \propto e^{-\mathcal{L}(x)}$ with $x := \hat{x}_T$ the clean state, and approximate the intractable expectation by the clean-state estimate at the current flow step $t$,
+With $y$ now being the guidance target, we can define a loss $\mathcal{L}(\hat{x}_t(z_t), y)$, dependent on the clean state estimate $\hat{x}_t$, which is a function of the noisy state $z_t$.
+With this formulation, we can compute the loss at any step of the flow on $\hat{x}_t$ with $0<t<T$ and on the final sample $\hat{x}_T=x_T$.
+
+This enables us to define the likelihood term 
+This is however still not enough to compute the posterior, since it's an intractable integral over all possible clean states
+\begin{align*}
+p(y \mid z^t) = \int p(y \mid x)\, p(x \mid z^t)\, dx
+\end{align*}
+
+We approach the problem like in the DPS paper and define the likelihood term as $p(y \mid x) \propto e^{-\mathcal{L}(x)}$ with $x := x_T$. 
+This 
+and approximate the intractable expectation by the clean-state estimate at the current flow step $t$,
 \begin{align*}
 p(y \mid z^t) = \int p(y \mid x)\, p(x \mid z^t)\, dx
 = \mathbb{E}_{x \mid z^t}\!\left[\, e^{-\mathcal{L}(x)} \right]
@@ -64,40 +67,12 @@ This means that to sample from the approximate posterior distribution we simply 
 
 \subsection{Guidance strength-schedule}
 
-Researchers in the image domain recognized that in order to obtain the aspired results,
-the guidance vector has to be scaled up.
+Under the adapted DPS framework we just introduced, we are now free to define any guidance schedule of our choice.
+To do so, we decide to test different schedules empirically.
 
-To unify the notation we can express this idea as follow: replace $a_t$ with a general guidance strength-schedule $\lambda_t$,
-which we can decompose 
-\begin{equation}
-    \lambda_t := w \cdot \alpha_t \cdot c_t
-\end{equation}
-with:
-\begin{itemize}[noitemsep]
-    \item $w$: guidance strength (time independent)
-    \item $\alpha_t$: guidance profile
-    \item $c_t$: a general step normalization constant (specific to different guidance algorithms)
-\end{itemize}
-Under this decomposition we would retrieve the approximate posterior sampling by setting $w=1$, $\{\alpha_t\}_{t=1}^T=\{a_t\}_{t=1}^T$, and $c_t=1$.
-Note that for $\lambda_t \neq a_t$ for $t=1,\dots, T$, the guided results stops being a sample from the posterior distribution.
-In this sense we trade mathematical reasoning for control.
-
-Different approaches to scale guidance have been to:
-\begin{itemize}[noitemsep]
-    \item scale up $w$
-    \item change the default profile schedule to an arbitrary $\alpha_t$
-    \item normalize the step to satisfy a certain constraint, such as setting $\{\lambda_t\}_{t=1}^T$ s.t. the guidance vector represents a fix fraction of the unguided vector field.
-\end{itemize}
-
-The question for which guidance schedule is most optimal remains unanswered.
-
-Applying this to our context:
-\begin{align*}
-    \tilde{u}(z_t) &= u(z_t) - a_t \nabla_{z_t} \log p(y|z_t) \\
-    &= u(z_t) - \lambda_t \nabla_{z^t}\mathcal{L}(\hat{x}_t)
-\end{align*}
-
-In \ref{...} develop variants of the base algorithm we will present next, testing empirically appropriate choices for $\{\lambda\}_{t=1}^T$ from different perspectives.
+We note that, under the define decomposition of $\lambda_t$, the role of $\alpha_t$ is only relative to the flow steps.
+It can thus be rescaled between 0 and 1 via a min-max scaling.
+We defer the rest of the discussion to chapter 6.
 
 \subsection{Base algorithm}
 

@@ -2,67 +2,81 @@
 \contentsline {chapter}{\numberline {1}Introduction}{1}{chapter.1}%
 \contentsline {chapter}{\numberline {2}Background}{4}{chapter.2}%
 \contentsline {section}{\numberline {2.1}Flow matching}{4}{section.2.1}%
-\contentsline {section}{\numberline {2.2}Guidance methods}{5}{section.2.2}%
-\contentsline {subsection}{\numberline {2.2.1}Classifier guidance}{6}{subsection.2.2.1}%
-\contentsline {subsection}{\numberline {2.2.2}Guidance strength-schedule}{6}{subsection.2.2.2}%
-\contentsline {subsection}{\numberline {2.2.3}Backpropagating through the ODE}{7}{subsection.2.2.3}%
-\contentsline {subsubsection}{FlowGrad}{7}{section*.5}%
-\contentsline {subsubsection}{D-Flow}{7}{section*.6}%
-\contentsline {subsubsection}{Control paper}{7}{section*.7}%
-\contentsline {section}{\numberline {2.3}ArchesWeather}{8}{section.2.3}%
-\contentsline {subsection}{\numberline {2.3.1}Dataset}{8}{subsection.2.3.1}%
-\contentsline {subsection}{\numberline {2.3.2}Architecture}{8}{subsection.2.3.2}%
-\contentsline {subsection}{\numberline {2.3.3}Training}{8}{subsection.2.3.3}%
-\contentsline {subsection}{\numberline {2.3.4}Evaluation}{8}{subsection.2.3.4}%
-\contentsline {section}{\numberline {2.4}Guidance in weather modeling}{8}{section.2.4}%
-\contentsline {chapter}{\numberline {3}Specifying events of interest}{10}{chapter.3}%
-\contentsline {section}{\numberline {3.1}Target variable and region: mask}{10}{section.3.1}%
-\contentsline {section}{\numberline {3.2}Target trajectory}{11}{section.3.2}%
-\contentsline {section}{\numberline {3.3}Pipeline overview}{12}{section.3.3}%
-\contentsline {chapter}{\numberline {4}Guidance design}{13}{chapter.4}%
-\contentsline {section}{\numberline {4.1}Base guidance method}{13}{section.4.1}%
-\contentsline {subsection}{\numberline {4.1.1}Classifier guidance}{13}{subsection.4.1.1}%
-\contentsline {subsection}{\numberline {4.1.2}Adapting classifier guidance}{14}{subsection.4.1.2}%
-\contentsline {subsection}{\numberline {4.1.3}Guidance strength-schedule}{15}{subsection.4.1.3}%
-\contentsline {subsection}{\numberline {4.1.4}Base algorithm}{15}{subsection.4.1.4}%
-\contentsline {section}{\numberline {4.2}Guidance design choices}{16}{section.4.2}%
-\contentsline {subsection}{\numberline {4.2.1}Guidance schedule}{16}{subsection.4.2.1}%
-\contentsline {subsection}{\numberline {4.2.2}Guidance loss}{16}{subsection.4.2.2}%
-\contentsline {section}{\numberline {4.3}Specific guidance methods (instances)}{18}{section.4.3}%
-\contentsline {subsection}{\numberline {4.3.1}CLOSE-GAP}{18}{subsection.4.3.1}%
-\contentsline {subsection}{\numberline {4.3.2}OPTIMIZE-SCHEDULE}{19}{subsection.4.3.2}%
-\contentsline {subsection}{\numberline {4.3.3}OPTIMIZE-GAIN}{19}{subsection.4.3.3}%
-\contentsline {subsection}{\numberline {4.3.4}Comparison}{20}{subsection.4.3.4}%
-\contentsline {chapter}{\numberline {5}Evaluation}{21}{chapter.5}%
-\contentsline {section}{\numberline {5.1}Flow-time assessment}{22}{section.5.1}%
-\contentsline {subsection}{\numberline {5.1.1}Tests}{22}{subsection.5.1.1}%
-\contentsline {section}{\numberline {5.2}Weather-time assessment}{23}{section.5.2}%
-\contentsline {subsection}{\numberline {5.2.1}Parameter characterisation tests}{23}{subsection.5.2.1}%
-\contentsline {subsubsection}{Region of interest}{23}{section*.8}%
-\contentsline {subsubsection}{Variable of interest}{23}{section*.9}%
-\contentsline {subsubsection}{Intervention profile}{23}{section*.10}%
-\contentsline {subsection}{\numberline {5.2.2}Realism tests}{24}{subsection.5.2.2}%
-\contentsline {section}{\numberline {5.3}Method Validation}{25}{section.5.3}%
-\contentsline {chapter}{\numberline {6}Experiments}{26}{chapter.6}%
-\contentsline {section}{\numberline {6.1}Flow-time evaluation}{26}{section.6.1}%
-\contentsline {subsection}{\numberline {6.1.1}Setup}{26}{subsection.6.1.1}%
-\contentsline {subsection}{\numberline {6.1.2}Achievement tests}{26}{subsection.6.1.2}%
-\contentsline {section}{\numberline {6.2}Weather-time evaluation}{27}{section.6.2}%
-\contentsline {subsection}{\numberline {6.2.1}Parameter characterisation tests}{27}{subsection.6.2.1}%
-\contentsline {subsubsection}{Region of interest}{27}{section*.11}%
-\contentsline {subsubsection}{Variable of interest}{27}{section*.12}%
-\contentsline {subsubsection}{Intervention profile}{27}{section*.13}%
-\contentsline {subsection}{\numberline {6.2.2}Realism tests}{27}{subsection.6.2.2}%
-\contentsline {section}{\numberline {6.3}Use cases}{27}{section.6.3}%
-\contentsline {subsection}{\numberline {6.3.1}Europe 2020-06-01}{28}{subsection.6.3.1}%
-\contentsline {subsection}{\numberline {6.3.2}Australia 2020-01-01}{28}{subsection.6.3.2}%
-\contentsline {subsection}{\numberline {6.3.3}North America 2020-07-01}{28}{subsection.6.3.3}%
-\contentsline {chapter}{\numberline {7}Discussion}{29}{chapter.7}%
-\contentsline {section}{\numberline {7.1}Mask}{29}{section.7.1}%
-\contentsline {section}{\numberline {7.2}...}{30}{section.7.2}%
-\contentsline {chapter}{\numberline {8}Conclusion}{31}{chapter.8}%
-\contentsline {section}{\numberline {8.1}Summary}{31}{section.8.1}%
-\contentsline {section}{\numberline {8.2}Future Directions}{31}{section.8.2}%
-\contentsline {section}{\numberline {8.3}Conclusive Remarks}{31}{section.8.3}%
-\contentsline {chapter}{Appendices}{}{section*.14}
-\contentsline {chapter}{\numberline {A}Code-base structure}{33}{appendix.A}%
+\contentsline {subsection}{\numberline {2.1.1}Conditional probability paths}{5}{subsection.2.1.1}%
+\contentsline {subsection}{\numberline {2.1.2}Conditional and marginal velocity fields}{6}{subsection.2.1.2}%
+\contentsline {subsection}{\numberline {2.1.3}Flow-matching objective}{6}{subsection.2.1.3}%
+\contentsline {subsection}{\numberline {2.1.4}Linear probability path}{7}{subsection.2.1.4}%
+\contentsline {section}{\numberline {2.2}Guidance}{8}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Guidance as posterior sampling}{8}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}From scores to flow-matching velocities}{9}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Guidance-strength schedules}{10}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}ArchesWeather}{11}{section.2.3}%
+\contentsline {subsection}{\numberline {2.3.1}Dataset}{11}{subsection.2.3.1}%
+\contentsline {subsection}{\numberline {2.3.2}Forecasting setup}{12}{subsection.2.3.2}%
+\contentsline {subsection}{\numberline {2.3.3}Residual flow model}{13}{subsection.2.3.3}%
+\contentsline {subsection}{\numberline {2.3.4}Sampling}{14}{subsection.2.3.4}%
+\contentsline {chapter}{\numberline {3}Background}{16}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Flow matching}{16}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Guidance}{17}{section.3.2}%
+\contentsline {subsection}{\numberline {3.2.1}Guidance as posterior sampling}{18}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.2}From diffusion to flow matching}{18}{subsection.3.2.2}%
+\contentsline {subsection}{\numberline {3.2.3}Guidance strength-schedule}{19}{subsection.3.2.3}%
+\contentsline {subsection}{\numberline {3.2.4}Guidance methods}{20}{subsection.3.2.4}%
+\contentsline {subsubsection}{FlowGrad}{20}{section*.7}%
+\contentsline {subsubsection}{D-Flow}{20}{section*.8}%
+\contentsline {subsubsection}{Control paper}{20}{section*.9}%
+\contentsline {section}{\numberline {3.3}ArchesWeather}{21}{section.3.3}%
+\contentsline {subsection}{\numberline {3.3.1}Dataset}{21}{subsection.3.3.1}%
+\contentsline {subsection}{\numberline {3.3.2}Objective}{21}{subsection.3.3.2}%
+\contentsline {subsection}{\numberline {3.3.3}Sampling}{23}{subsection.3.3.3}%
+\contentsline {section}{\numberline {3.4}Guidance in weather modeling}{24}{section.3.4}%
+\contentsline {chapter}{\numberline {4}Specifying events of interest}{25}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Target variable and region: mask}{25}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Target trajectory}{26}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Pipeline overview}{27}{section.4.3}%
+\contentsline {chapter}{\numberline {5}Guidance design}{28}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Base guidance method}{28}{section.5.1}%
+\contentsline {subsection}{\numberline {5.1.1}Adapting DPS}{28}{subsection.5.1.1}%
+\contentsline {subsection}{\numberline {5.1.2}Guidance strength-schedule}{30}{subsection.5.1.2}%
+\contentsline {subsection}{\numberline {5.1.3}Base algorithm}{30}{subsection.5.1.3}%
+\contentsline {section}{\numberline {5.2}Guidance design choices}{31}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Guidance schedule}{31}{subsection.5.2.1}%
+\contentsline {subsection}{\numberline {5.2.2}Guidance loss}{31}{subsection.5.2.2}%
+\contentsline {section}{\numberline {5.3}Specific guidance methods (instances)}{32}{section.5.3}%
+\contentsline {subsection}{\numberline {5.3.1}CLOSE-GAP}{33}{subsection.5.3.1}%
+\contentsline {subsection}{\numberline {5.3.2}OPTIMIZE-SCHEDULE}{33}{subsection.5.3.2}%
+\contentsline {subsection}{\numberline {5.3.3}OPTIMIZE-GAIN}{34}{subsection.5.3.3}%
+\contentsline {subsection}{\numberline {5.3.4}Comparison}{34}{subsection.5.3.4}%
+\contentsline {chapter}{\numberline {6}Evaluation}{36}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Flow-time assessment}{37}{section.6.1}%
+\contentsline {subsection}{\numberline {6.1.1}Tests}{37}{subsection.6.1.1}%
+\contentsline {section}{\numberline {6.2}Weather-time assessment}{38}{section.6.2}%
+\contentsline {subsection}{\numberline {6.2.1}Parameter characterisation tests}{38}{subsection.6.2.1}%
+\contentsline {subsubsection}{Region of interest}{38}{section*.12}%
+\contentsline {subsubsection}{Variable of interest}{38}{section*.13}%
+\contentsline {subsubsection}{Intervention profile}{38}{section*.14}%
+\contentsline {subsection}{\numberline {6.2.2}Realism tests}{39}{subsection.6.2.2}%
+\contentsline {section}{\numberline {6.3}Method Validation}{40}{section.6.3}%
+\contentsline {chapter}{\numberline {7}Experiments}{41}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Flow-time evaluation}{41}{section.7.1}%
+\contentsline {subsection}{\numberline {7.1.1}Setup}{41}{subsection.7.1.1}%
+\contentsline {subsection}{\numberline {7.1.2}Achievement tests}{41}{subsection.7.1.2}%
+\contentsline {section}{\numberline {7.2}Weather-time evaluation}{42}{section.7.2}%
+\contentsline {subsection}{\numberline {7.2.1}Parameter characterisation tests}{42}{subsection.7.2.1}%
+\contentsline {subsubsection}{Region of interest}{42}{section*.15}%
+\contentsline {subsubsection}{Variable of interest}{42}{section*.16}%
+\contentsline {subsubsection}{Intervention profile}{42}{section*.17}%
+\contentsline {subsection}{\numberline {7.2.2}Realism tests}{42}{subsection.7.2.2}%
+\contentsline {section}{\numberline {7.3}Use cases}{42}{section.7.3}%
+\contentsline {subsection}{\numberline {7.3.1}Europe 2020-06-01}{43}{subsection.7.3.1}%
+\contentsline {subsection}{\numberline {7.3.2}Australia 2020-01-01}{43}{subsection.7.3.2}%
+\contentsline {subsection}{\numberline {7.3.3}North America 2020-07-01}{43}{subsection.7.3.3}%
+\contentsline {chapter}{\numberline {8}Discussion}{44}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Mask}{44}{section.8.1}%
+\contentsline {section}{\numberline {8.2}...}{45}{section.8.2}%
+\contentsline {chapter}{\numberline {9}Conclusion}{46}{chapter.9}%
+\contentsline {section}{\numberline {9.1}Summary}{46}{section.9.1}%
+\contentsline {section}{\numberline {9.2}Future Directions}{46}{section.9.2}%
+\contentsline {section}{\numberline {9.3}Conclusive Remarks}{46}{section.9.3}%
+\contentsline {chapter}{Appendices}{}{section*.18}
+\contentsline {chapter}{\numberline {A}Code-base structure}{48}{appendix.A}%

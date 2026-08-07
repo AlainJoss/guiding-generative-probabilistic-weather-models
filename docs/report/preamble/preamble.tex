@@ -16,6 +16,13 @@
 \usepackage{etoolbox}                    % patching commands
 \usepackage{setspace}                    % line spacing
 \usepackage{graphicx}
+\usepackage{tikz}                         % pipeline / schematic figures
+\usetikzlibrary{arrows.meta, positioning, calc}
+% palette shared with the presentation (pipeline_figure.tex)
+\definecolor{kugreen}{RGB}{50,93,61}
+\definecolor{kugreenlys}{RGB}{132,158,139}
+\definecolor{kugreenlyslys}{RGB}{173,190,177}
+\definecolor{kugreenlyslyslys}{RGB}{214,223,216}
 \usepackage{listings}
 \usepackage{algorithm}                    % float wrapper for pseudocode
 \usepackage{algpseudocode}                % algorithmicx pseudocode
@@ -28,7 +35,7 @@
 \usepackage{xparse}
 \usepackage{hyperref}                    % must be loaded at the end
 \usepackage{cleveref}                    % \cref, load after hyperref
-\usepackage{glossaries}
+% \usepackage{MnSymbol}
 %----------------------------------------------------------------------------------------
 %	BIBLIOGRAPHY
 %----------------------------------------------------------------------------------------

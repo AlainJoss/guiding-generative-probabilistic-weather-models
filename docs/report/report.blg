@@ -1,0 +1,17 @@
+[0] Config.pm:307> INFO - This is Biber 2.19
+[0] Config.pm:310> INFO - Logfile is 'report.blg'
+[35] biber-darwin:340> INFO - === Fri Aug  7, 2026, 18:04:23
+[44] Biber.pm:419> INFO - Reading 'report.bcf'
+[83] Biber.pm:979> INFO - Found 9 citekeys in bib section 0
+[91] Biber.pm:4419> INFO - Processing section 0
+[97] Biber.pm:4610> INFO - Looking for bibtex file 'thesis.bib' for section 0
+[98] bibtex.pm:1713> INFO - LaTeX decoding ...
+[103] bibtex.pm:1519> INFO - Found BibTeX data source 'thesis.bib'
+[191] UCollate.pm:68> INFO - Overriding locale 'en-US' defaults 'variable = shifted' with 'variable = non-ignorable'
+[191] UCollate.pm:68> INFO - Overriding locale 'en-US' defaults 'normalization = NFD' with 'normalization = prenormalized'
+[191] Biber.pm:4239> INFO - Sorting list 'nty/global//global/global' of type 'entry' with template 'nty' and locale 'en-US'
+[191] Biber.pm:4245> INFO - No sort tailoring available for locale 'en-US'
+[196] bbl.pm:660> INFO - Writing 'report.bbl' with encoding 'UTF-8'
+[211] bbl.pm:763> INFO - Output to report.bbl
+[212] Biber.pm:131> WARN - I didn't find a database entry for '...' (section 0)
+[212] Biber.pm:133> INFO - WARNINGS: 1
