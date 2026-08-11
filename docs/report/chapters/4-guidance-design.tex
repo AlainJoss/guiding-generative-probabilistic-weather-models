@@ -7,67 +7,9 @@ Like the class-object relationship in programming, where the object is a specifi
 
 \section{Base guidance method}
 
-\subsection{Adapting DPS}
+In the development of the guidance algorithms we adopt a blend between between the posterior sampling and control views of guidance.
 
-One popular approach is to model it with a loss function as $p_t(y | \hat{x}_t) \propto \exp(-\mathcal{L}(\hat{x}_t, y))$
-such that
-\begin{align*}
-    u_t(z_t|y) &\approx u_t(z_t) + a_t \nabla_{z_t} \log p_t(y | \hat{x}_t) \\
-    &= u_t(z_t) + a_t \nabla_{z_t} \log \exp(-\mathcal{L}(\hat{x}_t, y)) \\
-    &= u_t(z_t) - a_t \nabla_{z_t} \mathcal{L}(\hat{x}_t, y)
-\end{align*}
-which is also the approach we will take, see chapter 4.
-
----Since this map from $x_0$ to $x_1$ is a single deterministic and differentiable trajectory, its output can be steered by differentiating a
-target loss through the flow---the mechanism on which our guidance builds (\Cref{ch:guide}).
----A key finding is that in order to make guidance actually work, we have to abandon probability land, by increasing the strength of the guidance.
-In fact, when we start to play with $lambda$, the guided output is not a sample of the conditional probability distribution anymore. 
-
-
-In our context we want to generate weather states and guide them towards an extreme event of our choice (in our case increasing temperature).
-Using the defininition of classifier guidance provided in chapter 2, we can design the loss function to achieve this objective.
-
-With $y$ now being the guidance target, we can define a loss $\mathcal{L}(\hat{x}_t(z_t), y)$, dependent on the clean state estimate $\hat{x}_t$, which is a function of the noisy state $z_t$.
-With this formulation, we can compute the loss at any step of the flow on $\hat{x}_t$ with $0<t<T$ and on the final sample $\hat{x}_T=x_T$.
-
-This enables us to define the likelihood term 
-This is however still not enough to compute the posterior, since it's an intractable integral over all possible clean states
-\begin{align*}
-p(y \mid z^t) = \int p(y \mid x)\, p(x \mid z^t)\, dx
-\end{align*}
-
-We approach the problem like in the DPS paper and define the likelihood term as $p(y \mid x) \propto e^{-\mathcal{L}(x)}$ with $x := x_T$. 
-This 
-and approximate the intractable expectation by the clean-state estimate at the current flow step $t$,
-\begin{align*}
-p(y \mid z^t) = \int p(y \mid x)\, p(x \mid z^t)\, dx
-= \mathbb{E}_{x \mid z^t}\!\left[\, e^{-\mathcal{L}(x)} \right]
-\approx e^{-\mathcal{L}(\hat{x}_t)}.
-\end{align*}
-(this we do like in the DPS paper)
-
-Substituting this approximation in the bayesian formula we get:
-\begin{align*}
-\nabla_{z^t}\log p(z^t \mid y)
-&= \nabla_{z^t}\log p(z^t)
-+ \nabla_{z^t}\log e^{-\mathcal{L}(\hat{x}_t)} \\
-&= \nabla_{z^t}\log p(z^t)
-- \nabla_{z^t}\mathcal{L}(\hat{x}_t)
-\end{align*}
-
-In the context of flow matching, this general formulation translates to:
-\begin{align*}
-    \tilde{u}(z_t) &= u(z_t) - a_t \nabla_{z_t} \log p(y|z_t) \\
-    &= u(z_t) - a_t \nabla_{z^t}\mathcal{L}(\hat{x}_t)
-\end{align*}
-
-where $a_t = ...$ in the specific context of our model.
-
-This means that to sample from the approximate posterior distribution we simply have to compute the right term at the specific step in the flow. 
-
-\subsection{Guidance strength-schedule}
-
-Under the adapted DPS framework we just introduced, we are now free to define any guidance schedule of our choice.
+Under the introduced DPS framework we just introduced, we are now free to define any guidance schedule of our choice.
 To do so, we decide to test different schedules empirically.
 
 We note that, under the define decomposition of $\lambda_t$, the role of $\alpha_t$ is only relative to the flow steps.

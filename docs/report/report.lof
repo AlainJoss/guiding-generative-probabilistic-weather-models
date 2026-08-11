@@ -1,11 +1,7 @@
 \babel@toc {english}{}\relax 
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {2.1}{\ignorespaces The two nested time scales in ArchesWeather. Each autoregressive weather step \(n\rightarrow n+1\) contains a complete flow of \(T=25\) steps used to generate the forecast residual. \relax }}{15}{figure.caption.5}%
-\contentsline {figure}{\numberline {2.2}{\ignorespaces Computational graph of one ArchesWeather forecast step. The deterministic model produces the base forecast \(\hat {x}^{\mathrm {det}}_{n+1}\), while the flow model generates the residual through \(T\) Euler steps before both components are combined. \relax }}{15}{figure.caption.6}%
-\addvspace {10\p@ }
-\contentsline {figure}{\numberline {3.1}{\ignorespaces The two nested time scales: the weather time $n$ advances in $24$\,h steps, while a full flow of $T$ steps generates each transition.\relax }}{22}{figure.caption.10}%
-\contentsline {figure}{\numberline {3.2}{\ignorespaces One forecast step of ArchesWeather.\relax }}{23}{figure.caption.11}%
+\contentsline {figure}{\numberline {2.1}{\ignorespaces Computational graph of one ArchesWeather forecast step. The deterministic model produces the base forecast \(\hat {x}^{\mathrm {det}}_{n+1}\), while the flow model generates the residual through \(T\) Euler steps before both components are combined. \relax }}{21}{figure.caption.8}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }

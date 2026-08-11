@@ -6,8 +6,9 @@ The first requirement concerns whether the algorithm reaches the target, and how
 
 The second requirement concerns whether the generated states are realistic, in terms of temporal, spatial, vertical, and cross-variable coherence.
 
-The evaluation is organised as a funnel. In \emph{flow-time} we assess the sampling dynamics of the algorithm variants and guidance schedules, and select the most promising method. In \emph{weather-time} we then characterise the parameters of the experimental setting, select the settings that produce the most desirable results, and finally validate the realism of the generated trajectories. \Cref{ch:experiments} carries out each stage in turn and reports the concrete settings and results; this chapter defines only \emph{what} we test and \emph{how} we score it.
+The evaluation is organised as a funnel. In \emph{flow-time} we assess the sampling dynamics of the algorithm under different guidance schedules, and select the most appropriate one through the defined tests. In \emph{weather-time} we then characterise the parameters of the experimental setting, select the settings that produce the most desirable results, and finally validate the realism of the generated trajectories. \Cref{ch:experiments} carries out each stage in turn and reports the concrete settings and results; this chapter defines only \emph{what} we test and \emph{how} we score it.
 
+---this is part of the discussion maybe, if not it has to be reframed in a more specific way
 Alongside these tests, the discussion examines further aspects that the framework does not measure directly---such as the diversity of the generated trajectories and the informativeness of the gradient---but that bear on the overall value of the method and its applications.
 
 \section{Flow-time assessment}

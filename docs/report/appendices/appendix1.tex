@@ -1,1 +1,222 @@
-\chapter{Code-base structure}\label{appendix:appendix1}
+\chapter{Development of the target-realization algorithm}
+\label{app:target-realization-development}
+
+Before arriving at the target-realization algorithm presented in
+\Cref{sec:target-realization}, we explored two more flexible strategies for
+determining the guidance magnitude: \textsc{Close-Gap} and
+\textsc{Optimize-Schedule}. These preliminary approaches motivated the final
+choice to prescribe the relative flow-time profile and optimize only a single
+overall guidance gain.
+
+\section{\textsc{Close-Gap}}
+\label{app:close-gap}
+
+The first approach exploits the fact that the desired target is known before
+generation by prescribing how the remaining target gap should evolve throughout
+the flow. Let
+
+\begin{equation}
+    \bar{\xi}_{n,t}
+    :=
+    \gamma_t^{\mathrm{gap}}\,\xi_{n,0},
+    \label{eq:app-close-gap-path}
+\end{equation}
+
+denote the desired remaining gap at flow step $t$, where
+$\gamma_t^{\mathrm{gap}}$ specifies the fraction of the initial gap that should
+remain.
+
+At each flow step, the method computes the local displacement of the noisy
+state required to move the current gap $\xi_{n,t}$ towards
+$\bar{\xi}_{n,t}$. Using a first-order Taylor approximation,
+
+\begin{equation}
+    \xi_{n,t}(z_{n,t}+\Delta z_{n,t})
+    \approx
+    \xi_{n,t}(z_{n,t})
+    +
+    \left(
+        \nabla_{z_{n,t}}\xi_{n,t}
+    \right)^\top
+    \Delta z_{n,t}.
+\end{equation}
+
+Requiring the corrected gap to equal the prescribed value gives
+
+\begin{equation}
+    \left(
+        \nabla_{z_{n,t}}\xi_{n,t}
+    \right)^\top
+    \Delta z_{n,t}
+    =
+    \bar{\xi}_{n,t}-\xi_{n,t}.
+\end{equation}
+
+Among the displacements satisfying this local constraint, the smallest in
+Euclidean norm is obtained by moving along the gradient of the gap,
+
+\begin{equation}
+    \Delta z_{n,t}^{\star}
+    =
+    \frac{
+        \bar{\xi}_{n,t}-\xi_{n,t}
+    }{
+        \left\|
+            \nabla_{z_{n,t}}\xi_{n,t}
+        \right\|_2^2
+    }
+    \nabla_{z_{n,t}}\xi_{n,t}.
+    \label{eq:app-close-gap-minimum-shift}
+\end{equation}
+
+Using
+
+\begin{equation}
+    g_{n,t}
+    =
+    \nabla_{z_{n,t}}\xi_{n,t}^{\,2}
+    =
+    2\xi_{n,t}
+    \nabla_{z_{n,t}}\xi_{n,t},
+\end{equation}
+
+the desired displacement can equivalently be written as
+
+\begin{equation}
+    \Delta z_{n,t}^{\star}
+    =
+    -
+    \frac{
+        2\xi_{n,t}
+        \left(
+            \xi_{n,t}-\bar{\xi}_{n,t}
+        \right)
+    }{
+        \lVert g_{n,t}\rVert_2^2
+    }
+    g_{n,t}.
+\end{equation}
+
+The guidance contribution to the Euler update is
+
+\begin{equation}
+    \Delta z_{n,t}^{\mathrm{gui}}
+    =
+    -h_t\lambda_{n,t}g_{n,t}.
+\end{equation}
+
+Requiring this contribution to realize the desired local displacement yields
+
+\begin{equation}
+    \lambda_{n,t}^{\mathrm{CG}}
+    =
+    \frac{
+        2\xi_{n,t}
+        \left(
+            \xi_{n,t}-\bar{\xi}_{n,t}
+        \right)
+    }{
+        h_t
+        \lVert g_{n,t}\rVert_2^2
+    }.
+    \label{eq:app-close-gap-lambda}
+\end{equation}
+
+The attraction of this formulation is its efficiency: the guidance magnitude
+is determined online and only a single flow is required. However, the update
+is greedy. It computes the intervention required to satisfy the prescribed gap
+under a local approximation, without accounting for the subsequent displacement
+induced by the learned velocity field. The resulting trajectory can therefore
+overshoot the prescribed gap and require compensating corrections at later
+flow steps.
+
+A slower gap-closing profile can reduce this behaviour, but then introduces a
+schedule parameter controlling how aggressively the gap is closed. Choosing
+this parameter requires repeated runs, reducing the practical advantage of the
+otherwise single-pass method. For this reason, we next considered optimizing
+the flow-time intervention schedule directly.
+
+\section{\textsc{Optimize-Schedule}}
+\label{app:optimize-schedule}
+
+Rather than prescribing the evolution of the target gap,
+\textsc{Optimize-Schedule} treats the intervention magnitudes across the
+complete flow as optimization variables.
+
+We parameterize the intervention through its contribution to the Euler update,
+
+\begin{equation}
+    k_{n,t}
+    :=
+    h_t\lambda_{n,t},
+\end{equation}
+
+such that
+
+\begin{equation}
+    z_{n,t+1}
+    =
+    z_{n,t}
+    +
+    h_tu_{n,t}
+    -
+    k_{n,t}g_{n,t}.
+\end{equation}
+
+The quantity $k_{n,t}g_{n,t}$ is the state displacement induced directly by
+guidance at flow step $t$. We optimize the complete intervention trajectory
+
+\begin{equation}
+    \mathbf{k}_n
+    =
+    \left(
+        k_{n,0},\ldots,k_{n,T-2}
+    \right)
+\end{equation}
+
+using the objective
+
+\begin{equation}
+    J_n(\mathbf{k}_n)
+    =
+    \xi_n^2
+    +
+    \kappa
+    \sum_{t=0}^{T-2}
+    \left\|
+        k_{n,t}g_{n,t}
+    \right\|_2^2.
+    \label{eq:app-optimize-schedule-objective}
+\end{equation}
+
+The first term measures target realization, while the second penalizes the
+total squared magnitude of the guidance-induced state displacements. This
+allows the optimization to prefer schedules that approach the prescribed
+target while limiting the amount of intervention applied along the flow.
+
+In principle, this formulation removes the need to prescribe a gap-closing
+trajectory and allows the temporal distribution of guidance to adapt freely.
+In practice, however, the optimization is strongly coupled. Changing
+$k_{n,t}$ modifies the noisy trajectory, which changes the clean-state
+estimates and therefore also the guidance gradients encountered at subsequent
+flow steps. Consequently, the optimal intervention at one flow step depends on
+the interventions applied throughout the trajectory.
+
+In preliminary experiments, this high-dimensional optimization was strongly
+sensitive to its initialization and could converge rapidly to different local
+solutions. The additional flexibility therefore came at the cost of a
+substantially more difficult optimization problem.
+
+These observations motivated the lower-dimensional formulation adopted in the
+main method. Instead of determining an independent intervention magnitude at
+every flow step, we prescribe a normalized profile $\gamma_t$ and restrict the
+guidance schedule to
+
+\begin{equation}
+    \lambda_{n,t}
+    =
+    w_n\gamma_t.
+\end{equation}
+
+Target realization then reduces to optimizing the single scalar $w_n$ at each
+weather step, as described in \Cref{sec:target-realization}.

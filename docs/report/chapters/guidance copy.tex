@@ -1,0 +1,989 @@
+
+\chapter{Guidance design}
+\label{ch:guide}
+
+The previous chapter specified the scenario to be generated through an initial
+atmospheric context, a target mask \(m\), and a target trajectory
+\(y^\star_{1:N}\). We now address the second component of the framework:
+how the generative forecast can be steered towards this prescribed target.
+
+We formulate this as a \emph{target-driven guidance} problem. At each weather
+step \(n\), the target \(y_n^\star\) is fixed before generation begins. During
+the internal residual flow, the current clean-state estimate is repeatedly
+compared with this target, and the resulting discrepancy is used to modify the
+generative dynamics. The central problem is therefore not to choose a guidance
+strength and observe the resulting scenario, but rather to determine the
+guidance required to realize a scenario that has been specified in advance.
+
+We first introduce the common guidance formulation used throughout this
+chapter. We then develop three strategies for realizing the prescribed target:
+\textsc{Close-Gap}, which locally controls the remaining target gap;
+\textsc{Optimize-Schedule}, which jointly optimizes the interventions across
+the flow; and \textsc{Optimize-Gain}, which fixes the relative flow-time
+profile and optimizes a single guidance gain. Finally, we introduce Universal
+Guidance and adversarial weather forecasting as baseline approaches.
+
+\section{Target-driven guidance}
+\label{sec:target-driven-guidance}
+
+Guidance operates independently at every weather step of the autoregressive
+forecast. For notational simplicity, we denote by
+\(\hat{x}_{n,t}\) the clean-state estimate of the weather state being generated
+at weather step \(n\), evaluated at internal flow time \(t\). Thus, \(n\)
+continues to index weather time, while \(t\) refers exclusively to the
+generative flow.
+
+Although the guidance problem is solved separately at each weather step, its
+effects are not independent across weather time. Once the guided state
+\(x_n^{\mathrm{gui}}\) has been generated, it becomes part of the conditioning
+context used to generate the following state. Guidance applied at one weather
+step can therefore propagate through the subsequent autoregressive forecast.
+
+\subsection{Guidance objective}
+\label{sec:guidance-objective}
+
+At weather step \(n\), the target construction introduced in
+\Cref{ch:specify} provides a scalar target value \(y_n^\star\). Given the mask
+\(m\), we measure the discrepancy between the current clean-state estimate and
+this target by
+
+\begin{equation}
+    \xi_{n,t}
+    :=
+    \mathcal{M}_m(\hat{x}_{n,t}) - y_n^\star ,
+    \label{eq:guidance-gap}
+\end{equation}
+
+where \(\mathcal{M}_m\) denotes the normalized masked average defined in
+\Cref{ch:specify}. We refer to \(\xi_{n,t}\) as the \emph{target gap}.
+
+The corresponding guidance loss is the squared target gap,
+
+\begin{equation}
+    \mathcal{L}_{n,t}
+    :=
+    \xi_{n,t}^{\,2}
+    =
+    \left(
+        \mathcal{M}_m(\hat{x}_{n,t}) - y_n^\star
+    \right)^2 .
+    \label{eq:guidance-loss}
+\end{equation}
+
+This formulation separates the specification of the desired scenario from the
+mechanism used to realize it. In the controlled experiments of
+\Cref{ch:specify}, for example,
+
+\begin{equation}
+    y_n^\star
+    =
+    (1+\rho_n)\,
+    \mathcal{M}_m(x_n^{\mathrm{ung}}),
+    \label{eq:controlled-guidance-target}
+\end{equation}
+
+whereas for historical storyline generation \(y_n^\star\) is obtained from a
+selected historical trajectory. The guidance algorithms developed below are
+unchanged by this choice: once \(y_n^\star\) has been specified, they operate
+only on the resulting target gap.
+
+After completing the internal flow, the generated weather state is denoted by
+\(x_n^{\mathrm{gui}}\). Its final realized target gap is therefore
+
+\begin{equation}
+    \xi_n
+    :=
+    \mathcal{M}_m(x_n^{\mathrm{gui}}) - y_n^\star
+    =
+    \xi_{n,T}.
+    \label{eq:final-guidance-gap}
+\end{equation}
+
+The objective of the guidance methods in this chapter is to reduce
+\(\lvert\xi_n\rvert\), ideally reaching \(\xi_n=0\). Importantly, this does
+not imply that arbitrary changes to the atmospheric state are considered
+acceptable. Reaching the prescribed target describes only whether guidance
+has succeeded with respect to the specified event; the meteorological
+plausibility of the resulting forecast is evaluated separately.
+
+\subsection{Gradient-based flow guidance}
+\label{sec:gradient-flow-guidance}
+
+As introduced in the background chapter, loss-based guidance modifies the
+generative velocity using the gradient of a differentiable objective with
+respect to the current noisy state. At weather step \(n\) and flow time \(t\),
+we compute
+
+\begin{equation}
+    g_{n,t}
+    :=
+    \nabla_{z_{n,t}}
+    \mathcal{L}_{n,t}.
+    \label{eq:guidance-gradient}
+\end{equation}
+
+For the squared target-gap loss in \Cref{eq:guidance-loss}, this becomes
+
+\begin{equation}
+    g_{n,t}
+    =
+    2\xi_{n,t}\,
+    \nabla_{z_{n,t}}
+    \mathcal{M}_m(\hat{x}_{n,t}).
+    \label{eq:guidance-gradient-expanded}
+\end{equation}
+
+Although the objective itself is defined only through the masked quantity
+\(\mathcal{M}_m\), the gradient is taken with respect to the complete noisy
+residual \(z_{n,t}\). It therefore propagates through the mapping from the
+noisy state to the clean-state estimate and can contain non-zero components
+outside the explicitly targeted variable and region. The intervention is thus
+not obtained by directly adding the mask to the generated weather field.
+Instead, the gradient describes the local change of the noisy state that
+modifies the masked quantity through the learned generative model.
+
+Using the notation introduced in the background chapter, the guided velocity
+can be written as
+
+\begin{equation}
+    \tilde{u}_{n,t}
+    =
+    u_{n,t}
+    -
+    \lambda_{n,t} g_{n,t},
+    \label{eq:target-driven-guided-velocity}
+\end{equation}
+
+followed by the usual Euler update
+
+\begin{equation}
+    z_{n,t+1}
+    =
+    z_{n,t}
+    +
+    h_t \tilde{u}_{n,t}.
+    \label{eq:guided-euler-update}
+\end{equation}
+
+It is useful to separate the direction of the guidance gradient from its
+magnitude. Defining
+
+\begin{equation}
+    \bar{g}_{n,t}
+    :=
+    \frac{g_{n,t}}{\lVert g_{n,t}\rVert_2},
+    \label{eq:unit-guidance-gradient}
+\end{equation}
+
+the same velocity modification can equivalently be expressed as
+
+\begin{equation}
+    \tilde{u}_{n,t}
+    =
+    u_{n,t}
+    -
+    q_{n,t}\bar{g}_{n,t},
+    \qquad
+    q_{n,t}
+    :=
+    \lambda_{n,t}\lVert g_{n,t}\rVert_2 .
+    \label{eq:unit-gradient-guidance}
+\end{equation}
+
+This representation will be convenient when comparing the methods developed
+below. Some methods directly control the multiplier of the raw gradient,
+whereas others naturally control the magnitude of the resulting intervention.
+Equations~\eqref{eq:target-driven-guided-velocity} and
+\eqref{eq:unit-gradient-guidance} are equivalent representations of the same
+update.
+
+\subsection{Guidance-strength parameterization}
+\label{sec:guidance-strength-parameterization}
+
+We decompose the raw-gradient multiplier introduced in
+\Cref{eq:target-driven-guided-velocity} as
+
+\begin{equation}
+    \lambda_{n,t}
+    =
+    w_n\,\gamma_t\,\nu_{n,t}.
+    \label{eq:guidance-strength-decomposition}
+\end{equation}
+
+The three terms play distinct roles. The scalar \(w_n\) controls the overall
+guidance magnitude at weather step \(n\). The profile \(\gamma_t\) controls
+how this magnitude is distributed over the internal flow. Finally,
+\(\nu_{n,t}\) represents an optional method-specific normalization or scaling
+factor.
+
+We take \(\gamma_t\) to be a non-negative normalized profile with maximum
+value one. Only its relative variation across flow time is relevant: any
+positive multiplicative rescaling of \(\gamma_t\) can be absorbed into
+\(w_n\). The concrete profile families considered in this thesis are therefore
+an experimental design choice and are introduced later together with the
+experimental setup.
+
+The decomposition in \Cref{eq:guidance-strength-decomposition} also clarifies
+the distinction between the methods developed below. In
+\textsc{Optimize-Gain}, the flow-time profile \(\gamma_t\) is fixed and only
+the scalar \(w_n\) is optimized. In \textsc{Optimize-Schedule}, the
+interventions at individual flow steps are instead optimized jointly. In
+\textsc{Close-Gap}, the profile has a different interpretation altogether:
+rather than prescribing the relative strength of guidance, it prescribes the
+desired evolution of the remaining target gap. We make this distinction
+explicit when deriving each method.
+
+Finally, we do not apply guidance at the last Euler step of the residual flow.
+For ArchesWeather, the final step size satisfies \(h_t=s_t\). Since
+
+\begin{equation}
+    u_{n,t}
+    =
+    \frac{\hat r_{n,t}-z_{n,t}}{s_t},
+\end{equation}
+
+the unguided final Euler update gives
+
+\begin{equation}
+    z_{n,t+1}
+    =
+    z_{n,t}
+    +
+    s_t
+    \frac{\hat r_{n,t}-z_{n,t}}{s_t}
+    =
+    \hat r_{n,t}.
+    \label{eq:final-flow-snap}
+\end{equation}
+
+A guidance correction applied at this point would therefore directly alter
+the final residual without any subsequent model evaluation in which the
+perturbed state could be processed. We consequently set the guidance
+magnitude to zero at the final flow step for all methods considered in this
+chapter.
+
+\section{Target-realization methods}
+\label{sec:target-realization-methods}
+
+The formulation above leaves open how the guidance magnitude should be chosen
+in order to realize the prescribed target. 
+---this is correct, but it's more that we develop them, although in a way they follow the theoeritical framework we have developed
+We investigate three approaches to
+this problem. They differ primarily in the number of guidance degrees of
+freedom that are controlled.
+
+\textsc{Close-Gap} determines a separate correction at every flow step from
+the current target gap. \textsc{Optimize-Schedule} instead treats the complete
+sequence of flow-time interventions as an optimization variable.
+\textsc{Optimize-Gain} reduces this problem to a single scalar by fixing the
+relative flow-time profile and optimizing only its overall magnitude.
+
+All three methods act on the same loss introduced in
+\Cref{eq:guidance-loss} and are applied independently at every weather step
+\(n\).
+
+
+\subsection{\textsc{Close-Gap}}
+\label{sec:close-gap}
+
+Since the desired target is known in advance, a direct strategy is to prescribe
+not only the final target gap ($\approx0$), but also how this gap should evolve throughout
+the flow. Let
+
+\begin{equation}
+    \bar{\xi}_{n,t}
+    :=
+    \gamma_t^{\mathrm{gap}}\,\xi_{n,0},
+    \label{eq:close-gap-path}
+\end{equation}
+
+denote the prescribed remaining gap at flow step $t$, where
+$\gamma_t^{\mathrm{gap}}$ controls the fraction of the initial gap that should
+remain. A decreasing profile therefore progressively closes the gap, with
+$\gamma_t^{\mathrm{gap}}\rightarrow 0$ corresponding to complete closure.
+
+At each flow step, \textsc{Close-Gap} computes the local displacement of the
+noisy state required to move the current gap $\xi_{n,t}$ towards
+$\bar{\xi}_{n,t}$. For a small displacement $\Delta z_{n,t}$, we approximate the target gap
+using a first-order Taylor expansion around the current noisy state:
+
+\begin{equation}
+    \xi_{n,t}(z_{n,t}+\Delta z_{n,t})
+    \approx
+    \xi_{n,t}(z_{n,t})
+    +
+    \left\langle
+        \nabla_{z_{n,t}}\xi_{n,t},
+        \Delta z_{n,t}
+    \right\rangle.
+\end{equation}
+
+Requiring the corrected gap to equal the prescribed value gives the local
+constraint
+
+\begin{equation}
+    \left\langle
+        \nabla_{z_{n,t}}\xi_{n,t},
+        \Delta z_{n,t}
+    \right\rangle
+    =
+    \bar{\xi}_{n,t}-\xi_{n,t}.
+    \label{eq:close-gap-constraint}
+\end{equation}
+
+Among all displacements satisfying this first-order constraint, the
+minimum-norm solution is aligned with the gradient of the gap,
+
+\begin{equation}
+    \Delta z_{n,t}^{\star}
+    =
+    \frac{
+        \bar{\xi}_{n,t}-\xi_{n,t}
+    }{
+        \left\|
+            \nabla_{z_{n,t}}\xi_{n,t}
+        \right\|_2^2
+    }
+    \nabla_{z_{n,t}}\xi_{n,t}.
+    \label{eq:close-gap-minimum-shift}
+\end{equation}
+
+The guidance gradient introduced above is
+
+\begin{equation}
+    g_{n,t}
+    =
+    \nabla_{z_{n,t}}\xi_{n,t}^{\,2}
+    =
+    2\xi_{n,t}
+    \nabla_{z_{n,t}}\xi_{n,t}.
+    \label{eq:close-gap-gradient}
+\end{equation}
+
+Substituting this relation into
+\Cref{eq:close-gap-minimum-shift} gives the desired guidance-induced
+displacement directly in terms of $g_{n,t}$,
+
+\begin{equation}
+    \Delta z_{n,t}^{\star}
+    =
+    -
+    \frac{
+        2\xi_{n,t}
+        \left(
+            \xi_{n,t}-\bar{\xi}_{n,t}
+        \right)
+    }{
+        \lVert g_{n,t}\rVert_2^2
+    }
+    g_{n,t}.
+    \label{eq:close-gap-shift}
+\end{equation}
+
+On the other hand, modifying the velocity according to
+
+\begin{equation}
+    \tilde{u}_{n,t}
+    =
+    u_{n,t}
+    -
+    \lambda_{n,t}g_{n,t}
+\end{equation}
+
+introduces the following guidance contribution to the Euler step:
+
+\begin{equation}
+    \Delta z_{n,t}^{\mathrm{gui}}
+    =
+    -h_t\lambda_{n,t}g_{n,t}.
+    \label{eq:close-gap-guidance-shift}
+\end{equation}
+
+Requiring the guidance contribution to the Euler step to realize the desired
+local displacement in \Cref{eq:close-gap-shift} yields the closed-form
+guidance multiplier
+
+\begin{equation}
+    \lambda_{n,t}^{\mathrm{CG}}
+    =
+    \frac{
+        2\xi_{n,t}
+        \left(
+            \xi_{n,t}-\bar{\xi}_{n,t}
+        \right)
+    }{
+        h_t
+        \lVert g_{n,t}\rVert_2^2
+    }.
+    \label{eq:close-gap-lambda}
+\end{equation}
+
+When the current gap already equals the prescribed gap, the required
+correction is zero. Otherwise, the multiplier is recomputed at the following
+flow step using the newly obtained state.
+
+The method is therefore greedy: at every flow step it computes the
+minimum-norm local correction predicted to move the current estimate onto the
+prescribed gap trajectory. This correction is derived from a first-order
+approximation and accounts only for the guidance-induced displacement, while
+the learned velocity field simultaneously advances the noisy state. The actual
+gap may therefore deviate from the prescribed path, in which case the
+difference is observed and corrected again at the next flow step.
+
+Unlike the optimization-based methods introduced below, \textsc{Close-Gap}
+requires no repeated generation of the same weather state. The guidance
+strength is determined online during a single flow. Its main limitation is
+that each intervention is chosen locally rather than according to its effect
+on the final generated state.
+
+\subsection{\textsc{Optimize-Schedule}}
+\label{sec:optimize-schedule}
+
+\textsc{Close-Gap} prescribes the evolution of the target gap and derives a
+local intervention at each flow step. A more general alternative is to optimize
+the interventions across the complete flow jointly, based on their effect on
+the final generated state.
+
+We parameterize the intervention at each flow step through its contribution to
+the Euler update,
+
+\begin{equation}
+    k_{n,t}
+    :=
+    h_t\lambda_{n,t},
+    \label{eq:guidance-kick}
+\end{equation}
+
+such that the guided Euler step becomes
+
+\begin{equation}
+    z_{n,t+1}
+    =
+    z_{n,t}
+    +
+    h_t u_{n,t}
+    -
+    k_{n,t}g_{n,t}.
+    \label{eq:kick-euler-update}
+\end{equation}
+
+We refer to $k_{n,t}g_{n,t}$ as the \emph{guidance kick}. This
+parameterization is convenient because the kick corresponds directly to the
+guidance-induced displacement of the noisy state during one Euler step. The
+magnitude of the intervention can therefore be regularized directly in the
+same space in which it is applied.
+
+Since the final Euler step is not guided, we optimize the vector
+
+\begin{equation}
+    \mathbf{k}_n
+    =
+    \left(
+        k_{n,0},\ldots,k_{n,T-2}
+    \right)
+\end{equation}
+
+according to
+
+\begin{equation}
+    J_n(\mathbf{k}_n)
+    =
+    \xi_n^2
+    +
+    \kappa
+    \sum_{t=0}^{T-2}
+    \left\|
+        k_{n,t}g_{n,t}
+    \right\|_2^2.
+    \label{eq:optimize-schedule-objective}
+\end{equation}
+
+The first term measures the final target gap, while the second penalizes the
+total squared magnitude of the guidance-induced state displacements.
+The coefficient $\kappa\geq0$ therefore controls the trade-off between target
+realization and intervention magnitude.
+
+This objective mirrors the terminal-loss and control-penalty structure
+introduced in \Cref{sec:guidance-as-control}. Here, however, the control
+direction is restricted to the guidance gradient $g_{n,t}$, while its magnitude
+is optimized independently at each flow step. The regularization is defined
+directly on the discrete state displacements applied by the numerical sampler.
+
+\paragraph{Gradient with respect to the schedule.}
+
+Optimizing $\mathbf{k}_n$ requires differentiating the final target loss
+through the sequence of Euler updates. Following the decomposed
+backpropagation strategy of \textcite{liu2023flowgrad}, we propagate the
+terminal gradient backwards through the discretized flow using
+vector--Jacobian products, without retaining the complete unrolled
+computation graph.
+
+We express this backward recursion as a discrete adjoint. Let
+
+\begin{equation}
+    p_{n,T}
+    :=
+    \nabla_{z_{n,T}}\xi_n^2
+\end{equation}
+
+denote the terminal adjoint. In addition, we introduce a
+frozen-guidance-gradient approximation: the guidance gradient $g_{n,t}$ is
+recomputed during each forward evaluation of the schedule, but treated as
+fixed during the corresponding backward pass. Under this approximation, the
+Jacobian of the Euler update with respect to the noisy state is
+
+\begin{equation}
+    \frac{\partial z_{n,t+1}}
+         {\partial z_{n,t}}
+    \approx
+    I
+    +
+    h_t
+    \frac{\partial u_{n,t}}
+         {\partial z_{n,t}},
+\end{equation}
+
+and the adjoint is propagated backwards according to
+
+\begin{equation}
+    p_{n,t}
+    \approx
+    p_{n,t+1}
+    +
+    h_t
+    \left(
+        \frac{\partial u_{n,t}}
+             {\partial z_{n,t}}
+    \right)^{\!\top}
+    p_{n,t+1}.
+    \label{eq:frozen-gradient-adjoint}
+\end{equation}
+The adjoint $p_{n,t+1}$ describes how a perturbation of the state
+$z_{n,t+1}$ affects the final target loss. Since the kick $k_{n,t}$
+enters the Euler update in \Cref{eq:kick-euler-update} as
+$-k_{n,t}g_{n,t}$, the derivative of the final target loss with respect
+to the kick is
+
+\begin{equation}
+    \frac{\partial \xi_n^2}
+         {\partial k_{n,t}}
+    \approx
+    -
+    \left\langle
+        p_{n,t+1},
+        g_{n,t}
+    \right\rangle.
+    \label{eq:kick-target-gradient}
+\end{equation}
+
+Including the intervention penalty in
+\Cref{eq:optimize-schedule-objective} gives
+
+\begin{equation}
+    \frac{\partial J_n}
+         {\partial k_{n,t}}
+    \approx
+    -
+    \left\langle
+        p_{n,t+1},
+        g_{n,t}
+    \right\rangle
+    +
+    2\kappa
+    k_{n,t}
+    \lVert g_{n,t}\rVert_2^2.
+    \label{eq:kick-objective-gradient}
+\end{equation}
+
+These gradients are used to jointly optimize the non-negative kick trajectory
+$\mathbf{k}_n$. The optimizer, initialization, stopping criteria, and
+regularization strength are specified with the experimental setup.
+
+Compared with \textsc{Close-Gap}, \textsc{Optimize-Schedule} accounts for how
+interventions applied at different flow steps influence the final target gap.
+This comes at a higher computational cost: the method introduces $T-1$
+optimization variables and requires repeated forward and backward evaluations
+of the flow for each generated weather state.
+
+\subsection{\textsc{Optimize-Gain}}
+\label{sec:optimize-gain}
+
+The flexibility of \textsc{Optimize-Schedule} comes at a substantial
+optimization cost. We therefore consider an intermediate formulation in which
+the relative distribution of guidance over flow time is fixed, while its
+overall magnitude remains adaptive.
+
+Let $\gamma_t$ be a prescribed normalized guidance profile. We set
+
+\begin{equation}
+    \lambda_{n,t}
+    =
+    w_n\gamma_t,
+    \label{eq:optimize-gain-lambda}
+\end{equation}
+
+such that all flow-time guidance strengths are determined by the single scalar
+$w_n\geq0$. Since the target is specified separately at every weather step,
+$w_n$ is also optimized independently for each weather step.
+
+For a fixed initial noise realization, running the complete guided flow defines
+the final target loss as a scalar function
+
+\begin{equation}
+    \mathcal{L}_n(w_n)
+    :=
+    \xi_n(w_n)^2.
+    \label{eq:gain-loss}
+\end{equation}
+
+We then seek a stationary point
+
+\begin{equation}
+    \frac{\mathrm{d}\mathcal{L}_n}
+         {\mathrm{d}w_n}
+    =
+    0.
+    \label{eq:gain-stationarity}
+\end{equation}
+
+If the prescribed target can be reached exactly, any $w_n^\star$ satisfying
+$\xi_n(w_n^\star)=0$ also satisfies \Cref{eq:gain-stationarity}. If exact
+closure is not reached, we retain the evaluated value of $w_n$ that produces
+the smallest remaining squared gap.
+
+Using \Cref{eq:optimize-gain-lambda}, the derivative follows directly from the
+chain rule,
+
+\begin{equation}
+    \frac{\mathrm{d}\mathcal{L}_n}
+         {\mathrm{d}w_n}
+    =
+    \sum_{t=0}^{T-2}
+    \frac{\partial \mathcal{L}_n}
+         {\partial \lambda_{n,t}}
+    \frac{\partial \lambda_{n,t}}
+         {\partial w_n}
+    =
+    \sum_{t=0}^{T-2}
+    \gamma_t
+    \frac{\partial \mathcal{L}_n}
+         {\partial \lambda_{n,t}}.
+    \label{eq:gain-chain-rule}
+\end{equation}
+
+The individual derivatives are evaluated using the frozen-guidance-gradient
+adjoint introduced in \Cref{eq:frozen-gradient-adjoint}. Since
+$\lambda_{n,t}$ enters the Euler update through
+$-h_t\lambda_{n,t}g_{n,t}$,
+
+\begin{equation}
+    \frac{\partial \mathcal{L}_n}
+         {\partial \lambda_{n,t}}
+    \approx
+    -h_t
+    \left\langle
+        p_{n,t+1},
+        g_{n,t}
+    \right\rangle.
+    \label{eq:gain-lambda-gradient}
+\end{equation}
+
+Because the problem is one-dimensional, we solve
+\Cref{eq:gain-stationarity} using the secant method. Given two previous
+evaluations $w_n^{(j-1)}$ and $w_n^{(j)}$, the next estimate is
+
+\begin{equation}
+    w_n^{(j+1)}
+    =
+    w_n^{(j)}
+    -
+    \frac{
+        \mathcal{L}_n'(w_n^{(j)})
+        \left(
+            w_n^{(j)}-w_n^{(j-1)}
+        \right)
+    }{
+        \mathcal{L}_n'(w_n^{(j)})
+        -
+        \mathcal{L}_n'(w_n^{(j-1)})
+    }.
+    \label{eq:secant-guidance-gain}
+\end{equation}
+
+All evaluations use the same initial noise realization. Consequently,
+$\mathcal{L}_n(w_n)$ changes only as a result of the guidance gain rather than
+because of stochastic differences between repeated samples.
+
+\textsc{Optimize-Gain} can therefore be interpreted as a restricted version
+of \textsc{Optimize-Schedule}. Rather than optimizing the intervention
+magnitude independently at every flow step, it restricts the guidance schedule
+to the one-dimensional family
+
+\begin{equation}
+    \boldsymbol{\lambda}_n
+    =
+    w_n
+    \boldsymbol{\gamma}.
+\end{equation}
+
+This removes most of the optimization degrees of freedom while retaining the
+central target-driven property of the method: the guidance magnitude is not
+chosen beforehand, but is adapted to the prescribed target.
+
+\section{Baseline methods}
+\label{sec:guidance-baselines}
+
+The three methods above are developed specifically around the target-driven
+formulation of this thesis. We compare them with two conceptually different
+ways of producing a targeted intervention: Universal Guidance and adversarial
+weather forecasting.
+
+\subsection{Universal Guidance}
+\label{sec:universal-guidance-baseline}
+
+Universal Guidance was introduced as a general mechanism for controlling
+diffusion models through arbitrary differentiable objectives
+\parencite{bansal2023universal}. In particular, its backward-guidance
+formulation first determines a change in the predicted clean sample that better
+satisfies the desired condition and subsequently maps this change back to the
+current noisy state.
+
+For the objective considered in this thesis, this clean-space optimization has
+a particularly simple solution. Since the masked functional
+\(\mathcal{M}_m\) is linear, we seek the smallest clean-state perturbation
+\(\Delta x_{n,t}\) satisfying
+
+\begin{equation}
+    \mathcal{M}_m
+    \left(
+        \hat{x}_{n,t}+\Delta x_{n,t}
+    \right)
+    =
+    y_n^\star.
+\end{equation}
+
+Equivalently,
+
+\begin{equation}
+    \left\langle
+        m,\Delta x_{n,t}
+    \right\rangle
+    =
+    -\xi_{n,t}.
+\end{equation}
+
+The minimum-\(\ell_2\)-norm solution is
+
+\begin{equation}
+    \Delta x_{n,t}^{\mathrm{UG}}
+    =
+    -\xi_{n,t}
+    \frac{m}{\lVert m\rVert_2^2}.
+    \label{eq:ug-clean-shift}
+\end{equation}
+
+Thus, unlike the gradient-based methods above, no iterative clean-space
+optimization is required for our particular loss.
+
+To translate this perturbation back to flow space, let \(D\) denote the
+diagonal scaling that maps the normalized residual representation used by
+ArchesWeather to physical state units. The clean-state estimate can then be
+written schematically as
+
+\begin{equation}
+    \hat{x}_{n,t}
+    =
+    \hat{x}^{\mathrm{det}}_n
+    +
+    D
+    \left(
+        z_{n,t}
+        +
+        s_tu_{n,t}
+    \right).
+    \label{eq:ug-clean-affine}
+\end{equation}
+
+The clean-space change in \Cref{eq:ug-clean-shift} therefore corresponds to the
+velocity correction
+
+\begin{equation}
+    \Delta u_{n,t}^{\mathrm{UG}}
+    =
+    \frac{1}{s_t}
+    D^{-1}
+    \Delta x_{n,t}^{\mathrm{UG}}.
+    \label{eq:ug-velocity-shift}
+\end{equation}
+
+We apply this correction according to the same normalized flow-time profile
+\(\gamma_t\) used for \textsc{Optimize-Gain},
+
+\begin{equation}
+    \tilde{u}_{n,t}
+    =
+    u_{n,t}
+    +
+    \gamma_t
+    \Delta u_{n,t}^{\mathrm{UG}}.
+    \label{eq:ug-guided-velocity}
+\end{equation}
+
+This provides a useful baseline because the desired clean-state intervention is
+constructed directly, rather than inferred from an optimized guidance
+strength. The temporal placement of guidance can nevertheless be kept
+identical to \textsc{Optimize-Gain}, allowing the effect of the intervention
+mechanism itself to be compared under the same flow-time profile.
+
+A special case occurs when \(\gamma_t\) is non-zero only at the beginning of
+the flow. Universal Guidance then applies a single targeted perturbation to the
+early noisy generative state, after which the remaining flow evolves without
+further intervention. This can be interpreted as an adversarial-style
+perturbation in the internal generative state space.
+
+\subsection{Adversarial weather forecasting}
+\label{sec:aowf-baseline}
+
+Our second baseline acts outside the generative flow. Adversarial Observations
+in Weather Forecasting (AOWF) directly optimizes perturbations to atmospheric
+states in order to manipulate a subsequent data-driven forecast
+\parencite{imgrund2025adversarial}. A related adversarial formulation is used
+as the baseline for guided precipitation interventions by
+\textcite{ueyama2026guided}.
+
+We adapt this idea to the same target-realization task considered throughout
+this chapter. When generating weather state \(x_n\), ArchesWeather is
+conditioned on the preceding atmospheric states. Following the one-state
+intervention setting used for comparison, we perturb the most recent
+conditioning state,
+
+\begin{equation}
+    x_{n-1}
+    \longrightarrow
+    x_{n-1}+\delta_{n-1}.
+\end{equation}
+
+Let
+
+\begin{equation}
+    F_n
+    \left(
+        x_{n-2},
+        x_{n-1};
+        \varepsilon_n
+    \right)
+\end{equation}
+
+denote the ordinary unguided one-step ArchesWeather forecast for a fixed
+generative noise realization \(\varepsilon_n\). The adversarial perturbation
+is obtained from
+
+\begin{equation}
+    \delta_{n-1}^\star
+    =
+    \arg\min_{\delta\in\mathcal{C}}
+    \left[
+        \mathcal{M}_m
+        \left(
+            F_n(
+                x_{n-2},
+                x_{n-1}+\delta;
+                \varepsilon_n
+            )
+        \right)
+        -
+        y_n^\star
+    \right]^2 ,
+    \label{eq:aowf-target-objective}
+\end{equation}
+
+where \(\mathcal{C}\) constrains the magnitude of the atmospheric perturbation.
+The exact constraint, optimizer, and attack budget used in our experiments are
+specified in the experimental setup.
+
+Once \(\delta_{n-1}^\star\) has been obtained, generation itself remains
+unguided. AOWF therefore differs fundamentally from the other methods in this
+chapter: it modifies the atmospheric conditioning state before generation,
+whereas the other approaches leave the atmospheric context fixed and intervene
+inside the generative flow.
+
+For comparison, AOWF is evaluated against the same prescribed weather-time
+target trajectory \(y^\star_{1:N}\) and the same target intensities as the
+guidance methods. Since the intervention occurs before the residual flow, no
+flow-time guidance profile \(\gamma_t\) is associated with AOWF.
+
+\section{Method comparison}
+\label{sec:guidance-method-comparison}
+
+The methods introduced above can be viewed as different answers to the same
+target-realization problem. Their principal distinction is the location and
+dimensionality of the intervention.
+
+\begin{table}[t]
+    \centering
+    \caption{
+        Conceptual comparison of the guidance and baseline methods.
+        \(K\) denotes the number of outer optimization evaluations when
+        applicable.
+    }
+    \label{tab:guidance-method-comparison}
+    \small
+    \begin{tabular}{p{0.18\linewidth} p{0.20\linewidth} p{0.22\linewidth} p{0.27\linewidth}}
+        \toprule
+        \textbf{Method}
+        & \textbf{Intervention}
+        & \textbf{Optimized quantity}
+        & \textbf{Main characteristic} \\
+        \midrule
+
+        \textsc{Close-Gap}
+        & Flow velocity
+        & Local \(\lambda_{n,t}\)
+        & Single-pass, locally follows a prescribed remaining-gap trajectory. \\
+
+        \textsc{Optimize-Schedule}
+        & Flow velocity
+        & Full kick trajectory \(\mathbf{k}_n\)
+        & Most flexible formulation; jointly optimizes interventions across flow time. \\
+
+        \textsc{Optimize-Gain}
+        & Flow velocity
+        & Scalar \(w_n\)
+        & Restricts guidance to \(w_n\gamma_t\), reducing target realization to a one-dimensional optimization. \\
+
+        Universal Guidance
+        & Clean estimate mapped to flow velocity
+        & None
+        & Constructs the target-closing clean-space correction directly and applies it according to \(\gamma_t\). \\
+
+        AOWF
+        & Atmospheric conditioning state
+        & State perturbation \(\delta\)
+        & Optimizes the model input and subsequently runs the generative forecast without flow guidance. \\
+
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The computational differences follow the same hierarchy.
+\textsc{Close-Gap} and Universal Guidance determine their interventions online
+and therefore require only a single guided residual flow per weather step.
+\textsc{Optimize-Gain} requires repeated flow evaluations, but searches over
+only one scalar parameter. \textsc{Optimize-Schedule} instead searches over
+one intervention variable per guided flow step and requires repeated forward
+and adjoint passes. AOWF also requires an outer optimization loop, but its
+optimization is performed in atmospheric input space rather than over the
+generative flow.
+
+These differences motivate the experimental comparison in the following
+chapters. Target realization alone is not sufficient to identify a useful
+guidance method: methods must additionally be compared in terms of
+meteorological plausibility, reliability across target intensities, sensitivity
+to their hyperparameters, and computational cost.
+
+Taken together, the methods in this chapter complete the \emph{Guide} component
+of the proposed framework. Starting from the scenario specification
+\((m,y^\star_{1:N})\), they provide different mechanisms for translating a
+prescribed target into a modified generative forecast. The remaining question
+is whether the resulting trajectories retain the structure of realistic
+weather, which motivates the evaluation methodology introduced next.

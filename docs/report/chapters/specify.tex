@@ -1,0 +1,358 @@
+
+\chapter{Specifying events of interest}
+\label{ch:specify}
+
+The first component of our framework is to specify the event toward which the
+generative model should be guided.
+In this thesis, we represent such an event through a scalar target trajectory
+\[
+    y^\star_{1:N}
+    =
+    \left(
+        y^\star_1,\ldots,y^\star_N
+    \right)
+\]
+over \(N\) weather steps, together with a mask \(m\) that determines which
+quantity of the forecast state is being targeted.
+Here, \(n=1,\ldots,N\) indexes weather time, while \(t\) remains reserved for
+the internal flow time of the generative model.
+
+Throughout this thesis, we focus on regional surface-temperature heatwaves.
+Accordingly, the mask selects surface temperature over a prescribed spatial
+region, and \(y^\star_{1:N}\) describes the desired evolution of its regional
+average.
+The broader framework is not restricted to this particular choice: different
+differentiable functionals of the weather state could be used to specify other
+types of target events.
+The particular mask and target construction developed here should therefore be
+viewed as one instantiation of the more general
+\emph{Specify--Guide--Evaluate} framework.
+
+We distinguish two ways of constructing target trajectories.
+For evaluating the guidance method itself, we use simple controlled targets
+defined relative to a matched unguided forecast.
+This allows us to systematically vary target intensity and study how guidance
+behaves as the requested deviation increases.
+For the final storyline generation, we instead construct targets from
+historically realized trajectories and select those satisfying a desired
+extremeness criterion.
+In both cases, the guidance method receives the same object:
+a prescribed trajectory \(y^\star_{1:N}\) for the masked quantity.
+
+
+\section{Target variable and region}
+
+We jointly specify the target variable and spatial region through a mask over
+the weather state.
+Let
+\[
+    x_n \in \mathbb{R}^{V\times I\times J}
+\]
+denote a weather state, where \(V\) indexes atmospheric fields and
+\(I=121\), \(J=240\) index latitude and longitude.
+We denote the corresponding coordinates by
+\[
+    (\varphi_i,\ell_j),
+    \qquad
+    i=1,\ldots,I,
+    \quad
+    j=1,\ldots,J.
+\]
+
+Let \(v^\star\) denote the target variable and let
+\[
+    k_{ij}\in\{0,1\}
+\]
+indicate whether spatial grid cell \((i,j)\) lies inside the selected region.
+In this work, the region is defined as a rectangular bounding box on the
+latitude--longitude grid.
+
+The mask is non-zero only for the selected variable and inside the selected
+region.
+To obtain a true area-weighted regional average, each included grid cell is
+weighted according to the surface area it represents.
+For a regular latitude--longitude grid, the area contribution of latitude row
+\(i\) is proportional to
+\begin{equation}
+    a_i
+    =
+    \int_{\beta_i^-}^{\beta_i^+}
+    \cos\varphi\,\mathrm{d}\varphi,
+    \label{eq:mask-cell-area}
+\end{equation}
+where \([\beta_i^-,\beta_i^+]\) denotes the latitude extent of the grid cell.
+The constant longitudinal cell width cancels during normalization.
+
+We therefore define the mask as
+\begin{equation}
+    m_{vij}
+    =
+    \frac{
+        \mathbf{1}[v=v^\star]\,
+        k_{ij}\,a_i
+    }{
+        \displaystyle
+        \sum_{i',j'}
+        k_{i'j'}\,a_{i'}
+    },
+    \label{eq:target-mask}
+\end{equation}
+such that
+\[
+    \sum_{v,i,j}m_{vij}=1.
+\]
+
+The corresponding masked-average operator is
+\begin{equation}
+    \mathcal{M}_m(x_n)
+    :=
+    \sum_{v,i,j}
+    m_{vij}\,x_{n,vij}.
+    \label{eq:masked-average}
+\end{equation}
+For our experiments, \(\mathcal{M}_m(x_n)\) therefore corresponds to the
+area-weighted mean surface temperature inside the selected region.
+
+Area weighting prevents the regional average from being biased toward
+high-latitude grid cells, which represent a smaller physical area on the
+sphere.
+This follows the latitude-weighting convention used in WeatherBench~2
+\parencite{rasp2024weatherbench2}.
+
+Using a binary spatial support also makes the target region explicit.
+Within the selected region, cells differ only through their physical area and
+are otherwise treated uniformly.
+This avoids introducing an additional spatial preference, as would occur, for
+example, with a bell-shaped mask whose center is weighted more strongly than
+its boundaries.
+Normalizing the mask to sum to one further ensures that
+\(\mathcal{M}_m\) remains an average and is therefore directly comparable
+across regions of different sizes.
+
+Although \(m\) jointly specifies one particular variable and region, its
+spatial support \(k_{ij}\) can also be reused to construct analogous averages
+for other atmospheric fields.
+This becomes useful later when evaluating how guidance applied to surface
+temperature affects other variables and pressure levels over the same region.
+
+
+\section{Target trajectory}
+
+Once the mask has been specified, the remaining task is to define the desired
+evolution of the masked quantity,
+\[
+    y^\star_{1:N}.
+\]
+The appropriate construction depends on the purpose of the experiment.
+We therefore separate the controlled targets used to evaluate the guidance
+method from the data-driven targets used for extreme-event storylines.
+
+
+\subsection{Controlled targets for method evaluation}
+
+When evaluating the guidance algorithm, our primary objective is to understand
+how it behaves as the requested deviation from the original forecast becomes
+increasingly demanding.
+For this purpose, we deliberately use a simple and interpretable target
+construction.
+
+Each guided rollout is paired with a corresponding unguided rollout
+\[
+    \{x_n^{\mathrm{ung}}\}_{n=1}^N.
+\]
+The two rollouts use the same initial atmospheric context and matched random
+noise realizations throughout the autoregressive forecast.
+Their difference therefore isolates, as far as possible, the effect introduced
+by guidance rather than differences arising from stochastic sampling.
+
+We prescribe the target trajectory as a relative increase over the masked
+average of this matched unguided rollout.
+Let \(\rho_N\) denote the maximum requested relative increase at the final
+weather step.
+We linearly increase the target intensity over the forecast horizon according
+to
+\begin{equation}
+    \rho_n
+    :=
+    \frac{n}{N}\rho_N,
+    \qquad
+    n=1,\ldots,N.
+    \label{eq:relative-target-schedule}
+\end{equation}
+The target trajectory is then defined as
+\begin{equation}
+    y^\star_n
+    :=
+    (1+\rho_n)\,
+    \mathcal{M}_m(x_n^{\mathrm{ung}}).
+    \label{eq:controlled-target}
+\end{equation}
+
+All target values are defined after transforming the relevant field back to
+physical units.
+For temperature, a multiplicative relative change depends on the chosen
+temperature scale and therefore does not constitute a scale-independent
+measure of physical extremeness.
+Accordingly, \(\rho_N\) is used here purely as a controlled intensity parameter
+for systematically stress-testing the guidance method.
+It should not be interpreted as a climatological definition of heatwave
+extremeness.
+
+Given a guided rollout \(x_n^{\mathrm{gui}}\), the remaining target gap at
+weather step \(n\) is
+\begin{equation}
+    \xi_n
+    :=
+    \mathcal{M}_m(x_n^{\mathrm{gui}})
+    -
+    y^\star_n
+    =
+    \mathcal{M}_m(x_n^{\mathrm{gui}})
+    -
+    (1+\rho_n)
+    \mathcal{M}_m(x_n^{\mathrm{ung}}).
+    \label{eq:target-gap}
+\end{equation}
+
+This formulation separates the desired outcome from the parameters used by the
+guidance algorithm to achieve it.
+Rather than increasing a guidance-strength parameter and observing how extreme
+the resulting forecast becomes, we first prescribe the desired trajectory and
+subsequently ask which guidance behavior is required to reach it.
+Guidance strength thus becomes a means of attaining a target rather than the
+definition of the target itself.
+
+This distinction is central to our approach.
+It allows guidance methods and hyperparameters to be compared at fixed target
+intensities and makes failure directly interpretable as an inability to close a
+known target gap.
+
+
+\subsection{Data-driven targets for storyline generation}
+
+The controlled targets above are useful for evaluating the guidance method,
+but their relative intensity parameter does not provide a climatological
+definition of an extreme event.
+For the generation of final weather storylines, we therefore consider a
+different target-construction strategy in which the trajectory itself is
+anchored in historical weather evolution.
+
+Because ArchesWeather conditions its generative forecast on the two preceding
+weather states, we define the initial atmospheric context as the pair
+\[
+    (x_{-1},x_0).
+\]
+Given this context and the target mask \(m\), we retrieve historical analogue contexts
+that are sufficiently similar according to a chosen similarity criterion.
+For each analogue, we then consider the subsequent evolution over the same
+\(N\)-step forecast horizon.
+The particular similarity metric and analogue-selection procedure are
+experimental choices and are specified in the corresponding experimental
+setup.
+
+This produces a collection of historically realized trajectories
+\[
+    \left\{
+        \tau^{(k)}_{1:N}
+    \right\}_{k=1}^{K_{\mathrm{hist}}},
+\]
+where
+\begin{equation}
+    \tau^{(k)}_n
+    :=
+    \mathcal{M}_m
+    \left(
+        x_n^{(k)}
+    \right)
+    \label{eq:historical-masked-trajectory}
+\end{equation}
+denotes the masked trajectory associated with historical analogue \(k\).
+
+These trajectories form an empirical reference set of historically realized
+evolutions associated with analogous initial situations.
+From this set, candidate trajectories can be selected according to a desired
+event property.
+
+More generally, let
+\begin{equation}
+    S(\tau_{1:N})
+    \label{eq:extremeness-functional}
+\end{equation}
+denote an application-specific functional used to characterize a trajectory.
+For heatwaves, possible choices include the maximum regional temperature
+anomaly, the mean anomaly over the event, the cumulative anomaly, or another
+heatwave-specific metric.
+The precise choice of \(S\) determines what aspect of the event is considered
+extreme, but is not intrinsic to the guidance framework.
+
+A set of storyline candidates can therefore be written abstractly as
+\begin{equation}
+    \mathcal{T}_{\mathrm{ext}}
+    :=
+    \left\{
+        \tau_{1:N}
+        \;:\;
+        S(\tau_{1:N})\in\mathcal{A}
+    \right\},
+    \label{eq:selected-storylines}
+\end{equation}
+where \(\mathcal{A}\) specifies the desired range or quantile of extremeness.
+An entire selected trajectory is then used as the guidance target,
+\begin{equation}
+    y^\star_{1:N}
+    :=
+    \tau_{1:N}.
+    \label{eq:storyline-target}
+\end{equation}
+
+Importantly, selection is performed at the level of complete trajectories
+rather than independently at each weather step.
+The temporal evolution of a selected target therefore remains inherited from a
+coherent candidate trajectory instead of being assembled from unrelated
+extreme values at individual lead times.
+
+This construction also separates the definition of an extreme event from the
+guidance mechanism.
+Different applications may use different similarity criteria, selection
+procedures, or extremeness functionals while leaving the subsequent guidance
+problem unchanged.
+Once \(m\) and \(y^\star_{1:N}\) have been specified, the guidance algorithm
+only needs to steer the masked forecast toward the prescribed trajectory.
+
+The historical trajectories used to construct the target set also provide
+natural reference states for the plausibility analysis developed in
+\Cref{ch:eval}.
+Thus, the same historical information used to define the target can later be
+used to assess whether the guided forecast remains consistent with weather
+states associated with comparable evolutions.
+
+
+\section{Pipeline overview}
+
+The specification procedure can now be summarized independently of how the
+target trajectory is constructed.
+A guided scenario is specified by
+
+\begin{enumerate}[noitemsep]
+    \item an initial atmospheric context \((x_{-1},x_0)\);
+    \item a mask \(m\), specifying the target variable and spatial region;
+    \item a scalar target trajectory \(y^\star_{1:N}\) for the masked quantity.
+\end{enumerate}
+
+The target trajectory may be constructed in different ways.
+For controlled method evaluation, it is derived from the matched unguided
+forecast through \Cref{eq:controlled-target}.
+For storyline generation, it is selected from historical analogue trajectories
+according to an application-specific event criterion.
+
+Once the initial context is fixed, the output of the specification stage is
+therefore
+\[
+    \left(
+        m,\,
+        y^\star_{1:N}
+    \right).
+\]
+These two objects define \emph{what} the model should generate.
+The next chapter addresses the complementary problem of \emph{how} to modify
+the generative process in order to realize that target.

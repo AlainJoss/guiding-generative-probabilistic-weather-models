@@ -1,3 +1,4 @@
+
 \chapter{Background}
 \label{ch:background}
 
@@ -5,16 +6,16 @@ This chapter introduces the theoretical and methodological background required
 for the development of our guidance approach.
 
 We begin with flow matching, the generative framework underlying ArchesWeather,
-and introduce the notion of probability paths, noisy states, velocity fields, and clean
+and introduce the probability paths, noisy states, velocity fields, and clean
 estimates used throughout this work.
-We then formulate guidance from a posterior-sampling perspective and derive how
-conditioning modifies the flow-matching velocity field.
-
-Next, we describe the components of ArchesWeather relevant to our method,
-including its deterministic forecast, residual flow model, and sampling
-procedure.
-Finally, we review existing work on guidance for generative weather models and
-position our approach within the current literature.
+We then formulate guidance from a posterior-sampling perspective, derive its
+flow-matching formulation, and discuss different approaches to guidance
+strength and control.
+Next, we review existing approaches to the controlled generation of weather
+scenarios and position our work within this emerging literature.
+Finally, we introduce ArchesWeather, the probabilistic weather model used in
+this thesis, and describe the components relevant to our method, including its
+deterministic forecast, residual flow model, and sampling procedure.
 
 
 \section{Flow matching}
@@ -38,9 +39,9 @@ with
     \qquad
     z_1 = x_1 \sim p_1.
 \]
-Throughout this work, we refer to $z_0$ as the \emph{noise}, intermediate states
-$z_t$, $t\in(0,1)$, as \emph{noisy states}, and the endpoint $z_1=x_1$ as the
-\emph{clean state}.
+Throughout this work, we refer to \(z_0\) as the \emph{noise}, intermediate
+states \(z_t\), \(t\in(0,1)\), as \emph{noisy states}, and the endpoint
+\(z_1=x_1\) as the \emph{clean state}.
 
 The evolution of \(z_t\) is governed by a time-dependent velocity field
 \(u_t\), defining the ordinary differential equation
@@ -171,7 +172,7 @@ yields
         -
         \frac{\dot{\beta}_t}{\beta_t}\alpha_t
     \right)x_1.
-    \label{eq:conditional-velocity}
+    \label{eq:conditional-path-velocity}
 \end{equation}
 
 The marginal velocity field generating \(p_t\) can then be expressed as the
@@ -188,7 +189,7 @@ the current noisy state \(z_t\):
 \end{equation}
 
 While this marginal velocity is generally not available in closed form, the
-conditional velocity in \Cref{eq:conditional-velocity} is tractable during
+conditional velocity in \Cref{eq:conditional-path-velocity} is tractable during
 training, since both \(x_1\) and the sampled noise \(\varepsilon\) are known.
 
 
@@ -287,23 +288,27 @@ The distinction between the full conditional distribution
 \(p_t(x_1\mid z_t)\) and the point estimate \(\hat{x}_t\) will become important
 when introducing guidance in the following section.
 
+
 \section{Guidance}
 
-In unconditional generation, the flow-matching model produces samples from the
-data distribution \(p_1(x_1)\).
+Without additional guidance, a generative model samples from its base
+distribution \(p_1(x_1)\).
 In many applications, however, we are interested in generating samples that
-satisfy a desired condition \(y\).
-Guidance modifies the sampling process to favor samples from the corresponding
-conditional distribution
+satisfy an additional desired condition \(y\).
+From a posterior-sampling perspective, guidance aims to modify the sampling
+process toward the corresponding conditional distribution
 \[
     p_1(x_1\mid y).
 \]
 
-We first formulate guidance from a posterior-sampling perspective and then
+We first formulate guidance from this posterior-sampling perspective and
 translate the resulting score modification to the flow-matching velocity
 field.
-Finally, we introduce a general guidance-strength schedule that will be used
-throughout this work.
+We then introduce a general guidance-strength schedule and review different
+strategies for choosing its magnitude over the generative trajectory.
+Finally, we discuss a complementary control perspective, in which guided
+generation is formulated as an optimization problem over variables that
+influence the complete generative trajectory.
 
 
 \subsection{Guidance as posterior sampling}
@@ -327,10 +332,10 @@ Taking the gradient with respect to the noisy state gives the conditional score
     \label{eq:conditional-score}
 \end{align}
 
-The first term corresponds to the unconditional generative process, while the
+The first term corresponds to the unguided generative process, while the
 second introduces the desired condition \(y\).
-Guidance can therefore be interpreted as modifying the unconditional
-generation process through the likelihood gradient
+Guidance can therefore be interpreted as modifying the original generation
+process through the likelihood gradient
 \[
     \nabla_{z_t}\log p_t(y\mid z_t).
 \]
@@ -386,6 +391,8 @@ The approximation replaces the full conditional distribution
     p(y\mid\hat{x}_t).
     \label{eq:likelihood-approximation}
 \end{equation}
+This clean-estimate approximation also underlies Diffusion Posterior Sampling
+\parencite{chung2023diffusion}.
 
 The likelihood \(p(y\mid x_1)\) can in principle be modeled in different ways.
 A convenient choice for gradient-based guidance is to define it through a
@@ -471,7 +478,7 @@ Substituting the conditional-score decomposition yields
     +
     a_t
     \nabla_{z_t}\log p_t(y\mid z_t).
-    \label{eq:conditional-velocity}
+    \label{eq:conditional-guided-velocity}
 \end{align}
 
 Using the clean-estimate approximation derived above, we obtain
@@ -504,6 +511,7 @@ velocity field.
 
 
 \subsection{Guidance-strength schedules}
+\label{sec:guidance-strength-schedules}
 
 The coefficient \(a_t\) in \Cref{eq:conditional-velocity-loss} is determined
 by the underlying probability path.
@@ -516,14 +524,14 @@ We therefore replace \(a_t\) by a general guidance-strength schedule
 \begin{equation}
     \lambda_t
     :=
-    w\,\gamma_t\,c_t,
+    w\,\gamma_t\,\nu_t,
     \label{eq:guidance-strength-schedule}
 \end{equation}
 where
 \begin{itemize}[noitemsep]
     \item \(w \geq 0\) controls the overall guidance strength;
     \item \(\gamma_t \geq 0\) controls how guidance varies along the flow;
-    \item \(c_t > 0\) is an optional algorithm-specific normalization factor.
+    \item \(\nu_t > 0\) is an optional algorithm-specific normalization factor.
 \end{itemize}
 
 We then define the \emph{guided velocity field} as
@@ -556,14 +564,338 @@ Instead, the guidance strength becomes an algorithmic parameter controlling
 the trade-off between the original generative dynamics and the imposed
 condition.
 
+The choice of \(\lambda_t\) varies substantially across applications.
+The simplest approach is to use a constant guidance strength throughout
+sampling,
+\begin{equation}
+    \lambda_t = w,
+    \label{eq:constant-guidance-schedule}
+\end{equation}
+where the scalar \(w>0\) controls the overall strength of guidance and is
+treated as a tunable hyperparameter.
+Fixed guidance scales are widely used in classifier-free guidance; for
+instance, \textcite{esser2024scaling} evaluate rectified-flow models using
+several values of \(w\).
+A similar strategy is used for weather guidance by
+\textcite{ueyama2026guided}, who tune a single guidance scale throughout the
+GenCast diffusion process, omitting guidance only at the final noise level.
+Loss-Guided Diffusion \parencite{song2023lossguided} similarly tunes an
+overall task-level guidance strength, while additionally introducing
+noise-dependent normalization to control the magnitude of the resulting
+gradient.
+
+Other approaches prescribe the temporal variation of guidance using the noise
+schedule of the pretrained generative model.
+In the original classifier-guidance formulation
+\parencite{dhariwal2021diffusion}, and subsequently in Universal Guidance
+\parencite{bansal2023universal}, the guidance contribution is scaled according
+to
+\begin{equation}
+    \lambda_t
+    =
+    w\sqrt{1-\bar{\alpha}^{\mathrm{diff}}_t},
+    \label{eq:noise-dependent-guidance-schedule}
+\end{equation}
+where \(\bar{\alpha}^{\mathrm{diff}}_t\) denotes the cumulative signal
+coefficient of the pretrained diffusion process.
+Consequently,
+\(\sqrt{1-\bar{\alpha}^{\mathrm{diff}}_t}\) is the standard deviation of the
+noise present at diffusion step \(t\).
+The overall gain \(w\) is again tuned for the particular guidance objective,
+while the temporal shape of the schedule is inherited directly from the
+pretrained model's noise schedule rather than chosen independently.
+
+Finally, the guidance strength can be adapted dynamically using quantities
+observed during sampling.
+Climate in a Bottle \parencite{brenowitz2025climate}, for example, normalizes
+its classifier-guidance contribution relative to the magnitude of the
+unguided generative update.
+Schematically, in the notation used here, this corresponds to
+\begin{equation}
+    \lambda_t
+    \propto
+    w
+    \frac{
+        \lVert u_t(z_t)\rVert_2
+    }{
+        \lVert\nabla_{z_t}\mathcal{L}(\hat{x}_t,y)\rVert_2
+    },
+    \label{eq:relative-guidance-schedule}
+\end{equation}
+such that the guidance vector remains a fixed fraction of the unguided
+generative update.
+From an optimization perspective, \textcite{shen2024trainingfree} similarly
+interpret guidance strength as a step size and propose a Polyak-style adaptive
+rule.
+Their update scales the guidance gradient using both its own norm and the
+magnitude of the unguided model prediction, adapting the effective step size at
+each sampling step rather than prescribing it beforehand.
+
+These examples illustrate that, even within the same local guidance
+construction, the guidance schedule is not uniquely determined in practice.
+Existing approaches range from tuning a constant global gain \(w\), to
+combining \(w\) with a temporal schedule inherited from the pretrained model,
+to adapting the effective guidance magnitude dynamically during sampling.
+
+
+\subsection{Guidance as control}
+\label{sec:guidance-as-control}
+
+A complementary perspective formulates guided generation as a control problem
+over the generative trajectory.
+Rather than constructing a local approximation of a conditional score, the
+objective is to modify variables that influence the trajectory such that its
+endpoint satisfies a desired condition.
+
+For consistency, we express the following methods using the notation introduced
+in this chapter rather than that of the original papers.
+We denote the generative state by \(z_t\), the frozen pretrained velocity field
+by \(u_t(z_t)\), and the terminal guidance objective by
+\(\mathcal{L}(z_1,y)\).
+
+FlowGrad \parencite{liu2023flowgrad} introduces an additive control
+\(g_t\) into the pretrained dynamics,
+\begin{equation}
+    \frac{\mathrm{d}}{\mathrm{d}t}z_t
+    =
+    u_t(z_t)+g_t,
+    \label{eq:flowgrad-dynamics}
+\end{equation}
+and optimizes the complete control trajectory according to
+\begin{equation}
+    \min_{\{g_t\}}
+    \;
+    \mathcal{L}(z_1,y)
+    +
+    \kappa
+    \int_0^1
+    \lVert g_t\rVert_2^2
+    \,\mathrm{d}t,
+    \label{eq:flowgrad-control}
+\end{equation}
+where \(g_t\) determines how the pretrained dynamics are modified at flow time
+\(t\), and \(\kappa>0\) penalizes large deviations from the original flow.
+Since the terminal state \(z_1\) depends on all preceding controls, their
+gradients are obtained by backpropagating the terminal objective through the
+ODE trajectory.
+
+D-Flow \parencite{benhamu2024dflow} instead leaves the velocity field unchanged
+and optimizes only the source noise:
+\begin{equation}
+    \min_{z_0}
+    \;
+    \mathcal{L}\bigl(z_1(z_0),y\bigr),
+    \qquad
+    \frac{\mathrm{d}}{\mathrm{d}t}z_t
+    =
+    u_t(z_t).
+    \label{eq:dflow-control}
+\end{equation}
+Here, \(z_1(z_0)\) emphasizes that the generated endpoint is determined by the
+initial noise through integration of the frozen flow.
+The terminal gradient is therefore propagated through the complete generative
+trajectory back to \(z_0\).
+
+OC-Flow \parencite{wang2025ocflow} places such approaches within a general
+optimal-control framework.
+Using the same notation, its Euclidean formulation can be viewed as optimizing
+a control trajectory
+\begin{equation}
+    \min_{\{g_t\}}
+    \;
+    \mathcal{L}(z_1,y)
+    +
+    \int_0^1
+    \mathcal{C}(g_t)\,
+    \mathrm{d}t,
+    \qquad
+    \frac{\mathrm{d}}{\mathrm{d}t}z_t
+    =
+    u_t(z_t)+g_t,
+    \label{eq:ocflow-control}
+\end{equation}
+where \(\mathcal{C}\) is a running cost that penalizes the applied control.
+OC-Flow derives the control updates using optimal-control theory and shows that
+existing backpropagation-through-ODE approaches can be interpreted within this
+framework.
+
+The posterior-sampling and control perspectives therefore provide two
+complementary views of guided generation.
+Posterior-style methods construct local corrections to the generative dynamics
+from a conditioning objective, while control-based methods formulate guidance
+as an optimization problem over variables that influence the complete
+generative trajectory.
+
+These perspectives provide the conceptual basis for the weather-specific
+approaches to controlled generation reviewed next.
+
+
+\section{Guided generation of weather scenarios}
+\label{sec:controlled-weather-generation}
+
+Having introduced the posterior-sampling and control perspectives on guidance,
+we now turn to their application in weather generation. Guided generation in
+weather and climate models remains comparatively recent, but existing work
+already spans several settings, from controlling individual atmospheric states
+to modifying complete weather trajectories. The approaches differ primarily in
+where control enters the generation process and how the desired event is
+specified.
+
+For multi-step weather trajectories, we use $n=0,\ldots,N$ to index weather
+time, while $t$ continues to denote the internal diffusion or flow time of the
+generative process. Sampling-time conditioning has also been explored beyond
+extreme-event generation, for example by incorporating external forecast
+information during diffusion sampling \parencite{hua2024weather}. Here, we
+focus specifically on methods aimed at controlling rare or extreme weather
+outcomes.
+
+\paragraph{State-level guidance.}
+
+At the most local level, guidance can be used to control the properties of a
+single generated atmospheric state. A representative example is Climate in a
+Bottle (cBottle) \parencite{brenowitz2025climate}, which uses classifier
+guidance for the on-demand generation of extreme atmospheric states. Unlike
+autoregressive weather models, cBottle generates independent multivariate
+states conditioned on slowly varying quantities such as sea-surface
+temperature and solar position.
+
+To generate tropical cyclones at user-specified locations, the authors train a
+classifier on historical cyclone observations and use its gradient during
+diffusion sampling. Expressed schematically in the notation introduced above,
+the guided dynamics take the form
+
+\begin{equation}
+    \tilde{u}_t(z_t\mid y)
+    =
+    u_t(z_t)
+    -
+    \lambda_t
+    \nabla_{z_t}
+    \mathcal{L}_{\mathrm{TC}}(z_t,y),
+    \label{eq:cbottle-guidance}
+\end{equation}
+
+where $y$ specifies the desired tropical-cyclone locations and
+$\mathcal{L}_{\mathrm{TC}}$ denotes the classifier loss. The guidance strength
+is adaptively normalized relative to the unguided generative update, as
+discussed in \Cref{sec:guidance-strength-schedules}. The resulting samples
+contain cyclones at the requested locations while retaining correlated
+structure across atmospheric variables \parencite{brenowitz2025climate}.
+
+Since cBottle generates atmospheric states independently, the method controls
+the occurrence and location of an event in a single state rather than its
+temporal evolution.
+
+\paragraph{Forecast guidance.}
+
+Guidance has also been applied directly within probabilistic weather
+forecasting. \textcite{ueyama2026guided} use gradient-based guidance during
+GenCast diffusion sampling to reduce precipitation over a prescribed target
+region. In contrast to approaches that perturb an atmospheric state before
+forecasting, the intervention is applied within the generative sampling
+process itself.
+
+Using the guidance notation introduced above, the mechanism can be represented
+schematically as
+
+\begin{equation}
+    \tilde{u}_t(z_t\mid y)
+    =
+    u_t(z_t)
+    -
+    \lambda
+    \nabla_{z_t}
+    \mathcal{L}_{\mathrm{precip}}(\hat{x}_t,y),
+    \label{eq:ueyama-weather-guidance}
+\end{equation}
+
+where $\mathcal{L}_{\mathrm{precip}}$ measures the precipitation-reduction
+objective on the current clean estimate $\hat{x}_t$. The gradient is
+propagated through the clean estimate to the noisy state $z_t$ and used to
+modify the generative update.
+
+The guidance scale $\lambda$ is fixed during sampling and controls the
+strength of the intervention. Increasing it produces stronger precipitation
+reduction, but also larger deviations from the original forecast. Accordingly,
+the authors evaluate not only whether the intervention succeeds, but also its
+effects on the surrounding atmospheric state through variable-wise and
+vertical perturbation structures, deviations of the generative trajectory,
+and cross-model transferability \parencite{ueyama2026guided}.
+
+\paragraph{Trajectory-level control.}
+
+Control objectives can also be defined over complete weather trajectories. A
+particularly relevant example is \textcite{whittaker2025heatwaves}, who
+construct extreme heatwave storylines by exploiting the differentiability of
+NeuralGCM. Starting from a historical atmospheric state $x_0$, they optimize a
+small perturbation $\delta x_0$ to the initial condition whose subsequent
+evolution produces a more extreme heatwave:
+
+\begin{equation}
+    \delta x_0^\star
+    =
+    \arg\min_{\delta x_0}
+    \left[
+        \mathcal{L}_{\mathrm{HW}}
+        \bigl(
+            F_{0:N}(x_0+\delta x_0)
+        \bigr)
+        +
+        \kappa
+        \lVert\delta x_0\rVert_2^2
+    \right],
+    \label{eq:heatwave-storyline-optimization}
+\end{equation}
+
+where $F_{0:N}$ denotes the differentiable NeuralGCM rollout,
+$\mathcal{L}_{\mathrm{HW}}$ penalizes trajectories that fail to attain the
+desired heatwave intensity, and $\kappa>0$ controls the penalty on the
+magnitude of the initial perturbation.
+
+Gradients are propagated through the complete model trajectory back to the
+initial atmospheric state. Applied to the 2021 Pacific Northwest heatwave,
+the optimization produces trajectories more extreme than those found in a
+conventional ensemble while retaining characteristic large-scale structures
+of the event \parencite{whittaker2025heatwaves}.
+
+This construction differs from the generative-guidance approaches above.
+NeuralGCM is used as a differentiable dynamical model, and control is achieved
+by optimizing the initial atmospheric condition rather than by intervening
+within a generative sampling process. It therefore provides an example of
+trajectory-level control through initial-condition optimization.
+
+Other approaches control trajectories without differentiating an event loss
+through the forecast model. \textcite{he2026extremeprofiles} use
+Intensity--Duration--Frequency profiles as likelihood constraints during
+sequential generation, preferentially retaining trajectories compatible with
+the desired extreme profile. Related rare-event methods instead clone or prune
+trajectories according to their likelihood of developing into the target event
+\parencite{lancelin2025rareevent}.
+
+A further alternative is to incorporate the desired condition during training
+rather than impose it on a pretrained generator at inference time.
+\textcite{loer2026storyline}, for example, learn a conditional generative
+distribution of temperature fields given atmospheric circulation and global
+warming level. In the Bayesian terminology introduced above, this corresponds
+to learning $p(x\mid y)$ directly, rather than starting from a pretrained model
+of $p(x)$ and introducing the condition through $p(y\mid x)$ during sampling.
+
+Taken together, these studies illustrate several routes to controlled weather
+generation: guiding individual atmospheric states, intervening during
+probabilistic forecast generation, optimizing initial conditions for complete
+trajectories, selectively sampling rare trajectories, and learning conditional
+generators directly.
+
 \section{ArchesWeather}
 
-ArchesWeather \parencite{couairon2024archesweather} is a probabilistic
-medium-range weather forecasting model that combines a deterministic forecast
-with a flow-matching model of the forecast residual.
-In this section, we describe the components required for the development
-of our guidance method and refer to the original work for architectural and
-training details.
+We investigate this problem using ArchesWeather
+\parencite{couairon2024archesweather}, a probabilistic medium-range weather
+forecasting model that combines a deterministic forecast with a flow-matching
+model of the forecast residual.
+Having established the general flow-matching and guidance formulations above,
+we now describe the components of ArchesWeather required for the development
+of our method and refer to the original work for architectural and training
+details.
 
 
 \subsection{Dataset}
@@ -612,8 +944,8 @@ their normalized representation.
 \subsection{Forecasting setup}
 
 ArchesWeather generates forecast trajectories autoregressively.
-We index forecast lead time by \(n\), which we refer to as
-\emph{weather time}.
+Following the convention introduced above, we index forecast lead time by
+\(n\), which we refer to as \emph{weather time}.
 At each weather step, the model produces a forecast for the next state
 \(x_{n+1}\).
 
@@ -687,9 +1019,9 @@ This corresponds directly to the Gaussian probability path introduced in
 The flow therefore starts from Gaussian noise and progressively approaches the
 clean residual \(r_{n+1}\).
 
-Unlike the generic flow-matching formulation, in which the neural network
-directly predicts the velocity field, the ArchesWeather residual model is
-trained to predict the clean residual from the noisy state.
+Unlike the velocity-field parameterization introduced in the generic
+formulation above, the ArchesWeather residual model is trained to predict the
+clean residual from the noisy state.
 We denote this estimate by
 \begin{equation}
     \hat{r}_t
@@ -827,51 +1159,10 @@ which is added to the deterministic forecast to obtain
     \label{eq:arches-final-forecast}
 \end{equation}
 
-The resulting nested time structure is illustrated in \Cref{fig:time-scales},
-while \Cref{fig:arches-computational-graph} summarizes the computations
-performed within a single weather step.
-
-\begin{figure}[H]
-    \centering
-    \resizebox{\textwidth}{!}{
-        \begin{tikzpicture}[x=0.9cm,y=0.9cm]
-            \def\L{3.4}
-            \def\M{25}
-
-            \draw (-0.6,0) -- (0,0);
-            \draw[-{Latex[length=3mm]}] (0,0) -- (10.8,0);
-
-            \foreach \j in {0,1,2} {
-                \foreach \i in {1,...,24} {
-                    \draw[line width=0.3pt]
-                    ({\j*\L + \i*\L/\M}, -0.10)
-                    --
-                    ({\j*\L + \i*\L/\M}, 0.10);
-                }
-            }
-
-            \foreach \x/\lab in {
-                0/{n=0},
-                3.4/{n=1},
-                6.8/{\cdots},
-                10.2/{n=N}
-            }{
-                \draw[line width=1pt] (\x,-0.28) -- (\x,0.28);
-                \node[below=6pt] at (\x,-0.28)
-                {\scriptsize $\lab$};
-            }
-
-            \node[above] at (1.7,0.3)
-            {\scriptsize $T$ flow steps};
-        \end{tikzpicture}
-    }
-    \caption{
-        The two nested time scales in ArchesWeather.
-        Each autoregressive weather step \(n\rightarrow n+1\) contains a
-        complete flow of \(T=25\) steps used to generate the forecast residual.
-    }
-    \label{fig:time-scales}
-\end{figure}
+\Cref{fig:arches-computational-graph} summarizes the computations performed
+within a single weather step.
+This structure will be central to the implementation and evaluation of our
+guidance method.
 
 \begin{figure}[H]
     \centering
@@ -887,5 +1178,7 @@ performed within a single weather step.
     \label{fig:arches-computational-graph}
 \end{figure}
 
-This structure will be central to our guidance method, which acts during the
-residual flow while ultimately steering the resulting weather forecast.
+The nested residual-flow structure of ArchesWeather provides the concrete
+generative process on which our guidance method will operate.
+Before developing that method in \Cref{ch:guide}, we first specify the weather
+trajectories toward which the model should be steered in \Cref{ch:specify}.
