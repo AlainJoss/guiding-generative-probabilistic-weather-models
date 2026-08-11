@@ -25,111 +25,37 @@ def _():
 
     import earthkit.plots as ekp
     import cartopy.crs as ccrs
-    from weatherbench2 import regridding
 
     from src.utils import ensure_rollout_dir, get_now_timestamp, dump_json, get_xr_dataset
-    from src.mask import get_mask_2d, get_mask_center
+    from src.mask import get_mask_2d, get_mask_center, effective_bbox
     from src.ui.map import visualize_map, to_display_units
     from src.ui.helpers import get_timestamp_from_sliders, max_day
     from src.rollout_config import RolloutConfig
 
-    ARCO_URI = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
-    ARCO_STORAGE = {"token": "anon"}
-    # ArchesWeather target grid (regrid needs ascending lat; flip to descending after)
-    ARCHES_LON = np.arange(0, 360, 1.5)              # 240, ascending 0..358.5
-    ARCHES_LAT_ASC = np.arange(-90, 90.001, 1.5)     # 121, ascending -90..90
-
-    SURFACE = ["10m_u_component_of_wind", "10m_v_component_of_wind",
-               "2m_temperature", "mean_sea_level_pressure"]
-    LEVELVARS = ["geopotential", "u_component_of_wind", "v_component_of_wind",
-                 "temperature", "specific_humidity", "vertical_velocity"]
-    MODEL_LEVELS = [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
-    UNITS = {
-        "10m_u_component_of_wind": "m s**-1", "10m_v_component_of_wind": "m s**-1",
-        "2m_temperature": "K", "mean_sea_level_pressure": "Pa",
-        "geopotential": "m**2 s**-2", "u_component_of_wind": "m s**-1",
-        "v_component_of_wind": "m s**-1", "temperature": "K",
-        "specific_humidity": "kg kg**-1", "vertical_velocity": "Pa s**-1",
-    }
     SURFACE_PAIR = {"temperature": "2m_temperature",
                     "u_component_of_wind": "10m_u_component_of_wind",
                     "v_component_of_wind": "10m_v_component_of_wind"}
     return (
-        ARCHES_LAT_ASC,
-        ARCHES_LON,
-        ARCO_STORAGE,
-        ARCO_URI,
-        LEVELVARS,
-        MODEL_LEVELS,
-        SURFACE,
+        RolloutConfig,
         SURFACE_PAIR,
-        UNITS,
         ccrs,
         dump_json,
+        effective_bbox,
         ekp,
         ensure_rollout_dir,
+        get_mask_2d,
         get_mask_center,
         get_now_timestamp,
         get_xr_dataset,
         mcolors,
         mo,
         np,
-        os,
         plt,
-        regridding,
         timedelta,
         to_display_units,
+        visualize_map,
         xr,
     )
-
-
-@app.cell
-def _(
-    ARCHES_LAT_ASC,
-    ARCHES_LON,
-    ARCO_STORAGE,
-    ARCO_URI,
-    LEVELVARS,
-    MODEL_LEVELS,
-    SURFACE,
-    UNITS,
-    regridding,
-    xr,
-):
-    # ---- ARCO access + WeatherBench2 regrid + arches-schema netCDF ----
-    def open_arco():
-        return xr.open_zarr(ARCO_URI, storage_options=ARCO_STORAGE, chunks={})
-
-    def sel_12z(ds):
-        # WeatherBench2-style instantaneous synoptic subsampling, keeping only 12:00Z
-        return ds.sel(time=ds.time.dt.hour == 12)
-
-    def regrid_to_arches(ds):
-        # WB2 ConservativeRegridder needs ascending lat + in-memory numpy
-        ds = ds.sortby("latitude").load()
-        source = regridding.Grid.from_degrees(lon=ds.longitude.values, lat=ds.latitude.values)
-        target = regridding.Grid.from_degrees(lon=ARCHES_LON, lat=ARCHES_LAT_ASC)
-        out = regridding.ConservativeRegridder(source, target).regrid_dataset(ds)
-        return out.sortby("latitude", ascending=False).astype("float32")  # -> descending
-
-    def regrid_batched(ds, size):
-        batches = [regrid_to_arches(ds.isel(time=slice(i, i + size)))
-                   for i in range(0, ds.sizes["time"], size)]
-        return xr.concat(batches, dim="time")
-
-    def to_arches_netcdf(ds, path, batch=2):
-        # ARCO subset -> 1.5deg arches_era5.nc schema netCDF
-        ds = ds[SURFACE + LEVELVARS].sel(level=MODEL_LEVELS)
-        ds = regrid_batched(ds, size=batch)
-        ds = ds.assign_coords(level=ds.level.astype("int64"))[SURFACE + LEVELVARS]
-        # arches order: surface (time,lat,lon); level (time,level,lat,lon)
-        ds = ds.transpose("time", "level", "latitude", "longitude", missing_dims="ignore")
-        for name in ds.data_vars:
-            ds[name].attrs["units"] = UNITS[name]
-        ds.to_netcdf(path)
-        return ds
-
-    return open_arco, sel_12z, to_arches_netcdf
 
 
 @app.cell
@@ -188,7 +114,7 @@ def _(mo):
 def _(mo):
     mask_mode_dropdown = mo.ui.dropdown(["BBOX", "ELLIPTICAL"], value="BBOX", label="mask_mode: ")
     side_lon_slider = mo.ui.slider(1.5, 90, step=1.5, value=12, label="lon side: ", show_value=True, debounce=True)
-    side_lat_slider = mo.ui.slider(1.5, 60, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
+    side_lat_slider = mo.ui.slider(1.5, 90, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
     sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=2, label="sigma div: ", show_value=True)
     zoom_slider = mo.ui.slider(1, 12, step=1, value=1, label="zoom: ", show_value=True)
     dpi_slider = mo.ui.slider(steps=[60, 100, 140, 200], value=100, label="dpi: ", show_value=True)
@@ -216,7 +142,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    run_button = mo.ui.run_button(label="save config + download data")
+    run_button = mo.ui.run_button(label="save config")
     return (run_button,)
 
 
@@ -239,9 +165,10 @@ def _(SURFACE_PAIR, level_slider, var_dropdown):
 
 @app.cell
 def _(
+    effective_bbox,
     get_center,
+    get_mask_2d,
     get_mask_center,
-    mask_mod,
     mask_mode_dropdown,
     side_lat_slider,
     side_lon_slider,
@@ -253,8 +180,8 @@ def _(
             center_lon - side_lon_slider.value / 2, center_lon + side_lon_slider.value / 2,
             center_lat - side_lat_slider.value / 2, center_lat + side_lat_slider.value / 2,
         )
-        weights = mask_mod.get_mask_2d(mask_mode_dropdown.value, corners, sigma_div=sigma_div_slider.value)
-        drawn = mask_mod.effective_bbox(*corners, sigma_div=sigma_div_slider.value)  # snapped box = pixel edges
+        weights = get_mask_2d(mask_mode_dropdown.value, corners, sigma_div=sigma_div_slider.value)
+        drawn = effective_bbox(*corners, sigma_div=sigma_div_slider.value)  # snapped box = pixel edges
         return weights, drawn
 
     mask, mask_corners = build_mask()
@@ -285,21 +212,21 @@ def _(
     bg_disp,
     dpi_slider,
     hw,
-    map_mod,
     mask,
     mask_corners,
     mask_mode_dropdown,
     set_center,
+    visualize_map,
     zoom_centers,
     zoom_slider,
 ):
     def build_weather_map():
         cmap, vmin, vmax, center = abs_style(bg_disp)
-        m = map_mod.visualize_map(
+        m = visualize_map(
             bg_disp,
             suptitle=(f"2m_temperature  ·  heatwave peak {hw['peak_ts']:%Y-%m-%d}"
                       if hw is not None else "2m_temperature (2020 mean)"),
-            title="click to set the box center",
+            title="click to set box center",
             interactive=True,
             cmap=cmap, vmin=vmin, vmax=vmax, center=center,
             puck_center=((mask_corners[0] + mask_corners[1]) / 2,
@@ -381,76 +308,56 @@ def _(
 
 @app.cell
 def _(
-    M_slider,
-    T_slider,
-    dump_json,
-    exp_starts,
-    experiment_dir,
-    hw,
-    level,
+    abs_style,
+    ccrs,
+    crs_mode_dropdown,
+    ekp,
+    get_center,
+    make_crs,
+    mask,
     mask_corners,
-    mo,
-    open_arco,
-    os,
-    partition,
-    run_button,
-    sel_12z,
-    timedelta,
-    to_arches_netcdf,
-    var,
+    np,
     xr,
+    zoom_centers,
+    zoom_slider,
 ):
-    def write_config():
-        if exp_starts is None or not exp_starts["starts"] or hw is None:
-            return mo.md("_no heatwave / start range selected_")
-        import importlib
-        import src.rollout_config as rc
-        importlib.reload(rc)                          # pick up new RolloutConfig fields in the live kernel
-        fmt = "%Y-%m-%d_%H:%M:%S"                     # subdir/id convention (matches get_now_timestamp)
-        outer = experiment_dir()
-        end_ts = exp_starts["end_ts"]
-        win_start = exp_starts["window_start"]
-        hw_s = hw["start_ts"]
-        hw_e = hw["end_ts"]
-        starts = exp_starts["starts"]
-        names = [s.strftime(fmt) for s in starts]
-        # OUTER config: just the start sweep + common end; run.py loops STARTS and runs each subdir
-        dump_json({"STARTS": names, "END_TS": rc.datetime_to_string(end_ts)},
-                  outer / "config.json")
-        for s, name in zip(starts, names):
-            N = (end_ts - s).days                                   # per-start horizon to END_TS
-            cfg = rc.RolloutConfig(
-                M=M_slider.value, N=int(N), T=T_slider.value, START_TS=s,
-                WINDOW_START=win_start, WINDOW_END=end_ts,
-                HEATWAVE_START=hw_s, HEATWAVE_END=hw_e,
-                PARTITION=partition, LEVEL=level, VAR=var, MASK_CORNERS=list(mask_corners))
-            (outer / name).mkdir(parents=True, exist_ok=True)
-            dump_json(cfg.to_dict(), outer / name / "config.json")
-        return mo.md(f"✅ saved outer config + {len(names)} start configs under `{outer}`")
+    def globe_mask():
+        # the mask WEIGHTS on the globe (like domain_globe, but plotting the mask instead of T)
+        center_lon, center_lat = get_center()
+        m = ekp.Map(crs=make_crs(crs_mode_dropdown.value, center_lon, center_lat))
+        _le = np.linspace(-180, 180, 241); _lc = 0.5 * (_le[:-1] + _le[1:])   # display grid (geographic)
+        _la = np.linspace(90, -90, 122);   _lac = 0.5 * (_la[:-1] + _la[1:])
+        mask_da = xr.DataArray(mask, dims=("latitude", "longitude"),
+                               coords={"latitude": _lac, "longitude": _lc})
+        cmap, vmin, vmax, center = abs_style(mask)
+        m.pcolormesh(mask_da, cmap=cmap, vmin=vmin, vmax=vmax)
+        m.coastlines()
+        m.legend(label="mask weights")
+        ax = m.fig.axes[0]
+        ax.set_title("mask weights")
+        lon_l, lon_r, lat_b, lat_t = mask_corners
+        _n = 120
+        _lon, _lat = np.linspace(lon_l, lon_r, _n), np.linspace(lat_b, lat_t, _n)
+        _bx = np.concatenate([_lon, np.full(_n, lon_r), _lon[::-1], np.full(_n, lon_l)])
+        _by = np.concatenate([np.full(_n, lat_b), _lat, np.full(_n, lat_t), _lat[::-1]])
+        ax.plot(_bx, _by, color="red", linewidth=1.5, transform=ccrs.PlateCarree(), zorder=10)
+        zoom = max(1, int(zoom_slider.value))
+        if zoom > 1:
+            if crs_mode_dropdown.value == "PlateCarree":
+                lon_span, lat_span = 360.0 / zoom, 180.0 / zoom
+                cx, cy = zoom_centers
+                ax.set_extent([max(-180.0, cx - lon_span / 2), min(180.0, cx + lon_span / 2),
+                               max(-90.0, cy - lat_span / 2), min(90.0, cy + lat_span / 2)],
+                              crs=ccrs.PlateCarree())
+            else:
+                x0, x1 = ax.get_xlim(); y0, y1 = ax.get_ylim()
+                xm, ym = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
+                hx, hy = (x1 - x0) / (2 * zoom), (y1 - y0) / (2 * zoom)
+                ax.set_xlim(xm - hx, xm + hx); ax.set_ylim(ym - hy, ym + hy)
+        return m.fig
 
-    def download_model_input():
-        if exp_starts is None or not exp_starts["starts"]:
-            return mo.md("_no start range selected_")
-        path = str(experiment_dir() / "era5_input.nc")
-        if os.path.exists(path):
-            ds = xr.open_dataset(path)
-        else:
-            window = sel_12z(open_arco()).sel(
-                time=slice(exp_starts["window_start"] - timedelta(days=1), exp_starts["end_ts"]))
-            ds = to_arches_netcdf(window, path, batch=2)
-        return mo.md(
-            f"✅ `{path}`\n\nsteps={ds.sizes['time']} (WINDOW_START−1d .. END_TS) · "
-            f"vars={len(ds.data_vars)} · levels={ds.sizes.get('level')} · "
-            f"grid={ds.sizes['latitude']}×{ds.sizes['longitude']}"
-        )
-
-    def build_experiment():
-        # single button: write the per-start configs, then fetch + regrid the model input
-        return mo.vstack([write_config(), download_model_input()], align="start")
-
-    build_result = (build_experiment() if run_button.value
-                    else mo.md(""))
-    return (build_result,)
+    globe_mask_fig = globe_mask()
+    return (globe_mask_fig,)
 
 
 @app.cell(hide_code=True)
@@ -464,6 +371,7 @@ def _(mo):
 @app.cell
 def _(
     M_slider,
+    N_slider,
     T_slider,
     build_result,
     level_slider,
@@ -473,7 +381,7 @@ def _(
 ):
     mo.vstack([
         mo.hstack([var_dropdown, level_slider], justify="start"),
-        mo.hstack([M_slider, T_slider], justify="start"),
+        mo.hstack([M_slider, N_slider, T_slider], justify="start"),
         mo.hstack([run_button], justify="start"),
         build_result,
     ], align="start")
@@ -485,6 +393,7 @@ def _(
     crs_mode_dropdown,
     domain_map,
     dpi_slider,
+    globe_mask_fig,
     mask_map,
     mask_mode_dropdown,
     mo,
@@ -499,7 +408,8 @@ def _(
         mo.hstack([mask_mode_dropdown, side_lon_slider, side_lat_slider, sigma_div_slider,
                    zoom_slider, dpi_slider], justify="start"),
         mo.hstack([crs_mode_dropdown], justify="start"),
-        mo.hstack([weather_map, mask_map, domain_map], justify="start", align="start"),
+        mo.hstack([mo.vstack([weather_map, mask_map]), globe_mask_fig, domain_map],
+                  justify="start", align="start"),
     ], align="start")
     return
 
@@ -553,6 +463,7 @@ def _(xr):
 def _(
     clim_ds,
     clim_path,
+    dpi_slider,
     get_masked_mean,
     get_slices,
     highlight_year_slider,
@@ -587,7 +498,7 @@ def _(
             o = np.argsort(d)
             return d[o], vv[o]
 
-        fig, ax = plt.subplots(figsize=(14, 8), dpi=500)
+        fig, ax = plt.subplots(figsize=(14, 8), dpi=dpi_slider.value)
         for yr in years:                                     # non-neighbour years: light gray
             if yr in (sel - 1, sel, sel + 1):
                 continue
@@ -659,23 +570,25 @@ def _(mo):
 
 @app.cell
 def _(
-    N_minus_slider,
-    N_plus_slider,
+    add_button,
+    clear_button,
+    dates,
     highlight_year_slider,
     mo,
     peak_rank_slider,
     region_clim_plot,
     region_trajectory_fig,
     rolling_window_slider,
-    start_range_slider,
+    start_day_slider,
 ):
     mo.vstack([
         mo.hstack([highlight_year_slider, peak_rank_slider, rolling_window_slider], justify="start"),
         mo.hstack([
             region_clim_plot,
             mo.vstack([
-                mo.hstack([N_plus_slider, N_minus_slider], justify="start"),
-                start_range_slider,
+                start_day_slider,
+                mo.hstack([add_button, clear_button], justify="start"),
+                mo.md("**picked dates:** " + (", ".join(d.strftime("%Y-%m-%d") for d in dates) if dates else "_none_")),
                 region_trajectory_fig,
             ], align="start"),
         ], justify="start", align="end"),
@@ -765,54 +678,54 @@ def _(
 
 @app.cell
 def _(
-    N_minus_slider,
-    N_plus_slider,
+    N_slider,
+    dpi_slider,
     hw,
     mo,
     np,
     plt,
     region_clim_plot,
-    start_range_slider,
+    start_day_slider,
 ):
     def region_trajectory_plot():
         if hw is None:
             return mo.md("_no heatwave selected_")
-        v, s, Np, Nm = hw["v_raw"], hw["start_i"], int(N_plus_slider.value), int(N_minus_slider.value)
-        e = hw["end_i"]                                     # heatwave end index
-        lo, hi = max(0, s - Nm), min(len(v), e + Np + 1)    # N- before start .. N+ after end
+        v, s, e = hw["v_raw"], hw["start_i"], hw["end_i"]
+        n = int(start_day_slider.value)                  # selected start offset (0 = heatwave start)
+        N = int(N_slider.value)
+        dur = e - s
+        lo_n, hi_n = min(-5, n), max(dur + 5, n + N)     # x-range: heatwave +/- margin and the horizon
+        lo, hi = max(0, s + lo_n), min(len(v), s + hi_n + 1)
         seg = v[lo:hi]
-        steps = np.arange(lo - s, hi - s)                # x relative to start (0 = heatwave start)
+        steps = np.arange(lo - s, hi - s)
         size = tuple(region_clim_plot.get_size_inches()) if hasattr(region_clim_plot, "get_size_inches") else (14, 8)
-        fig, ax = plt.subplots(figsize=size, dpi=500)   # same size + dpi as the left chart
-        fn, ln = (int(x) for x in start_range_slider.value)      # experiment-start sweep range (n)
-        ax.axvspan(fn, ln, color="#457b9d", alpha=0.12, zorder=1)             # start-sweep band
-        ax.axvline(fn, color="#457b9d", linewidth=1.1, linestyle="--", zorder=4)
-        ax.axvline(ln, color="#457b9d", linewidth=1.1, linestyle="--", zorder=4)
-        # trajectory drawn like the left chart's selected year: solid red, same weight
+        fig, ax = plt.subplots(figsize=size, dpi=dpi_slider.value)
+        ax.axvspan(n, n + N, color="#457b9d", alpha=0.12, zorder=1)                # rollout horizon [n, n+N]
+        ax.axvline(n, color="#457b9d", linewidth=1.4, linestyle="--", zorder=4)     # selected start
         ax.plot(steps, seg, color="#e63946", linewidth=2.1, zorder=6)
-        pts_x = [0, hw["peak_i"] - s, e - s]                     # start, peak, end
-        pts_y = [v[s], v[hw["peak_i"]], v[e]]                     # real-data temps there
-        ax.plot(pts_x, pts_y, "o", color="#e63946", markersize=6, zorder=7)   # markers as on the left
-        for px, py in [(0, v[s]), (e - s, v[e])]:                 # start & end temps (peak annotated above)
+        ax.plot([0, hw["peak_i"] - s, e - s], [v[s], v[hw["peak_i"]], v[e]], "o",
+                color="#e63946", markersize=6, zorder=7)
+        for px, py in [(0, v[s]), (e - s, v[e])]:
             ax.annotate(f"{py:.1f}°C", xy=(px, py), xytext=(0, -14), textcoords="offset points",
                         ha="center", color="#e63946", fontsize=10, fontweight="bold", zorder=8)
-        ax.axvline(0, color="#e63946", linewidth=0.8, linestyle=":", zorder=3)  # heatwave start (n=0)
-        ax.axvline(hw["end_i"] - s, color="#e63946", linewidth=0.9, linestyle=":", zorder=3)  # heatwave end
-        ax.axvline(hw["peak_i"] - s, color="#e63946", linewidth=0.9, linestyle=":", zorder=3)  # peak
+        ax.axvline(0, color="#e63946", linewidth=0.8, linestyle=":", zorder=3)
+        ax.axvline(e - s, color="#e63946", linewidth=0.9, linestyle=":", zorder=3)
+        ax.axvline(hw["peak_i"] - s, color="#e63946", linewidth=0.9, linestyle=":", zorder=3)
         ax.annotate(f"{v[hw['peak_i']]:.1f}°C", xy=(hw["peak_i"] - s, v[hw["peak_i"]]),
                     xytext=(0, 7), textcoords="offset points", ha="center", color="#e63946",
                     fontsize=10, fontweight="bold", zorder=8)
         ax.set_xlabel("n  (days from heatwave start)")
         ax.set_ylabel("mask-avg 2m_temperature [°C]")
-        ax.set_title(f"Masked-average over heatwave", loc="left", fontsize=13)
-        ax.set_xticks(steps)
+        ax.set_title(f"Masked-average over heatwave  ·  start n={n}, N={N}", loc="left", fontsize=13)
+        tick = steps if len(steps) <= 20 else steps[::(len(steps) // 20 + 1)]
+        ax.set_xticks(tick)
         for spn in ("top", "right"):
             ax.spines[spn].set_visible(False)
         ax.grid(True, axis="y", color="#eeeeee", linewidth=0.9)
         ax.set_axisbelow(True)
-        fig.subplots_adjust(bottom=0.16, top=0.93, left=0.09, right=0.97)   # match left chart margins
+        fig.subplots_adjust(bottom=0.16, top=0.93, left=0.09, right=0.97)
         _ylo, _yhi = ax.get_ylim()
-        ax.set_ylim(_ylo, _yhi + 0.05 * (_yhi - _ylo))   # same title headroom as the left chart
+        ax.set_ylim(_ylo, _yhi + 0.05 * (_yhi - _ylo))
         return fig
 
     region_trajectory_fig = region_trajectory_plot()
@@ -821,46 +734,50 @@ def _(
 
 @app.cell
 def _(mo):
-    N_plus_slider = mo.ui.slider(1, 30, value=14, step=1, label="N⁺ (days after start): ", show_value=True)
-    N_minus_slider = mo.ui.slider(0, 10, value=2, step=1, label="N⁻ (days before start): ", show_value=True)
-    return N_minus_slider, N_plus_slider
+    N_slider = mo.ui.slider(1, 30, value=15, step=1, label="N (rollout days): ", show_value=True)
+    return (N_slider,)
 
 
 @app.cell
-def _(N_minus_slider, N_plus_slider, hw, start_range_slider, timedelta):
-    def experiment_starts():
+def _(hw, mo):
+    def make_start_day():
         if hw is None:
-            return None
-        hw_start = hw["start_ts"]                                    # python datetime
-        Nm, Np = int(N_minus_slider.value), int(N_plus_slider.value)
+            return mo.ui.slider(0, 1, value=0, label="start day (n):")
         dur = int(hw["end_i"] - hw["start_i"])
-        end_ts = hw_start + timedelta(days=dur + Np)               # common END_TS = WINDOW_END
-        window_start = hw_start - timedelta(days=Nm)               # WINDOW_START
-        first_n, last_n = (int(x) for x in start_range_slider.value)
-        starts = [hw_start + timedelta(days=n) for n in range(first_n, last_n + 1)]
-        starts = [s for s in starts if s < end_ts]                # keep N >= 1
-        return dict(end_ts=end_ts, window_start=window_start, first_n=first_n, last_n=last_n, starts=starts)
+        return mo.ui.slider(start=-10, stop=dur + 10, step=1, value=0, show_value=True,
+                            full_width=True, label="start day (n, 0 = heatwave start):")
 
-    exp_starts = experiment_starts()
-    return (exp_starts,)
+    start_day_slider = make_start_day()
+    return (start_day_slider,)
 
 
 @app.cell
-def _(N_minus_slider, N_plus_slider, hw, mo):
-    def make_start_range():
-        # experiment-start sweep, indexed by n (= right-chart step index; 0 = heatwave start).
-        # bounds depend on hw / N⁻ / N⁺, so this cell recomputes (and the slider resets) like day_slider did.
-        if hw is None:
-            return mo.ui.range_slider(start=0, stop=1, value=[0, 1], label="experiment starts (n):")
-        Nm, Np = int(N_minus_slider.value), int(N_plus_slider.value)
-        dur = int(hw["end_i"] - hw["start_i"])
-        lo = -Nm
-        hi = max(lo + 1, dur + Np - 1)                  # last start < END_TS so every run has N >= 1
-        return mo.ui.range_slider(start=lo, stop=hi, step=1, value=[lo, 0],
-                                  show_value=True, full_width=True, label="experiment starts (n):")
+def _(mo):
+    get_dates, set_dates = mo.state([])
+    return get_dates, set_dates
 
-    start_range_slider = make_start_range()
-    return (start_range_slider,)
+
+@app.cell
+def _(hw, start_day_slider, timedelta):
+    current_date = (hw["start_ts"] + timedelta(days=int(start_day_slider.value))
+                    if hw is not None else None)
+    return (current_date,)
+
+
+@app.cell
+def _(current_date, get_dates, mo, set_dates):
+    add_button = mo.ui.button(
+        label="add start",
+        on_click=lambda _: set_dates(sorted(set(
+            get_dates() + ([current_date] if current_date is not None else [])))))
+    clear_button = mo.ui.button(label="clear dates", on_click=lambda _: set_dates([]))
+    return add_button, clear_button
+
+
+@app.cell
+def _(get_dates):
+    dates = get_dates()
+    return (dates,)
 
 
 @app.cell
@@ -875,26 +792,26 @@ def _(
     abs_style,
     add_map_stats,
     dpi_slider,
-    map_mod,
     mask,
     mask_mode_dropdown,
+    visualize_map,
     zoom_centers,
     zoom_slider,
 ):
     def build_mask_map():
         # the mask weights (arches lat weights, sum to 1): white at 0, warm toward the max
         cmap, vmin, vmax, center = abs_style(mask)
-        m = map_mod.visualize_map(
+        m = visualize_map(
             mask,
             suptitle="mask",
-            title="mask weights m(lon, lat)  ·  arches lat weights, sums to 1",
+            title="mask weights",
             interactive=False,
             cmap=cmap, vmin=vmin, vmax=vmax, center=center,
             contour_2d=None if mask_mode_dropdown.value == "BBOX" else mask,
             contour_levels=8, contour_color="black", contour_linewidth=0.5,
             zoom=zoom_slider.value,   # 1 = full map (all grid points); >1 zooms into the box
             zoom_center_lon=zoom_centers[0], zoom_center_lat=zoom_centers[1],
-            figsize=(14, 8), dpi=dpi_slider.value,
+            figsize=(11.2, 8), dpi=dpi_slider.value,
         )
         return add_map_stats(m, mask)[0]   # (fig, ax) -> fig for display
 
@@ -903,13 +820,50 @@ def _(
 
 
 @app.cell
-def _():
-    import importlib
-    import src.ui.map as map_mod
-    import src.mask as mask_mod
-    importlib.reload(map_mod)    # pick up map.py edits (no white grid; interactive zoom)
-    importlib.reload(mask_mod)   # pick up the reverted (previous) mask weighting
-    return map_mod, mask_mod
+def _(
+    M_slider,
+    N_slider,
+    RolloutConfig,
+    T_slider,
+    dates,
+    dump_json,
+    experiment_dir,
+    hw,
+    level,
+    mask_corners,
+    mo,
+    partition,
+    run_button,
+    var,
+):
+    def write_config():
+        if not dates or hw is None:
+            return mo.md("_pick a start and click 'add start'_")
+        fmt = "%Y-%m-%d_%H:%M:%S"                     # subdir/id convention (matches get_now_timestamp)
+        outer = experiment_dir()
+        N = int(N_slider.value)
+        names = [d.strftime(fmt) for d in dates]
+        # OUTER config = the picked date list + rollout length. run.py loops STARTS;
+        # `python -m src.download --rollout_id <id>` derives the per-date windows from STARTS + N.
+        dump_json({"STARTS": names, "N": N}, outer / "config.json")
+        for d, name in zip(dates, names):
+            cfg = RolloutConfig(
+                M=M_slider.value, N=N, T=T_slider.value, START_TS=d,
+                PARTITION=partition, LEVEL=level, VAR=var, MASK_CORNERS=list(mask_corners))
+            (outer / name).mkdir(parents=True, exist_ok=True)
+            dump_json(cfg.to_dict(), outer / name / "config.json")
+        return mo.md(
+            f"✅ saved {len(names)} dates (N={N}) under `{outer}`\n\n"
+            f"download the model input with `python -m src.download --rollout_id {outer.name}`")
+
+    def build_experiment():
+        # the button only writes the configs; the model input is fetched separately via
+        # `python -m src.download --rollout_id <exp_id>`
+        return write_config()
+
+    build_result = (build_experiment() if run_button.value
+                    else mo.md(""))
+    return (build_result,)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,12 @@ M * N * T
 3 * M * N + 4 * M * N * T
 
 
+Report:
+- check guidance terminology consistency
+
+
 New whiteboard:
+- implement AOWF baseline
 - attempt interactive latex formulas in marimo notebook
 - attempt wind
 - compare mask region and not mask region rmSE and other metrics

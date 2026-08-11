@@ -3,7 +3,7 @@ from pathlib import Path
 import xarray as xr
 import torch
 
-from src.utils import get_x_cond
+from src.utils import get_x_cond, find_era5_input
 from src.utils import (
     batchify_and_move,
     get_var_idx, get_level_idx,
@@ -32,8 +32,10 @@ def rollout(
 ):  
     # for testing purposes
     flow_model.T=T
-    # create objects from config
-    x_cond_init = get_x_cond(config.START_TS, config.N)
+    # create objects from config. Prefer this experiment's downloaded era5_input.nc
+    # (in the per-start subdir or the outer exp dir); else the global ERA5 store.
+    input_path = find_era5_input(rollout_dir)
+    x_cond_init = get_x_cond(config.START_TS, config.N, input_path=input_path)
     x_cond_init = batchify_and_move(x_cond_init, flow_model.device)
 
     if guidance_flag:

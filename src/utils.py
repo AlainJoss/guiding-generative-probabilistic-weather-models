@@ -74,6 +74,25 @@ def get_td_dataset(multistep:int=1, year:int=2020):
     )
 
 
+def get_td_dataset_from_file(path, multistep:int=1):
+    # per-experiment era5_input.nc: a single arches-schema netCDF, 24h-spaced (12:00Z),
+    # so timedelta_hours=24 (the global store is 6-hourly). Era5Forecast reads a single
+    # file directly and applies the SAME pangu normalization / lat-flip / lon-roll, so the
+    # x_cond it yields is structurally identical to the global-store one.
+    # domain="train": the val/test domains clamp timestamps to 2019/2020, which would drop
+    # our (e.g. 2026) dates; "train" applies no date bounds, and the single-file path skips
+    # the domain filename filter entirely.
+    return Era5Forecast(
+        path=str(path),
+        domain="train",
+        load_prev=True,
+        norm_scheme="pangu",
+        lead_time_hours=24,
+        timedelta_hours=24,
+        multistep=multistep,
+    )
+
+
 def get_model(device):
     gen_model, _ = load_module(  # _ := gen_config
         MODELSTORE / "archesweathergen",
@@ -88,6 +107,17 @@ def get_model(device):
 
 def get_rollout_dir(rollout_id:str):
     return ROLLOUTS / rollout_id
+
+
+def find_era5_input(rollout_dir: Path):
+    """The per-experiment model input, if it was downloaded. A multi-start run executes in
+    a per-start subdir (<exp_id>/<start_ts>); era5_input.nc lives once in the OUTER exp dir
+    (<exp_id>), so check the subdir first then its parent. Returns None if absent (then
+    get_x_cond falls back to the global ERA5 store)."""
+    for p in (rollout_dir / "era5_input.nc", rollout_dir.parent / "era5_input.nc"):
+        if p.exists():
+            return p
+    return None
 
 
 def get_dict_from_json(path: Path):
@@ -467,8 +497,13 @@ def gt_state_to_tdict(gt_ds: xr.Dataset, time_index: int, device) -> TensorDict:
     return TensorDict({"surface": sfc_t, "level": lvl_t}, batch_size=[1], device=device)
 
 
-def get_x_cond(timestamp: datetime, N):
-    ds = get_td_dataset(multistep=N, year=timestamp.year)
+def get_x_cond(timestamp: datetime, N, input_path: Path | None = None):
+    # prefer the per-experiment era5_input.nc (needed for dates outside the global ERA5
+    # store, e.g. 2026); fall back to the global store by year.
+    if input_path is not None and Path(input_path).exists():
+        ds = get_td_dataset_from_file(input_path, multistep=N)
+    else:
+        ds = get_td_dataset(multistep=N, year=timestamp.year)
     timestamp = np.datetime64(timestamp, "ns")
 
     ds_timestamps = [
@@ -476,7 +511,11 @@ def get_x_cond(timestamp: datetime, N):
         for ts in ds.timestamps
     ]
 
-    idx = ds_timestamps.index(timestamp) - 4  # everything is shifted because we have a "prev_state"
+    # __getitem__ bumps the index by load_prev*lead_time//timedelta so prev_state is in
+    # range; undo that here so `state` lands exactly on the requested timestamp. This is 4
+    # for the 6-hourly global store and 1 for the 24h-spaced era5_input.nc.
+    offset = ds.load_prev * ds.lead_time_hours // ds.timedelta
+    idx = ds_timestamps.index(timestamp) - offset
     x_cond = ds[idx]
     # ts = tensor_timestamp_to_string(x_cond["timestamp"])
     # print(f"get x_cond with timestamp {ts} from timestamp {timestamp}")

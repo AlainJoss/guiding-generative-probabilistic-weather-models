@@ -282,6 +282,10 @@ def draw_base_map(
         cmap=cmap,
         norm=norm,
         shading="flat",
+        # stroke each cell's border in its own face colour to fill the antialiasing
+        # seams between cells (the white gridlines); keep antialiasing on (setting it
+        # off would pixelate the outer edges).
+        edgecolors="face",
     )
     ax.set_xlim(float(lon_e_plot[0]), float(lon_e_plot[-1]))
     ax.set_ylim(float(lat_e_plot[-1]), float(lat_e_plot[0]))

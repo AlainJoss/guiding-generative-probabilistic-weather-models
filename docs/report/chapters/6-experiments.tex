@@ -1,21 +1,42 @@
 \chapter{Experiments}\label{ch:experiments}
 
-This chapter carries out the evaluation framework of \Cref{ch:eval}. Each section follows the same pattern: we first state the concrete settings, then report the results and the decision they lead to. Tests are referenced by the identifiers introduced in \Cref{ch:eval} (T1--T7).
+This chapter carries out the evaluation framework of \Cref{ch:eval}. 
+Each section follows the same pattern: we first state the concrete settings, then report the results and the decision they lead to. 
+Tests are referenced by the identifiers introduced in \Cref{ch:eval} (T1--T7).
+---actually reference the latex identifiers like for equations
 
-For all experiments we select the region of interest and retrieve the state corresponding at the start of the heatwave reaching the highest temperatures over the mask with selection criteria being the highest rolling window sum over 5 days.  
-
-\section{Flow-time evaluation}\label{sec:exp-flow}
+\section{Flow-time evaluation}
+\label{sec:exp-flow}
 
 \subsection{Setup}
 
-Here we assess the performance of the three proposed guidance algorithms with following setup:
+We first investigate how the placement of guidance within the generative flow
+affects target realization. To isolate the effect of flow time, we keep the
+target region and intensity fixed while varying the atmospheric starting state
+and stochastic realization. We use the following setup:
+
 \begin{itemize}[noitemsep]
-    \item 3 different starting states with different masks (Europe, America, Australia)
-    \item N=2, M=3
-    \item 2 intensity levels (+0.25\%, +0.75\%)
-    \item 2 a\_t schedules (spike, closegap($\eta=1$))
+    \item one fixed target mask over Europe;
+    \item three different atmospheric starting states;
+    \item $N=1$ weather step and $M=3$ ensemble members;
+    \item one target intensity of $+0.25\%$;
+    \item three single-step guidance profiles:
+    $\texttt{spike@1}$, $\texttt{spike@3}$, $\texttt{spike@6}$, $\texttt{spike@12}$, $\texttt{spike@24}$.
 \end{itemize}
 
+Each spike profile applies guidance at only one flow step, allowing early,
+intermediate, and late interventions to be compared directly. The guidance
+gain $w_n$ is optimized independently for each experiment using the
+target-realization algorithm described in \Cref{sec:target-realization}.
+The resulting design comprises $3\times3\times5=45$ guided experiments.
+
+Given the results of this first test, we now test something related.
+The question is then not only during which phase of the guidance it's most appropriate to guide,
+but whether to spread the guidance over multiple steps would be benefitial.
+We test this by defining a\_t to be interpolated between spike 1-3, 3-6, ... .
+
+Of course optimizing this would be most appropriate. 
+What we are trying to do here is to observe empirically whether some properties emerge before defering future research to the development of an appropriate algorithm, which could use this information for initialization. 
 
 \subsection{Achievement tests}
 % T1 convergence, T2 stability, T3 trajectory deviation.

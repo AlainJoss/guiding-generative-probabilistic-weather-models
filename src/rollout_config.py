@@ -51,7 +51,7 @@ def string_to_datetime(timestamp: str):
 
 
 # fields (de)serialized as datetime <-> string in to_dict/from_dict
-DATETIME_FIELDS = ("START_TS", "WINDOW_START", "WINDOW_END", "HEATWAVE_START", "HEATWAVE_END")
+DATETIME_FIELDS = ("START_TS",)
 
 
 @dataclass
@@ -60,13 +60,7 @@ class RolloutConfig:
     M: int | None = None
     N: int | None = None
     T: int | None = None  # number of flow/sampling steps (lower = faster, for testing)
-    START_TS: datetime | None = None  # rollout initial condition (= WINDOW_START for the earliest start)
-
-    # event context (same across all per-start subdir configs; describe the heatwave + padded window)
-    WINDOW_START: datetime | None = None  # heatwave_start - N_minus
-    WINDOW_END: datetime | None = None  # heatwave_end + N_plus (= common END_TS for the start sweep)
-    HEATWAVE_START: datetime | None = None
-    HEATWAVE_END: datetime | None = None
+    START_TS: datetime | None = None  # rollout initial condition (one of the outer config's STARTS dates)
 
     PARTITION: str | None = None
     LEVEL: int | None = None
