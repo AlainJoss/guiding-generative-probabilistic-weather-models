@@ -47,7 +47,14 @@ def iter_sweeps(sweep_params: dict[str, list]) -> Iterator[dict]:
     specific_axes = set().union(*[set(v) for v in GUIDANCE_METHOD_HYPERS.values()])
 
     for mode in sweep_params["GUIDANCE_MODE"]:
-        active = GUIDANCE_METHOD_HYPERS[mode]
+        active = GUIDANCE_METHOD_HYPERS.get(mode)
+        if active is None:
+            # stale rollout swept a guidance mode that no longer exists in the
+            # current registry (e.g. a renamed/removed method); skip it so the
+            # analysis notebooks can still read the modes that DO exist instead
+            # of crashing with KeyError. Never triggers during generation, where
+            # every swept mode must be a live method.
+            continue
         axis_values = []
         for k in all_keys:
             if k == "GUIDANCE_MODE":

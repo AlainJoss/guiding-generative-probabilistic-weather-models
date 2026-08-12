@@ -325,6 +325,7 @@ def _(
     partition,
     rollout_id,
     save_config_button,
+    spread_modes,
     sweep_ranges,
     timestamp,
     var,
@@ -354,11 +355,12 @@ def _(
             dump_json(config.to_dict(), rollout_dir / "config.json")
 
             _rv = sweep_ranges.value
+            _a_t_modes = list(dict.fromkeys(list(a_t_mode_select.value) + spread_modes))
             sweep = {
                 "GUIDANCE_MODE": list(guidance_mode_select.value),
                 "GUI_REF": list(gui_ref_select.value),
                 "MASK_MODE": list(mask_mode_select.value),
-                "a_t_mode": list(a_t_mode_select.value) or ["gap-closing"],
+                "a_t_mode": _a_t_modes or ["gap-closing"],
                 "mask_shift": [_d if _d == "none" else f"{_d}@{int(mask_shift_px_slider.value)}"
                                for _d in (list(mask_shift_select.value) or ["none"])],
                 "GUIDANCE_DELTA": delta_trajectories,
@@ -1422,6 +1424,7 @@ def _(
     mask_shift_select,
     mo,
     notebook_mode,
+    spread_widget,
     sweep_ranges,
 ):
     # shown only for the modes that use them (see GUIDANCE_METHOD_HYPERS)
@@ -1441,10 +1444,13 @@ def _(
     _ms_vals = [_d if _d == "none" else f"{_d}@{int(mask_shift_px_slider.value)}"
                 for _d in (list(mask_shift_select.value) or ["none"])]
 
+    # spread@ preview now lives per-row inside spread_widget (see the spread build cell)
+
     hypers_widget = mo.vstack([
         mo.md("## Sweep"),
         mo.md("**Common**:"),
         mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, a_t_mode_select], justify="start"),
+        spread_widget,
         _sweep_row("sigma_div"),
         mo.hstack([mask_shift_select, mask_shift_px_slider, mo.md(f"-> `{_ms_vals}`")],
                   justify="start", align="center"),
@@ -4667,6 +4673,12 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     mask_mode_select = mo.ui.multiselect(MASK_MODES, value=["BBOX"], label="MASK_MODE: ")
     a_t_mode_select = mo.ui.multiselect(A_T_MODES, value=["gap-closing"], label="A_T_MODE: ")
 
+    # spread@{start}-{end}: linear ramp 1->0 over the flow window [start,end], 0 outside (eta
+    # unused). Author how MANY windows here (like the target-percentage profiles); each window's
+    # [start,end] is a range slider in its own row (spread_range_controls) shown with a mini
+    # profile, and appended to a_t_mode at save time.
+    n_spreads_slider = mo.ui.slider(0, 8, step=1, value=0, label="spread@ windows: ", show_value=True, debounce=True)
+
     # numeric axes -> (start, stop, log_scale, integer)
     # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
     NUMERIC_AXES = {
@@ -4713,8 +4725,67 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         gui_ref_select,
         guidance_mode_select,
         mask_mode_select,
+        n_spreads_slider,
         sweep_ranges,
     )
+
+
+@app.cell
+def _(config, mo, n_spreads_slider, notebook_mode):
+    # per-window range sliders: each picks a [start, end] flow-step window for one spread@ mode.
+    # Recreated when the count changes (values reset to the full window), like the delta controls.
+    if notebook_mode == "guided_rollout":
+        _T = int(config.T or 25)
+        spread_range_controls = mo.ui.dictionary({
+            f"{_i}.range": mo.ui.range_slider(1, _T, step=1, value=[1, _T],
+                                              label=f"window {_i} [t]: ", show_value=True, debounce=True)
+            for _i in range(int(n_spreads_slider.value))
+        })
+    else:
+        spread_range_controls = mo.ui.dictionary({})
+    return (spread_range_controls,)
+
+
+@app.cell
+def _(
+    a_t_profile,
+    config,
+    mo,
+    n_spreads_slider,
+    notebook_mode,
+    plt,
+    spread_range_controls,
+):
+    # build spread@ modes from the range sliders, each row shown with its own mini 1->0 profile
+    if notebook_mode == "guided_rollout":
+        _T = int(config.T or 25)
+        _sv = spread_range_controls.value
+        _modes = []
+        _srows = []
+        for _i in range(int(n_spreads_slider.value)):
+            _lo, _hi = _sv[f"{_i}.range"]
+            _lo, _hi = int(min(_lo, _hi)), int(max(_lo, _hi))
+            _mode = f"spread@{_lo}-{_hi}"
+            _modes.append(_mode)
+            _prof = a_t_profile(_mode, 1.0, _T)   # eta ignored for spread@
+            _pf, _pax = plt.subplots(figsize=(2.6, 0.8), dpi=100)
+            _pax.plot(range(1, _T + 1), _prof, "-", color="#e42536", linewidth=1.2)
+            _pax.fill_between(range(1, _T + 1), _prof, color="#e42536", alpha=0.15)
+            _pax.set_ylim(-0.05, 1.05); _pax.set_xlim(1, _T)
+            _pax.set_xticks([]); _pax.set_yticks([]); _pax.set_title(_mode, fontsize=7)
+            for _s in _pax.spines.values():
+                _s.set_visible(False)
+            _pf.tight_layout(pad=0.1)
+            _srows.append(mo.hstack([spread_range_controls[f"{_i}.range"], mo.as_html(_pf)],
+                                    justify="start", align="center"))
+            plt.close(_pf)
+        # identical windows collapse to one sweep point (order preserved)
+        spread_modes = list(dict.fromkeys(_modes))
+        spread_widget = mo.vstack([n_spreads_slider, *_srows], align="start")
+    else:
+        spread_modes = []
+        spread_widget = None
+    return spread_modes, spread_widget
 
 
 @app.cell(hide_code=True)

@@ -1,12 +1,12 @@
 import marimo
 
-__generated_with = "0.23.13"
+__generated_with = "0.23.15"
 app = marimo.App(width="full")
 
 
 @app.cell
 def _():
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from pathlib import Path
 
     import marimo as mo
@@ -15,35 +15,39 @@ def _():
 
     from src.ui.comparison import (
         channel,
-        clean_pred_branches,
-        clean_pred_trajectory,
-        gt_states,
+        clean_pred_branches_primitive,
+        clean_pred_trajectory_primitive,
         load_rollout,
         open_store,
         residual_scaler,
         select_point,
         sweep_points,
     )
-    from src.utils import get_gt_rollout, get_rollout_ids
+    from src.pca_basis import mask_bbox, ensure_basis, project, cloud_sample
+    from src.utils import get_gt_rollout, get_rollout_ids, get_rollout_dir, find_era5_input
 
     return (
         Path,
         channel,
-        clean_pred_branches,
-        clean_pred_trajectory,
+        clean_pred_branches_primitive,
+        clean_pred_trajectory_primitive,
+        cloud_sample,
         datetime,
+        ensure_basis,
+        find_era5_input,
         get_gt_rollout,
+        get_rollout_dir,
         get_rollout_ids,
-        gt_states,
         load_rollout,
+        mask_bbox,
         mo,
         np,
         open_store,
         plt,
+        project,
         residual_scaler,
         select_point,
         sweep_points,
-        timedelta,
     )
 
 
@@ -63,40 +67,61 @@ def _(mo):
 
 @app.cell
 def _(get_rollout_ids, mo):
-    rollout_ids = get_rollout_ids("gui")
-    rollout_dropdown = mo.ui.dropdown(rollout_ids, value=rollout_ids[0], label="rollout: ")
-    rollout_dropdown
+    # experiment selector (outer folder)
+    _ids = get_rollout_ids("gui")
+    _exp_ids = sorted({_r.split("/", 1)[0] for _r in _ids})
+    experiment_dropdown = mo.ui.dropdown(
+        _exp_ids, value=_exp_ids[0] if _exp_ids else None, label="experiment: ")
+    return (experiment_dropdown,)
+
+
+@app.cell
+def _(experiment_dropdown, get_rollout_ids, mo):
+    # rollout selector: the start_ts sub-folders under the selected experiment
+    _starts = [_r.split("/", 1)[1] for _r in get_rollout_ids("gui")
+               if "/" in _r and _r.split("/", 1)[0] == experiment_dropdown.value]
+    rollout_dropdown = mo.ui.dropdown(
+        _starts, value=_starts[0] if _starts else None, label="rollout: ")
+    mo.hstack([experiment_dropdown, rollout_dropdown], justify="start", align="start")
     return (rollout_dropdown,)
+
+
+@app.cell
+def _(experiment_dropdown, rollout_dropdown):
+    # combine experiment + rollout selectors into "<exp>/<start_ts>"; a legacy single
+    # rollout has no start subfolder, so the experiment id IS the rollout id
+    rollout_id = (f"{experiment_dropdown.value}/{rollout_dropdown.value}"
+                  if rollout_dropdown.value else experiment_dropdown.value)
+    return (rollout_id,)
 
 
 @app.cell
 def _(
     channel,
-    clean_pred_branches,
-    clean_pred_trajectory,
+    clean_pred_branches_primitive,
+    clean_pred_trajectory_primitive,
+    cloud_sample,
     datetime,
+    ensure_basis,
+    find_era5_input,
     get_gt_rollout,
-    gt_states,
+    get_rollout_dir,
     load_rollout,
+    mask_bbox,
     np,
     open_store,
+    project,
     residual_scaler,
-    rollout_dropdown,
+    rollout_id,
     select_point,
     sweep_points,
-    timedelta,
 ):
-    # ===== rollout, latent helpers, reference cloud, PCA frame =====
-    rollout_dir, config, sweep_values, records, mask = load_rollout(rollout_dropdown.value)
+    # ===== rollout, latent helpers, persisted PCA basis =====
+    rollout_dir, config, sweep_values, records, mask = load_rollout(rollout_id)
     points = sweep_points(sweep_values, records)
     VAR, LEVEL, N_STEPS = config["VAR"], config["LEVEL"], config["N"]
     ROLLOUT_START = datetime.fromisoformat(config["START_TS"])
     RESID_SCALER = residual_scaler(config["PARTITION"], VAR, LEVEL)
-
-    def mask_bbox(mask_2d, rel_threshold=0.5):
-        """Row/col slices of the mask footprint at rel_threshold * max."""
-        rows, cols = np.where(np.asarray(mask_2d) >= rel_threshold * float(np.asarray(mask_2d).max()))
-        return slice(int(rows.min()), int(rows.max()) + 1), slice(int(cols.min()), int(cols.max()) + 1)
 
     BBOX = mask_bbox(mask)
 
@@ -105,42 +130,34 @@ def _(
         field = np.asarray(field, dtype=float)
         return field[..., BBOX[0], BBOX[1]].reshape(*field.shape[:-2], -1)
 
-    def gt_reference_latents(days_back):
-        """Daily GT states ending just before the rollout start (shrinks if the store is short)."""
-        err = None
-        for days in (days_back, days_back // 2, days_back // 4, 7):
-            try:
-                da = channel(get_gt_rollout(days, ROLLOUT_START - timedelta(days=days + 2))[VAR], config)
-                return bbox_latent(da.values)
-            except Exception as e:
-                err = e
-        raise RuntimeError(f"no GT cloud loadable: {err}")
-
-    def pca_frame(reference, n_components=3):
-        """PCA basis of `reference` rows; returns (project, explained_variance_ratio)."""
-        mu = reference.mean(axis=0)
-        _, sv, vt = np.linalg.svd(reference - mu, full_matrices=False)
-        basis = vt[:n_components].T
-        return (lambda x: (x - mu) @ basis), (sv ** 2 / (sv ** 2).sum())[:n_components]
-
-    pca_cloud = gt_reference_latents(60)
-    pca_project, pca_evr = pca_frame(pca_cloud)
+    # persisted PCA basis (2020 climatology), reused across experiments -- no rollout-relative refit
+    _basis = ensure_basis(VAR, LEVEL, BBOX, "era5")
+    pca_project = lambda x: project(_basis, x)
+    pca_evr = _basis.evr
+    pca_cloud = cloud_sample(VAR, LEVEL, BBOX, "era5", max_points=400)
     pca_cloud_proj = pca_project(pca_cloud)
-    pca_targets = bbox_latent(np.asarray(channel(gt_states(config)[VAR], config).isel(time=slice(1, None)), dtype=float))
+    # GT targets from this experiment's era5_input.nc (valid days 1..N)
+    _gt_input = find_era5_input(get_rollout_dir(rollout_id))
+    pca_targets = bbox_latent(np.asarray(channel(
+        get_gt_rollout(config["N"] + 1, ROLLOUT_START, input_path=_gt_input)[VAR], config
+    ).isel(time=slice(1, None)), dtype=float))
     try:
-        pca_ung_finals = bbox_latent(np.asarray(channel(open_store(rollout_dir, "ung", VAR), config).isel(m=0), dtype=float))
+        _ung = channel(open_store(rollout_dir, "ung", VAR), config).isel(m=0)
+        if "t" in _ung.dims:
+            _ung = _ung.isel(t=-1)
+        pca_ung_finals = bbox_latent(np.asarray(_ung, dtype=float))
     except FileNotFoundError:
         pca_ung_finals = None
 
     def guided_latents(sel, m, n):
-        """Guided clean-pred trajectory as bbox latents (T, F), or None without records."""
-        traj = clean_pred_trajectory(rollout_dir, records, sel, m, n, VAR, RESID_SCALER, level=LEVEL)
+        """Guided clean-pred trajectory as bbox latents (T, F)."""
+        traj = clean_pred_trajectory_primitive(rollout_dir, sel, m, n, VAR, RESID_SCALER, level=LEVEL)
         return None if traj is None else bbox_latent(traj)
 
     def branch_latents(sel, m, n):
-        """(gui_ung_over_t, gui) bbox-latent pair: raw estimate vs with the
-        step-t guidance kick subtracted. None without a lambda record."""
-        pair = clean_pred_branches(rollout_dir, records, sel, m, n, VAR, RESID_SCALER, level=LEVEL)
+        """(gui_ung_over_t, gui) bbox-latent pair (convention-robust primitives):
+        base_t -> kick_t is the GUIDANCE step, kick_t -> base_{t+1} the PUSHBACK (pull-back)."""
+        pair = clean_pred_branches_primitive(rollout_dir, sel, m, n, VAR, RESID_SCALER, level=LEVEL)
         return None if pair is None else (bbox_latent(pair[0]), bbox_latent(pair[1]))
 
     def twin_latents(sel, m, n):
@@ -396,21 +413,13 @@ def _(
 
 
 @app.cell
-def _(
-    Path,
-    mo,
-    n_slider,
-    pca_fig,
-    pca_fig2,
-    rollout_dropdown,
-    save_fig_button,
-):
+def _(Path, mo, n_slider, pca_fig, pca_fig2, rollout_id, save_fig_button):
     # ===== thesis-figure export (high-dpi PNG + vector PDF) =====
     _msg = "export the 3D figure at the current view"
     if save_fig_button.value:
         _out_dir = Path("figures")
         _out_dir.mkdir(exist_ok=True)
-        _stem = _out_dir / f"pca_trajectories_{rollout_dropdown.value.replace(':', '-')}_n{n_slider.value}"
+        _stem = _out_dir / f"pca_trajectories_{rollout_id.replace('/', '_').replace(':', '-')}_n{n_slider.value}"
         _saved = []
         for _f, _suffix in ((pca_fig, ""), (pca_fig2, "_pingpong")):
             if _f is None:

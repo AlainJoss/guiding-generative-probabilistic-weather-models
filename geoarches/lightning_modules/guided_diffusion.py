@@ -23,6 +23,10 @@ A_T_MODES = [
     # T-1 for the max T=25 flow steps (the last tick T is never guided); larger k on a
     # shorter run is clipped to the last tick.
     *[f"spike@{k}" for k in range(1, 25)],
+    # spread@{start}-{end}: linear ramp 1 -> 0 over the flow-step window [start, end]
+    # (1-based), ZERO outside (eta ignored). Parsed dynamically by alpha_t_profile -- NOT
+    # enumerated here; the guided_rollout UI builds one string per selected range.
+    # Distributed analogue of spike@k for the spike-vs-spread comparison.
 ]
 
 
@@ -44,6 +48,9 @@ def alpha_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
       spike@k     guide at ONE step: the k-th flow step (1-based, so spike@1 is
                   the first step); eta is IGNORED, ZERO elsewhere; k past the
                   last tick is clipped to it (never guided by the sampler)
+      spread@a-b  linear ramp 1 -> 0 over the flow-step window [a, b] (1-based); ZERO
+                  outside; eta is IGNORED; a==b -> spike at a. Distributed analogue of
+                  spike@k for the spike-vs-spread comparison.
     "-spec" suffix: time reversal (monotone modes) / vertical flip (gaussian).
     """
     specular = mode.endswith("-spec")
@@ -57,6 +64,20 @@ def alpha_t_profile(mode: str, eta: float, T: int, floor: float = 0.01):
         a = np.zeros(T)
         a[int(np.clip(k - 1, 0, T - 1))] = 1.0
         return a[::-1] if specular else a
+
+    if base.startswith("spread@"):
+        _lo, _hi = base.split("@", 1)[1].split("-")
+        s0 = int(np.clip(int(_lo) - 1, 0, T - 1))   # 1-based -> 0-based flow index
+        e0 = int(np.clip(int(_hi) - 1, 0, T - 1))
+        if e0 < s0:
+            s0, e0 = e0, s0
+        a = np.zeros(T)
+        if e0 == s0:
+            a[s0] = 1.0                               # degenerate window -> spike at start
+        else:
+            w = np.arange(s0, e0 + 1)
+            a[w] = 1.0 - (w - s0) / (e0 - s0)         # linear ramp 1 -> 0 over the window
+        return a[::-1] if specular else a            # 0 outside the window; eta unused
 
     if base == "spike":
         a = np.zeros(T)
