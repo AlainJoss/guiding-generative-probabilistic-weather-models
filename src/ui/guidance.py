@@ -1450,7 +1450,7 @@ def _(
         mo.md("## Sweep"),
         mo.md("**Common**:"),
         mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, a_t_mode_select], justify="start"),
-        spread_widget,
+        *([spread_widget] if spread_widget is not None else []),
         _sweep_row("sigma_div"),
         mo.hstack([mask_shift_select, mask_shift_px_slider, mo.md(f"-> `{_ms_vals}`")],
                   justify="start", align="center"),
@@ -4766,13 +4766,18 @@ def _(
             _lo, _hi = _sv[f"{_i}.range"]
             _lo, _hi = int(min(_lo, _hi)), int(max(_lo, _hi))
             _mode = f"spread@{_lo}-{_hi}"
-            _modes.append(_mode)
-            _prof = a_t_profile(_mode, 1.0, _T)   # eta ignored for spread@
+            _prof = a_t_profile(_mode, 1.0, _T).copy()   # eta ignored for spread@
+            _prof[-1] = 0.0                              # the last flow step is never guided
+            _active = bool(_prof.any())                  # False -> window sits only on the last tick
+            if _active:
+                _modes.append(_mode)                     # else a silent no-op -> not swept (like spike@ cap)
+            _col = "#e42536" if _active else "#bbbbbb"
             _pf, _pax = plt.subplots(figsize=(2.6, 0.8), dpi=100)
-            _pax.plot(range(1, _T + 1), _prof, "-", color="#e42536", linewidth=1.2)
-            _pax.fill_between(range(1, _T + 1), _prof, color="#e42536", alpha=0.15)
+            _pax.plot(range(1, _T + 1), _prof, "-", color=_col, linewidth=1.2)
+            _pax.fill_between(range(1, _T + 1), _prof, color=_col, alpha=0.15)
             _pax.set_ylim(-0.05, 1.05); _pax.set_xlim(1, _T)
-            _pax.set_xticks([]); _pax.set_yticks([]); _pax.set_title(_mode, fontsize=7)
+            _pax.set_xticks([]); _pax.set_yticks([])
+            _pax.set_title(_mode if _active else f"{_mode} (no guidance)", fontsize=7)
             for _s in _pax.spines.values():
                 _s.set_visible(False)
             _pf.tight_layout(pad=0.1)
