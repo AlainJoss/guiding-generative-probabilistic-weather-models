@@ -104,3 +104,18 @@ Open questions:
 
 Bug reports:
 - domain all has another bug
+
+
+Alternative loss:
+- **Top-\(p\%\) mean / spatial CVaR**
+  - Average the hottest \(p\%\) of pixels inside the mask.
+  - Captures extreme intensity without relying on a single maximum.
+  $$
+  S_p(x)
+  =
+  \frac{1}{k}
+  \sum_{i \in \operatorname{TopK}(x_{\mathcal M},\,k)} x_i,
+  \qquad
+  k = \left\lceil p\,|\mathcal M| \right\rceil
+  $$
+  - Example: \(p=0.05\) gives the mean temperature of the hottest 5% of the masked region.

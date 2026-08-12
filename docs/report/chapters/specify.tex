@@ -119,6 +119,35 @@ sphere.
 This follows the latitude-weighting convention used in WeatherBench~2
 \parencite{rasp2024weatherbench2}.
 
+Figure~\ref{fig:target-mask-example} illustrates the resulting area-weighted
+mask for an example target region over South America. The rectangular support
+is constant in longitude, while the normalized mask weights vary with latitude
+according to the physical area represented by each grid cell.
+
+\begin{figure}[t]
+    \centering
+    \begin{subfigure}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=5.2cm]{figures/mask_flat.png}
+        \caption{Data-space representation.}
+        \label{fig:target-mask-flat}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[c]{0.48\textwidth}
+        \centering
+        \includegraphics[height=5.2cm]{figures/mask_globe.png}
+        \caption{Projected representation.}
+        \label{fig:target-mask-globe}
+    \end{subfigure}
+
+    \caption{
+        Example of the spatial target mask. The rectangular support determines
+        which grid cells are included, while the latitude-dependent weights
+        account for differences in physical grid-cell area.
+    }
+    \label{fig:target-mask-example}
+\end{figure}
+
 Using a binary spatial support also makes the target region explicit.
 Within the selected region, cells differ only through their physical area and
 are otherwise treated uniformly.
@@ -149,6 +178,9 @@ method from the data-driven targets used for extreme-event storylines.
 
 
 \subsection{Controlled targets for method evaluation}
+
+TODO: explain here that we compute the percentage wrt to the ensemble average to retain the ensemble distribution over time.
+Otherwise all members collapse to a single trajectory.
 
 When evaluating the guidance algorithm, our primary objective is to understand
 how it behaves as the requested deviation from the original forecast becomes

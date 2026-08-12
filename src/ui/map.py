@@ -14,8 +14,6 @@ import geopandas as gpd
 import geodatasets
 from wigglystuff import ChartPuck
 
-plt.rcParams["font.family"] = "Menlo"    # INter
-
 
 # @functools.lru_cache(maxsize=1)
 def _get_world():
@@ -275,21 +273,25 @@ def draw_base_map(
     value_lat_min=None,
     value_lat_max=None,
 ):
-    im = ax.pcolormesh(
-        lon_e_plot,
-        lat_e_plot,
+    # imshow, not pcolormesh: the display grid is uniform, so imshow renders it as a solid
+    # raster image. pcolormesh antialiases each cell's edges, leaving white seams (the
+    # "gridlines") between cells when the field is downsampled at low dpi/zoom -- and
+    # edgecolors="face" only hides them at high dpi. imshow has no such seams at any dpi/zoom.
+    im = ax.imshow(
         array_2d_plot,
         cmap=cmap,
         norm=norm,
-        shading="flat",
-        # stroke each cell's border in its own face colour to fill the antialiasing
-        # seams between cells (the white gridlines); keep antialiasing on (setting it
-        # off would pixelate the outer edges).
-        edgecolors="face",
+        extent=(float(lon_e_plot[0]), float(lon_e_plot[-1]),
+                float(lat_e_plot[-1]), float(lat_e_plot[0])),   # (left, right, bottom, top)
+        origin="upper",            # row 0 == lat_e_plot[0] (90 N) at the top
+        interpolation="nearest",
+        aspect="auto",             # respect the explicit set_xlim/set_ylim below (not 1:1)
     )
     ax.set_xlim(float(lon_e_plot[0]), float(lon_e_plot[-1]))
     ax.set_ylim(float(lat_e_plot[-1]), float(lat_e_plot[0]))
     ax.margins(0)
+    ax.grid(False)   # the style's gridlines (zorder 2) sit above the imshow (zorder 0) and
+                     # would paint a lon/lat cross over the field; a field map doesn't need them
 
     if world is None:
         world = _get_world()
@@ -484,7 +486,6 @@ def make_interactive_map(
     zoom_center_lat=0.0,
 ):
     # single puck = rectangle CENTER; side lengths come from the sliders
-    plt.rcParams["font.family"] = "Menlo"
     grid = prepare_era5_plot_grid(array_2d)
     norm = make_norm(grid["array_plot"], vmin=vmin, vmax=vmax, center=center)
     world = _get_world()

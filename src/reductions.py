@@ -34,6 +34,7 @@ from src.utils import (
     get_guidance_schedule,
     get_config,
     get_gt_rollout,
+    find_era5_input,
     sweep_coord_label,
     append_to_zarr,
     ensure_rollout_dir,
@@ -82,7 +83,10 @@ def _rollout_ctx(rollout_id):
         handles["res"] = None
     gui = handles["gui"]
     res_scale_map = _res_scale_map(handles["grads"].level)
-    gt_rollout = get_gt_rollout(config.N + 1, config.START_TS)
+    # GT from this experiment's downloaded era5_input.nc (has the exact dates; rolled to
+    # the mask convention inside get_gt_rollout), else the global arches store.
+    gt_rollout = get_gt_rollout(config.N + 1, config.START_TS,
+                                input_path=find_era5_input(get_rollout_dir(rollout_id)))
     gt_n_xr = (
         gt_rollout.isel(time=slice(1, None))
         .rename({"time": "n"})

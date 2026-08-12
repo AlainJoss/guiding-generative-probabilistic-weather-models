@@ -54,7 +54,8 @@ def rollout(
         guidance_type = config.GUIDANCE_MODE
         # GT reference: ground-truth field per step (member-independent). gt rollout holds
         # N+1 states (initial + N forecasts); guidance step n's valid time is index n+1.
-        gt_ds = get_gt_rollout(config.N + 1, config.START_TS) if config.GUI_REF == "GT" else None
+        gt_ds = (get_gt_rollout(config.N + 1, config.START_TS, input_path=input_path)
+                 if config.GUI_REF == "GT" else None)
         guidance_kwargs = build_guidance_kwargs(guidance_type, sweep_params)
 
         # baseline masked means anchoring the target trajectory A = (1 + p_n) * base:

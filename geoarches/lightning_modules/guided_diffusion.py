@@ -19,8 +19,10 @@ from geoarches.paths import STATS_PATH
 A_T_MODES = [
     "gaussian", "linear", "logistic", "exponential", "gap-closing", "spike",
     "gaussian-spec", "linear-spec", "logistic-spec", "exponential-spec", "gap-closing-spec", "spike-spec",
-    # spike@k: guide ONLY at the k-th flow step (1-based; eta is ignored)
-    *[f"spike@{k}" for k in range(1, 11)],
+    # spike@k: guide ONLY at the k-th flow step (1-based; eta is ignored). Offered up to
+    # T-1 for the max T=25 flow steps (the last tick T is never guided); larger k on a
+    # shorter run is clipped to the last tick.
+    *[f"spike@{k}" for k in range(1, 25)],
 ]
 
 

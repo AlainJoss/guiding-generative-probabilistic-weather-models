@@ -480,7 +480,16 @@ def tensor_timestamp_to_string(
 # TODO: this is not a good pattern
 #       I should select lazyly and then compute() (or load() ) such that I don't have to load a 30GB file in memory
 #       Need to convert the netcdf to zarr  
-def get_gt_rollout(N, timestamp):
+def get_gt_rollout(N, timestamp, input_path=None):
+    # Prefer this experiment's downloaded era5_input.nc (holds the exact dates); fall back
+    # to the global arches store otherwise.
+    if input_path is not None and Path(input_path).exists():
+        ds = xr.open_dataset(input_path)
+        # era5_input.nc is geographic (lon 0..358.5); arches_era5*.nc is Europe-rolled by
+        # shape//2. Roll the DATA (keep coord labels) so downstream masked means align with
+        # `mask`, which lives in the rolled convention. Verified roll = shape//2 (=120).
+        ds = ds.roll(longitude=ds.sizes["longitude"] // 2, roll_coords=False)
+        return get_N_states(ds, N, timestamp)
     ds = get_xr_dataset(timestamp.year)
     return get_N_states(ds, N, timestamp)
 

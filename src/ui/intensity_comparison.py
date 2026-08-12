@@ -96,23 +96,37 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(get_rollout_ids, mo, refresh_button):
-    # experiment: the requested id when present, else pick from what exists
+    # experiment selector (outer folder); the rollout (date sub-folder) is picked below
     if refresh_button.value:
         pass
 
     _ids = get_rollout_ids("gui")
+    _exp_ids = sorted({_r.split("/", 1)[0] for _r in _ids})
     _default = "2026-07-28_00:00:07"
-    rollout_dropdown = mo.ui.dropdown(
-        _ids, value=(_default if _default in _ids else (_ids[0] if _ids else None)),
+    experiment_dropdown = mo.ui.dropdown(
+        _exp_ids, value=(_default if _default in _exp_ids else (_exp_ids[0] if _exp_ids else None)),
         label="experiment: ",
     )
-    mo.hstack([rollout_dropdown, refresh_button], justify="start", align="center")
+    mo.hstack([experiment_dropdown, refresh_button], justify="start", align="center")
+    return (experiment_dropdown,)
+
+
+@app.cell(hide_code=True)
+def _(experiment_dropdown, get_rollout_ids, mo):
+    # rollout selector: the start_ts sub-folders under the selected experiment
+    _starts = [_r.split("/", 1)[1] for _r in get_rollout_ids("gui")
+               if "/" in _r and _r.split("/", 1)[0] == experiment_dropdown.value]
+    rollout_dropdown = mo.ui.dropdown(
+        _starts, value=_starts[0] if _starts else None, label="rollout: ",
+    )
+    rollout_dropdown
     return (rollout_dropdown,)
 
 
 @app.cell(hide_code=True)
-def _(get_config, get_sweep_dict, rollout_dropdown):
-    ROLLOUT_ID = rollout_dropdown.value
+def _(experiment_dropdown, get_config, get_sweep_dict, rollout_dropdown):
+    ROLLOUT_ID = (f"{experiment_dropdown.value}/{rollout_dropdown.value}"
+                  if rollout_dropdown.value else experiment_dropdown.value)
     config = get_config(ROLLOUT_ID)
     SWEEP = get_sweep_dict(ROLLOUT_ID)
     N_STEPS = int(config.N)
@@ -166,6 +180,7 @@ def _(sweep_params_row_ic):
 
 @app.cell(hide_code=True)
 def _(
+    GT_INPUT,
     SWEEP,
     config,
     get_gt_rollout,
@@ -230,7 +245,7 @@ def _(
                 return _base_cache[_key]
             _b2 = None
             if config.GUI_REF == "GT":
-                _gt_t = get_gt_rollout(config.N + 1, config.START_TS)[config.VAR]
+                _gt_t = get_gt_rollout(config.N + 1, config.START_TS, input_path=GT_INPUT)[config.VAR]
                 if "level" in _gt_t.dims:
                     _gt_t = _gt_t.sel(level=config.LEVEL)
                 _b2 = np.asarray((_gt_t.astype("float64") * _mda2)
@@ -460,6 +475,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
+    GT_INPUT,
     LEVEL_VARS,
     ROLLOUT_ID,
     SURFACE_PAIR,
@@ -570,7 +586,7 @@ def _(
     _gui_ds0 = stores["gui"]
     _mw_ic = xr.DataArray(mask_np, dims=("latitude", "longitude"),
                           coords={"latitude": _gui_ds0.latitude, "longitude": _gui_ds0.longitude})
-    _ic0 = get_gt_rollout(config.N + 1, config.START_TS).isel(time=0).assign_coords(
+    _ic0 = get_gt_rollout(config.N + 1, config.START_TS, input_path=GT_INPUT).isel(time=0).assign_coords(
         latitude=_gui_ds0.latitude, longitude=_gui_ds0.longitude, level=_gui_ds0.level)
     gt_ic_wnorm_ic = xnorm_ic.normalize((_ic0 * _mw_ic).sum(("latitude", "longitude")) / float(_mw_ic.sum()))
 
@@ -681,6 +697,7 @@ def _(
 
 @app.cell(hide_code=True)
 def _(
+    GT_INPUT,
     add_map_stats_ic,
     base_sel,
     config,
@@ -709,7 +726,7 @@ def _(
     _lat_c = 0.5 * (mask_corners_ic[2] + mask_corners_ic[3])
     if _lon_c > 180.0:
         _lon_c -= 360.0
-    _gt_roll = get_gt_rollout(config.N + 1, config.START_TS)
+    _gt_roll = get_gt_rollout(config.N + 1, config.START_TS, input_path=GT_INPUT)
     _wsl = np.asarray(get_slices(_gt_roll, config.PARTITION, config.VAR, config.LEVEL), dtype=float)
     _wsl, _w_unit = to_display_units(_wsl, config.VAR)
     _wn = int(weather_n_slider.value)
@@ -763,6 +780,7 @@ def _(
 @app.cell(hide_code=True)
 def _(
     DELTAS,
+    GT_INPUT,
     N_STEPS,
     config,
     delta_labels,
@@ -809,7 +827,7 @@ def _(
         _fin = lambda _ds: _ds.isel(t=-1) if "t" in _ds.dims else _ds
         _fig, _ax = plt.subplots(figsize=(11, 5.2), dpi=dpi_slider.value)
         _xs = np.arange(0, N_STEPS + 1)
-        _gt_roll2 = get_gt_rollout(config.N + 1, config.START_TS)
+        _gt_roll2 = get_gt_rollout(config.N + 1, config.START_TS, input_path=GT_INPUT)
         _ic_val = _mm_traj(_gt_roll2, -1, _m)  # shared initial state = the n=0 anchor
         _x_pad = 0.06 * max(N_STEPS, 1)
         _guf0 = _fin(_selp2(stores["gui_ung"], delta_sel(delta_order[0])))
@@ -898,7 +916,7 @@ def _(
         _x_pad = 0.06 * max(N_STEPS, 1)
         # base anchoring A = (1+phi_n)*base -- SAME numbers as the experiments
         # table / rollout.py: the independent ung.zarr (per member) or gt (GT ref)
-        _base_ds = (get_gt_rollout(config.N + 1, config.START_TS)
+        _base_ds = (get_gt_rollout(config.N + 1, config.START_TS, input_path=GT_INPUT)
                     if config.GUI_REF == "GT" else _fin(stores["ung"]))
 
         def _gaps(_gui_i, _i, _mm):
@@ -1012,6 +1030,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
+    GT_INPUT,
     LEVELS_DICT,
     N_STEPS,
     SURFACE_PAIR,
@@ -1036,7 +1055,7 @@ def _(
     # states convention: surface pair first (if any), then levels bottom -> top.
     # sequential ramp: lightest = lowest peak, darkest = highest (monotone)
     _ICOLORS = [plt.get_cmap("Reds")(_x) for _x in np.linspace(0.35, 0.95, max(len(delta_order), 2))]
-    _gt = get_gt_rollout(config.N + 1, config.START_TS)
+    _gt = get_gt_rollout(config.N + 1, config.START_TS, input_path=GT_INPUT)
     from src.ui.map import to_display_units as _tdu
     _mask_core = mask_np >= 0.5 * float(mask_np.max())
 
@@ -2003,18 +2022,19 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
-    # ===== latent trajectories: rollout records, bbox latents, PCA frame =====
-    from datetime import datetime as _lt_datetime, timedelta as _lt_timedelta
+    # ===== latent trajectories: rollout records, bbox latents, PERSISTED PCA basis =====
+    from datetime import datetime as _lt_datetime
     from src.ui.comparison import (
         channel as _lt_channel,
-        clean_pred_branches as _lt_branches,
-        clean_pred_trajectory as _lt_trajf,
-        gt_states as _lt_gt_states,
+        clean_pred_branches_primitive as _lt_branches,
+        clean_pred_trajectory_primitive as _lt_trajf,
         load_rollout as _lt_load_rollout,
         open_store as _lt_open_store,
         select_point as _lt_select_point,
         sweep_points as _lt_sweep_points,
     )
+    from src.pca_basis import mask_bbox as _lt_mask_bbox, ensure_basis as _lt_ensure_basis, project as _lt_project, cloud_sample as _lt_cloud_sample
+    from src.utils import find_era5_input as _lt_find_era5, get_rollout_dir as _lt_get_rollout_dir
 
     _lt_dir, _lt_cfg, lt_sweep_values, _lt_records, _lt_mask = _lt_load_rollout(ROLLOUT_ID)
     lt_points = _lt_sweep_points(lt_sweep_values, _lt_records)
@@ -2022,10 +2042,7 @@ def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
     _lt_start = _lt_datetime.fromisoformat(_lt_cfg["START_TS"])
     _lt_c = residual_scaler(_lt_cfg["PARTITION"], _lt_VAR, _lt_LEVEL)
 
-    # bbox footprint of the mask at half max -> flattened feature vectors
-    _lt_rows, _lt_cols = np.where(np.asarray(_lt_mask) >= 0.5 * float(np.asarray(_lt_mask).max()))
-    _LT_BBOX = (slice(int(_lt_rows.min()), int(_lt_rows.max()) + 1),
-                slice(int(_lt_cols.min()), int(_lt_cols.max()) + 1))
+    _LT_BBOX = _lt_mask_bbox(_lt_mask)
 
 
     def lt_bbox_latent(_field):
@@ -2033,43 +2050,33 @@ def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
         return _field[..., _LT_BBOX[0], _LT_BBOX[1]].reshape(*_field.shape[:-2], -1)
 
 
-    def _lt_gt_cloud(_days_back):
-        # daily GT states ending just before the rollout start (shrinks if short)
-        _err = None
-        for _days in (_days_back, _days_back // 2, _days_back // 4, 7):
-            try:
-                _da = _lt_channel(get_gt_rollout(_days, _lt_start - _lt_timedelta(days=_days + 2))[_lt_VAR], _lt_cfg)
-                return lt_bbox_latent(_da.values)
-            except Exception as _e:
-                _err = _e
-        raise RuntimeError(f"no GT cloud loadable: {_err}")
-
-
-    lt_pca_cloud = _lt_gt_cloud(60)
-    _lt_mu = lt_pca_cloud.mean(axis=0)
-    _lt_u, _lt_sv, _lt_vt = np.linalg.svd(lt_pca_cloud - _lt_mu, full_matrices=False)
-    _lt_basis = _lt_vt[:3].T
-    lt_pca_project = lambda _x: (_x - _lt_mu) @ _lt_basis
-    lt_pca_evr = (_lt_sv ** 2 / (_lt_sv ** 2).sum())[:3]
+    # persisted PCA basis (2020 climatology), reused across experiments -- no rollout-relative refit
+    _lt_basis_obj = _lt_ensure_basis(_lt_VAR, _lt_LEVEL, _LT_BBOX, "era5")
+    lt_pca_project = lambda _x: _lt_project(_lt_basis_obj, _x)
+    lt_pca_evr = _lt_basis_obj.evr
+    lt_pca_cloud = _lt_cloud_sample(_lt_VAR, _lt_LEVEL, _LT_BBOX, "era5", max_points=400)
     lt_pca_cloud_proj = lt_pca_project(lt_pca_cloud)
+    # GT from this experiment's era5_input.nc (shared by every GT site in this notebook)
+    GT_INPUT = _lt_find_era5(_lt_get_rollout_dir(ROLLOUT_ID))
+    _lt_gtr = get_gt_rollout(_lt_cfg["N"] + 1, _lt_start, input_path=GT_INPUT)
     lt_pca_targets = lt_bbox_latent(np.asarray(
-        _lt_channel(_lt_gt_states(_lt_cfg)[_lt_VAR], _lt_cfg).isel(time=slice(1, None)), dtype=float))
+        _lt_channel(_lt_gtr[_lt_VAR], _lt_cfg).isel(time=slice(1, None)), dtype=float))
     try:
         _lt_ung = _lt_channel(_lt_open_store(_lt_dir, "ung", _lt_VAR), _lt_cfg).isel(m=0)
         if "t" in _lt_ung.dims:
-            _lt_ung = _lt_ung.isel(t=-1)  # independent unguided FINAL states
+            _lt_ung = _lt_ung.isel(t=-1)
         lt_pca_ung_finals = lt_bbox_latent(np.asarray(_lt_ung, dtype=float))
     except FileNotFoundError:
         lt_pca_ung_finals = None
 
 
     def lt_guided_latents(_sel, _m, _n):
-        _t = _lt_trajf(_lt_dir, _lt_records, _sel, _m, _n, _lt_VAR, _lt_c, level=_lt_LEVEL)
+        _t = _lt_trajf(_lt_dir, _sel, _m, _n, _lt_VAR, _lt_c, level=_lt_LEVEL)
         return None if _t is None else lt_bbox_latent(_t)
 
 
     def lt_branch_latents(_sel, _m, _n):
-        _p = _lt_branches(_lt_dir, _lt_records, _sel, _m, _n, _lt_VAR, _lt_c, level=_lt_LEVEL)
+        _p = _lt_branches(_lt_dir, _sel, _m, _n, _lt_VAR, _lt_c, level=_lt_LEVEL)
         return None if _p is None else (lt_bbox_latent(_p[0]), lt_bbox_latent(_p[1]))
 
 
@@ -2084,6 +2091,7 @@ def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
 
     print(f"cloud: {lt_pca_cloud.shape} | EVR(3): {float(lt_pca_evr.sum()):.3f} | runs: {len(lt_points)}")
     return (
+        GT_INPUT,
         lt_branch_latents,
         lt_delta_of,
         lt_guided_latents,

@@ -14,3 +14,5 @@ data_party_tricks.md
 skills-lock.json
 
 figures/
+# generated PCA bases (fit-once cache)
+local_data/pca_basis/

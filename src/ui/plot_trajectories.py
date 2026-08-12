@@ -431,7 +431,9 @@ def plot_trajectories(
                 )
                 y_values.append(_traj)
                 if annotate_target_guidance:
-                    _annotate_to_axis(_traj, colors["target_guidance"])
+                    # gap vs the unguided member (Δ^ung) on the plan too, matching the
+                    # guided-member annotation; the target is defined as A=(1+p)·unguided
+                    _annotate_to_axis(_traj, colors["target_guidance"], ung=unguided_member)
 
         # ------------------------------------------------------------
         # Mean rollouts

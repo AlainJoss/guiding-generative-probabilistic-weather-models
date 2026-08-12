@@ -115,6 +115,87 @@ def clean_pred_trajectory(rollout_dir, records, sel, m, n, var, c, level=None):
     return gui[None] + ((res + vfs) - z_final[None]) * c
 
 
+def clean_pred_trajectory_primitive(rollout_dir, sel, m, n, var, c, level=None):
+    """Guided clean-pred trajectory (T, lat, lon) from stored primitives, with NO lambda
+    records -- faithful under the new w*a*c/g_norm guidance convention (the lambda-based
+    `clean_pred_trajectory` above mis-scales it). Mirrors reductions.py:161-175:
+    z_T = (gui - gui_det)/c;  x_hat_t = gui + ((res_t + vfs_t) - z_T) * c. The final flow
+    step reproduces `gui` exactly (endpoint identity)."""
+    def _load(store):
+        da = select_point(open_store(rollout_dir, store, var), sel)
+        da = da.sel(level=level) if "level" in da.dims and level is not None else da
+        return np.asarray(da.isel(m=m, n=n), dtype=float)
+
+    res, vfs = _load("res"), _load("vfs")
+    gui, gui_det = _load("gui"), _load("gui_det")
+    z_T = (gui - gui_det) / c
+    return gui[None] + ((res + vfs) - z_T[None]) * c
+
+
+def guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=None):
+    """Per-flow-step velocities for one guided channel, reconstructed from stored
+    primitives (no reductions store, no lambda records). Mirrors reductions.py:161-171:
+    z_T=(gui-gui_det)/c; z_{t+1}=[res_{t+1}..,z_T]; gui_vfs=(z_{t+1}-res)*s/h;
+    gui_vec=(vfs-gui_vfs)/s (the applied guidance kick; ==0 where guidance was off).
+    Returns dict of (T,lat,lon) arrays vfs/gui_vfs/gui_vec and (T,) grids s/h."""
+    def _load(store):
+        da = select_point(open_store(rollout_dir, store, var), sel)
+        da = da.sel(level=level) if "level" in da.dims and level is not None else da
+        return np.asarray(da.isel(m=m, n=n), dtype=float)
+
+    res, vfs = _load("res"), _load("vfs")
+    gui, gui_det = _load("gui"), _load("gui_det")
+    s, h = flow_grids(res.shape[0])
+    z_T = (gui - gui_det) / c
+    z_next = np.concatenate([res[1:], z_T[None]], axis=0)          # z_{t+1}
+    gui_vfs = (z_next - res) * (s / h)[:, None, None]
+    gui_vec = (vfs - gui_vfs) / s[:, None, None]
+    return {"vfs": vfs, "gui_vfs": gui_vfs, "gui_vec": gui_vec, "s": s, "h": h}
+
+
+def convergence_state_line(rollout_dir, sel, m, n, var, c, mask, A, level=None):
+    """Guidance-convergence line (mirrors guidance.py:4506-4547): the realized guided STATE
+    masked-mean minus the target ``A`` over flow steps ``t``, anchored at the pure-noise state,
+    with the final Euler landing appended.
+
+        state_t   = M(x_det + sigma_r z_t) - A       (t = 0..T-1; state_0 = noise)
+        state_T   = state_{T-1} + c * (h/s)_{T-1} * M(gui_vfs_{T-1})   (final landing)
+        land_ung_t= state_t + c * (h/s)_t * M(vfs_t)  (where the RAW flow step would land)
+
+    Returns ``(states (T+1,), land_ung (T,))``. The purple-vs-yellow gap at t+1 is the
+    guidance contribution; the state line's descent to 0 is the convergence to target."""
+    mnp = np.asarray(mask, dtype=float)
+    vel = guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=level)
+    res = select_point(open_store(rollout_dir, "res", var), sel)
+    res = res.sel(level=level) if "level" in res.dims and level is not None else res
+    z_mm = (np.asarray(res.isel(m=m, n=n), dtype=float) * mnp).sum(axis=(-2, -1))   # M(z_t)
+    u_mm = (vel["vfs"] * mnp).sum(axis=(-2, -1))                                     # M(s_t u_t)
+    gu_mm = (vel["gui_vfs"] * mnp).sum(axis=(-2, -1))                                # M(gui_vfs_t)
+    hs = vel["h"] / vel["s"]
+    gd = select_point(open_store(rollout_dir, "gui_det", var), sel)
+    gd = gd.sel(level=level) if "level" in gd.dims and level is not None else gd
+    det_mm = float((np.asarray(gd.isel(m=m, n=n), dtype=float) * mnp).sum())         # M(x_det)
+    T = z_mm.shape[0]
+    states = np.empty(T + 1)
+    states[:T] = det_mm + c * z_mm - float(A)
+    states[T] = states[T - 1] + c * hs[-1] * gu_mm[-1]
+    land_ung = states[:T] + c * hs * u_mm
+    return states, land_ung
+
+
+def clean_pred_branches_primitive(rollout_dir, sel, m, n, var, c, level=None):
+    """(gui_ung_over_t, gui) clean-pred branch pair from stored primitives, NO lambda records
+    -- convention-robust (works under the new w*a*c/g_norm guidance convention, unlike the
+    lambda-based `clean_pred_branches`). base = the raw-velocity estimate
+    (`clean_pred_trajectory_primitive`); kick = base minus the applied guidance
+    `c * s_t * gui_vec_t`. Per step, base_t -> kick_t is the GUIDANCE step and
+    kick_t -> base_{t+1} the PUSHBACK (pull-back) step -- the intensity_comparison pingpong."""
+    base = clean_pred_trajectory_primitive(rollout_dir, sel, m, n, var, c, level=level)
+    vel = guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=level)
+    kick = base - float(c) * vel["s"][:, None, None] * vel["gui_vec"]
+    return base, kick
+
+
 def clean_pred_branches(rollout_dir, records, sel, m, n, var, c, level=None):
     """(gui_ung_over_t, gui) clean-pred trajectory pair, both (T, lat, lon).
 

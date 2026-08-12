@@ -117,7 +117,7 @@ def _(mo):
     side_lat_slider = mo.ui.slider(1.5, 90, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
     sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=2, label="sigma div: ", show_value=True)
     zoom_slider = mo.ui.slider(1, 12, step=1, value=1, label="zoom: ", show_value=True)
-    dpi_slider = mo.ui.slider(steps=[60, 100, 140, 200], value=100, label="dpi: ", show_value=True)
+    dpi_slider = mo.ui.slider(steps=[60, 100, 140, 500], value=100, label="dpi: ", show_value=True)
     var_dropdown = mo.ui.dropdown(
         ["geopotential", "u_component_of_wind", "v_component_of_wind", "temperature",
          "specific_humidity", "vertical_velocity", "mean_sea_level_pressure"],
@@ -334,7 +334,7 @@ def _(
         m.coastlines()
         m.legend(label="mask weights")
         ax = m.fig.axes[0]
-        ax.set_title("mask weights")
+        # ax.set_title("mask weights")
         lon_l, lon_r, lat_b, lat_t = mask_corners
         _n = 120
         _lon, _lat = np.linspace(lon_l, lon_r, _n), np.linspace(lat_b, lat_t, _n)
@@ -803,7 +803,7 @@ def _(
         cmap, vmin, vmax, center = abs_style(mask)
         m = visualize_map(
             mask,
-            suptitle="mask",
+            # suptitle="mask",
             title="mask weights",
             interactive=False,
             cmap=cmap, vmin=vmin, vmax=vmax, center=center,
@@ -811,7 +811,7 @@ def _(
             contour_levels=8, contour_color="black", contour_linewidth=0.5,
             zoom=zoom_slider.value,   # 1 = full map (all grid points); >1 zooms into the box
             zoom_center_lon=zoom_centers[0], zoom_center_lat=zoom_centers[1],
-            figsize=(11.2, 8), dpi=dpi_slider.value,
+            figsize=(14, 8), dpi=dpi_slider.value,
         )
         return add_map_stats(m, mask)[0]   # (fig, ax) -> fig for display
 

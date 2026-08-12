@@ -55,7 +55,7 @@ def _():
 def _():
     from src.paths import ROLLOUTS
     from src.rollout_config import MASK_MODES, RolloutConfig, GUIDANCE_METHODS, GUI_REFS, GUIDANCE_METHOD_HYPERS
-    from geoarches.lightning_modules.guided_diffusion import A_T_MODES, alpha_t_profile
+    from geoarches.lightning_modules.guided_diffusion import A_T_MODES, alpha_t_profile as a_t_profile
     from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
@@ -64,7 +64,7 @@ def _():
     from src.ui.plot_trajectories import plot_trajectories
 
     from src.utils import get_var_idx, get_level_idx
-    from src.utils import get_now_timestamp, ensure_rollout_dir, get_rollout_dir
+    from src.utils import get_now_timestamp, ensure_rollout_dir, get_rollout_dir, find_era5_input
     from src.utils import get_timestamps, get_N_timestamps, get_N_slices as base_get_N_slices, get_slices as base_get_slices, get_gt_rollout
     from src.utils import (
         dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config, sweep_coord_label
@@ -89,13 +89,14 @@ def _():
         RolloutConfig,
         VARIABLES_DICT,
         XarrayNormalizer,
-        alpha_t_profile,
+        a_t_profile,
         base_get_N_slices,
         base_get_slices,
         build_reductions_store,
         compute_reductions_for_sweep,
         dump_json,
         ensure_rollout_dir,
+        find_era5_input,
         get_N_timestamps,
         get_config,
         get_gt_rollout,
@@ -122,7 +123,6 @@ def _():
         sweep_coord_label,
         to_display_units,
         visualize_map,
-        visualize_mask_3d,
     )
 
 
@@ -273,13 +273,31 @@ def _(get_rollout_ids, mo, notebook_mode_dropdown, refresh_button):
 
 @app.cell
 def _(mo, rollout_ids):
-    rollout_id_dropdown = mo.ui.dropdown(
-        options=rollout_ids,
-        value=rollout_ids[0] if len(rollout_ids)>0 else None,
-        label="rollout_id: ",
-        allow_select_none=True
+    # experiment selector (outer folder). rollout_ids are "<exp>/<start_ts>" for a
+    # multi-start experiment, or a bare "<exp>" for a legacy single rollout.
+    _exp_ids = sorted({rid.split("/", 1)[0] for rid in rollout_ids})
+    experiment_id_dropdown = mo.ui.dropdown(
+        options=_exp_ids,
+        value=_exp_ids[0] if _exp_ids else None,
+        label="experiment: ",
+        allow_select_none=True,
     )
-    return (rollout_id_dropdown,)
+    return (experiment_id_dropdown,)
+
+
+@app.cell(hide_code=True)
+def _(experiment_id_dropdown, mo, rollout_ids):
+    # rollout selector: the start_ts subfolders under the selected experiment. Empty for a
+    # legacy single rollout (there the experiment id IS the rollout id).
+    _starts = [rid.split("/", 1)[1] for rid in rollout_ids
+               if "/" in rid and rid.split("/", 1)[0] == experiment_id_dropdown.value]
+    rollout_dropdown = mo.ui.dropdown(
+        options=_starts,
+        value=_starts[0] if _starts else None,
+        label="rollout: ",
+        allow_select_none=True,
+    )
+    return (rollout_dropdown,)
 
 
 @app.cell
@@ -546,9 +564,10 @@ def _(
 
 
 @app.cell
-def _(mo, rollout_id_dropdown, save_config_button):
+def _(experiment_id_dropdown, mo, rollout_dropdown, save_config_button):
     setup_widget = mo.hstack([
-        rollout_id_dropdown,
+        experiment_id_dropdown,
+        rollout_dropdown,
         *([save_config_button] if save_config_button is not None else []),
     ], justify="start", align="start")
     setup_widget
@@ -565,9 +584,11 @@ def _(mo, sweep_params_widget):
 def _(
     config,
     experiment_params,
+    find_era5_input,
     get_gt_rollout,
     get_mask_2d,
     get_rollout,
+    get_rollout_dir,
     iter_sweeps,
     mo,
     notebook_mode,
@@ -641,7 +662,7 @@ def _(
                 return _base_cache[_key]
             _b2 = None
             if config.GUI_REF == "GT":
-                _gt2 = get_gt_rollout(config.N + 1, config.START_TS)[config.VAR]
+                _gt2 = get_gt_rollout(config.N + 1, config.START_TS, input_path=find_era5_input(get_rollout_dir(rollout_id)))[config.VAR]
                 if "level" in _gt2.dims:
                     _gt2 = _gt2.sel(level=config.LEVEL)
                 _b2 = np.asarray((_gt2.astype("float64") * _mda2)
@@ -730,16 +751,23 @@ def _(
 
 
 @app.cell
-def _(get_now_timestamp, notebook_mode, rollout_id_dropdown):
+def _(
+    experiment_id_dropdown,
+    get_now_timestamp,
+    notebook_mode,
+    rollout_dropdown,
+):
     # rollout
     # conf params 
     match notebook_mode:
         case "unguided_rollout":
             rollout_id=get_now_timestamp()
-        case "guided_rollout":
-            rollout_id = rollout_id_dropdown.value
-        case "analyze_rollout":
-            rollout_id = rollout_id_dropdown.value
+        case "guided_rollout" | "analyze_rollout":
+            # combine the experiment + rollout selectors into "<exp>/<start_ts>"; a legacy
+            # single rollout has no start subfolder, so the experiment id IS the rollout id
+            _exp = experiment_id_dropdown.value
+            rollout_id = (f"{_exp}/{rollout_dropdown.value}"
+                          if (_exp is not None and rollout_dropdown.value is not None) else _exp)
         case _:
             pass
     return (rollout_id,)
@@ -958,9 +986,11 @@ def _(
 @app.cell
 def _(
     N,
+    find_era5_input,
     get_gt_rollout,
     get_masked_mean,
     get_rollout,
+    get_rollout_dir,
     get_slices,
     gui_ung_final_xr,
     guided_xr,
@@ -1033,8 +1063,10 @@ def _(
         case _:
             pass
 
-    # gt
-    gt_rollout = get_gt_rollout(N+1, timestamp)
+    # gt (from this experiment's downloaded era5_input.nc, rolled to the mask
+    # convention; falls back to the global arches store when no file is found)
+    _gt_input = find_era5_input(get_rollout_dir(rollout_id))
+    gt_rollout = get_gt_rollout(N + 1, timestamp, input_path=_gt_input)
     gt_N_slices = get_slices(gt_rollout, partition, var, level)
     gt_trajectory = get_masked_mean(gt_N_slices, mask)
     return (
@@ -1636,10 +1668,7 @@ def _(
     inspect_states_widget_make,
     level_slider,
     m_n_widget,
-    mask3d_azim_slider,
-    mask3d_elev_slider,
     mask_map,
-    mask_map_3d,
     mask_mode_dropdown,
     mask_shift_preview_dropdown,
     mask_shift_px_slider,
@@ -1666,9 +1695,7 @@ def _(
     )
 
     _mask_maps_row = mo.hstack(
-        [_w_ for _w_ in [weather_map, mask_map,
-         (mo.vstack([mask_map_3d, mo.hstack([mask3d_elev_slider, mask3d_azim_slider], justify="start")],
-                    align="start") if mask_map_3d is not None else None)] if _w_ is not None],
+        [_w_ for _w_ in [weather_map, mask_map] if _w_ is not None],
         justify="start",
         align="start",
     )
@@ -1851,6 +1878,8 @@ def _(
             contour_levels=8,
             contour_color="black",
             contour_linewidth=0.5,
+            mask_2d=mask,
+            show_mask=True,
             zoom=zoom_slider.value,
             zoom_center_lon=zoom_centers[0],
             zoom_center_lat=zoom_centers[1],
@@ -4711,46 +4740,7 @@ def _(mo):
     side_lon_slider = mo.ui.slider(1.5, 90, step=1.5, value=12, label="lon side: ", show_value=True, debounce=True)
     side_lat_slider = mo.ui.slider(1.5, 60, step=1.5, value=10, label="lat side: ", show_value=True, debounce=True)
     sigma_div_slider = mo.ui.slider(steps=[0.25, 0.5, 1, 2, 4], value=2, label="sigma divisor: ", show_value=True, debounce=True)
-    # 3D mask view rotation (as in latent_trajectories.py)
-    mask3d_elev_slider = mo.ui.slider(0, 90, step=5, value=45, label="elev: ", show_value=True, debounce=True)
-    mask3d_azim_slider = mo.ui.slider(-180, 180, step=5, value=-45, label="azim: ", show_value=True, debounce=True)
-    return (
-        mask3d_azim_slider,
-        mask3d_elev_slider,
-        side_lat_slider,
-        side_lon_slider,
-        sigma_div_slider,
-    )
-
-
-@app.cell
-def _(
-    dpi_slider,
-    mask,
-    mask3d_azim_slider,
-    mask3d_elev_slider,
-    mask_section_checkbox,
-    visualize_mask_3d,
-    white_zero_cmap,
-    zoom_centers,
-    zoom_slider,
-):
-    if mask_section_checkbox.value:
-        mask_map_3d = visualize_mask_3d(
-            mask,
-            cmap=white_zero_cmap,
-            title="mask (3D)",
-            elev=mask3d_elev_slider.value,
-            azim=mask3d_azim_slider.value,
-            zoom=zoom_slider.value,
-            zoom_center_lon=zoom_centers[0],
-            zoom_center_lat=zoom_centers[1],
-            figsize=(14, 8),
-            dpi=dpi_slider.value,
-        )
-    else:
-        mask_map_3d = None
-    return (mask_map_3d,)
+    return side_lat_slider, side_lon_slider, sigma_div_slider
 
 
 @app.cell
@@ -5151,7 +5141,6 @@ def _(
         )
     else:
         year_dates = year_series = year_unit = None
-
     return year_dates, year_series, year_unit
 
 
@@ -5160,7 +5149,6 @@ def _(mo):
     climatology_rolling_slider = mo.ui.slider(
         1, 31, value=7, step=1, label="rolling avg (days): ", show_value=True, debounce=True
     )
-
     return (climatology_rolling_slider,)
 
 
@@ -5193,7 +5181,6 @@ def _(
         )
     else:
         year_trajectory_plot = None
-
     return (year_trajectory_plot,)
 
 

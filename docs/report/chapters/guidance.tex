@@ -54,7 +54,7 @@ this target by
     \label{eq:guidance-gap}
 \end{equation}
 
-where \(\mathcal{M}_m\) denotes the normalized masked average defined in
+where \(\mathcal{M}_m\) denotes the masked average defined in
 \Cref{ch:specify}. We refer to \(\xi_{n,t}\) as the \emph{target gap}.
 
 The corresponding guidance loss is the squared target gap,
@@ -105,6 +105,8 @@ not imply that arbitrary changes to the atmospheric state are considered
 acceptable. Reaching the prescribed target describes only whether guidance
 has succeeded with respect to the specified event; the meteorological
 plausibility of the resulting forecast is evaluated separately.
+
+TODO: say something about alternative objectives and option to define a curved mask or push top k\% area.
 
 \subsection{Gradient-based flow guidance}
 \label{sec:gradient-flow-guidance}
