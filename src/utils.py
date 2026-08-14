@@ -221,8 +221,24 @@ def get_guidance_schedule(rollout_id, sweep_sel: dict | None = None, m: int | No
 
 
 # @functools.lru_cache(maxsize=None)
+# the guided latent store was renamed res -> gui_res (symmetry with gui_ung_res / ung_res).
+# Treat the two as aliases so either name resolves to whichever file exists: old experiments
+# keep res.zarr, new ones write gui_res.zarr, and readers work against both.
+STORE_ALIASES = {"res": "gui_res", "gui_res": "res"}
+
+
+def resolve_store_name(rollout_dir, store):
+    if (rollout_dir / f"{store}.zarr").exists():
+        return store
+    alt = STORE_ALIASES.get(store)
+    if alt and (rollout_dir / f"{alt}.zarr").exists():
+        return alt
+    return store  # unchanged -> caller hits the normal FileNotFoundError
+
+
 def get_rollout(rollout_type:str, rollout_id:str):
-    path = get_rollout_dir(rollout_id) / f"{rollout_type}.zarr"
+    _dir = get_rollout_dir(rollout_id)
+    path = _dir / f"{resolve_store_name(_dir, rollout_type)}.zarr"
     rollout = xr.open_zarr(path)
     return rollout
 

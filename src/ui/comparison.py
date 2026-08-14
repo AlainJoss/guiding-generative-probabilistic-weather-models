@@ -16,7 +16,7 @@ from geoarches.paths import STATS_PATH
 from src.mask import get_mask_2d
 from src.paths import ROLLOUTS
 from src.rollout_config import GUIDANCE_METHOD_HYPERS
-from src.utils import get_gt_rollout, get_level_idx, get_var_idx
+from src.utils import get_gt_rollout, get_level_idx, get_var_idx, resolve_store_name
 
 
 def load_rollout(rollout_id):
@@ -53,8 +53,8 @@ def sweep_points(sweep_values, records):
 
 
 def open_store(rollout_dir, store, var):
-    """One variable of a rollout store, lazily."""
-    return xr.open_zarr(rollout_dir / f"{store}.zarr")[var]
+    """One variable of a rollout store, lazily (res/gui_res aliased to whichever exists)."""
+    return xr.open_zarr(rollout_dir / f"{resolve_store_name(rollout_dir, store)}.zarr")[var]
 
 
 def select_point(da, sel):
@@ -108,7 +108,7 @@ def clean_pred_trajectory(rollout_dir, records, sel, m, n, var, c, level=None):
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
-    res, vfs, grads = _load("res"), _load("vfs"), _load("grads")
+    res, vfs, grads = _load("gui_res"), _load("vfs"), _load("grads")
     gui = _load("gui")
     s, h = flow_grids(res.shape[0])
     z_final = res[-1] + (vfs[-1] - lam[-1] * grads[-1] * s[-1]) * (h[-1] / s[-1])
@@ -126,7 +126,7 @@ def clean_pred_trajectory_primitive(rollout_dir, sel, m, n, var, c, level=None):
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
-    res, vfs = _load("res"), _load("vfs")
+    res, vfs = _load("gui_res"), _load("vfs")
     gui, gui_det = _load("gui"), _load("gui_det")
     z_T = (gui - gui_det) / c
     return gui[None] + ((res + vfs) - z_T[None]) * c
@@ -135,17 +135,23 @@ def clean_pred_trajectory_primitive(rollout_dir, sel, m, n, var, c, level=None):
 def unguided_state_primitive(rollout_dir, sel, m, n, var, c, prefix, level=None):
     """Actual unguided STATE trajectory x_t = x_det + c*z_t (T, lat, lon) for
     ``prefix in {"gui_ung", "ung"}``. Reads the unguided latent z_t from the ``{prefix}_res``
-    store and x_det from ``gui_det`` (c = residual_scaler = sigma_res). Falls back to the legacy
-    ``{prefix}`` clean-pred store (x_hat_t, physical units) for experiments run before the
-    res-store switch. x_hat and x_t agree at t=-1 (endpoint identity); they differ over t."""
+    store and x_det from the deterministic core (c = residual_scaler = sigma_res). The core is the
+    guided pass's ``gui_det`` for the same-seed twin (``gui_ung``, which shares the guided run's
+    conditioning), but the independent run's OWN ``ung_det`` for ``prefix="ung"`` (its conditioning
+    diverges from the guided rollout for n>=1, so gui_det would be the wrong core). Falls back to
+    ``gui_det``, then to the legacy ``{prefix}`` clean-pred store (x_hat_t) for pre-switch
+    experiments. x_hat and x_t agree at t=-1 (endpoint identity); they differ over t."""
     def _load(store):
         da = select_point(open_store(rollout_dir, store, var), sel)
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
-    if (rollout_dir / f"{prefix}_res.zarr").exists() and (rollout_dir / "gui_det.zarr").exists():
+    _det = "ung_det" if prefix == "ung" else "gui_det"
+    if not (rollout_dir / f"{_det}.zarr").exists():
+        _det = "gui_det"                    # fallback (e.g. legacy ung run without its own det core)
+    if (rollout_dir / f"{prefix}_res.zarr").exists() and (rollout_dir / f"{_det}.zarr").exists():
         z = _load(f"{prefix}_res")          # (T, lat, lon) unguided latent z_t
-        det = _load("gui_det")              # (lat, lon) deterministic core x_det (no t axis)
+        det = _load(_det)                   # (lat, lon) deterministic core x_det (no t axis)
         return det[None] + c * z            # x_t = x_det + sigma_res * z_t
     return _load(prefix)                    # legacy clean-pred trajectory (pre-switch experiments)
 
@@ -161,7 +167,7 @@ def guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=None):
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
-    res, vfs = _load("res"), _load("vfs")
+    res, vfs = _load("gui_res"), _load("vfs")
     gui, gui_det = _load("gui"), _load("gui_det")
     s, h = flow_grids(res.shape[0])
     z_T = (gui - gui_det) / c
@@ -184,7 +190,7 @@ def convergence_state_line(rollout_dir, sel, m, n, var, c, mask, A, level=None):
     guidance contribution; the state line's descent to 0 is the convergence to target."""
     mnp = np.asarray(mask, dtype=float)
     vel = guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=level)
-    res = select_point(open_store(rollout_dir, "res", var), sel)
+    res = select_point(open_store(rollout_dir, "gui_res", var), sel)
     res = res.sel(level=level) if "level" in res.dims and level is not None else res
     z_mm = (np.asarray(res.isel(m=m, n=n), dtype=float) * mnp).sum(axis=(-2, -1))   # M(z_t)
     u_mm = (vel["vfs"] * mnp).sum(axis=(-2, -1))                                     # M(s_t u_t)
@@ -229,7 +235,7 @@ def clean_pred_branches(rollout_dir, records, sel, m, n, var, c, level=None):
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
-    res, vfs, grads = _load("res"), _load("vfs"), _load("grads")
+    res, vfs, grads = _load("gui_res"), _load("vfs"), _load("grads")
     gui = _load("gui")
     s, h = flow_grids(res.shape[0])
     z_final = res[-1] + (vfs[-1] - lam[-1] * grads[-1] * s[-1]) * (h[-1] / s[-1])

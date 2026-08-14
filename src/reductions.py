@@ -88,7 +88,7 @@ def _rollout_ctx(rollout_id):
         "gui_ung": _gui_ung_h,
     }
     try:
-        handles["res"] = get_rollout("res", rollout_id)
+        handles["res"] = get_rollout("gui_res", rollout_id)  # res/gui_res aliased in get_rollout
     except FileNotFoundError:
         handles["res"] = None
     gui = handles["gui"]
@@ -265,7 +265,12 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
         _ung_traj_ds = _ung_h.sel({_k: _v for _k, _v in sweep_point.items()
                                    if _k in _ung_h.dims})
         if _ung_is_res:  # reconstruct x_t = x_det + sigma_res*z_t from the ung latent
-            _det_u = get_rollout("gui_det", rollout_id).sel(sweep_point)
+            # use the independent run's OWN det core (ung_det); the guided gui_det is a DIFFERENT
+            # core for n>=1 (its conditioning diverges). Fall back to gui_det only if ung_det absent.
+            if (get_rollout_dir(rollout_id) / "ung_det.zarr").exists():
+                _det_u = get_rollout("ung_det", rollout_id)
+            else:
+                _det_u = get_rollout("gui_det", rollout_id).sel(sweep_point)
             _ung_traj_ds = xr.Dataset({_v: _det_u[_v] + res_scale_map[_v] * _ung_traj_ds[_v]
                                        for _v in _ung_traj_ds.data_vars})
         _und_dot, _und_nrm = _defl_dot_nrm(_ung_traj_ds)

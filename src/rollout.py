@@ -189,18 +189,24 @@ def rollout(
                 append_to_zarr(rollout_dir, "gui_ung_res", save_state)
 
                 for trace_type, trace in sampling_trace.items():
+                    # the guided latent trace is persisted as gui_res (symmetry with
+                    # gui_ung_res / ung_res); vfs and grads keep their names.
+                    store_type = "gui_res" if trace_type == "res" else trace_type
                     save_trace = torch.stack(trace, dim=0)
                     save_trace = tdict_to_xr(
                         create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params=sweep_params),
                         save_trace,
                         t_dim=True
                     )
-                    append_to_zarr(rollout_dir, trace_type, save_trace)
+                    append_to_zarr(rollout_dir, store_type, save_trace)
 
             else:
-                # ung_res stores the unguided LATENT z_t trajectory; the analysis reconstructs
-                # the state x_t = x_det + sigma_res * z_t using the guided pass's gui_det (x_det)
-                # in the same experiment dir (guided + unguided share a rollout dir).
+                # ung_res stores the unguided LATENT z_t trajectory; ung_det stores THIS run's own
+                # deterministic core x_det. Together they reconstruct x_t = x_det + sigma_res * z_t.
+                # ung_det is REQUIRED (not gui_det): the independent unguided rollout advances its
+                # conditioning on the UNGUIDED state, so for n>=1 its det core differs from the guided
+                # pass's gui_det. It is stored under a distinct name so it never collides with the
+                # guided gui_det.zarr (which carries sweep dims) in a shared rollout dir.
                 ung_res = torch.stack(ung_trace["res"], dim=0)
                 save_state = tdict_to_xr(
                     create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params={}),
@@ -208,6 +214,16 @@ def rollout(
                     t_dim=True
                 )
                 append_to_zarr(rollout_dir, "ung_res", save_state)
+
+                det_state = ung_trace.get("det_pred")
+                if det_state is not None:
+                    save_state = flow_model.denormalize(det_state).cpu()
+                    save_state = tdict_to_xr(
+                        create_slice_zarr_container(m, n, t_dim=False, sweep_params={}),
+                        save_state,
+                        t_dim=False
+                    )
+                    append_to_zarr(rollout_dir, "ung_det", save_state)
 
             # after the last iteration no need to set this again
             if n < config.N-1:
