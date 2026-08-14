@@ -20,7 +20,7 @@ GT = LOCAL_DATA / "era5"
 PCA_BASIS = LOCAL_DATA / "pca_basis"
 
 # NOTE: switch between SWITCHDRIVE_DATA or LOCAL_DATA for defining source for notebooks 
-ROLLOUTS = LOCAL_DATA / "rollouts"
+ROLLOUTS = SWITCHDRIVE_DATA / "rollouts"
 print(f"DATA @ {SWITCHDRIVE_DATA}  |  GT_DATA @ {LOCAL_DATA}  |  CLIM @ {CLIM}")
 
 if Path(ROOT, "modelstore").exists():
