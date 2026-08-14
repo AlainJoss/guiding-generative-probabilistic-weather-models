@@ -66,16 +66,26 @@ def _flow_grids(T):
     return s, h
 
 
+def _open_unguided(rollout_id, prefix):
+    """Open the unguided latent store ``{prefix}_res`` (True) if present, else the legacy
+    clean-pred store ``{prefix}`` (False). The caller reconstructs the actual state
+    x_t = x_det + sigma_res*z_t from the latent (falls through unchanged for legacy)."""
+    if (get_rollout_dir(rollout_id) / f"{prefix}_res.zarr").exists():
+        return get_rollout(f"{prefix}_res", rollout_id), True
+    return get_rollout(prefix, rollout_id), False
+
+
 @lru_cache(maxsize=4)
 def _rollout_ctx(rollout_id):
     """Per-rollout constants (lazy zarr handles + GT + normalizer + scaler), hoisted
     so a whole-store build doesn't reload the stat files / GT for every sweep point."""
     config = get_config(rollout_id)
+    _gui_ung_h, _gui_ung_is_res = _open_unguided(rollout_id, "gui_ung")
     handles = {
         "grads": get_rollout("grads", rollout_id),
         "vfs": get_rollout("vfs", rollout_id),
         "gui": get_rollout("gui", rollout_id),
-        "gui_ung": get_rollout("gui_ung", rollout_id),
+        "gui_ung": _gui_ung_h,
     }
     try:
         handles["res"] = get_rollout("res", rollout_id)
@@ -94,7 +104,7 @@ def _rollout_ctx(rollout_id):
                        longitude=gui.longitude, level=gui.level)
     )
     return dict(config=config, handles=handles, res_scale_map=res_scale_map,
-                xnorm=XarrayNormalizer(), gt_n_xr=gt_n_xr)
+                xnorm=XarrayNormalizer(), gt_n_xr=gt_n_xr, gui_ung_is_res=_gui_ung_is_res)
 
 
 def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
@@ -116,7 +126,15 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
     # --- raw cubes at this sweep point (keep m, n, t, level, lat, lon) ---
     grads_xr = _h["grads"].sel(sweep_point)
     vfs_xr = _h["vfs"].sel(sweep_point)
-    gui_ung_xr = _h["gui_ung"].sel(sweep_point)
+    _gui_ung_raw = _h["gui_ung"].sel(sweep_point)
+    if _ctx["gui_ung_is_res"]:
+        # gui_ung_res holds the unguided latent z_t -> reconstruct x_t = x_det + sigma_res*z_t
+        # (same identity as _state_ds below; x_t == clean-pred at t=-1)
+        _det_gu = get_rollout("gui_det", rollout_id).sel(sweep_point)
+        gui_ung_xr = xr.Dataset({_v: _det_gu[_v] + res_scale_map[_v] * _gui_ung_raw[_v]
+                                 for _v in _gui_ung_raw.data_vars})
+    else:
+        gui_ung_xr = _gui_ung_raw  # legacy clean-pred store
     gui_ung_final_xr = gui_ung_xr.isel(t=-1) if "t" in gui_ung_xr.dims else gui_ung_xr
     guided_xr = _h["gui"].sel(sweep_point)
     res_xr = _h["res"].sel(sweep_point) if _h["res"] is not None else None
@@ -243,9 +261,13 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
         if res_xr is None:
             raise KeyError("no res trace")
         _gud_dot, _gud_nrm = _defl_dot_nrm(gui_ung_xr)
-        _ung_traj_ds = get_rollout("ung", rollout_id)
-        _ung_traj_ds = _ung_traj_ds.sel({_k: _v for _k, _v in sweep_point.items()
-                                         if _k in _ung_traj_ds.dims})
+        _ung_h, _ung_is_res = _open_unguided(rollout_id, "ung")
+        _ung_traj_ds = _ung_h.sel({_k: _v for _k, _v in sweep_point.items()
+                                   if _k in _ung_h.dims})
+        if _ung_is_res:  # reconstruct x_t = x_det + sigma_res*z_t from the ung latent
+            _det_u = get_rollout("gui_det", rollout_id).sel(sweep_point)
+            _ung_traj_ds = xr.Dataset({_v: _det_u[_v] + res_scale_map[_v] * _ung_traj_ds[_v]
+                                       for _v in _ung_traj_ds.data_vars})
         _und_dot, _und_nrm = _defl_dot_nrm(_ung_traj_ds)
         _have_ung_defl = True
     except (FileNotFoundError, KeyError):

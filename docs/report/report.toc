@@ -27,20 +27,25 @@
 \contentsline {subsection}{\numberline {3.2.2}Data-driven targets for storyline generation}{26}{subsection.3.2.2}%
 \contentsline {section}{\numberline {3.3}Pipeline overview}{28}{section.3.3}%
 \contentsline {chapter}{\numberline {4}Guidance design}{29}{chapter.4}%
-\contentsline {section}{\numberline {4.1}Target-driven guidance}{29}{section.4.1}%
+\contentsline {section}{\numberline {4.1}Target-driven guidance}{30}{section.4.1}%
 \contentsline {subsection}{\numberline {4.1.1}Guidance objective}{30}{subsection.4.1.1}%
 \contentsline {subsection}{\numberline {4.1.2}Gradient-based flow guidance}{31}{subsection.4.1.2}%
 \contentsline {subsection}{\numberline {4.1.3}Guidance-strength parameterization}{32}{subsection.4.1.3}%
 \contentsline {section}{\numberline {4.2}Target realization algorithm}{33}{section.4.2}%
 \contentsline {chapter}{\numberline {5}Evaluation}{37}{chapter.5}%
-\contentsline {section}{\numberline {5.1}Flow-time tests}{38}{section.5.1}%
-\contentsline {section}{\numberline {5.2}Weather-time assessment}{38}{section.5.2}%
-\contentsline {subsection}{\numberline {5.2.1}Parameter characterisation tests}{38}{subsection.5.2.1}%
+\contentsline {section}{\numberline {5.1}Quantitative evaluation}{38}{section.5.1}%
+\contentsline {subsection}{\numberline {5.1.1}Q2}{38}{subsection.5.1.1}%
+\contentsline {subsection}{\numberline {5.1.2}Q3}{38}{subsection.5.1.2}%
+\contentsline {section}{\numberline {5.2}Quanlitative evaluation}{38}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Q3}{38}{subsection.5.2.1}%
+\contentsline {subsection}{\numberline {5.2.2}Q4}{38}{subsection.5.2.2}%
+\contentsline {section}{\numberline {5.3}Weather-time assessment}{39}{section.5.3}%
+\contentsline {subsection}{\numberline {5.3.1}Parameter characterisation tests}{39}{subsection.5.3.1}%
 \contentsline {subsubsection}{Region of interest}{39}{section*.10}%
 \contentsline {subsubsection}{Variable of interest}{39}{section*.11}%
 \contentsline {subsubsection}{Intervention profile}{39}{section*.12}%
-\contentsline {subsection}{\numberline {5.2.2}Realism tests}{39}{subsection.5.2.2}%
-\contentsline {section}{\numberline {5.3}Method Validation}{40}{section.5.3}%
+\contentsline {subsection}{\numberline {5.3.2}Realism tests}{40}{subsection.5.3.2}%
+\contentsline {subsection}{\numberline {5.3.3}Method Validation}{41}{subsection.5.3.3}%
 \contentsline {chapter}{\numberline {6}Experiments}{42}{chapter.6}%
 \contentsline {section}{\numberline {6.1}Flow-time evaluation}{42}{section.6.1}%
 \contentsline {subsection}{\numberline {6.1.1}Setup}{42}{subsection.6.1.1}%

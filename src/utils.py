@@ -238,6 +238,13 @@ def get_rollout_ids(rollout_type: str):
     # one subdir per start_ts (each a normal rollout). Expand those into "<exp_id>/<start_ts>"
     # ids; legacy single rollouts (zarr + config.json directly in the dir) stay as "<exp_id>".
     # Direct (non-recursive) zarr check so an outer dir is never matched by a child's zarr.
+    def _has(dirpath, rtype):
+        if (dirpath / f"{rtype}.zarr").exists():
+            return True
+        # an unguided baseline now persists only the latent trajectory (ung_res)
+        # instead of the physical ung state; either marks a usable baseline.
+        return rtype == "ung" and (dirpath / "ung_res.zarr").exists()
+
     ids = []
     for p in Path(ROLLOUTS).glob("2026*"):
         cfg = p / "config.json"
@@ -247,9 +254,9 @@ def get_rollout_ids(rollout_type: str):
         if "STARTS" in d:
             for s in d["STARTS"]:
                 sub = p / s
-                if (sub / "config.json").exists() and (sub / f"{rollout_type}.zarr").exists():
+                if (sub / "config.json").exists() and _has(sub, rollout_type):
                     ids.append(f"{p.name}/{s}")
-        elif (p / f"{rollout_type}.zarr").exists():
+        elif _has(p, rollout_type):
             ids.append(p.name)
     return sorted(ids, reverse=True)
 

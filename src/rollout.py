@@ -67,16 +67,12 @@ def rollout(
                 _base_da = _base_da.sel(level=config.LEVEL)
             base_mm = get_masked_mean(_base_da.to_numpy(), mask_2d)  # (N+1,)
         else:
-            _ung_path = rollout_dir / "ung.zarr"
-            assert _ung_path.exists(), (
-                "guided rollout needs the unguided baseline; run --rollout_type ung first"
-            )
-            _base_da = xr.open_zarr(_ung_path)[config.VAR]
-            if "t" in _base_da.dims:  # ung stores the full flow trajectory now
-                _base_da = _base_da.isel(t=-1)
-            if config.PARTITION == "level":
-                _base_da = _base_da.sel(level=config.LEVEL)
-            base_mm = get_masked_mean(_base_da.to_numpy(), mask_2d)  # (M, N)
+            # UNG ref: the baseline is the unguided masked mean of THIS member/step. The
+            # guided loop re-runs the unguided pass with the SAME seed, so we take that
+            # online x_hat_ung inline (below) instead of reading a stored unguided state
+            # -- the standalone ung rollout now persists only the latent (ung_res), not the
+            # physical state. base_mm[m, n] == masked_mean(denorm(x_hat_ung)) exactly.
+            base_mm = None
     else:
         delta_trajectory=None
         mask_tdict = None
@@ -118,9 +114,17 @@ def rollout(
                     # delta makes the loss target (1 + delta_n) * S(x_ref) == A exactly,
                     # wherever the online reference drifted. s_ref ~ 0 would only
                     # inflate delta_n, never the realized target.
-                    A_target = (1.0 + float(p_n)) * float(
-                        base_mm[n + 1] if config.GUI_REF == "GT" else base_mm[m, n]
-                    )
+                    if config.GUI_REF == "GT":
+                        base_val = float(base_mm[n + 1])
+                    else:
+                        # unguided masked mean of this (m, n) from the online same-seed
+                        # pass (== the old stored ung state, which is no longer written)
+                        base_val = float(get_masked_mean(
+                            x_ung_field[config.PARTITION][0, var_idx, level_idx]
+                            .detach().cpu().numpy().astype("float64"),
+                            mask_2d,
+                        ))
+                    A_target = (1.0 + float(p_n)) * base_val
                     s_ref = float(
                         (x_ref[config.PARTITION][0, var_idx, level_idx]
                          .detach().cpu().numpy().astype("float64") * mask_2d).sum()
@@ -172,16 +176,17 @@ def rollout(
                     )
                     append_to_zarr(rollout_dir, "gui_det", save_state)
 
-                # gui_ung is the unguided clean-prediction trajectory over flow steps t
-                # (last slice == final unguided state). Mirrors clean_preds for the guided
-                # pass; clean_prediction already denormalizes, so this is in physical units.
-                ung_traj = torch.stack(ung_trace["clean_preds"], dim=0)
+                # gui_ung_res is the unguided LATENT z_t trajectory over flow steps t (the same
+                # thing the guided pass traces as "res"). The analysis reconstructs the actual
+                # unguided state x_t = x_det + sigma_res * z_t from it (+ gui_det); the final
+                # slice still == the final unguided state (x_hat_T == x_T at t=-1).
+                ung_res = torch.stack(ung_trace["res"], dim=0)
                 save_state = tdict_to_xr(
                     create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params=sweep_params),
-                    ung_traj,
+                    ung_res,
                     t_dim=True
                 )
-                append_to_zarr(rollout_dir, "gui_ung", save_state)
+                append_to_zarr(rollout_dir, "gui_ung_res", save_state)
 
                 for trace_type, trace in sampling_trace.items():
                     save_trace = torch.stack(trace, dim=0)
@@ -193,15 +198,16 @@ def rollout(
                     append_to_zarr(rollout_dir, trace_type, save_trace)
 
             else:
-                # ung stores the full clean-prediction trajectory over flow steps t
-                # (physical units; last slice == final unguided state, like gui_ung)
-                ung_traj = torch.stack(ung_trace["clean_preds"], dim=0)
+                # ung_res stores the unguided LATENT z_t trajectory; the analysis reconstructs
+                # the state x_t = x_det + sigma_res * z_t using the guided pass's gui_det (x_det)
+                # in the same experiment dir (guided + unguided share a rollout dir).
+                ung_res = torch.stack(ung_trace["res"], dim=0)
                 save_state = tdict_to_xr(
                     create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params={}),
-                    ung_traj,
+                    ung_res,
                     t_dim=True
                 )
-                append_to_zarr(rollout_dir, "ung", save_state)
+                append_to_zarr(rollout_dir, "ung_res", save_state)
 
             # after the last iteration no need to set this again
             if n < config.N-1:

@@ -94,18 +94,20 @@ def get_container_args(rollout_type):
     # tuples: (file type, t_dim_flag)
     match rollout_type:
         case "ung":
-            # ung holds the FULL flow-step trajectory (final state = t=-1 slice)
-            return [("ung", True)]
+            # ung_res holds the FULL flow-step LATENT z_t trajectory; the analysis reconstructs
+            # x_t = x_det + sigma_res * z_t using the guided pass's gui_det in the same dir.
+            return [("ung_res", True)]
         case "gui":
             # raw primitives only: grads = dL/dz, vfs = u*s_t, res = noisy state z_t.
             # gui_vec / gui_vf / gui_res / clean_preds are reconstructed in the UI.
+            # gui_ung_res = the unguided (same-seed twin) latent z_t trajectory.
             return [
                 ("grads", True),
                 ("vfs", True),
                 ("res", True),
                 ("gui", False),
                 ("gui_det", False),
-                ("gui_ung", True)
+                ("gui_ung_res", True)
             ]
         case _:
             return []
@@ -114,8 +116,8 @@ def get_container_args(rollout_type):
 def written_containers(rollout_type, guidance_mode):
     """Container types a single sweep point actually fills."""
     if rollout_type == "ung":
-        return {"ung"}
-    return {"gui", "gui_det", "gui_ung", "grads", "vfs", "res"}
+        return {"ung_res"}
+    return {"gui", "gui_det", "gui_ung_res", "grads", "vfs", "res"}
 
 
 def find_resume_index(rollout_dir, rollout_type, sweep_params):

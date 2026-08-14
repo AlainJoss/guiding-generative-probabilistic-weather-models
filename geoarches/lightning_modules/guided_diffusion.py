@@ -412,7 +412,9 @@ class GuidedFlow(BaseLightningModule):
     # ------------------------------------------------------- unguided pass ---
 
     def unguided_flow(self, x_cond, det_pred, seed=None):
-        # traces the per-step clean-state estimate -> full-t gui_ung trajectory
+        # traces the per-step clean-state estimate AND the raw latent z_t (res). The latent
+        # lets the analysis reconstruct the ACTUAL unguided state x_t = x_det + sigma_res*z_t
+        # (mirrors the guided pass, which traces "res" the same way in _guided_flow).
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.flow_timesteps()
         sampling_trace = defaultdict(list)
@@ -425,6 +427,7 @@ class GuidedFlow(BaseLightningModule):
                 u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
                 x_hat_t = self.clean_prediction(det_pred, z_t, u_t, s_t)
                 sampling_trace["clean_preds"].append(x_hat_t.detach().cpu())
+                sampling_trace["res"].append(z_t.detach().cpu())  # pre-step latent z_t (== guided "res")
                 z_t = self.euler_step(z_t, u_t, h)
 
         return z_t, sampling_trace

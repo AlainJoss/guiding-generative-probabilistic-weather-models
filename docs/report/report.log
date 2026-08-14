@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  12 AUG 2026 15:42
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  13 AUG 2026 18:10
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1091,7 +1091,7 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ) [2
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 61.
+Package cleveref Info: loaded `english' language definitions on input line 63.
  [3])
 \tf@toc=\write6
 \openout6 = `report.toc'.
@@ -1181,23 +1181,23 @@ Chapter 3.
 ]
 Package cleveref Info: loaded `english' language definitions on input line 115.
  [23]
-<figures/mask_flat.png, id=633, 514.20105pt x 333.1647pt>
+<figures/mask_flat.png, id=658, 514.20105pt x 333.1647pt>
 File: figures/mask_flat.png Graphic file (type png)
 <use figures/mask_flat.png>
 Package pdftex.def Info: figures/mask_flat.png  used on input line 131.
 (pdftex.def)             Requested size: 228.3519pt x 147.95424pt.
-<figures/mask_globe.png, id=635, 514.20105pt x 582.85754pt>
+<figures/mask_globe.png, id=660, 514.20105pt x 582.85754pt>
 File: figures/mask_globe.png Graphic file (type png)
 <use figures/mask_globe.png>
 Package pdftex.def Info: figures/mask_globe.png  used on input line 138.
 (pdftex.def)             Requested size: 130.52715pt x 147.95424pt.
 Package cleveref Info: loaded `english' language definitions on input line 174.
  [24 <./figures/mask_flat.png> <./figures/mask_globe.png>]
-Package cleveref Info: loaded `english' language definitions on input line 232.
+Package cleveref Info: loaded `english' language definitions on input line 235.
  [25]
-Package cleveref Info: loaded `english' language definitions on input line 290.
+Package cleveref Info: loaded `english' language definitions on input line 293.
  [26]
-Package cleveref Info: loaded `english' language definitions on input line 360.
+Package cleveref Info: loaded `english' language definitions on input line 363.
  [27])
 Package cleveref Info: loaded `english' language definitions on input line 28.
  [28]
@@ -1211,18 +1211,18 @@ Chapter 4.
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 110.
+Package cleveref Info: loaded `english' language definitions on input line 116.
  [30]
-Package cleveref Info: loaded `english' language definitions on input line 193.
+Package cleveref Info: loaded `english' language definitions on input line 186.
  [31]
-Package cleveref Info: loaded `english' language definitions on input line 266.
+Package cleveref Info: loaded `english' language definitions on input line 249.
  [32]
-Package cleveref Info: loaded `english' language definitions on input line 340.
+Package cleveref Info: loaded `english' language definitions on input line 331.
  [33]
-Package cleveref Info: loaded `english' language definitions on input line 442.
- [34])
-Package cleveref Info: loaded `english' language definitions on input line 29.
- [35]
+Package cleveref Info: loaded `english' language definitions on input line 432.
+ [34]
+Package cleveref Info: loaded `english' language definitions on input line 524.
+ [35])
 Package cleveref Info: loaded `english' language definitions on input line 29.
  [36]
 \openout2 = `chapters/5-evaluation-framework.aux'.
@@ -1235,12 +1235,12 @@ Chapter 5.
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 38.
+Package cleveref Info: loaded `english' language definitions on input line 47.
  [38]
-Package cleveref Info: loaded `english' language definitions on input line 63.
- [39])
-Package cleveref Info: loaded `english' language definitions on input line 31.
- [40]
+Package cleveref Info: loaded `english' language definitions on input line 72.
+ [39]
+Package cleveref Info: loaded `english' language definitions on input line 98.
+ [40])
 Package cleveref Info: loaded `english' language definitions on input line 31.
  [41]
 \openout2 = `chapters/6-experiments.aux'.
@@ -1253,7 +1253,7 @@ Chapter 6.
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 93.
+Package cleveref Info: loaded `english' language definitions on input line 68.
  [43])
 Package cleveref Info: loaded `english' language definitions on input line 32.
  [44]
@@ -1322,24 +1322,24 @@ Package cleveref Info: loaded `english' language definitions on input line 48.
 Package cleveref Info: loaded `english' language definitions on input line 19.
  (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/5-evaluation-framework.aux) (./chapters/6-experiments.aux) (./chapters/7-discussion.aux) (./chapters/8-conclusion.aux) (./appendices/appendix1.aux))
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: 8182EFDA84D851C60517741723A7FEAF;9114.
+(rerunfilecheck)             Checksum: 340911541EEFB94393D8F5137451A174;9622.
 Package logreq Info: Writing requests to 'report.run.xml'.
 \openout1 = `report.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 41691 strings out of 476025
- 839403 string characters out of 5790016
+ 41694 strings out of 476025
+ 839416 string characters out of 5790016
  1867388 words of memory out of 5000000
- 61204 multiletter control sequences out of 15000+600000
+ 61205 multiletter control sequences out of 15000+600000
  540965 words of font info for 100 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 89i,12n,92p,1246b,3030s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 89i,12n,92p,1246b,3005s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmib10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc2074.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm0800.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfti1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftt1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfxc1728.pfb>
-Output written on report.pdf (63 pages, 1002426 bytes).
+Output written on report.pdf (63 pages, 1005572 bytes).
 PDF statistics:
- 1109 PDF objects out of 1200 (max. 8388607)
- 961 compressed objects within 10 object streams
- 285 named destinations out of 1000 (max. 500000)
- 479 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 1129 PDF objects out of 1200 (max. 8388607)
+ 981 compressed objects within 10 object streams
+ 287 named destinations out of 1000 (max. 500000)
+ 519 words of extra memory for PDF output out of 10000 (max. 10000000)
 

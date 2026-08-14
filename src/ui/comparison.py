@@ -132,6 +132,24 @@ def clean_pred_trajectory_primitive(rollout_dir, sel, m, n, var, c, level=None):
     return gui[None] + ((res + vfs) - z_T[None]) * c
 
 
+def unguided_state_primitive(rollout_dir, sel, m, n, var, c, prefix, level=None):
+    """Actual unguided STATE trajectory x_t = x_det + c*z_t (T, lat, lon) for
+    ``prefix in {"gui_ung", "ung"}``. Reads the unguided latent z_t from the ``{prefix}_res``
+    store and x_det from ``gui_det`` (c = residual_scaler = sigma_res). Falls back to the legacy
+    ``{prefix}`` clean-pred store (x_hat_t, physical units) for experiments run before the
+    res-store switch. x_hat and x_t agree at t=-1 (endpoint identity); they differ over t."""
+    def _load(store):
+        da = select_point(open_store(rollout_dir, store, var), sel)
+        da = da.sel(level=level) if "level" in da.dims and level is not None else da
+        return np.asarray(da.isel(m=m, n=n), dtype=float)
+
+    if (rollout_dir / f"{prefix}_res.zarr").exists() and (rollout_dir / "gui_det.zarr").exists():
+        z = _load(f"{prefix}_res")          # (T, lat, lon) unguided latent z_t
+        det = _load("gui_det")              # (lat, lon) deterministic core x_det (no t axis)
+        return det[None] + c * z            # x_t = x_det + sigma_res * z_t
+    return _load(prefix)                    # legacy clean-pred trajectory (pre-switch experiments)
+
+
 def guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=None):
     """Per-flow-step velocities for one guided channel, reconstructed from stored
     primitives (no reductions store, no lambda records). Mirrors reductions.py:161-171:

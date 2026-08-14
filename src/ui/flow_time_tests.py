@@ -22,6 +22,8 @@ def _():
     from src.ui.plot_trajectory import plot_trajectory
     from src.utils import get_rollout_ids, get_gt_rollout, get_rollout_dir, find_era5_input
     from datetime import datetime
+    import xarray as xr
+    from src.dimensions import LEVELS_DICT
 
     # line colours: sampled per run from a colormap sized to the number of schedules
     # (see sched_colors), so any count of schedules gets all-distinct colours
@@ -37,6 +39,7 @@ def _():
 
 
     return (
+        LEVELS_DICT,
         WARM_CMAP,
         channel,
         clean_pred_trajectory_primitive,
@@ -65,6 +68,7 @@ def _():
         residual_scaler,
         select_point,
         sweep_points,
+        xr,
     )
 
 
@@ -80,9 +84,9 @@ def _(mo):
     here `spike@k`). Metrics recompute automatically on selection.
 
     - **T1 Reliability**: did we reach the target? Final gap $\xi_n=\mathcal{M}_m(x_n^{\mathrm{gui}})-y_n^\star$.
-    - **T2 Interference**: how the guided state converges, and how much guidance it took.
+    - **T2 Guidance effect**: how much change was inflicted to other variables.
     - **T3 Closeness**: how far the guided flow strays from the unguided one (PCA latent space).
-    - **T4 Realism**: does the guidance footprint match the mask $m$?
+    - **T4 Realism**: does the guidance footprint match the mask?
     """)
     return
 
@@ -270,6 +274,9 @@ def _(
                         # deviation; kick = base - c*s*gui_vec (clean-pred branch, step-t kick removed).
                         _kick = region_latent(_traj - _c * _vel["s"][:, None, None] * _vel["gui_vec"], PCA_REGION)
                         _pk = project(basis, _kick)
+                        _vfs_lat = region_latent(_c * _vel["vfs"], PCA_REGION)   # vfs field -> region latents
+                        _pgx = project(basis, _g - _vfs_lat)                       # actual state x_t = clean-pred - c*vfs
+                        _pkx = project(basis, _kick - _vfs_lat)                    # x_t kick branch
                         _gstep, _pstep = ftt.step_sums(_g, _kick)
                         _end = float(np.linalg.norm(_g[-1] - _u[-1]) / np.sqrt(_g.shape[1]))
                         _tv = ftt.realism_tv(_guif, _ungf, _mask)
@@ -288,7 +295,7 @@ def _(
                         _dpc = _pg[-1] - _pu[-1]
                         _a["dpc1"].append(float(_dpc[0])); _a["dpc2"].append(float(_dpc[1])); _a["dpc3"].append(float(_dpc[2])); _a["gvec_res_sim"].append(_sim)
                         traj_grid.setdefault((_ei, _m, _n), {})[_lb] = {
-                            "pg": _pg, "pk": _pk, "pu": _pu, "states": _states, "land_ung": _land, "gfield": _gfield,
+                            "pg": _pg, "pk": _pk, "pgx": _pgx, "pkx": _pkx, "pu": _pu, "states": _states, "land_ung": _land, "gfield": _gfield,
                             "gvec_avg": _gvec_avg}
             # reference rows (ung + gui_ung): PCA path length + endpoint PC-deviation from
             # gui_ung; guidance/pushback are 0 (unguided). twin is a_t_mode-independent -> any sel.
@@ -345,26 +352,55 @@ def _(
 
 
 @app.cell
-def _(glabel, metrics, mo):
+def _(glabel, interf_data, metrics, mo, np):
     if metrics is None:
         leaderboard = mo.md("## Leaderboard\n\n_press **compute metrics**_")
     else:
-        _mins = ("total_guidance", "guidance_steps", "pushback_steps")
-        _best = {_k: min(_r[_k][0] for _r in metrics.values()) for _k in _mins}
-        _best["realism_tv"] = max(_r["realism_tv"][0] for _r in metrics.values())
-        _dist = lambda r: (r["dpc1"][0]**2 + r["dpc2"][0]**2 + r["dpc3"][0]**2) ** 0.5  # PC-space endpoint dist to gui_ung
-        def _b(_r, _k, _fmt="{:.3g}"):
-            _v = _r[_k][0]; _s = _fmt.format(_v)
-            return f"**{_s}**" if _v == _best[_k] else _s
-        _rows = ["| sweep point | total guidance | dist to gui_ung | guidance steps | pushback steps | realism TV |",
-                 "|---|---|---|---|---|---|"]
+        _has_i = interf_data is not None
+        def _push(_lb):
+            return interf_data["avg_score_ms"].get(_lb) if _has_i else None
+        def _reached(_r):
+            _n = _r["n_pool"]; _p = (_r["reached_count"] / _n) if _n else float("nan")
+            _sd = float(np.sqrt(max(_p * (1.0 - _p), 0.0) / _n)) if _n else float("nan")
+            return (_p, _sd)
+        def _dist_ms(_r):
+            # PC-space dist to gui_ung + first-order propagated std from the dPC stds
+            _mu = (_r["dpc1"][0], _r["dpc2"][0], _r["dpc3"][0])
+            _sd = (_r["dpc1"][1], _r["dpc2"][1], _r["dpc3"][1])
+            _d = float(np.sqrt(sum(_x * _x for _x in _mu)))
+            _ds = float(np.sqrt(sum((_x * _y) ** 2 for _x, _y in zip(_mu, _sd))) / _d) if _d > 0 else 0.0
+            return (_d, _ds)
+        # per-column winners: max everywhere, except dPC = max |deviation|
+        _bre = max((_reached(_r)[0] for _r in metrics.values() if np.isfinite(_reached(_r)[0])), default=None)
+        _bpu = max((v[0] for v in (_push(_lb) for _lb in metrics) if v is not None and np.isfinite(v[0])), default=None)
+        _bd = {_k: max(abs(_r[_k][0]) for _r in metrics.values()) for _k in ("dpc1", "dpc2", "dpc3")}
+        _bdi = max(_dist_ms(_r)[0] for _r in metrics.values())
+        _bt = max(_r["realism_tv"][0] for _r in metrics.values())
+        def _f(_ms, _is_best, signed=False):
+            if _ms is None or not np.isfinite(_ms[0]):
+                return "—"
+            _s = f"{_ms[0]:+.3f} ± {_ms[1]:.3f}" if signed else f"{_ms[0]:.3f} ± {_ms[1]:.3f}"
+            return f"**{_s}**" if _is_best else _s
+        _rows = ["| sweep point | reached ratio | push score | ΔPC1 | ΔPC2 | ΔPC3 | dist to gui_ung | realism TV |",
+                 "|---|---|---|---|---|---|---|---|"]
         for _lb, _r in metrics.items():
-            _rows.append(f"| {glabel(_lb)} | {_b(_r, 'total_guidance', '{:.3f}')} | {_dist(_r):.3g} | "
-                         f"{_b(_r, 'guidance_steps')} | {_b(_r, 'pushback_steps')} | {_b(_r, 'realism_tv', '{:.3f}')} |")
+            _rc = _reached(_r); _dm = _dist_ms(_r); _pu = _push(_lb)
+            _rows.append(
+                f"| {glabel(_lb)} "
+                f"| {_f(_rc, _bre is not None and _rc[0] == _bre)} "
+                f"| {_f(_pu, _pu is not None and _bpu is not None and _pu[0] == _bpu)} "
+                f"| {_f(_r['dpc1'], abs(_r['dpc1'][0]) == _bd['dpc1'], signed=True)} "
+                f"| {_f(_r['dpc2'], abs(_r['dpc2'][0]) == _bd['dpc2'], signed=True)} "
+                f"| {_f(_r['dpc3'], abs(_r['dpc3'][0]) == _bd['dpc3'], signed=True)} "
+                f"| {_f(_dm, _dm[0] == _bdi)} "
+                f"| {_f(_r['realism_tv'], _r['realism_tv'][0] == _bt)} |")
         leaderboard = mo.vstack([
             mo.md("## Leaderboard"),
-            mo.md("Best per column in **bold** (min for guidance / deviation, max for realism TV). "
-                  "dist to gui_ung = PC-space endpoint distance to the gui_ung twin. References ung / gui_ung are in the T3 Closeness table."),
+            mo.md("mean ± std over the pool (3 dp); **bold** = winner per column. **reached ratio** = fraction of "
+                  "pooled runs within 1% of the target (± binomial std). Winners are **max** everywhere except "
+                  "ΔPCk = **max |deviation|** (most divergent on that PC) and dist to gui_ung = **max** (most divergent). "
+                  "**push score** = variable-normalized avg-space push (needs the **interference profiles** computed, else —). "
+                  "ΔPCk = signed endpoint deviation from gui_ung along PCk; dist to gui_ung = its PC-space norm."),
             mo.md("\n".join(_rows))])
     leaderboard
     return
@@ -380,35 +416,8 @@ def _(mo):
     - **final gap** $\xi_n=\mathcal{M}_m(x_n^{\mathrm{gui}})-y_n^\star$ (masked average), mean $\pm$ std over the pool.
     - **reached** = pooled runs within a 1% relative miss $|\xi_n|/|y_n^\star-\mathcal{M}_m(x_n^{\mathrm{ung}})|\le0.01$.
     - **target reached** = 🎯 if ALL pooled runs are within 1%, else ❌.
+    - **convergence** (one figure per experiment, below): the gap $\xi_{n,t}=\mathcal{M}_m(\hat{x}_{n,t})-y_n^\star$ over flow time converging to $0$ (toggle `aggregate m`).
     """)
-    return
-
-
-@app.cell
-def _(glabel, metrics, mo):
-    # ---- Reliability: target-diff + within-1% target-reached (no plots) ----
-    if metrics is None:
-        t1_view = mo.md("_press **compute metrics**_")
-    else:
-        _rows = ["| sweep point | n_pool | final gap $\\xi_n$ (mean +/- std) | reached | target reached |",
-                 "|---|---|---|---|---|"]
-        for _lb, _r in metrics.items():
-            _v = _r["eps_final"]; _td = f"{_v[0]:+.4f} +/- {_v[1]:.4f}"
-            _rc = _r["reached_count"]; _np = _r["n_pool"]
-            _rows.append(f"| {glabel(_lb)} | {_np} | {_td} | {_rc}/{_np} | {chr(0x1F3AF) if _rc == _np else chr(0x274C)} |")
-        t1_view = mo.md("\n".join(_rows))
-    t1_view
-    return
-
-
-@app.cell(hide_code=True)
-def _(aggregate_m_checkbox, mo):
-    mo.vstack([
-        mo.md(r"""## T2: Interference
-    - **Convergence** (one figure per experiment): the guided-state gap over flow time $\xi_{n,t}=\mathcal{M}_m(\hat{x}_{n,t})-y_n^\star$ per schedule, converging to $0$.
-    - **Table**: total guidance $=\sum_t\lVert\lambda_{n,t}\,g_{n,t}\rVert$ — how much intervention the schedule needed."""),
-        aggregate_m_checkbox,
-    ])
     return
 
 
@@ -426,9 +435,11 @@ def _(
     sched_colors,
     traj_grid,
 ):
-    # ---- Interference: guided-state convergence, one figure per experiment ----
+    # ---- Reliability: guided-state convergence over flow time, one figure per experiment ----
+    # The gap xi_{n,t} = M_m(x_hat_{n,t}) - y_n* per schedule, converging to 0 (moved here from
+    # the Interference section; the bar chart + total-guidance table were removed).
     if metrics is None or traj_grid is None:
-        t2_view = mo.md("_press **compute metrics**_")
+        reliability_conv_view = mo.md("_press **compute metrics**_")
     else:
         _n = int(n_slider.value) - 1; _agg = aggregate_m_checkbox.value; _labels = list(sched_colors)
         _items = []
@@ -460,14 +471,537 @@ def _(
                     if _m == M - 1 and _cell: _ax.legend(fontsize=6, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0)
             _f.tight_layout(pad=0.3)
             _items.append(mo.as_html(_f))
-        _best = min(_r["total_guidance"][0] for _r in metrics.values())
-        _rows = ["| sweep point | n_pool | total guidance |", "|---|---|---|"]
+        reliability_conv_view = mo.vstack([aggregate_m_checkbox, *_items], align="start")
+    reliability_conv_view
+    return
+
+
+@app.cell
+def _(glabel, metrics, mo):
+    # ---- Reliability: target-diff + within-1% target-reached (no plots) ----
+    if metrics is None:
+        t1_view = mo.md("_press **compute metrics**_")
+    else:
+        _rows = ["| sweep point | n_pool | final gap $\\xi_n$ (mean +/- std) | reached | target reached |",
+                 "|---|---|---|---|---|"]
         for _lb, _r in metrics.items():
-            _np = _r["n_pool"]
-            _v = _r["total_guidance"]; _cc = f"{_v[0]:.3f}+/-{_v[1]:.3f}"
-            _rows.append(f"| {glabel(_lb)} | {_np} | " + (("**"+_cc+"**") if _v[0]==_best else _cc) + " |")
-        t2_view = mo.vstack(_items + [mo.md("\n".join(_rows))])
-    t2_view
+            _v = _r["eps_final"]; _td = f"{_v[0]:+.4f} +/- {_v[1]:.4f}"
+            _rc = _r["reached_count"]; _np = _r["n_pool"]
+            _rows.append(f"| {glabel(_lb)} | {_np} | {_td} | {_rc}/{_np} | {chr(0x1F3AF) if _rc == _np else chr(0x274C)} |")
+        t1_view = mo.md("\n".join(_rows))
+    t1_view
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## T2: Guidance effect
+
+    How much the guidance perturbs the flow, profiled across **all** variables/levels.
+    **T2a — Push across all variables** gives three masked-mean profiles per level variable (aggregated over
+    experiments): the **absolute** guided intensity $\mathcal{M}_m(x^{\mathrm{gui}})$, its deviation from
+    **ground truth** $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gt}})$, and the **push**
+    relative to the unguided twin $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gui\_ung}})$.
+    **T2b** — push as the guidance kick $\|\nabla\mathcal{L}\|$ (lower = better).
+    """)
+    return
+
+
+@app.cell
+def _(mo, sched_colors):
+    # T2 interference subtests (T2a/T2b): the per-channel push across ALL variables is heavy
+    # (~1-2 min over the pool), so it is gated behind a button; the top-k slider then re-renders
+    # the tables/grids instantly from the cached result.
+    interf_button = mo.ui.run_button(label="compute interference profiles (~1-2 min)")
+    interf_k_slider = mo.ui.slider(1, max(len(sched_colors), 2), value=min(3, max(len(sched_colors), 1)),
+                                   step=1, label="top-k schedules: ", show_value=True)
+    mo.hstack([interf_button, interf_k_slider], justify="start", align="center")
+    return interf_button, interf_k_slider
+
+
+@app.cell
+def _(LEVELS_DICT):
+    # constants for the interference subtests: the 6 level variables and their channel order
+    # ('sfc' ALWAYS first, then levels bottom->top), like intensity_comparison's intensity_channels.
+    INTERF_LEVEL_VARS = ["geopotential", "u_component_of_wind", "v_component_of_wind",
+                         "temperature", "specific_humidity", "vertical_velocity"]
+    INTERF_SURFACE_PAIR = {"temperature": "2m_temperature",
+                           "u_component_of_wind": "10m_u_component_of_wind",
+                           "v_component_of_wind": "10m_v_component_of_wind"}
+    INTERF_VSHORT = {"geopotential": "z", "u_component_of_wind": "u", "v_component_of_wind": "v",
+                     "temperature": "T", "specific_humidity": "q", "vertical_velocity": "w"}
+
+
+    def interf_chan_order(_var):
+        """Channel labels for one variable, surface->top. 'sfc' is ALWAYS the first channel (even
+        for variables with no surface pair, e.g. geopotential) so every chart shares one aligned
+        x-axis; variables without a surface value simply have a gap (NaN) at sfc."""
+        return ["sfc"] + [f"L{_L}" for _L in reversed(LEVELS_DICT["level"])]
+
+    return (
+        INTERF_LEVEL_VARS,
+        INTERF_SURFACE_PAIR,
+        INTERF_VSHORT,
+        interf_chan_order,
+    )
+
+
+@app.cell
+def _(
+    EXPS,
+    INTERF_LEVEL_VARS,
+    INTERF_SURFACE_PAIR,
+    M,
+    N,
+    datetime,
+    find_era5_input,
+    get_gt_rollout,
+    get_rollout_dir,
+    interf_button,
+    load_rollout,
+    np,
+    sched_colors,
+    select_point,
+    sweep_points,
+    xr,
+):
+    # ---- heavy per-channel interference compute (button-gated) ----
+    # For every selected schedule, pooled over subexperiments x members x guided n, compute three
+    # per-channel pushes across ALL 6 level variables (+ their surface pair):
+    #   avg  = M_mask(x_gui) - M_mask(x_gui_ung)                 (masked-mean of the guidance effect)
+    #   kick = sqrt( sum_t sum_mask (dL/dz)^2 )                  (RAW grad norm; unscaled, all steps)
+    #   appk = sqrt( sum_t lam_raw_t^2 sum_mask (dL/dz)^2 )      (APPLIED kick; lam_raw_t=w a c/||g||,
+    #          zero on unguided steps -> schedule-aware, guided-steps-only)
+    # Also the ABSOLUTE masked means M(x_gui), M(x_gui_ung) and the ground-truth M(x_gt) at valid time
+    # n+1 (for the T2a absolute-intensity and vs-ground-truth profile grids).
+    # Also per-variable totals and a variable-normalized rank score (equal weight per variable).
+    interf_data = None
+    if interf_button.value:
+        _labels = list(sched_colors)
+        _avg = {lb: {v: {} for v in INTERF_LEVEL_VARS} for lb in _labels}
+        _kick = {lb: {v: {} for v in INTERF_LEVEL_VARS} for lb in _labels}
+        _appk = {lb: {v: {} for v in INTERF_LEVEL_VARS} for lb in _labels}
+        _absg = {lb: {v: {} for v in INTERF_LEVEL_VARS} for lb in _labels}   # M(x_gui)
+        _absu = {lb: {v: {} for v in INTERF_LEVEL_VARS} for lb in _labels}   # M(x_gui_ung)
+        _absgt = {lb: {v: {} for v in INTERF_LEVEL_VARS} for lb in _labels}  # M(x_gt) @ valid time n+1
+        _any_gt = False
+
+        def _lam_raw_for(_recs, _sel, _m, _n):
+            # applied-kick multiplier per flow step: lam_raw_t = w_t a_t c_t / ||g_t|| (from the
+            # guidance_schedule sidecar). Zero where a_t=0, so appk is schedule-aware + guided-only.
+            for _r in _recs:
+                if _r.get("m") == _m and _r.get("n") == _n and all(
+                    _r["sweep"].get(_k) == _v for _k, _v in _sel.items() if _k in _r["sweep"]
+                ):
+                    _a = np.asarray(_r["a_t"], float); _c = np.asarray(_r["c_t"], float)
+                    _w = np.asarray(_r["w_t"], float); _gn = np.asarray(_r["g_norm_t"], float)
+                    return (_w * _a * _c) / np.clip(_gn, 1e-30, None)
+            return None
+
+        for _ei, _rid in enumerate(EXPS):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
+            _mask = np.asarray(_mask, float); _msum = float(_mask.sum())
+            _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
+            _gui = xr.open_zarr(_dir / "gui.zarr"); _giu = xr.open_zarr(_dir / "gui_ung.zarr"); _gr = xr.open_zarr(_dir / "grads.zarr")
+            try:
+                # GT valid state (member-independent). N+1 times: index 0 = init, n+1 = forecast step n.
+                _gtr = get_gt_rollout(N + 1, datetime.fromisoformat(_cfg["START_TS"]),
+                                      input_path=find_era5_input(get_rollout_dir(_rid)))
+                _have_gt = True; _any_gt = True
+            except Exception:
+                _gtr = None; _have_gt = False
+            for _lb, _sel in _pts.items():
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _gns = [nn for nn in range(N) if _p[nn] != 0.0] or [0]
+                for _m in range(M):
+                    for _n in _gns:
+                        _lam = _lam_raw_for(_recs, _sel, _m, _n)
+                        _lam2 = None if _lam is None else (_lam ** 2)
+                        for _var in INTERF_LEVEL_VARS:
+                            _levs = list(_gui[_var]["level"].values)
+                            _g = np.asarray(select_point(_gui[_var], _sel).isel(m=_m, n=_n), float)      # (level,lat,lon)
+                            _ud = select_point(_giu[_var], _sel).isel(m=_m, n=_n)
+                            _u = np.asarray(_ud.isel(t=-1) if "t" in _ud.dims else _ud, float)            # (level,lat,lon)
+                            _gg = np.asarray(select_point(_gr[_var], _sel).isel(m=_m, n=_n), float)       # (t,level,lat,lon)
+                            _ga = (_g * _mask).sum((-2, -1)) / _msum                                       # (level,) M(x_gui)
+                            _ua = (_u * _mask).sum((-2, -1)) / _msum                                       # (level,) M(x_gui_ung)
+                            _pa = _ga - _ua                                                                # (level,) push
+                            _gta = None
+                            if _have_gt:
+                                _gt_lv = np.asarray(_gtr[_var].isel(time=_n + 1).sel(level=_levs), float)  # (level,lat,lon)
+                                _gta = (_gt_lv * _mask).sum((-2, -1)) / _msum                              # (level,) M(x_gt)
+                            _pt = ((_gg ** 2) * _mask).sum((-2, -1))                                       # (t,level) grad energy
+                            _pk = np.sqrt(_pt.sum(axis=0))                                                 # (level,) raw
+                            _pc = np.sqrt((_pt * _lam2[:, None]).sum(axis=0)) if _lam2 is not None else None  # (level,) applied
+                            for _li, _L in enumerate(_levs):
+                                _cl = f"L{int(_L)}"
+                                _avg[_lb][_var].setdefault(_cl, []).append(float(_pa[_li]))
+                                _absg[_lb][_var].setdefault(_cl, []).append(float(_ga[_li]))
+                                _absu[_lb][_var].setdefault(_cl, []).append(float(_ua[_li]))
+                                _kick[_lb][_var].setdefault(_cl, []).append(float(_pk[_li]))
+                                if _gta is not None:
+                                    _absgt[_lb][_var].setdefault(_cl, []).append(float(_gta[_li]))
+                                if _pc is not None:
+                                    _appk[_lb][_var].setdefault(_cl, []).append(float(_pc[_li]))
+                            if _var in INTERF_SURFACE_PAIR:
+                                _svar = INTERF_SURFACE_PAIR[_var]
+                                _gs = np.asarray(select_point(_gui[_svar], _sel).isel(m=_m, n=_n), float)  # (lat,lon)
+                                _usd = select_point(_giu[_svar], _sel).isel(m=_m, n=_n)
+                                _us = np.asarray(_usd.isel(t=-1) if "t" in _usd.dims else _usd, float)
+                                _grs = np.asarray(select_point(_gr[_svar], _sel).isel(m=_m, n=_n), float)  # (t,lat,lon)
+                                _pts = ((_grs ** 2) * _mask).sum((-2, -1))                                  # (t,)
+                                _ga_s = float((_gs * _mask).sum() / _msum)
+                                _ua_s = float((_us * _mask).sum() / _msum)
+                                _avg[_lb][_var].setdefault("sfc", []).append(_ga_s - _ua_s)
+                                _absg[_lb][_var].setdefault("sfc", []).append(_ga_s)
+                                _absu[_lb][_var].setdefault("sfc", []).append(_ua_s)
+                                _kick[_lb][_var].setdefault("sfc", []).append(float(np.sqrt(_pts.sum())))
+                                if _have_gt:
+                                    _gts = np.asarray(_gtr[_svar].isel(time=_n + 1), float)                # (lat,lon)
+                                    _absgt[_lb][_var].setdefault("sfc", []).append(float((_gts * _mask).sum() / _msum))
+                                if _lam2 is not None:
+                                    _appk[_lb][_var].setdefault("sfc", []).append(float(np.sqrt((_pts * _lam2).sum())))
+
+        def _mean_map(_acc):
+            return {lb: {v: {cl: float(np.mean(vs)) for cl, vs in _acc[lb][v].items() if vs} for v in INTERF_LEVEL_VARS} for lb in _labels}
+
+        def _pvt(_D, _absv):
+            return {lb: {v: float(sum((abs(x) if _absv else x) for x in _D[lb][v].values())) for v in INTERF_LEVEL_VARS} for lb in _labels}
+
+        def _scores(_pv):
+            _vmax = {v: (max(_pv[lb][v] for lb in _labels) or 1.0) for v in INTERF_LEVEL_VARS}
+            return {lb: float(np.mean([_pv[lb][v] / _vmax[v] for v in INTERF_LEVEL_VARS])) for lb in _labels}
+
+        _AVG = _mean_map(_avg); _KICK = _mean_map(_kick); _APPK = _mean_map(_appk)
+        _ABSG = _mean_map(_absg); _ABSU = _mean_map(_absu); _ABSGT = _mean_map(_absgt)
+        _apv = _pvt(_AVG, True); _kpv = _pvt(_KICK, False); _cpv = _pvt(_APPK, False)
+        _npool = max((len(vs) for v in INTERF_LEVEL_VARS for vs in _avg[_labels[0]][v].values()), default=0) if _labels else 0
+        # per-sample T2a score + T2d collateral -> (mean, std) over the (exp x m x n) pool. Fixed
+        # normalizers (overall vmax / mean 2mT) so the mean matches the T2a/T2d table values.
+        _avg_score = _scores(_apv)
+        def _nsamp(_l):
+            return min((len(vs) for v in INTERF_LEVEL_VARS for vs in _avg[_l][v].values()), default=0)
+        def _pv_sample(_acc, _l, _i, _absv):
+            return {v: float(sum((abs(_acc[_l][v][cl][_i]) if _absv else _acc[_l][v][cl][_i]) for cl in _acc[_l][v])) for v in INTERF_LEVEL_VARS}
+        _avmax = {v: (max(_apv[lb][v] for lb in _labels) or 1.0) for v in INTERF_LEVEL_VARS}
+        _avg_score_ms, _collateral_ms = {}, {}
+        for _l in _labels:
+            _ns = _nsamp(_l)
+            _si = [float(np.mean([_pv_sample(_avg, _l, _i, True)[v] / _avmax[v] for v in INTERF_LEVEL_VARS])) for _i in range(_ns)]
+            _avg_score_ms[_l] = (_avg_score[_l], float(np.std(_si)) if _si else float("nan"))
+            _sfc = _APPK[_l]["temperature"].get("sfc", float("nan"))
+            _ci = [sum(_pv_sample(_appk, _l, _i, False).values()) / _sfc - 1.0 for _i in range(_ns)] if (np.isfinite(_sfc) and _sfc != 0.0) else []
+            _collateral_ms[_l] = (float(np.mean(_ci)), float(np.std(_ci))) if _ci else (float("nan"), float("nan"))
+        interf_data = {"avg": _AVG, "kick": _KICK, "appk": _APPK,
+                       "abs_gui": _ABSG, "abs_ung": _ABSU, "abs_gt": _ABSGT, "have_gt": _any_gt,
+                       "avg_pvt": _apv, "kick_pvt": _kpv, "appk_pvt": _cpv,
+                       "avg_score": _avg_score, "kick_score": _scores(_kpv), "appk_score": _scores(_cpv),
+                       "avg_score_ms": _avg_score_ms, "collateral_ms": _collateral_ms,
+                       "labels": _labels, "n_pool": _npool}
+    return (interf_data,)
+
+
+@app.cell
+def _(
+    INTERF_LEVEL_VARS,
+    INTERF_VSHORT,
+    glabel,
+    interf_chan_order,
+    interf_data,
+    interf_k_slider,
+    mo,
+    np,
+    plt,
+    sched_colors,
+):
+    # shared renderer for a subtest: a per-variable table + a 6-chart perturbation-profile grid
+    # (one chart per level variable, x = channels surface->top, lines = the top-k schedules).
+    # _lower_better -> best is the MINIMUM. _normalize_by_2mT -> divide each line by its own 2mT
+    # (surface-temperature) kick (all schedules = 1 at temp/sfc) and rank/score by COLLATERAL =
+    # total non-target kick per unit 2mT (min = most targeted). _show_table=False -> grid only.
+    def interf_render(_key, _title_md, _desc_md, _ylabel, _split_T_sfc=False, _lower_better=False,
+                      _normalize_by_2mT=False, _show_table=True):
+        if interf_data is None:
+            return mo.vstack([mo.md(_title_md), mo.md("_press **compute interference profiles** above_")])
+        _D = interf_data[_key]
+        _pvt = interf_data[_key + "_pvt"]
+        _score = interf_data[_key + "_score"]
+        _labels = interf_data["labels"]
+        _k = min(int(interf_k_slider.value), len(_labels))
+        # ---- ranking (winner first) ----
+        if _normalize_by_2mT:
+            # collateral per unit 2mT = total_kick/2mT - 1 ; MIN = most targeted / least side-effect
+            def _coll(_l):
+                _nrm = _D[_l]["temperature"].get("sfc", np.nan)
+                if not (np.isfinite(_nrm) and _nrm != 0.0):
+                    return float("-inf")   # missing target -> never wins under max
+                return sum(_pvt[_l][_v] for _v in INTERF_LEVEL_VARS) / _nrm - 1.0
+            _rankval = {_l: _coll(_l) for _l in _labels}
+            _ranked = sorted(_labels, key=lambda _l: _rankval[_l], reverse=True)  # descending: max collateral first (higher=better)
+        else:
+            _rankval = _score
+            _ranked = sorted(_labels, key=lambda _l: _score[_l], reverse=not _lower_better)
+        _winner = _ranked[0]
+        _top = _ranked[:_k]
+        # ---- 6-chart grid ----
+        _fig, _axs = plt.subplots(2, 3, figsize=(15, 7), dpi=120)
+        for _ax, _var in zip(_axs.ravel(), INTERF_LEVEL_VARS):
+            _cos = interf_chan_order(_var); _xs = list(range(len(_cos)))
+            for _lb in _top:
+                _ys = [_D[_lb][_var].get(_cl, np.nan) for _cl in _cos]
+                if _normalize_by_2mT:
+                    _nrm = _D[_lb]["temperature"].get("sfc", np.nan)
+                    _ys = [(_y / _nrm) if (np.isfinite(_nrm) and _nrm != 0.0) else np.nan for _y in _ys]
+                _ax.plot(_xs, _ys, "-o", ms=3, lw=1.7, color=sched_colors[_lb], label=glabel(_lb))
+            _ax.axhline(1.0 if _normalize_by_2mT else 0.0, color="#999999", lw=0.6,
+                        ls="--" if _normalize_by_2mT else "-")
+            _ax.set_xticks(_xs); _ax.set_xticklabels(_cos, fontsize=6, rotation=90)
+            _ax.set_xlim(-0.5, len(_cos) - 0.5)   # half-slot pad: sfc is the first tick, off the y-axis
+            _ax.set_title(_var, fontsize=9); _ax.set_ylabel(_ylabel, fontsize=7)
+            for _s in ("top", "right"):
+                _ax.spines[_s].set_visible(False)
+        _axs.ravel()[0].legend(fontsize=6, loc="best")
+        _fig.tight_layout()
+        _grid = mo.as_html(_fig); plt.close(_fig)
+        if not _show_table:
+            return mo.vstack([mo.md(_title_md), mo.md(_desc_md), _grid], align="start")
+        # ---- T2d collateral table (2mT-normalized) ----
+        if _normalize_by_2mT:
+            # per-variable kick per unit 2mT (temperature column = its LEVELS only, i.e. the collateral
+            # WITHIN temperature; the 2mT reference is 1 by construction and omitted). MIN per column;
+            # "collateral" = total non-target kick per unit 2mT; winner = min collateral.
+            _cols = []
+            for _v in INTERF_LEVEL_VARS:
+                _cd = {}
+                for _l in _labels:
+                    _nrm = _D[_l]["temperature"].get("sfc", np.nan)
+                    _raw = (_pvt[_l]["temperature"] - _D[_l]["temperature"].get("sfc", 0.0)) if _v == "temperature" else _pvt[_l][_v]
+                    _cd[_l] = (_raw / _nrm) if (np.isfinite(_nrm) and _nrm != 0.0) else float("nan")
+                _cols.append((INTERF_VSHORT[_v], _cd, "max"))
+            _cols.append(("collateral", {_l: _rankval[_l] for _l in _labels}, "max"))
+            _best = {_h: max((_v for _v in _vv.values() if np.isfinite(_v)), default=float("nan")) for _h, _vv, _r in _cols}
+            _rows = ["| schedule | " + " | ".join(_h for _h, _u1, _u2 in _cols) + " |",
+                     "|" + "---|" * (len(_cols) + 1)]
+            for _lb in _ranked:
+                _cells = [(f"**{_v2[_lb]:.3g}**" if _v2[_lb] == _best[_h] else f"{_v2[_lb]:.3g}") for _h, _v2, _r in _cols]
+                _star = "★ " if _lb in _top else ""
+                _rows.append(f"| {_star}{glabel(_lb)} | " + " | ".join(_cells) + " |")
+            return mo.vstack([
+                mo.md(_title_md), mo.md(_desc_md), _grid,
+                mo.md(f"_best-{_k} schedules (★) drawn. Each cell = applied kick **per unit of the 2mT surface "
+                      f"kick** (temperature column = its **levels only**; 2mT itself is 1 by construction, omitted). "
+                      f"**collateral** = total non-target kick per unit 2mT; **max = winner** (fullest physically-coupled "
+                      f"response per unit of target kick). **bold** = per-column max. Pooled over "
+                      f"{interf_data['n_pool']} (exp×m×n) samples._"),
+                mo.md("\n".join(_rows)),
+            ], align="start")
+        # ---- default per-variable push table ----
+        _defrule = "min" if _lower_better else "max"
+        _cols = []  # (header, {lb: value}, "max"|"min")
+        for _v in INTERF_LEVEL_VARS:
+            if _v == "temperature" and _split_T_sfc:
+                _sfc = {_l: abs(_D[_l]["temperature"].get("sfc", float("nan"))) for _l in _labels}
+                _tlev = {_l: _pvt[_l]["temperature"] - _sfc[_l] for _l in _labels}
+                _cols.append(("T", _tlev, _defrule))
+                _lead2mT = ("2mT", _sfc, None)   # 2mT -> first column, no bold
+            else:
+                _cols.append((INTERF_VSHORT[_v], {_l: _pvt[_l][_v] for _l in _labels}, _defrule))
+        if _split_T_sfc:
+            _cols = [_lead2mT] + _cols
+        _best = {_h: (min if _r == "min" else max)(_vv.values()) for _h, _vv, _r in _cols if _r is not None}
+        _rows = ["| schedule | " + " | ".join(_h for _h, _u1, _u2 in _cols) + " | score |",
+                 "|" + "---|" * (len(_cols) + 2)]
+        for _lb in _ranked:
+            _cells = []
+            for _h, _vv, _r in _cols:
+                _val = _vv[_lb]; _s = f"{_val:.3g}"
+                _cells.append(f"**{_s}**" if (_r is not None and _val == _best[_h]) else _s)
+            _sc = f"{_score[_lb]:.3f}"; _sc = f"**{_sc}**" if _lb == _winner else _sc
+            _star = "★ " if _lb in _top else ""
+            _rows.append(f"| {_star}{glabel(_lb)} | " + " | ".join(_cells) + f" | {_sc} |")
+        return mo.vstack([
+            mo.md(_title_md),
+            mo.md(_desc_md),
+            _grid,
+            mo.md(f"_best-{_k} schedules (★) drawn, ranked by the variable-normalized push score"
+                  + (" (**lower = better**)" if _lower_better else "")
+                  + f"; **bold** = per-column {'min' if _lower_better else 'max'}"
+                  + (" (**2mT** = surface temperature, first column, unbolded; **T** = temperature levels only)" if _split_T_sfc else "")
+                  + "; **score** bold = the single winner (rank #1). "
+                  f"Per-variable value = sum over that variable's channels; "
+                  f"pooled over {interf_data['n_pool']} (exp×m×n) samples._"),
+            mo.md("\n".join(_rows)),
+        ], align="start")
+
+    return (interf_render,)
+
+
+@app.cell(hide_code=True)
+def _(
+    INTERF_LEVEL_VARS,
+    glabel,
+    interf_chan_order,
+    interf_data,
+    interf_k_slider,
+    mo,
+    np,
+    plt,
+    sched_colors,
+):
+    # grid-only profile renderers ported from intensity_comparison's "Guidance intensity" section:
+    # per level variable a 6-chart grid (x = channels surface->top), one line per top-k schedule of the
+    # masked-mean of the guided state. _mode="abs" -> absolute M(x_gui); _mode="vsgt" -> M(x_gui)-M(gt).
+    # References: unguided twin (gui_ung, dashed grey) and ground truth (gt: dashed green / zero line).
+    # Top-k + ordering follow the T2a push score, so all three T2a views show the SAME schedules. No table.
+    def interf_profile_render(_mode, _title_md, _desc_md, _ylabel):
+        if interf_data is None:
+            return mo.vstack([mo.md(_title_md), mo.md("_press **compute interference profiles** above_")])
+        _absg = interf_data["abs_gui"]; _absu = interf_data["abs_ung"]; _absgt = interf_data["abs_gt"]
+        _labels = interf_data["labels"]; _score = interf_data["avg_score"]
+        _have_gt = bool(interf_data.get("have_gt"))
+        _k = min(int(interf_k_slider.value), len(_labels))
+        _ranked = sorted(_labels, key=lambda _l: _score[_l], reverse=True)
+        _top = _ranked[:_k]
+
+        def _refline(_D, _var, _cos):
+            # schedule-independent reference (gui_ung / gt): mean across drawn labels (collapses to value)
+            _out = []
+            for _cl in _cos:
+                _vv = [_D[_l][_var][_cl] for _l in _top if _cl in _D.get(_l, {}).get(_var, {})]
+                _out.append(float(np.mean(_vv)) if _vv else np.nan)
+            return _out
+
+        _fig, _axs = plt.subplots(2, 3, figsize=(15, 7), dpi=120)
+        for _ax, _var in zip(_axs.ravel(), INTERF_LEVEL_VARS):
+            _cos = interf_chan_order(_var); _xs = list(range(len(_cos)))
+            _gtref = _refline(_absgt, _var, _cos) if _have_gt else [np.nan] * len(_cos)
+            for _lb in _top:
+                _ys = [_absg[_lb][_var].get(_cl, np.nan) for _cl in _cos]
+                if _mode == "vsgt":
+                    _ys = [(_y - _gt) if (np.isfinite(_y) and np.isfinite(_gt)) else np.nan
+                           for _y, _gt in zip(_ys, _gtref)]
+                _ax.plot(_xs, _ys, "-o", ms=3, lw=1.7, color=sched_colors[_lb], label=glabel(_lb))
+            # unguided-twin reference line
+            _uref = _refline(_absu, _var, _cos)
+            if _mode == "vsgt":
+                _uref = [(_uu - _gt) if (np.isfinite(_uu) and np.isfinite(_gt)) else np.nan
+                         for _uu, _gt in zip(_uref, _gtref)]
+            _ax.plot(_xs, _uref, "--", color="#555555", lw=1.5, label="unguided (gui_ung)")
+            # ground-truth reference
+            if _mode == "abs":
+                if _have_gt:
+                    _ax.plot(_xs, _gtref, "--", color="#009E73", lw=1.5, label="ground truth (gt)")
+            else:
+                _ax.axhline(0.0, color="#009E73", lw=1.5, ls="--", label="ground truth (gt)")
+            _ax.set_xticks(_xs); _ax.set_xticklabels(_cos, fontsize=6, rotation=90)
+            _ax.set_xlim(-0.5, len(_cos) - 0.5)
+            _ax.set_title(_var, fontsize=9); _ax.set_ylabel(_ylabel, fontsize=7)
+            for _s in ("top", "right"):
+                _ax.spines[_s].set_visible(False)
+        _axs.ravel()[0].legend(fontsize=6, loc="best")
+        _fig.tight_layout()
+        _grid = mo.as_html(_fig); plt.close(_fig)
+        return mo.vstack([mo.md(_title_md), mo.md(_desc_md), _grid], align="start")
+
+    return (interf_profile_render,)
+
+
+@app.cell(hide_code=True)
+def _(interf_profile_render):
+    interf_abs_view = interf_profile_render(
+        "abs",
+        r"### Absolute intensity — $\mathcal{M}_m(x^{\mathrm{gui}})$ by level",
+        r"Masked-mean of the **guided state** $\mathcal{M}_m(x^{\mathrm{gui}})$ per variable/level, one line "
+        r"per top-$k$ schedule; dashed grey = unguided twin (gui\_ung), dashed green = ground truth (gt). "
+        r"One chart per level variable — $x$ = channels (surface→top). Pooled across experiments (exp×m×n).",
+        r"mask-mean  $\mathcal{M}_m(x^{gui})$",
+    )
+    interf_abs_view
+    return
+
+
+@app.cell(hide_code=True)
+def _(interf_profile_render):
+    interf_vsgt_view = interf_profile_render(
+        "vsgt",
+        r"### Relative to ground truth — $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gt}})$",
+        r"The same masked-mean, minus the ground-truth valid state at lead $n{+}1$: how far each "
+        r"variable/level sits from truth. GT is the zero line (green); dashed grey = unguided twin "
+        r"(gui\_ung). One chart per level variable — $x$ = channels (surface→top). Pooled across "
+        r"experiments (exp×m×n).",
+        r"mask-mean  $\mathcal{M}_m(x^{gui})-\mathcal{M}_m(x^{gt})$",
+    )
+    interf_vsgt_view
+    return
+
+
+@app.cell
+def _(interf_render):
+    interf_A_view = interf_render(
+        "avg",
+        r"### Push relative to unguided — $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gui\_ung}})$",
+        r"Per variable/level, the masked-mean of the **guidance effect** "
+        r"$\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gui\_ung}})$: how far each variable's "
+        r"average state is pushed (relative to its unguided twin) to reach the target. One chart per "
+        r"level variable — $x$ = channels (surface→top), one line per top-$k$ schedule.",
+        r"push  $\mathcal{M}_m(x^{gui})-\mathcal{M}_m(x^{gui\_ung})$",
+        _split_T_sfc=True,
+    )
+    interf_A_view
+    return
+
+
+@app.cell
+def _(interf_render):
+    interf_B_view = interf_render(
+        "kick",
+        r"### T2b — Raw guidance-gradient norm $\lVert\nabla\mathcal{L}\rVert$",
+        r"Per variable/level, the mask-weighted norm of the **raw** loss gradient over **all** flow steps "
+        r"$\lVert\nabla\mathcal{L}\rVert=\sqrt{\sum_t\sum_{\mathrm{mask}}(\nabla_z\mathcal{L})^2}$ (the `grads` store, "
+        r"**unscaled** by the schedule). It shows the *shape/direction* of the guidance signal per level, but is "
+        r"schedule-blind (independent of $w,a_t,c_t$) and sums over steps where **no** kick was applied — so it is "
+        r"NOT the applied kick (see T2c). One chart per level variable — $x$ = channels (surface→top), top-$k$ lines.",
+        r"raw  $\|\nabla\mathcal{L}\|$",
+        _lower_better=True,
+    )
+    interf_B_view
+    return
+
+
+@app.cell
+def _(interf_render):
+    interf_C_view = interf_render(
+        "appk",
+        r"### T2c — Applied guidance kick $\lVert\lambda_t\nabla\mathcal{L}\rVert$",
+        r"Per variable/level, the **actually applied** kick: each step's raw gradient weighted by the applied "
+        r"multiplier $\lambda^{\mathrm{raw}}_t=w_t a_t c_t/\lVert g_t\rVert$ (from the guidance schedule sidecar), then "
+        r"$\sqrt{\sum_t (\lambda^{\mathrm{raw}}_t)^2\sum_{\mathrm{mask}}(\nabla_z\mathcal{L})^2}$. Since $\lambda^{\mathrm{raw}}_t=0$ on "
+        r"unguided steps, this is schedule-aware and isolates **where** the guidance acts (e.g. a single step for "
+        r"`spike@k`) — the faithful guidance kick. One chart per level variable — $x$ = channels (surface→top), top-$k$ lines.",
+        r"applied kick  $\|\lambda_t\nabla\mathcal{L}\|$",
+        _lower_better=True,
+    )
+    interf_C_view
+    return
+
+
+@app.cell
+def _(interf_render):
+    interf_D_view = interf_render(
+        "appk",
+        r"### T2d — Applied kick, normalized to surface temperature (2mT)",
+        r"The applied-kick profiles from T2c, but every line is divided by **its own** surface-temperature "
+        r"kick (2mT), so all schedules pass through **1 at temperature/sfc** (dashed line) and every channel "
+        r"reads as the applied kick **per unit of the target's surface kick**. The table ranks by "
+        r"**collateral** = total non-target kick per unit 2mT (**higher = better** — the fullest physically-coupled "
+        r"response per unit of target kick). One chart per level variable — $x$ = channels (surface→top), best-$k$ lines.",
+        r"applied kick / 2mT",
+        _lower_better=True,
+        _normalize_by_2mT=True,
+        _show_table=True,
+    )
+    interf_D_view
     return
 
 
@@ -491,8 +1025,15 @@ def _(mo):
     azim_slider = mo.ui.slider(-180, 180, value=0, step=5, label="azim: ", show_value=True)
     zoom_traj_checkbox = mo.ui.checkbox(label="zoom to trajectories", value=True)
     zoom_pad_slider = mo.ui.slider(-0.4, 2.0, step=0.05, value=0, label="zoom pad: ", show_value=True)
-    mo.hstack([elev_slider, azim_slider, zoom_traj_checkbox, zoom_pad_slider], justify="start", align="center")
-    return azim_slider, elev_slider, zoom_pad_slider, zoom_traj_checkbox
+    xt_checkbox = mo.ui.checkbox(value=False, label="actual state x_t (drop vfs)")
+    mo.hstack([elev_slider, azim_slider, zoom_traj_checkbox, zoom_pad_slider, xt_checkbox], justify="start", align="center")
+    return (
+        azim_slider,
+        elev_slider,
+        xt_checkbox,
+        zoom_pad_slider,
+        zoom_traj_checkbox,
+    )
 
 
 @app.cell
@@ -556,6 +1097,7 @@ def _(
     sched_colors,
     traj_grid,
     ung_traj,
+    xt_checkbox,
     zoom_pad_slider,
     zoom_traj_checkbox,
 ):
@@ -574,7 +1116,7 @@ def _(
                 _cell = traj_grid.get((_ei, _m, _n), {})
                 for _lb in _labels:
                     if _lb not in _cell: continue
-                    _pg = np.asarray(_cell[_lb]["pg"]); _c = sched_colors[_lb]
+                    _pg = np.asarray(_cell[_lb]["pgx" if xt_checkbox.value else "pg"]); _c = sched_colors[_lb]
                     _ax.plot(_pg[:, 0], _pg[:, 1], _pg[:, 2], "-", color=_c, linewidth=1.4, alpha=0.9, label=glabel(_lb).split()[-1])
                     _ax.scatter(_pg[-1, 0], _pg[-1, 1], _pg[-1, 2], marker="o", s=45, color=_c, depthshade=False)
                     _grp.append(_pg)
@@ -593,7 +1135,7 @@ def _(
                     _ax.scatter(_pu[-1, 0], _pu[-1, 1], _pu[-1, 2], marker="o", s=34, color="#888888", depthshade=False)
                     _grp.append(_pu)
                 if _cell:
-                    _sp = np.asarray(next(iter(_cell.values()))["pg"])[0]
+                    _sp = np.asarray(next(iter(_cell.values()))["pgx" if xt_checkbox.value else "pg"])[0]
                     _ax.scatter(_sp[0], _sp[1], _sp[2], marker="o", s=45, facecolors="#FFD700", edgecolors="black", linewidths=1.2, depthshade=False, label="start")
                     pass
                 if zoom_traj_checkbox.value and _grp:
@@ -660,6 +1202,7 @@ def _(
     sched_colors,
     traj_grid,
     ung_traj,
+    xt_checkbox,
     zoom_pad_slider,
     zoom_traj_checkbox,
 ):
@@ -683,7 +1226,7 @@ def _(
                 _cell = traj_grid.get((_ei, _m, _n), {})
                 for _lb in _labels:
                     if _lb not in _cell or "pk" not in _cell[_lb]: continue
-                    _bp = np.asarray(_cell[_lb]["pg"]); _kp = np.asarray(_cell[_lb]["pk"]); _c = sched_colors[_lb]
+                    _bp = np.asarray(_cell[_lb]["pgx" if xt_checkbox.value else "pg"]); _kp = np.asarray(_cell[_lb]["pkx" if xt_checkbox.value else "pk"]); _c = sched_colors[_lb]
                     for _t in range(len(_bp)):
                         _seg = np.stack([_bp[_t], _kp[_t]])
                         _ax.plot(_seg[:, 0], _seg[:, 1], _seg[:, 2], "-", color=_c, linewidth=1.4, alpha=0.9,
@@ -707,7 +1250,7 @@ def _(
                     _ax.plot(_pu[:, 0], _pu[:, 1], _pu[:, 2], "--", color="#888888", linewidth=1.0, alpha=0.7, label="gui_ung")
                     _grp.append(_pu)
                 if _cell:
-                    _sp = np.asarray(next(iter(_cell.values()))["pg"])[0]
+                    _sp = np.asarray(next(iter(_cell.values()))["pgx" if xt_checkbox.value else "pg"])[0]
                     _ax.scatter(_sp[0], _sp[1], _sp[2], marker="o", s=45, facecolors="#FFD700", edgecolors="black", linewidths=1.2, depthshade=False, label="start")
                 if zoom_traj_checkbox.value and _grp:
                     _pts = np.vstack(_grp); _lo, _hi = _pts.min(0), _pts.max(0)
@@ -822,19 +1365,16 @@ def _(
                 _cb.set_ticks(list(np.linspace(0.0, _vmax, 5))); _cax.tick_params(labelsize=7)
             _figs.append(mo.as_html(_f))
         _besttv = max(_r["realism_tv"][0] for _r in metrics.values())
-        _bestsim = min(_r["gvec_res_sim"][0] for _r in metrics.values())
-        _rows = ["| sweep point | n_pool | realism TV | guidance vs residual (cos) |", "|---|---|---|---|"]
+        _rows = ["| sweep point | n_pool | realism TV |", "|---|---|---|"]
         for _lb, _r in metrics.items():
             _tv = _r["realism_tv"]; _tvc = f"{_tv[0]:.3f}+/-{_tv[1]:.3f}"; _tvc = f"**{_tvc}**" if _tv[0]==_besttv else _tvc
-            _sm = _r["gvec_res_sim"]; _smc = f"{_sm[0]:.3f}+/-{_sm[1]:.3f}"; _smc = f"**{_smc}**" if _sm[0]==_bestsim else _smc
             _npv = _r["n_pool"]
-            _rows.append(f"| {glabel(_lb)} | {_npv} | {_tvc} | {_smc} |")
+            _rows.append(f"| {glabel(_lb)} | {_npv} | {_tvc} |")
         t4_view = mo.vstack([
             mo.md(f"**Realism** \u2014 top: guidance effect; bottom: avg-guidance (traj-avg |guidance vector|). "
                   f"Mask-normalized; colour scale = **{realism_norm_dropdown.value}**.  (m={_m}, n={_n + 1})"),
             *_figs,
-            mo.md("TV vs mask (**higher = better**); guidance-vs-residual = cosine similarity of the "
-                  "normalized avg-guidance vector to the guidance residual |x_gui - x_ung| (lowest in bold)."),
+            mo.md("TV vs mask (**higher = better**)."),
             mo.md("\n".join(_rows))])
     t4_view
     return

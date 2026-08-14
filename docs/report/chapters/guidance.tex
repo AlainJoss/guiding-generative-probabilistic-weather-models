@@ -2,7 +2,7 @@
 \chapter{Guidance design}
 \label{ch:guide}
 
-The previous chapter specified the scenario to be generated through an initial
+In the previous chapter we specified the scenario to be generated through an initial
 atmospheric context, a target mask \(m\), and a target trajectory
 \(y^\star_{1:N}\). We now address the second component of the framework:
 how the generative forecast can be steered towards this prescribed target.
@@ -11,27 +11,32 @@ We formulate this as a \emph{target-driven guidance} problem. At each weather
 step \(n\), the target \(y_n^\star\) is fixed before generation begins. During
 the internal residual flow, the current clean-state estimate is repeatedly
 compared with this target, and the resulting discrepancy is used to modify the
-generative dynamics. The central problem is therefore not to choose a guidance
-strength and observe the resulting scenario, but rather to determine the
-guidance required to realize a scenario that has been specified in advance.
+generative dynamics. The central problem is to determine how the guidance should be performed over the flow
+and the necessary strength to realize the specified target.
+
+--TODO: not the right place for "(not to choose a guidance strength and observe the resulting scenario)" but somewhere has to be put
 
 We first introduce the common guidance formulation used throughout this
 chapter. We then develop three strategies for realizing the prescribed target:
 \textsc{Close-Gap}, which locally controls the remaining target gap;
 \textsc{Optimize-Schedule}, which jointly optimizes the interventions across
 the flow; and \textsc{Optimize-Gain}, which fixes the relative flow-time
-profile and optimizes a single guidance gain. Finally, we introduce Universal
-Guidance and adversarial weather forecasting as baseline approaches.
+profile and optimizes a single guidance gain. Finally, we introduce adversarial weather forecasting as baseline, which will be used for the tests in chapter 5 (TODO).
+
+Here we need already to say that we experiment with two other alternatives, but defer the reader to the appendix.
+We have to say that we take an empirical approach to the problem and develop an algorithm that under this perspective trades efficiency with abstract formulation. 
+
+Introduce here that one way to pick the conditioning is from the clean estimate like we introduced in the background and put in the archesweather figure with the orange additions.
 
 \section{Target-driven guidance}
 \label{sec:target-driven-guidance}
 
-Guidance operates independently at every weather step of the autoregressive
+In our approach, guidance operates independently at every weather step of the autoregressive
 forecast. For notational simplicity, we denote by
 \(\hat{x}_{n,t}\) the clean-state estimate of the weather state being generated
 at weather step \(n\), evaluated at internal flow time \(t\). Thus, \(n\)
 continues to index weather time, while \(t\) refers exclusively to the
-generative flow.
+generative flow. (TODO: this has probably already been said in the background chapter)
 
 Although the guidance problem is solved separately at each weather step, its
 effects are not independent across weather time. Once the guided state
@@ -57,7 +62,7 @@ this target by
 where \(\mathcal{M}_m\) denotes the masked average defined in
 \Cref{ch:specify}. We refer to \(\xi_{n,t}\) as the \emph{target gap}.
 
-The corresponding guidance loss is the squared target gap,
+We then square the target gap to define a corresponding guidance loss
 
 \begin{equation}
     \mathcal{L}_{n,t}
@@ -70,22 +75,25 @@ The corresponding guidance loss is the squared target gap,
     \label{eq:guidance-loss}
 \end{equation}
 
-This formulation separates the specification of the desired scenario from the
-mechanism used to realize it. In the controlled experiments of
-\Cref{ch:specify}, for example,
+TODO: say something about alternative objectives and option to define a curved mask or push top k\% area.
 
-\begin{equation}
-    y_n^\star
-    =
-    (1+\rho_n)\,
-    \mathcal{M}_m(x_n^{\mathrm{ung}}),
-    \label{eq:controlled-guidance-target}
-\end{equation}
+This formulation separates the specification of the desired scenario $y_n^\star$ from the
+mechanism used to realize it (guidance). This is in contrast to the methods presented in (TODO: reference and explain here, this is the moment). 
 
-whereas for historical storyline generation \(y_n^\star\) is obtained from a
-selected historical trajectory. The guidance algorithms developed below are
-unchanged by this choice: once \(y_n^\star\) has been specified, they operate
-only on the resulting target gap.
+% In \Cref{ch:specify} we introduced the two approaches we will use to define $y^*_n$, 
+% where for controlled experiments we specify the target as 
+% \begin{equation}
+%     y_n^\star
+%     =
+%     (1+\rho_n)\,
+%     \mathcal{M}_m(x_n^{\mathrm{ung}}),
+%     \label{eq:controlled-guidance-target}
+% \end{equation}
+
+% whereas for the generation of storylines \(y_n^\star\) is obtained from a
+% selected historical trajectory. The guidance algorithms developed below are
+% unaffected by this choice: once \(y_n^\star\) has been specified, they operate
+% only on the resulting target gap.
 
 After completing the internal flow, the generated weather state is denoted by
 \(x_n^{\mathrm{gui}}\). Its final realized target gap is therefore
@@ -99,14 +107,13 @@ After completing the internal flow, the generated weather state is denoted by
     \label{eq:final-guidance-gap}
 \end{equation}
 
-The objective of the guidance methods in this chapter is to reduce
-\(\lvert\xi_n\rvert\), ideally reaching \(\xi_n=0\). Importantly, this does
-not imply that arbitrary changes to the atmospheric state are considered
-acceptable. Reaching the prescribed target describes only whether guidance
-has succeeded with respect to the specified event; the meteorological
-plausibility of the resulting forecast is evaluated separately.
+The objective of the guidance methods in this chapter is to minimize
+\(\lvert\xi_n\rvert\), ideally reaching \(\xi_n=0\). 
+Importantly, we want the optimization to satisfy some constraint of "well behaviour" in doing so.
+Furthermore, this does also not imply that arbitrary changes to the atmospheric state are considered
+acceptable. 
+We will discuss both concerns in the next chapter thoroughly.
 
-TODO: say something about alternative objectives and option to define a curved mask or push top k\% area.
 
 \subsection{Gradient-based flow guidance}
 \label{sec:gradient-flow-guidance}
@@ -135,15 +142,15 @@ For the squared target-gap loss in \Cref{eq:guidance-loss}, this becomes
     \label{eq:guidance-gradient-expanded}
 \end{equation}
 
-Although the objective itself is defined only through the masked quantity
-\(\mathcal{M}_m\), the gradient is taken with respect to the complete noisy
-residual \(z_{n,t}\). It therefore propagates through the mapping from the
+(TODO: enhance paragraph)
+Recalling from (TODO: ref) that \(\hat{x}_{n,t}:= \hat{x}_{n,t}(z_{n,t})\), we note that although the loss is defined by the masked quantity,
+the gradient propagates through the mapping from the
 noisy state to the clean-state estimate and can contain non-zero components
-outside the explicitly targeted variable and region. The intervention is thus
-not obtained by directly adding the mask to the generated weather field.
-Instead, the gradient describes the local change of the noisy state that
+outside the mask. We actually expect this from our interventions.
+Put into words, the gradient describes the local change of the noisy state that
 modifies the masked quantity through the learned generative model.
 
+(TODO: expression is a little bit loose, we need to specify that we are simplifying the notation by reintroducing the old expression)
 Using the notation introduced in the background chapter, the guided velocity
 can be written as
 
@@ -167,6 +174,7 @@ followed by the usual Euler update
     \label{eq:guided-euler-update}
 \end{equation}
 
+(TODO: this next part has to be reframed in terms of $\nu$ instead of the other methods)
 It is useful to separate the direction of the guidance gradient from its
 magnitude. Defining
 
@@ -192,6 +200,7 @@ the same velocity modification can equivalently be expressed as
     \label{eq:unit-gradient-guidance}
 \end{equation}
 
+(TODO:old)
 This representation will be convenient when comparing the methods developed
 below. Some methods directly control the multiplier of the raw gradient,
 whereas others naturally control the magnitude of the resulting intervention.
@@ -202,7 +211,7 @@ update.
 \subsection{Guidance-strength parameterization}
 \label{sec:guidance-strength-parameterization}
 
-We decompose the raw-gradient multiplier introduced in
+As introduced in (TODO: ref), we decompose the raw-gradient multiplier introduced in
 \Cref{eq:target-driven-guided-velocity} as
 
 \begin{equation}
@@ -216,8 +225,10 @@ The three terms play distinct roles. The scalar \(w_n\) controls the overall
 guidance magnitude at weather step \(n\). The profile \(\gamma_t\) controls
 how this magnitude is distributed over the internal flow. Finally,
 \(\nu_{n,t}\) represents an optional method-specific normalization or scaling
-factor.
+factor. (TODO: maybe here we should already say if the gradient is not normalized, 
+it's norm can be absorbed by this term, and we can actually respicify g\_t to be the normalized grad!)
 
+(TODO: not sure whether I should specify it in more technical terms)
 We take \(\gamma_t\) to be a non-negative normalized profile with maximum
 value one. Only its relative variation across flow time is relevant: any
 positive multiplicative rescaling of \(\gamma_t\) can be absorbed into
@@ -225,6 +236,7 @@ positive multiplicative rescaling of \(\gamma_t\) can be absorbed into
 an experimental design choice and are introduced later together with the
 experimental setup.
 
+(TODO: old -> methods can be presented in order such that the difficulty of tuning OPT-lambda motivated the development of NOLR, but then the empirical findings defieted the purpose of the optimization in the first place)
 The decomposition in \Cref{eq:guidance-strength-decomposition} also clarifies
 the distinction between the methods developed below. In
 \textsc{Optimize-Gain}, the flow-time profile \(\gamma_t\) is fixed and only
@@ -235,29 +247,30 @@ rather than prescribing the relative strength of guidance, it prescribes the
 desired evolution of the remaining target gap. We make this distinction
 explicit when deriving each method.
 
-Finally, we do not apply guidance at the last Euler step of the residual flow.
-For ArchesWeather, the final step size satisfies \(h_t=s_t\). Since
+Finally, we do not apply guidance at the last Euler step of the residual flow, as proposed by (TODO: cite guidance for prec paper),
+setting $\lambda_T=0$.
+% For ArchesWeather, the final step size satisfies \(h_t=s_t\). Since
 
-\begin{equation}
-    u_{n,t}
-    =
-    \frac{\hat r_{n,t}-z_{n,t}}{s_t},
-\end{equation}
+% \begin{equation}
+%     u_{n,t}
+%     =
+%     \frac{\hat r_{n,t}-z_{n,t}}{s_t},
+% \end{equation}
 
-the unguided final Euler update gives
+% the unguided final Euler update gives
 
-\begin{equation}
-    z_{n,t+1}
-    =
-    z_{n,t}
-    +
-    s_t
-    \frac{\hat r_{n,t}-z_{n,t}}{s_t}
-    =
-    \hat r_{n,t}.
-    \label{eq:final-flow-snap}
-\end{equation}
-
+% \begin{equation}
+%     z_{n,t+1}
+%     =
+%     z_{n,t}
+%     +
+%     s_t
+%     \frac{\hat r_{n,t}-z_{n,t}}{s_t}
+%     =
+%     \hat r_{n,t}.
+%     \label{eq:final-flow-snap}
+% \end{equation}
+(TODO: can be expressed more compactly)
 A guidance correction applied at this point would therefore directly alter
 the final residual without any subsequent model evaluation in which the
 perturbed state could be processed. We consequently set the guidance
@@ -266,7 +279,7 @@ chapter.
 
 \section{Target realization algorithm}
 \label{sec:target-realization}
-
+(TODO: duplication of the duplication, we should simply stop saying this)
 The formulation above leaves open how the guidance magnitude should be chosen
 in order to realize the prescribed target. Since the target $y_n^\star$ is
 known before generation, we adapt the guidance strength to the target rather
@@ -274,6 +287,7 @@ than selecting it independently of the desired outcome. Preliminary approaches
 that motivated the formulation developed here are discussed in
 \Cref{app:target-realization-development}.
 
+(TODO: this is repeating what we already said before, which was already said in the background)
 We prescribe the relative distribution of guidance over flow time through a
 normalized profile $\gamma_t$ and optimize only its overall magnitude. At
 weather step $n$, we therefore set
@@ -309,11 +323,13 @@ We then seek a stationary point
     \label{eq:gain-stationarity}
 \end{equation}
 
+(TODO: the loss is a parabola, minimizing cannot yield a maximum, so it's unnecessary to be overly technical)
 If the prescribed target can be reached exactly, any $w_n^\star$ satisfying
 $\xi_n(w_n^\star)=0$ also satisfies \Cref{eq:gain-stationarity}. If exact
 closure is not reached, we retain the evaluated value of $w_n$ that produces
 the smallest remaining squared gap.
 
+(TODO: the computation graph might be showcased more elegantly)
 The gain $w_n$ influences the terminal loss through the complete sequence of
 guided Euler steps,
 
@@ -377,6 +393,7 @@ frozen-guidance-gradient approximation, the guided Euler update
     \right)
 \end{equation}
 
+(TODO: state? -> write out on whiteboard)
 has the approximate state Jacobian
 
 \begin{equation}
@@ -416,8 +433,9 @@ The adjoint can therefore be propagated backwards according to
 
 Although the optimization variable is $w_n$, rather than the states
 $z_{n,t}$, these adjoints are required because a change in $w_n$ modifies the
-trajectory at every guided flow step. Using
-$\lambda_{n,t}=w_n\gamma_t$, the chain rule gives
+trajectory at every guided flow step. 
+(TODO: maybe this we can introduce before, to motivate the need for the jacobians)
+Using $\lambda_{n,t}=w_n\gamma_t$, the chain rule gives
 
 \begin{equation}
     \frac{\mathrm{d}\mathcal{L}_n}

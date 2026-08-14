@@ -1,17 +1,32 @@
 \chapter{Evaluation}\label{ch:eval}
 
-We evaluate our guidance method against the two requirements we set for it: \emph{achievement}, the ability to reach the specified target, and \emph{realism}, the physical plausibility of the states it generates.
+We evaluate the developed algorithm against the two requirements we have set for it: 
+\begin{itemize}
+    \item Quantitative evaluation.
+    \begin{itemize}
+        \item Q1: Is it able to achieve the target we have set for it, across different experimental settings?
+        \item Q2: Which guidance schedule yields the most desirable results?
+    \end{itemize}
+    \begin{itemize}
+        \item Q3: What results do the different experimental settings achieve, and what is their impact?
+        \item Q4: Are the results realistic in terms of spatial distribution, levels distribution, and co-variation, and time progression? 
+    \end{itemize}
+\end{itemize}
 
-The first requirement concerns whether the algorithm reaches the target, and how well it does so across settings. We test this through convergence, stability, and trajectory deviation, which together expose the failure modes of the algorithm and reveal which design choices are more adequate overall.
+We organize the evaluation evaluation as follows.
+We answer the first two questions quantitaviley and proceed with a more qualitative approach for the latter two concerns.
+While address the third question with both quantitative metrics but with a qualitative approach, aimed only at characterize different settings. 
+The last question would call for a quantitative approach, however, this would require both expert knowledge and a thorrow set of tests involving historical data, which is out of scope for this thesis.
+We thus address each one of the subquestions, but only assessing the visual characteristics.
 
-The second requirement concerns whether the generated states are realistic, in terms of temporal, spatial, vertical, and cross-variable coherence.
+\section{Quantitative evaluation}
+\subsection{Q2}
+\subsection{Q3}
+\section{Quanlitative evaluation}
+\subsection{Q3}
 
-The evaluation is organised as a funnel. In \emph{flow-time} we assess the sampling dynamics of the algorithm under different guidance schedules, and select the most appropriate one through the defined tests. In \emph{weather-time} we then characterise the parameters of the experimental setting, select the settings that produce the most desirable results, and finally validate the realism of the generated trajectories. \Cref{ch:experiments} carries out each stage in turn and reports the concrete settings and results; this chapter defines only \emph{what} we test and \emph{how} we score it.
+\subsection{Q4}
 
----this is part of the discussion maybe, if not it has to be reframed in a more specific way
-Alongside these tests, the discussion examines further aspects that the framework does not measure directly---such as the diversity of the generated trajectories and the informativeness of the gradient---but that bear on the overall value of the method and its applications.
-
-\section{Flow-time tests}
 Here we assess the algorithm under different guidance schedules, with the purpose of selecting the most adequate parameters to perform the weather-time evaluation. 
 
 Before asking whether the method produces realistic results, we first have to establish that it works: that it reaches the target, does so reliably across settings, and does so in a desirable manner (stability and deviation concerns).
@@ -80,7 +95,7 @@ For all four tests we average over the experiments and report the mean and stand
 
 \Cref{ch:experiments} sets out the concrete settings for each stage of this framework and reports the results, which \Cref{ch:discussion} then discusses.
 
-\section{Method Validation}
+\subsection{Method Validation}
 
 This approach can be used to guide any state towards an extreme over the specified mask.
 
@@ -90,3 +105,4 @@ and observe what the model is doing.
 Another way would be to guide it towards the ground truth and observe the RMSE of other variables compared to the ung.
 
 Validate method against: gt, opposite direction, same direction. Make sure you apply same amount of guidance needed when definining y star.
+
