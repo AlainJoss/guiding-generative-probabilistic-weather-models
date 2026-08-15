@@ -384,11 +384,19 @@ def _(
                        mask_shift=str(base_sel.get("mask_shift") or "none"))
     mask_np = np.asarray(mask)
 
-    # lazy store handles (full datasets; sliced per delta/var below)
+    # lazy store handles (full datasets; sliced per delta/var below). ung/gui_ung were migrated to
+    # the latent format -> reconstruct the physical STATE trajectory x_t = x_det + sigma_r*z_t, with
+    # the converged endpoint x_T = x_det + sigma_r*z_T spliced on as a final t-slice (falls back to
+    # the length-T trajectory ending x_{T-1} on pre-splice runs). Every .isel(t=-1) below then reads
+    # the true final unguided state.
+    from src.ui.comparison import unguided_state_ds as _unguided_state_ds
+    from src.utils import get_rollout_dir as _get_rollout_dir
+    _rdir = _get_rollout_dir(ROLLOUT_ID)
     _stores = {}
     for _s in ("gui", "gui_ung", "gui_det", "ung_det", "ung", "res", "vfs", "grads"):
         try:
-            _stores[_s] = get_rollout(_s, ROLLOUT_ID)
+            _stores[_s] = (_unguided_state_ds(_rdir, _s) if _s in ("ung", "gui_ung")
+                           else get_rollout(_s, ROLLOUT_ID))
         except FileNotFoundError:
             _stores[_s] = None
     stores = _stores
@@ -868,18 +876,18 @@ def _(
 
         # realized schedules: lambda_hat_t = ||gui_vec_t|| for t < T-1 (last step never guided)
         def _lam_for(_ii, _mm):
-            _res_i = _selp2(stores["res"], delta_sel(_ii)).isel(m=_mm, n=_sched_n)
-            _vfs_i = _selp2(stores["vfs"], delta_sel(_ii)).isel(m=_mm, n=_sched_n)
-            _Tl = int(_res_i.sizes["t"])
+            _res_i = _selp2(stores["res"], delta_sel(_ii)).isel(m=_mm, n=_sched_n)   # z_0..z_T (T+1)
+            _vfs_i = _selp2(stores["vfs"], delta_sel(_ii)).isel(m=_mm, n=_sched_n)   # length T
+            _Tl = int(_vfs_i.sizes["t"])                                            # flow-step count T
             _sg = np.linspace(1000, 1, _Tl) / 1000
             _hg = np.empty_like(_sg); _hg[:-1] = _sg[:-1] - _sg[1:]; _hg[-1] = _sg[-1]
-            _shg = ((_sg / _hg)[:-1])
+            _shg = _sg / _hg
             _lam_sq = None
             for _v in _res_i.data_vars:
                 _z = _res_i[_v]
-                _dz = (_z.shift(t=-1) - _z).isel(t=slice(0, _Tl - 1))
+                _dz = (_z.shift(t=-1) - _z).isel(t=slice(0, _Tl))          # z_{t+1} - z_t, t=0..T-1
                 _gvf = _dz * _dz.t.copy(data=_shg)
-                _gvec = (_vfs_i[_v].isel(t=slice(0, _Tl - 1)) - _gvf) / _dz.t.copy(data=_sg[:-1])
+                _gvec = (_vfs_i[_v].isel(t=slice(0, _Tl)) - _gvf) / _dz.t.copy(data=_sg)
                 _q = (_gvec ** 2).sum([d for d in _gvec.dims if d != "t"])
                 _lam_sq = _q if _lam_sq is None else _lam_sq + _q
             return np.sqrt(np.asarray(_lam_sq.compute(), dtype=float))
@@ -1394,17 +1402,17 @@ def _(
             return None
         _z_mm, _u_mm = _z_all[:, n], _u_all[:, n]        # (M, T)
         _gui_mm, _det_mm = _g_all[:, n], _d_all[:, n]     # (M,)
-        _M_all, _T_len = _z_mm.shape
-        _s_flow = np.linspace(1000, 1, _T_len) / 1000
+        _M_all = _z_mm.shape[0]
+        _T_flow = _u_mm.shape[1]                          # Euler-step count (T); z_mm / states are T+1
+        _s_flow = np.linspace(1000, 1, _T_flow) / 1000
         _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
         _hs = _h_flow / _s_flow
         from src.ui.comparison import residual_scaler as _rs
         _c_sc = _rs(_p, _v, _lv if _p == "level" else None)
 
-        # realized guided step in masked-mean space (exact identity)
-        _zT_mm = (_gui_mm - _det_mm) / _c_sc
-        _z_next = np.concatenate([_z_mm[:, 1:], _zT_mm[:, None]], axis=1)
-        _gu_mm = (_z_next - _z_mm) / _hs
+        # realized guided step in masked-mean space: res holds z_0..z_T, so z_T = z_mm[:, -1]
+        _z_next = _z_mm[:, 1:]                            # z_1..z_T (length T)
+        _gu_mm = (_z_next - _z_mm[:, :_T_flow]) / _hs
 
         # target only at the TARGET channel: y = (1 + phi_n) * M(x_ung at n)
         _is_tgt = (_v == config.VAR) and (_p != "level" or _lv == config.LEVEL)
@@ -1415,16 +1423,14 @@ def _(
         else:
             _y = np.zeros(_M_all)
 
-        _states = np.empty((_M_all, _T_len + 1))
-        _states[:, :_T_len] = _det_mm[:, None] + _c_sc * _z_mm - _y[:, None]
-        _states[:, _T_len] = _states[:, _T_len - 1] + _c_sc * _hs[-1] * _gu_mm[:, -1]
-        _land_ung = _states[:, :_T_len] + _c_sc * _hs * _u_mm
+        _states = _det_mm[:, None] + _c_sc * _z_mm - _y[:, None]   # M(x_t) - A, t=0..T (ends at x_T)
+        _land_ung = _states[:, :_T_flow] + _c_sc * _hs * _u_mm     # where the raw flow step lands (T)
         _pa_unit = ""
         if not _is_tgt:
             _states, _pa_unit = _tdu_c(_states, _v)
             _land_ung = _tdu_c(_land_ung, _v)[0]
 
-        _xt = np.arange(_T_len + 1).astype(float)
+        _xt = np.arange(_states.shape[1]).astype(float)   # T+1 ticks (0..T)
         with plt.rc_context({"font.size": 8, "axes.titlesize": 10, "legend.fontsize": 7}):
             # not-yet-computed member / unrun point: render a flat-zero chart
             _not_computed = not np.isfinite(_states[m]).any()
@@ -2032,6 +2038,7 @@ def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
         open_store as _lt_open_store,
         select_point as _lt_select_point,
         sweep_points as _lt_sweep_points,
+        unguided_state_ds as _lt_unguided_state_ds,
     )
     from src.pca_basis import mask_bbox as _lt_mask_bbox, ensure_basis as _lt_ensure_basis, project as _lt_project, cloud_sample as _lt_cloud_sample
     from src.utils import find_era5_input as _lt_find_era5, get_rollout_dir as _lt_get_rollout_dir
@@ -2062,7 +2069,7 @@ def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
     lt_pca_targets = lt_bbox_latent(np.asarray(
         _lt_channel(_lt_gtr[_lt_VAR], _lt_cfg).isel(time=slice(1, None)), dtype=float))
     try:
-        _lt_ung = _lt_channel(_lt_open_store(_lt_dir, "ung", _lt_VAR), _lt_cfg).isel(m=0)
+        _lt_ung = _lt_channel(_lt_unguided_state_ds(_lt_dir, "ung")[_lt_VAR], _lt_cfg).isel(m=0)
         if "t" in _lt_ung.dims:
             _lt_ung = _lt_ung.isel(t=-1)
         lt_pca_ung_finals = lt_bbox_latent(np.asarray(_lt_ung, dtype=float))
@@ -2081,7 +2088,7 @@ def _(N_STEPS, ROLLOUT_ID, get_gt_rollout, np, residual_scaler):
 
 
     def lt_twin_latents(_sel, _m, _n):
-        _tw = _lt_channel(_lt_select_point(_lt_open_store(_lt_dir, "gui_ung", _lt_VAR), _sel), _lt_cfg)
+        _tw = _lt_channel(_lt_select_point(_lt_unguided_state_ds(_lt_dir, "gui_ung")[_lt_VAR], _sel), _lt_cfg)
         return lt_bbox_latent(np.asarray(_tw.isel(m=_m, n=_n), dtype=float))
 
 

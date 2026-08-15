@@ -17,13 +17,21 @@ from src.mask import get_mask_2d
 from src.paths import ROLLOUTS
 from src.rollout_config import GUIDANCE_METHOD_HYPERS
 from src.utils import get_gt_rollout, get_level_idx, get_var_idx, resolve_store_name
+from src.utils import experiment_root, SUBDIR_TS_FMT
 
 
 def load_rollout(rollout_id):
     """(dir, config, sweep_values, schedule_records, mask) for one rollout."""
     rollout_dir = ROLLOUTS / rollout_id
-    config = json.load(open(rollout_dir / "config.json"))
-    sweep_values = json.load(open(rollout_dir / "sweep_params.json"))
+    # config + sweep are shared at the exp root (a multi-start member resolves UP); the
+    # trace sidecars (guidance_schedule.json, ...) stay per-date in the rollout dir.
+    root = experiment_root(rollout_dir)
+    config = json.load(open(root / "config.json"))
+    sweep_values = json.load(open(root / "sweep_params.json"))
+    if root != rollout_dir:
+        # shared config has START_TS=None -> recover this member's start from the subdir name
+        # (ISO string, so consumers' datetime.fromisoformat keeps working).
+        config["START_TS"] = datetime.strptime(rollout_dir.name, SUBDIR_TS_FMT).isoformat()
     try:
         records = json.load(open(rollout_dir / "guidance_schedule.json"))
     except FileNotFoundError:
@@ -97,9 +105,9 @@ def residual_scaler(partition, var, level=None):
 
 
 def clean_pred_trajectory(rollout_dir, records, sel, m, n, var, c, level=None):
-    """Guided clean-pred trajectory (T, lat, lon) reconstructed from raw traces:
-    gui_vfs = vfs - lam*grads*s;  z_T = res[-1] + gui_vfs[-1]*(h/s)[-1];
-    x_hat_t = gui_final + ((res_t + vfs_t) - z_T) * c.  None without a lambda record."""
+    """Guided clean-pred trajectory (T, lat, lon):
+    x_hat_t = gui_final + ((res_t + vfs_t) - z_T) * c, with z_T = res[-1] (res holds z_0..z_T,
+    length T+1; vfs/grads are per-step, length T). None without a lambda record."""
     lam = applied_lambda(records, sel, m, n)
     if lam is None:
         return None
@@ -108,28 +116,26 @@ def clean_pred_trajectory(rollout_dir, records, sel, m, n, var, c, level=None):
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
-    res, vfs, grads = _load("gui_res"), _load("vfs"), _load("grads")
+    res, vfs = _load("gui_res"), _load("vfs")
     gui = _load("gui")
-    s, h = flow_grids(res.shape[0])
-    z_final = res[-1] + (vfs[-1] - lam[-1] * grads[-1] * s[-1]) * (h[-1] / s[-1])
-    return gui[None] + ((res + vfs) - z_final[None]) * c
+    z_T = res[-1]                                   # res holds z_0..z_T; the endpoint is res[-1]
+    return gui[None] + ((res[:-1] + vfs) - z_T[None]) * c
 
 
 def clean_pred_trajectory_primitive(rollout_dir, sel, m, n, var, c, level=None):
-    """Guided clean-pred trajectory (T, lat, lon) from stored primitives, with NO lambda
-    records -- faithful under the new w*a*c/g_norm guidance convention (the lambda-based
-    `clean_pred_trajectory` above mis-scales it). Mirrors reductions.py:161-175:
-    z_T = (gui - gui_det)/c;  x_hat_t = gui + ((res_t + vfs_t) - z_T) * c. The final flow
-    step reproduces `gui` exactly (endpoint identity)."""
+    """Guided clean-pred trajectory (T, lat, lon) from stored primitives, no lambda records:
+    z_T = res[-1] (res holds z_0..z_T, length T+1); x_hat_t = gui + ((res_t + vfs_t) - z_T) * c
+    over the T Euler steps (res[:-1] aligned with the length-T vfs). The final flow step
+    reproduces `gui` exactly (endpoint identity)."""
     def _load(store):
         da = select_point(open_store(rollout_dir, store, var), sel)
         da = da.sel(level=level) if "level" in da.dims and level is not None else da
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
     res, vfs = _load("gui_res"), _load("vfs")
-    gui, gui_det = _load("gui"), _load("gui_det")
-    z_T = (gui - gui_det) / c
-    return gui[None] + ((res + vfs) - z_T[None]) * c
+    gui = _load("gui")
+    z_T = res[-1]
+    return gui[None] + ((res[:-1] + vfs) - z_T[None]) * c
 
 
 def unguided_state_primitive(rollout_dir, sel, m, n, var, c, prefix, level=None):
@@ -150,10 +156,34 @@ def unguided_state_primitive(rollout_dir, sel, m, n, var, c, prefix, level=None)
     if not (rollout_dir / f"{_det}.zarr").exists():
         _det = "gui_det"                    # fallback (e.g. legacy ung run without its own det core)
     if (rollout_dir / f"{prefix}_res.zarr").exists() and (rollout_dir / f"{_det}.zarr").exists():
-        z = _load(f"{prefix}_res")          # (T, lat, lon) unguided latent z_t
+        z = _load(f"{prefix}_res")          # (T+1, lat, lon) unguided latent z_0 .. z_T
         det = _load(_det)                   # (lat, lon) deterministic core x_det (no t axis)
-        return det[None] + c * z            # x_t = x_det + sigma_res * z_t
+        return det[None] + c * z            # x_t = x_det + sigma_res * z_t, t = 0..T (ends at x_T)
     return _load(prefix)                    # legacy clean-pred trajectory (pre-switch experiments)
+
+
+def unguided_state_ds(rollout_dir, prefix):
+    """Full unguided STATE trajectory *Dataset* x_t = x_det + sigma_r*z_t (all vars, keeps m/n/t
+    and any sweep dims) reconstructed from the latent stores, with the converged endpoint
+    x_T = x_det + sigma_r*z_T spliced as a final t-slice (length T+1) when ``{prefix}_z_T`` exists
+    (else length T, ending x_{T-1}). ``prefix in {"ung","gui_ung"}``; the deterministic core is
+    ``ung_det`` for ``ung`` and ``gui_det`` for the same-seed twin ``gui_ung`` (falls back to
+    ``gui_det``). Returns the legacy ``{prefix}.zarr`` physical STATE store as-is when
+    ``{prefix}_res`` is absent (pre-migration experiments). Unlike ``unguided_state_primitive``
+    (one channel, numpy), this keeps the lazy xarray Dataset so callers ``.sel``/``.isel`` it."""
+    if not (rollout_dir / f"{prefix}_res.zarr").exists():
+        return xr.open_zarr(rollout_dir / f"{prefix}.zarr")   # legacy physical STATE store
+    _det = "ung_det" if prefix == "ung" else "gui_det"
+    if not (rollout_dir / f"{_det}.zarr").exists():
+        _det = "gui_det"
+    z = xr.open_zarr(rollout_dir / f"{prefix}_res.zarr")
+    det = xr.open_zarr(rollout_dir / f"{_det}.zarr")
+    def _c(v):
+        if "level" in z[v].dims:
+            return xr.DataArray([residual_scaler("level", v, int(_L)) for _L in z[v].level.values],
+                                dims=("level",), coords={"level": z[v].level})
+        return residual_scaler("surface", v)
+    return xr.Dataset({v: det[v] + _c(v) * z[v] for v in z.data_vars})  # z = z_0..z_T -> reaches x_T
 
 
 def guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=None):
@@ -168,11 +198,9 @@ def guided_velocity_primitive(rollout_dir, sel, m, n, var, c, level=None):
         return np.asarray(da.isel(m=m, n=n), dtype=float)
 
     res, vfs = _load("gui_res"), _load("vfs")
-    gui, gui_det = _load("gui"), _load("gui_det")
-    s, h = flow_grids(res.shape[0])
-    z_T = (gui - gui_det) / c
-    z_next = np.concatenate([res[1:], z_T[None]], axis=0)          # z_{t+1}
-    gui_vfs = (z_next - res) * (s / h)[:, None, None]
+    s, h = flow_grids(vfs.shape[0])                               # flow grids over the T Euler steps
+    z_next = res[1:]                                              # z_{t+1} = z_1..z_T (length T)
+    gui_vfs = (z_next - res[:-1]) * (s / h)[:, None, None]        # realized guided step velocity
     gui_vec = (vfs - gui_vfs) / s[:, None, None]
     return {"vfs": vfs, "gui_vfs": gui_vfs, "gui_vec": gui_vec, "s": s, "h": h}
 
@@ -199,11 +227,9 @@ def convergence_state_line(rollout_dir, sel, m, n, var, c, mask, A, level=None):
     gd = select_point(open_store(rollout_dir, "gui_det", var), sel)
     gd = gd.sel(level=level) if "level" in gd.dims and level is not None else gd
     det_mm = float((np.asarray(gd.isel(m=m, n=n), dtype=float) * mnp).sum())         # M(x_det)
-    T = z_mm.shape[0]
-    states = np.empty(T + 1)
-    states[:T] = det_mm + c * z_mm - float(A)
-    states[T] = states[T - 1] + c * hs[-1] * gu_mm[-1]
-    land_ung = states[:T] + c * hs * u_mm
+    T = vel["vfs"].shape[0]                          # flow-step count (T); z_mm/states are T+1
+    states = det_mm + c * z_mm - float(A)            # M(x_t) - A, t = 0..T (ends at x_T, from res[-1])
+    land_ung = states[:T] + c * hs * u_mm            # where the raw flow step would land (T)
     return states, land_ung
 
 
@@ -237,9 +263,9 @@ def clean_pred_branches(rollout_dir, records, sel, m, n, var, c, level=None):
 
     res, vfs, grads = _load("gui_res"), _load("vfs"), _load("grads")
     gui = _load("gui")
-    s, h = flow_grids(res.shape[0])
-    z_final = res[-1] + (vfs[-1] - lam[-1] * grads[-1] * s[-1]) * (h[-1] / s[-1])
-    base = gui[None] + ((res + vfs) - z_final[None]) * c
+    s, h = flow_grids(vfs.shape[0])
+    z_T = res[-1]                                    # res holds z_0..z_T; the endpoint is res[-1]
+    base = gui[None] + ((res[:-1] + vfs) - z_T[None]) * c
     kick = base - (lam[:, None, None] * grads * s[:, None, None]) * c
     return base, kick
 

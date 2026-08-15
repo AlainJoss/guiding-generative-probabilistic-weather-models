@@ -1,0 +1,21 @@
+[0] Config.pm:307> INFO - This is Biber 2.19
+[0] Config.pm:310> INFO - Logfile is 'report.blg'
+[32] biber-darwin:340> INFO - === Sat Aug 15, 2026, 19:31:15
+[39] Biber.pm:419> INFO - Reading 'report.bcf'
+[81] Biber.pm:979> INFO - Found 29 citekeys in bib section 0
+[88] Biber.pm:4419> INFO - Processing section 0
+[94] Biber.pm:4610> INFO - Looking for bibtex file 'thesis.bib' for section 0
+[96] bibtex.pm:1713> INFO - LaTeX decoding ...
+[112] bibtex.pm:1519> INFO - Found BibTeX data source 'thesis.bib'
+[295] UCollate.pm:68> INFO - Overriding locale 'en-US' defaults 'normalization = NFD' with 'normalization = prenormalized'
+[295] UCollate.pm:68> INFO - Overriding locale 'en-US' defaults 'variable = shifted' with 'variable = non-ignorable'
+[296] Biber.pm:4239> INFO - Sorting list 'nty/global//global/global' of type 'entry' with template 'nty' and locale 'en-US'
+[296] Biber.pm:4245> INFO - No sort tailoring available for locale 'en-US'
+[315] bbl.pm:660> INFO - Writing 'report.bbl' with encoding 'UTF-8'
+[345] bbl.pm:763> INFO - Output to report.bbl
+[345] Biber.pm:131> WARN - Duplicate entry key: 'ueyama2026guided' in file 'thesis.bib', skipping ...
+[345] Biber.pm:131> WARN - Duplicate entry key: 'liu2023flowgrad' in file 'thesis.bib', skipping ...
+[345] Biber.pm:131> WARN - Duplicate entry key: 'benhamu2024dflow' in file 'thesis.bib', skipping ...
+[345] Biber.pm:131> WARN - Duplicate entry key: 'couairon2024archesweather' in file 'thesis.bib', skipping ...
+[345] Biber.pm:131> WARN - Duplicate entry key: 'price2023gencast' in file 'thesis.bib', skipping ...
+[346] Biber.pm:133> INFO - WARNINGS: 5

@@ -5,6 +5,7 @@
 This chapter introduces the theoretical and methodological background required
 for the development of our guidance approach.
 
+(TODO: reformulate the starting sentence)
 We begin with flow matching, the generative framework underlying ArchesWeather,
 and introduce the probability paths, noisy states, velocity fields, and clean
 estimates used throughout this work.
@@ -259,40 +260,53 @@ corresponding to
     \qquad
     \beta_t=1-t.
 \]
+
 Its conditional velocity reduces to the constant displacement
+
 \begin{equation}
     u_t(z_t\mid x_1)
     =
     x_1-\varepsilon.
     \label{eq:linear-conditional-velocity}
 \end{equation}
+
 Training therefore amounts to least-squares regression onto the displacement
 between the source noise and the clean sample.
 
-At an intermediate flow time \(t<1\), the noisy state \(z_t\) does not uniquely
-identify the clean sample \(x_1\) from which it originates.
-Instead, the possible clean samples are described by the conditional
-distribution
+Under the conditional probability path used to construct the marginal flow, an
+intermediate noisy state $z_t$ is generally compatible with multiple clean
+samples $x_1$. Their conditional distribution is
+
 \[
     p_t(x_1\mid z_t).
 \]
+
+This should be distinguished from the deterministic coupling induced by the
+learned flow ODE. Once a state $z_t$ is fixed during sampling, integrating the
+velocity field from $t$ to $1$ determines a unique endpoint. The distribution
+$p_t(x_1\mid z_t)$ instead refers to the coupling induced by the conditional
+probability path in \Cref{eq:gaussian-probability-path}.
+
 In practice, a generative model can provide a tractable clean estimate
+
 \begin{equation}
     \hat{x}_t
     :=
-    \hat{x}_\theta(z_t,t)
+    \hat{x}_\theta(z_t,t),
     \label{eq:clean-estimate}
 \end{equation}
-from the current noisy state.
-The distinction between the full conditional distribution
-\(p_t(x_1\mid z_t)\) and the point estimate \(\hat{x}_t\) will become important
-when introducing guidance in the following section.
+
+from the current noisy state. This point estimate should therefore not be
+confused with the deterministic endpoint obtained by continuing the learned
+flow from $z_t$. Rather, it provides a representative clean state associated
+with the conditional distribution $p_t(x_1\mid z_t)$. This distinction becomes
+important when introducing guidance in the following section.
 
 
 \section{Guidance}
 
 Without additional guidance, a generative model samples from its base
-distribution \(p_1(x_1)\).
+distribution $p_1(x_1)$.
 In many applications, however, we are interested in generating samples that
 satisfy an additional desired condition \(y\).
 From a posterior-sampling perspective, guidance aims to modify the sampling
@@ -313,9 +327,8 @@ influence the complete generative trajectory.
 
 \subsection{Guidance as posterior sampling}
 
-Rather than considering only the conditional distribution at the clean endpoint,
-we can define the corresponding distribution over noisy states at any flow time
-\(t\).
+To introduce guidance during the generative trajectory, we consider the
+distribution of noisy states conditioned on $y$ at an arbitrary flow time $t$.
 By Bayes' rule,
 \begin{equation}
     p_t(z_t\mid y)
@@ -361,9 +374,9 @@ condition \(y\) depends on the generative process only through \(x_1\):
     y \perp z_t \mid x_1
     \\
     &=
-    \mathbb{E}_{x_1\sim p_t(\cdot\mid z_t)}
+    \mathbb{E}_{x_1 \sim p_t(x_1 \mid z_t)}
     \left[
-        p(y\mid x_1)
+        p(y \mid x_1)
     \right]
     \\
     &\approx
@@ -418,6 +431,8 @@ where the gradient is propagated through the clean estimate
 
 
 \subsection{From scores to flow-matching velocities}
+
+TODO: cite the MIT notes for the translation formula
 
 The previous derivation expresses guidance in terms of scores.
 To apply it to flow matching, we require the corresponding modification of the
@@ -504,10 +519,11 @@ equivalently be written as
     \label{eq:conditional-velocity-loss}
 \end{equation}
 
-Thus, gradient-based guidance in flow matching consists of evaluating a loss
-on the clean estimate \(\hat{x}_t\), differentiating it with respect to the
-current noisy state \(z_t\), and using the resulting gradient to modify the
-velocity field.
+Thus, the posterior-sampling formulation provides a principled local guidance
+direction: evaluate a loss on the clean estimate $\hat{x}_t$ and differentiate
+it with respect to the current noisy state $z_t$. The corresponding magnitude
+is determined by $a_t$ under the posterior-sampling interpretation, but can
+more generally be treated as an algorithmic choice, as discussed next.
 
 
 \subsection{Guidance-strength schedules}

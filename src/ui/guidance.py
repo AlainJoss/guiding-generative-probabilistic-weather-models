@@ -309,7 +309,6 @@ def _(
     T,
     a_t_mode_select,
     compute_axis_values,
-    config,
     delta_trajectories,
     dump_json,
     ensure_rollout_dir,
@@ -351,8 +350,10 @@ def _(
         if save_config_button.value and notebook_mode == "guided_rollout":
             save_id = rollout_id
             rollout_dir = ensure_rollout_dir(save_id)
-            # config.json already exists (created in unguided mode) -> preserve it as-is
-            dump_json(config.to_dict(), rollout_dir / "config.json")
+            # config.json already lives at the experiment root (shared, START_TS-agnostic) -> leave
+            # it untouched; only the sweep is authored here, written once at the exp root so all
+            # start dates share it (a flat rollout's root is its own dir).
+            _root = rollout_dir.parent if (rollout_dir.parent / "starts.json").exists() else rollout_dir
 
             _rv = sweep_ranges.value
             _a_t_modes = list(dict.fromkeys(list(a_t_mode_select.value) + spread_modes))
@@ -367,7 +368,7 @@ def _(
                 **{ax: compute_axis_values(ax, _rv) for ax in NUMERIC_AXES},
             }
             if all(sweep[a] for a in ("GUIDANCE_MODE", "GUI_REF", "MASK_MODE")):
-                dump_json(sweep, rollout_dir / "sweep_params.json")
+                dump_json(sweep, _root / "sweep_params.json")
             else:
                 print("each categorical axis needs at least one value")
     return
@@ -591,12 +592,15 @@ def _(
     get_mask_2d,
     get_rollout,
     get_rollout_dir,
+    has_unguided,
     iter_sweeps,
     mo,
     notebook_mode,
     np,
+    open_unguided_traj_ds,
     rollout_id,
     sweep_coord_label,
+    unguided_final_state_ds,
     xr,
 ):
     # experiments tables (side by side):
@@ -613,7 +617,7 @@ def _(
         except (FileNotFoundError, KeyError):
             _gui_ds = None
         try:
-            _ung_ds = get_rollout("ung", rollout_id)
+            _ung_ds = open_unguided_traj_ds(rollout_id, "ung") if has_unguided(rollout_id, "ung") else None
         except (FileNotFoundError, KeyError):
             _ung_ds = None
         _swept_axes = [_k for _k, _v in experiment_params.items() if len(_v) > 1]
@@ -670,9 +674,7 @@ def _(
                 _b2 = np.asarray((_gt2.astype("float64") * _mda2)
                                  .sum(("latitude", "longitude")).compute())[1:]  # (N,)
             elif _ung_ds is not None and config.VAR in _ung_ds:
-                _u2 = _ung_ds[config.VAR]
-                if "t" in _u2.dims:
-                    _u2 = _u2.isel(t=-1)
+                _u2 = unguided_final_state_ds(rollout_id, "ung")[config.VAR]
                 if "level" in _u2.dims:
                     _u2 = _u2.sel(level=config.LEVEL)
                 _b2 = np.asarray((_u2.astype("float64") * _mda2)
@@ -843,7 +845,15 @@ def config_cell(get_config, notebook_mode, rollout_id):
 
 
 @app.cell
-def _(get_rollout, notebook_mode, rollout_id, sweep_params):
+def _(
+    get_rollout,
+    has_unguided,
+    notebook_mode,
+    open_unguided_traj_ds,
+    rollout_id,
+    sweep_params,
+    unguided_final_state_ds,
+):
     # data objects (config lives in its own cell so sweep changes don't re-run it)
     # NEW ung stores hold the full flow-step trajectory; unguided_xr is the final-state
     # view (t=-1), ung_traj_xr the full trajectory (None on legacy stores without t).
@@ -854,18 +864,80 @@ def _(get_rollout, notebook_mode, rollout_id, sweep_params):
             guided_xr=None
             # TODO: set everything to None
         case "guided_rollout":
-            _ung = get_rollout("ung", rollout_id)
-            ung_traj_xr = _ung if "t" in _ung.dims else None
-            unguided_xr = _ung.isel(t=-1) if "t" in _ung.dims else _ung
+            if has_unguided(rollout_id, "ung"):
+                _ung = open_unguided_traj_ds(rollout_id, "ung")
+                ung_traj_xr = _ung if "t" in _ung.dims else None
+                unguided_xr = unguided_final_state_ds(rollout_id, "ung")
+            else:
+                ung_traj_xr = None; unguided_xr = None
             guided_xr = None
         case "analyze_rollout":
-            _ung = get_rollout("ung", rollout_id).compute()
-            ung_traj_xr = _ung if "t" in _ung.dims else None
-            unguided_xr = _ung.isel(t=-1) if "t" in _ung.dims else _ung
+            if has_unguided(rollout_id, "ung"):
+                _ung = open_unguided_traj_ds(rollout_id, "ung").compute()
+                ung_traj_xr = _ung if "t" in _ung.dims else None
+                unguided_xr = unguided_final_state_ds(rollout_id, "ung").compute()
+            else:
+                ung_traj_xr = None; unguided_xr = None
             guided_xr = get_rollout("gui", rollout_id).sel(sweep_params).compute()
         case _:
             pass
     return guided_xr, unguided_xr
+
+
+@app.cell(hide_code=True)
+def _(STATS_PATH, VARIABLES_DICT, get_rollout, get_rollout_dir, torch, xr):
+    # --- unguided-state reconstruction (latent-format migration) --------------------------
+    # ung / gui_ung were migrated from physical STATE zarrs to the latent format:
+    #   x_t = x_det + sigma_r * z_t   (z_t in {prefix}_res, x_det in ung_det|gui_det).
+    # Rebuild the physical state here so downstream cells keep their old ung.zarr/gui_ung.zarr
+    # view. {prefix}_res holds z_0..z_T (length T+1), so the reconstructed trajectory already
+    # reaches the true final x_T at t=-1 (no separate z_T store).
+    def _res_scale_map_local(_level_coord):
+        _rsc = torch.load(STATS_PATH / "deltapred24_aws_denorm.pt", weights_only=False)
+        _out = {_v: float(_rsc["surface"][_vi].squeeze())
+                for _vi, _v in enumerate(VARIABLES_DICT["surface"])}
+        _lev = _rsc["level"].squeeze(-1).squeeze(-1).numpy()
+        for _vi, _v in enumerate(VARIABLES_DICT["level"]):
+            _out[_v] = xr.DataArray(_lev[_vi] * (3.0 if _v == "vertical_velocity" else 1.0),
+                                    dims=("level",), coords={"level": _level_coord})
+        return _out
+
+    def _ung_pick(_ds, _prefix, _sweep):
+        if _prefix == "gui_ung" and _sweep:
+            return _ds.sel({_k: _v for _k, _v in _sweep.items() if _k in _ds.dims})
+        return _ds
+
+    def _ung_det_store(rollout_id, prefix):
+        _d = "ung_det" if prefix == "ung" else "gui_det"
+        if not (get_rollout_dir(rollout_id) / f"{_d}.zarr").exists():
+            _d = "gui_det"
+        return _d
+
+    def has_unguided(rollout_id, prefix):
+        _dir = get_rollout_dir(rollout_id)
+        return (_dir / f"{prefix}_res.zarr").exists() or (_dir / f"{prefix}.zarr").exists()
+
+    def open_unguided_traj_ds(rollout_id, prefix, sweep_params=None):
+        """Full unguided STATE trajectory x_t = x_det + sigma_r*z_t (length T, ends x_{T-1}).
+        Legacy {prefix}.zarr STATE store returned as-is when {prefix}_res is absent."""
+        if not (get_rollout_dir(rollout_id) / f"{prefix}_res.zarr").exists():
+            return _ung_pick(get_rollout(prefix, rollout_id), prefix, sweep_params)   # legacy STATE store
+        _z = _ung_pick(get_rollout(f"{prefix}_res", rollout_id), prefix, sweep_params)
+        _det = _ung_pick(get_rollout(_ung_det_store(rollout_id, prefix), rollout_id), prefix, sweep_params)
+        _rsm = _res_scale_map_local(_z.level)
+        # keep the res store's dim order (m,n,t,lat,lon,...): det+c*z broadcasts det over t and
+        # otherwise appends t LAST, which mis-indexes get_slices[m][n][t] downstream
+        return xr.Dataset({_v: (_det[_v] + _rsm[_v] * _z[_v]).transpose(*_z[_v].dims)
+                           for _v in _z.data_vars})
+
+    def unguided_final_state_ds(rollout_id, prefix, sweep_params=None):
+        """Converged final unguided state x_T = x_det + sigma_r*z_T (no t). The res store holds
+        z_0..z_T, so the reconstructed trajectory already ends at x_T -> just take its last t."""
+        _traj = open_unguided_traj_ds(rollout_id, prefix, sweep_params)
+        return _traj.isel(t=-1) if "t" in _traj.dims else _traj
+
+
+    return has_unguided, open_unguided_traj_ds, unguided_final_state_ds
 
 
 @app.cell
@@ -1088,6 +1160,7 @@ def _(
 
 @app.cell(hide_code=True)
 def _(
+    N,
     delta_trajectories,
     delta_trajectory,
     gt_trajectory,
@@ -1103,12 +1176,15 @@ def _(
     if notebook_mode in ("guided_rollout", "analyze_rollout"):
         # guided mode previews EVERY authored profile; analyze mode has the selected one
         _profiles = delta_trajectories if notebook_mode == "guided_rollout" else [delta_trajectory]
-        _p0 = np.asarray(_profiles[0], dtype=float)
+        # clip each profile to the N guided weather steps: a profile longer than N broadcasts to
+        # length len(profile) and desyncs from the N-step base / timestamps (delta-vs-N mismatch)
+        _profiles = [np.asarray(_pp, dtype=float)[:N] for _pp in _profiles]
+        _p0 = _profiles[0]
         if guidance_reference == "GT":
             _base = np.tile(gt_trajectory[1:len(_p0) + 1], (ung_M_N_trajectories.shape[0], 1))
         else:
             _base = ung_M_N_trajectories
-        _targets_all = [(1.0 + np.asarray(_pp, dtype=float)) * _base for _pp in _profiles]
+        _targets_all = [(1.0 + _pp) * _base for _pp in _profiles]
         target_guidance_M_N_trajectories = _targets_all[0]
         target_guidance_trajectory = target_guidance_M_N_trajectories[m]
         # one member-m line per profile, drawn together on the trajectories chart
@@ -3044,6 +3120,7 @@ def _():
 
 @app.cell
 def _(
+    N,
     config,
     delta_trajectories,
     delta_trajectory,
@@ -3055,6 +3132,7 @@ def _(
     gui_ung_m_trajectory,
     m,
     notebook_mode,
+    np,
     plot_trajectories,
     target_guidance_M_N_trajectories,
     target_guidance_trajectories_all,
@@ -3093,8 +3171,8 @@ def _(
         ground_truth=_disp(gt_trajectory),
         ground_truth_label=f"Ground truth ({view_mask_mode})",
         delta_trajectories=(
-            ([[0] + list(_t) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
-             else [[0] + list(delta_trajectory)])
+            ([[0] + list(np.asarray(_t)[:N]) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
+             else [[0] + list(np.asarray(delta_trajectory)[:N])])
             if (("target_pct_profile" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
         ),
         annotate_target_guidance=(notebook_mode == "guided_rollout"),
@@ -3208,9 +3286,11 @@ def _(
     guided_xr,
     notebook_mode,
     np,
+    open_unguided_traj_ds,
     rollout_id,
     sweep_params,
     torch,
+    unguided_final_state_ds,
     xr,
 ):
     # NOT gated on flow_section_checkbox: these are LAZY .sel handles consumed by
@@ -3223,10 +3303,11 @@ def _(
         # affine identities; no model needed. LEGACY stores load directly.
         grads_xr = get_rollout("grads", rollout_id).sel(sweep_params)
         vfs_xr = get_rollout("vfs", rollout_id).sel(sweep_params)
-        gui_ung_xr = get_rollout("gui_ung", rollout_id).sel(sweep_params)
-        # gui_ung carries the full flow-step (t) axis; its last slice is the final
-        # unguided state. Guard so older stores (no t axis) still work.
-        gui_ung_final_xr = gui_ung_xr.isel(t=-1) if "t" in gui_ung_xr.dims else gui_ung_xr
+        gui_ung_xr = open_unguided_traj_ds(rollout_id, "gui_ung", sweep_params)
+        # ung/gui_ung migrated to the latent format: gui_ung_xr is the reconstructed physical
+        # state trajectory x_t = x_det + sigma_r*z_t (length T); gui_ung_final_xr is the true
+        # converged final state x_T = x_det + sigma_r*z_T (z_T-spliced, falls back to x_{T-1}).
+        gui_ung_final_xr = unguided_final_state_ds(rollout_id, "gui_ung", sweep_params)
 
         try:
             res_xr = get_rollout("res", rollout_id).sel(sweep_params)
@@ -3276,22 +3357,17 @@ def _(
             _h_da = xr.DataArray(_h_np, dims=("t",), coords={"t": grads_xr.t})
 
 
-            # exact identities from stored primitives (no lambda records needed):
-            # z_{t+1} = z_t + (h_t/s_t) * gui_vfs_t, last step closed with z_T from
-            # the final guided state; gui_vec = (vfs - gui_vfs)/s_t, so unguided
-            # steps give gui_vfs == vfs identically (e.g. spike a_t).
-            _det_zT = get_rollout("gui_det", rollout_id).sel(sweep_params)
-            _z_T = xr.Dataset({_v: (guided_xr[_v] - _det_zT[_v]) / res_scale_map[_v] for _v in res_xr.data_vars})
-            _z_next = xr.concat(
-                [res_xr.isel(t=slice(1, None)).assign_coords(t=res_xr.t.values[:-1]),
-                 _z_T.expand_dims(t=[int(res_xr.t.values[-1])])],
-                dim="t",
-            )
-            gui_vfs_xr = (_z_next - res_xr) * _s_da / _h_da     # guided vf, stored x s_t convention
+            # exact identities from stored primitives (no lambda records needed): res holds z_0..z_T
+            # (length T+1), so z_{t+1}=res[1:], z_t=res[:-1], z_T=res[-1] -- align these T-step slices
+            # with vfs/grads (length T). gui_vec = (vfs - gui_vfs)/s_t; unguided steps give gui_vfs==vfs.
+            _res_prev = res_xr.isel(t=slice(0, -1)).assign_coords(t=grads_xr.t)   # z_0..z_{T-1}
+            _z_next = res_xr.isel(t=slice(1, None)).assign_coords(t=grads_xr.t)   # z_1..z_T
+            _z_T = res_xr.isel(t=-1)                                              # the endpoint z_T
+            gui_vfs_xr = (_z_next - _res_prev) * _s_da / _h_da  # guided vf, stored x s_t convention
             gui_vec_xr = (vfs_xr - gui_vfs_xr) / _s_da          # applied guidance vector per t
             gui_res_xr = -(gui_vec_xr * _h_da).sum("t")         # guidance contribution to z_T
             # clean prediction (physical): gui_final + ((z_t + s_t*u_t) - z_T) * c
-            _dev = (res_xr + vfs_xr) - _z_T
+            _dev = (_res_prev + vfs_xr) - _z_T
             clean_preds_xr = xr.Dataset(
                 {_v: guided_xr[_v] + _dev[_v] * res_scale_map[_v] for _v in _dev.data_vars}
             ).transpose("m", "n", "t", ...)  # broadcast puts t last; restore trace order
@@ -3488,13 +3564,14 @@ def _(
                                 partition, var, level)[m][n]
         except (FileNotFoundError, KeyError):
             _gui2d = get_slices(guided_xr, partition, var, level)[m][n]
-            _zT2d = _res_mn[-1] + guided_vfs_slices[m][n][-1] * (_h_sched[-1] / _s_sched[-1])
+            _zT2d = _res_mn[-1]                             # res holds z_0..z_T; the endpoint is res[-1]
             _det2d = _gui2d - c_phys * _zT2d
         x_land_ung_slice = _det2d + c_phys * (np.asarray(res_slice) + (_h_sched[t] / _s_sched[t]) * np.asarray(vfs_slice))
         x_land_gui_slice = _det2d + c_phys * (np.asarray(res_slice) + (_h_sched[t] / _s_sched[t]) * np.asarray(guided_vfs_slice))
-        # left map of the x_t row: realized guided landing vs the SAVED gui_ung
-        # trace at the same t (the unguided reference run's trajectory)
-        landing_diff_slice = x_land_gui_slice - np.asarray(_gui_ung_t)
+        # guidance effect: guided vs unguided-twin STATE at the SAME flow step, both res-based
+        # (x_t = x_det + sigma_r*z_t, NO velocity term). At the noise step z_t is the shared init
+        # noise of both passes (same seed) -> exactly 0 everywhere; the divergence grows with t.
+        landing_diff_slice = (_det2d + c_phys * np.asarray(res_slice)) - np.asarray(_gui_ung_t)
         masked_residual_land_slice = (x_land_ung_slice - _scale * np.asarray(_x_ref_slice)) * np.asarray(mask)
         # row-1 left: realized guided landing vs the FINAL unguided state (the
         # reference the guidance target is built from)
@@ -3595,7 +3672,7 @@ def _(
             ("step_inc_map", step_inc_slice, r"$\sigma_r\, h_t u^{\text{gui}}_t$", -0.001, 0.001),
             ("clean_res_map", clean_res_slice, r"$\hat{r}_t = \sigma_r\,(z^t + s_t u_t)$", -1, 1),
             ("gui_vec_map", gui_vec_phys_slice, r"$\sigma_r\,\lambda_t h_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
-            ("landing_diff_map", landing_diff_slice, r"$x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$  ($x_t^{\text{gui}} = \hat{x}^{\text{gui\_det}}+\sigma_r(z_t+h_t u^{\text{gui}}_t)$, gui\_ung from trace)", -1, 1),
+            ("landing_diff_map", landing_diff_slice, r"guidance effect  $x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$  ($x_t=\hat{x}^{\text{gui\_det}}+\sigma_r z_t$; $=0$ at the noise step)", -1, 1),
             ("masked_residual_land_map", masked_residual_land_slice, r"$(x_t - (1+\phi_n)\,x^{\text{ref}}) \cdot \text{mask}$", -1, 1),
             ("gui_land_vs_ung_final_map", gui_land_vs_ung_final_slice, r"$x_t^{\text{gui}} - x_T^{\text{gui\_ung}}$  (landing vs final unguided state)", -1, 1),
             ("r_land_gui_map", r_land_gui_slice, r"$r_t^{\text{gui}} = \sigma_r\,(z_t + h_t u^{\text{gui}}_t)$", -1, 1),
@@ -3607,7 +3684,7 @@ def _(
         # map_specs entries are never displayed (dead) or belong to an unselected
         # row. Gate the expensive visualize_map calls by the flow-row selection.
         _FLOW_MAP_ROW = {
-            "gui_land_vs_ung_final_map": "gui_t diffs", "masked_residual_land_map": "gui_t diffs",
+            "landing_diff_map": "gui_t diffs", "masked_residual_land_map": "gui_t diffs",
             "r_land_gui_map": "x_t diffs", "r_land_map": "x_t diffs",
             "grads_map": "grads", "gui_vec_map": "grads",
             "vfs_map": "vfs", "guided_vfs_map": "vfs",
@@ -3678,9 +3755,9 @@ def _(
         diff_grads_map = maps["diff_grads_map"]
     return (
         grads_map,
-        gui_land_vs_ung_final_map,
         gui_vec_map,
         guided_vfs_map,
+        landing_diff_map,
         masked_residual_land_map,
         r_land_gui_map,
         r_land_map,
@@ -3718,9 +3795,9 @@ def _(
     flow_row_select,
     flow_section_checkbox,
     grads_map,
-    gui_land_vs_ung_final_map,
     gui_vec_map,
     guided_vfs_map,
+    landing_diff_map,
     level_slider,
     m_slider,
     masked_residual_land_map,
@@ -3775,7 +3852,7 @@ def _(
         )
 
         map_rows = [
-            ("gui_t diffs", [gui_land_vs_ung_final_map, masked_residual_land_map]),
+            ("gui_t diffs", [landing_diff_map, masked_residual_land_map]),
             ("x_t diffs", [r_land_gui_map, r_land_map]),
             ("grads", [grads_map, gui_vec_map]),
             ("vfs", [vfs_map, guided_vfs_map]),
@@ -4526,38 +4603,36 @@ def _(
             _z_mm  = (np.asarray(get_slices(res_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
             _u_mm  = (np.asarray(get_slices(vfs_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
             _gu_mm = (np.asarray(get_slices(gui_vfs_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
-            _M_all, _T_len = _z_mm.shape
-            _s_flow = np.linspace(1000, 1, _T_len) / 1000
+            _M_all = _z_mm.shape[0]
+            _T_flow = _u_mm.shape[1]                        # Euler-step count (T); z_mm / states are T+1
+            _s_flow = np.linspace(1000, 1, _T_flow) / 1000
             _h_flow = np.empty_like(_s_flow); _h_flow[:-1] = _s_flow[:-1] - _s_flow[1:]; _h_flow[-1] = _s_flow[-1]
             _hs = _h_flow / _s_flow
             _c_sc = res_scale_map[var]
             _c_sc = float(_c_sc.sel(level=level)) if partition == "level" else float(_c_sc)
 
             # M(x_det): from the gui_det store; older stores -> reconstruct from the
-            # final guided state (M(x_det) = M(gui) - sigma_r M(z_T))
+            # final guided state (M(x_det) = M(gui) - sigma_r M(z_T), z_T = z_mm[:, -1])
             try:
                 _det_mm = (np.asarray(get_slices(get_rollout("gui_det", rollout_id).sel(sweep_params).compute(),
                                                  partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
             except (FileNotFoundError, KeyError):
-                _zT_mm = _z_mm[:, -1] + _hs[-1] * _gu_mm[:, -1]
                 _gui_mm = (np.asarray(get_slices(guided_xr, partition, var, level))[:, n] * _mask_np).sum(axis=(-1, -2))
-                _det_mm = _gui_mm - _c_sc * _zT_mm
+                _det_mm = _gui_mm - _c_sc * _z_mm[:, -1]
 
             _is_tgt = (var == config.VAR) and (partition != "level" or level == config.LEVEL)
             _msum_pa = float(np.asarray(_mask_np).sum())
             _y = (np.asarray(cfg_target_guidance_M_N_trajectories)[:, n] if _is_tgt
                   else np.zeros(_M_all))
-            _states = np.empty((_M_all, _T_len + 1))
-            _states[:, :_T_len] = _det_mm[:, None] + _c_sc * _z_mm - _y[:, None]
-            _states[:, _T_len] = _states[:, _T_len - 1] + _c_sc * _hs[-1] * _gu_mm[:, -1]
-            _land_ung = _states[:, :_T_len] + _c_sc * _hs * _u_mm
+            _states = _det_mm[:, None] + _c_sc * _z_mm - _y[:, None]   # M(x_t) - A, t=0..T (ends at x_T)
+            _land_ung = _states[:, :_T_flow] + _c_sc * _hs * _u_mm     # where the raw flow step lands (T)
             _pa_unit = ""
             if not _is_tgt:
                 # absolute mask-averaged values, display units (K -> degC etc.)
                 _states, _pa_unit = to_display_units(_states / _msum_pa, var)
                 _land_ung = to_display_units(_land_ung / _msum_pa, var)[0]
 
-            _xt = np.arange(_T_len + 1).astype(float)
+            _xt = np.arange(_states.shape[1]).astype(float)   # T+1 ticks (0..T)
             _wt = 22.0  # match the rollout trajectories figure width
             with plt.rc_context({"font.size": 10, "axes.titlesize": 14, "legend.fontsize": 9}):
                 _fig, _ax = plt.subplots(figsize=(_wt, 6), dpi=dpi_slider.value)
@@ -4904,7 +4979,7 @@ def _(
                 _lazy_cv[_k] = _e
             _flat_cv = dask.compute(_lazy_cv)[0]
 
-            _T_cv = res_xr.sizes["t"]
+            _T_cv = vfs_xr.sizes["t"]                    # Euler-step count (T); res/states are T+1
             _s_cv = np.linspace(1000, 1, _T_cv) / 1000
             _h_cv = np.empty_like(_s_cv); _h_cv[:-1] = _s_cv[:-1] - _s_cv[1:]; _h_cv[-1] = _s_cv[-1]
             _hs_cv = _h_cv / _s_cv
@@ -4925,12 +5000,9 @@ def _(
                     if "det" in _d:
                         _detv = float(np.atleast_1d(np.asarray(_d["det"]))[m])
                     else:
-                        _zT = _zmm[m, -1] + _hs_cv[-1] * _gumm[m, -1]
-                        _detv = float(np.atleast_1d(np.asarray(_d["gui"]))[m]) - _zT
-                    _st = np.empty(_T_cv + 1)
-                    _st[:_T_cv] = _detv + _zmm[m]
-                    _st[_T_cv] = _st[_T_cv - 1] + _hs_cv[-1] * _gumm[m, -1]
-                    _lu = _st[:_T_cv] + _hs_cv * _umm[m]
+                        _detv = float(np.atleast_1d(np.asarray(_d["gui"]))[m]) - _zmm[m, -1]  # z_T = z[-1]
+                    _st = _detv + _zmm[m]                # state trajectory (T+1), reaches x_T at index T
+                    _lu = _st[:_T_cv] + _hs_cv * _umm[m] # where the raw flow step lands (T)
                     _fm = _lu - _st[:_T_cv]              # flow move (state_t -> ung landing)
                     _gm = _st[1:] - _lu                  # guidance move (ung -> gui landing)
                     _axc.bar(_xt_cv[1:] - 0.16, _fm, bottom=_st[:_T_cv], width=0.28, color="#C0392B",
@@ -5008,12 +5080,13 @@ def _(
                     if "det" in _d:
                         _detv = float(np.atleast_1d(np.asarray(_d["det"]))[m])
                     else:
-                        _detv = float(np.atleast_1d(np.asarray(_d["gui"]))[m]) - (_zmm[-1] + _hs_cv[-1] * _gumm[-1])
-                    _cpg = _detv + _zmm + _gumm     # guided clean prediction
-                    _cpu = _detv + _zmm + _umm      # model's raw (unguided-vf) clean prediction
+                        _detv = float(np.atleast_1d(np.asarray(_d["gui"]))[m]) - _zmm[-1]  # z_T = z[-1]
+                    _z_pre = _zmm[:_T_cv]           # z_0..z_{T-1} aligned with the length-T vfs/gui_vfs
+                    _cpg = _detv + _z_pre + _gumm  # guided clean prediction (T)
+                    _cpu = _detv + _z_pre + _umm   # model's raw (unguided-vf) clean prediction (T)
                     _sd_ = _cv_zstats(_v, _lv)[1]
-                    _stn = (_cpg - _ugmm) / _msum_cv / _sd_
-                    _tipn = (_cpu - _ugmm) / _msum_cv / _sd_
+                    _stn = (_cpg - _ugmm[:_T_cv]) / _msum_cv / _sd_
+                    _tipn = (_cpu - _ugmm[:_T_cv]) / _msum_cv / _sd_
                     _cl = _cols_sp[_k]
                     _ax_sp.plot(_xs_sp, _stn, "-o", color=_cl, linewidth=1.4, markersize=4.5,
                                 markeredgecolor="white", markeredgewidth=0.7, zorder=6, label=_k)

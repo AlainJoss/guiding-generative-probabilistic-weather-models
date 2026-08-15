@@ -109,6 +109,20 @@ def get_rollout_dir(rollout_id:str):
     return ROLLOUTS / rollout_id
 
 
+# date-subdir naming for multi-start experiments (matches download.STARTS_FMT and the
+# experiment_builder format); the start date is recovered from the subdir name.
+SUBDIR_TS_FMT = "%Y-%m-%d_%H:%M:%S"
+
+
+def experiment_root(rollout_dir: Path) -> Path:
+    """Dir holding the shared config.json / sweep_params.json. A multi-start experiment keeps
+    those (plus starts.json) once at the exp root; each date subdir carries only artifacts. So a
+    date subdir resolves UP to its parent (marked by starts.json); a flat single rollout is its
+    own root."""
+    parent = rollout_dir.parent
+    return parent if (parent / "starts.json").exists() else rollout_dir
+
+
 def find_era5_input(rollout_dir: Path):
     """The per-experiment model input, if it was downloaded. A multi-start run executes in
     a per-start subdir (<exp_id>/<start_ts>); era5_input.nc lives once in the OUTER exp dir
@@ -127,7 +141,8 @@ def get_dict_from_json(path: Path):
 
 
 def get_sweep_dict(rollout_id):
-    path = get_rollout_dir(rollout_id) / "sweep_params.json"
+    # the sweep is shared across a multi-start experiment -> resolve from the exp root
+    path = experiment_root(get_rollout_dir(rollout_id)) / "sweep_params.json"
     return get_dict_from_json(path)
 
 
@@ -244,16 +259,22 @@ def get_rollout(rollout_type:str, rollout_id:str):
 
 
 def get_config(rollout_id: str) -> RolloutConfig:
-    path = get_rollout_dir(rollout_id) / f"config.json"
-    config_dict = get_dict_from_json(path)
-    return RolloutConfig.from_dict(config_dict)
+    rollout_dir = get_rollout_dir(rollout_id)
+    root = experiment_root(rollout_dir)
+    config = RolloutConfig.from_dict(get_dict_from_json(root / "config.json"))
+    if root != rollout_dir:
+        # date subdir of a multi-start experiment: the shared config has START_TS=None,
+        # so recover this member's start date from the subdir name.
+        config.START_TS = datetime.strptime(rollout_dir.name, SUBDIR_TS_FMT)
+    return config
 
 
 def get_rollout_ids(rollout_type: str):
-    # A multi-start experiment is an OUTER dir whose config.json holds {"STARTS": [...]} and
-    # one subdir per start_ts (each a normal rollout). Expand those into "<exp_id>/<start_ts>"
-    # ids; legacy single rollouts (zarr + config.json directly in the dir) stay as "<exp_id>".
-    # Direct (non-recursive) zarr check so an outer dir is never matched by a child's zarr.
+    # A multi-start experiment is an exp dir whose starts.json holds {"STARTS": [...]} plus a
+    # shared config.json/sweep_params.json; each start_ts subdir holds only artifacts. Expand
+    # those into "<exp_id>/<start_ts>" ids; a flat single rollout (zarr + config.json directly
+    # in the dir, no starts.json) stays as "<exp_id>".
+    # Direct (non-recursive) zarr check so an exp dir is never matched by a child's zarr.
     def _has(dirpath, rtype):
         if (dirpath / f"{rtype}.zarr").exists():
             return True
@@ -263,16 +284,13 @@ def get_rollout_ids(rollout_type: str):
 
     ids = []
     for p in Path(ROLLOUTS).glob("2026*"):
-        cfg = p / "config.json"
-        if not cfg.exists():
-            continue
-        d = get_dict_from_json(cfg)
-        if "STARTS" in d:
-            for s in d["STARTS"]:
+        starts = p / "starts.json"
+        if starts.exists():
+            for s in get_dict_from_json(starts)["STARTS"]:
                 sub = p / s
-                if (sub / "config.json").exists() and _has(sub, rollout_type):
+                if _has(sub, rollout_type):
                     ids.append(f"{p.name}/{s}")
-        elif _has(p, rollout_type):
+        elif (p / "config.json").exists() and _has(p, rollout_type):
             ids.append(p.name)
     return sorted(ids, reverse=True)
 

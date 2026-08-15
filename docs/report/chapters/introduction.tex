@@ -2,175 +2,124 @@
 \chapter{Introduction}
 \label{ch:intro}
 
-Machine-learning models have reached state-of-the-art skill in weather
+Machine-learning (ML) models have reached state-of-the-art skill in weather
 forecasting, rivaling traditional physics-based numerical models at a fraction
 of their computational cost
 \parencite{lam2023graphcast,bi2023pangu}.
-More recently, generative models have extended these advances to probabilistic
-forecasting
+
+An increasingly important class of these models is formed by generative
+probabilistic weather models
 \parencite{price2023gencast,couairon2024archesweather}.
-Instead of producing a single deterministic forecast, they are trained to
-approximate the conditional distribution of future atmospheric states given
-the available atmospheric state and can therefore generate multiple plausible
-future trajectories
-\parencite{price2023gencast}.
-This allows them to represent forecast uncertainty explicitly, alleviating the
-smoothing effects often observed in deterministic neural forecasts, enabling
-direct ensemble generation, and achieving strong probabilistic skill as
-measured, for instance, by the Continuous Ranked Probability Score (CRPS)
+Rather than producing a single deterministic forecast, these models are trained
+to approximate the conditional distribution of future atmospheric states.
+Sampling from the learned distribution enables the direct generation of
+forecast ensembles and thereby an explicit representation of forecast
+uncertainty.
+This probabilistic formulation also mitigates the smoothing effects often
+associated with deterministic models and improves probabilistic forecast skill,
+measured for instance by the Continuous Ranked Probability Score (CRPS)
 \parencite{hersbach2000crps,price2023gencast}.
 
 Beyond their use as probabilistic samplers, generative models can also be
-actively steered during generation.
-In image generation, applications such as text-to-image generation, editing,
-and inpainting routinely rely on \emph{guidance} to steer a pretrained
-generative model toward a desired outcome
+actively controlled during generation. This is standard in image generation,
+where applications such as text-to-image synthesis, editing, and inpainting
+rely on \emph{guidance} to steer a pretrained generative model toward a desired
+outcome
 \parencite{dhariwal2021diffusion,ho2022classifierfree,nichol2021glide}.
 Generative weather models, by contrast, are still predominantly used in their
-unguided form, while their potential for controlled generation remains
+unguided form, and their potential for controlled generation remains
 comparatively unexplored.
-Only a small number of recent studies have investigated related forms of
-weather control, including classifier-guided generation of tropical cyclones
-with Climate in a Bottle \parencite{brenowitz2025climate},
-precipitation-reduction interventions through guided diffusion
-\parencite{ueyama2026guided}, and optimized heatwave storylines using
-differentiable weather models
-\parencite{whittaker2025heatwaves}.
 
-This opens up a complementary use of generative weather models beyond
-probabilistic forecasting.
-While forecasting asks which future weather trajectories are likely given the
-current state, \emph{scenario generation} asks what a prescribed alternative
-evolution could look like while remaining meteorologically plausible
-\parencite{shepherd2018storylines}.
-This distinction is particularly relevant for extreme weather.
+A small number of recent studies have begun to investigate different forms of
+weather control for the generation of extreme-event scenarios, including
+tropical cyclones \parencite{brenowitz2025climate}, droughts
+\parencite{ueyama2026guided}, and heatwaves
+\parencite{whittaker2025heatwaves}. 
+These approaches shift the focus from forecasting a distribution of likely
+weather trajectories to generating plausible low-probability alternatives
+under prescribed conditions of interest. We refer to this complementary task
+as \emph{scenario generation}.
+
+This distinction is particularly relevant for extreme-weather storylines.
 Extreme events account for a disproportionate share of weather-related impacts
 \parencite{wmo2023atlas}, yet their rarity means that both historical
-observations and finite forecast ensembles provide only limited examples from
-which to study them.
-The historical record necessarily contains only a finite sample of possible
-extremes, while risk analysis may also require considering plausible
-alternatives, including scenarios more severe than those previously observed
+observations and finite forecast ensembles provide only a limited sample of
+possible realizations. Considering plausible low-probability alternatives
+beyond those represented in historical observations and finite forecast
+ensembles is therefore essential for assessing extreme-weather risk
 \parencite{thompson2017unseen,shepherd2018storylines}.
 
-We are therefore interested in exploiting the ability of generative weather
-models to produce coherent weather trajectories while deliberately steering
-them toward prescribed extremes.
-Rather than generating an isolated extreme state, the objective is to obtain an
-event that remains structured as weather throughout its evolution: coherent
-over time and space, across atmospheric pressure levels, and between the
-different meteorological variables.
-In other words, the imposed extreme should remain embedded within a
-multivariate atmospheric evolution that is consistent with the structure of
-realistic weather.
-
-Transferring guidance methods from image generation to this setting is not
-immediate.
-First, the conditioning objective is different.
-Image-generation guidance commonly targets semantic properties, whereas a
-weather scenario can be specified quantitatively by prescribing the evolution
-of selected atmospheric quantities over a spatial domain and forecast horizon
-\parencite{dhariwal2021diffusion,ho2022classifierfree,nichol2021glide}.
-Second, plausibility is considerably more structured.
-Satisfying such a target is not sufficient on its own: the generated trajectory
-must remain coherent beyond the prescribed quantities and spatial domain,
-across neighboring locations, atmospheric variables, pressure levels, and
-subsequent forecast steps.
-Third, the role of guidance strength changes.
-In image generation, guidance strength is commonly used to control the
-trade-off between stronger conditioning and sample fidelity or diversity
-\parencite{dhariwal2021diffusion,ho2022classifierfree}.
-For weather scenario generation, an explicit quantitative target instead gives
-us a measurable objective: the model should be guided sufficiently to reach
-the prescribed trajectory, while the consequences of that guidance on the
-remaining forecast must be evaluated explicitly.
+We are therefore interested in exploiting the ability of generative weather models to produce coherent weather trajectories while deliberately steering them toward prescribed extreme events.
+Transferring guidance methods from image generation to this setting is nonetheless not straightforward. 
+First, while image-generation targets can often be expressed directly through a text prompt, class label, or reference image, weather scenarios require the conditioning objective to be explicitly constructed. Second, while image plausibility can often be assessed from visual coherence, weather plausibility is inherently multivariate and spatiotemporal: guided trajectories must remain coherent across space and pressure levels, preserve meaningful relationships between meteorological variables, and evolve realistically over time.
 
 These considerations lead to the central research question of this thesis:
 
 \begin{quote}
-\emph{Can we steer generative probabilistic weather models to produce extreme
+\emph{Can we guide generative probabilistic weather models to produce extreme
 weather trajectories that satisfy a prescribed target while remaining
 meteorologically plausible?}
 \end{quote}
 
-We address this question through a general framework composed of three stages:
-\emph{Specify}, \emph{Guide}, and \emph{Evaluate}.
-The first determines the target trajectory toward which the model should be
-steered.
-The second modifies the generative process to reach that target.
-The third assesses both whether the prescribed event has been realized and
-whether the resulting trajectory remains consistent with the structure of
-realistic weather.
+We address this question by separating two problems that are often intertwined
+in guided generation: \emph{what} scenario should be generated, and \emph{how}
+the generative model should be steered to produce it. We refer to these two
+stages as \emph{Specify} and \emph{Guide}.
 
-We investigate this framework using ArchesWeather
-\parencite{couairon2024archesweather}, a probabilistic weather model based on
-flow matching.
-As an experimental case study, we focus on regional surface-temperature
-heatwaves and formulate the guidance objective in terms of a prescribed
-temperature trajectory over a chosen region.
-These choices define the particular scenario studied in this thesis rather
-than the methodology itself: the guidance framework operates on differentiable
-objectives defined on the forecast state and can therefore, in principle, be
-used to prescribe different meteorological quantities and forms of weather
-evolution.
+The first stage defines the desired scenario independently of the guidance
+mechanism. In our setting, this amounts to specifying a target variable, a
+spatial region, and a target trajectory describing how the corresponding
+regional quantity should evolve over forecast time. The second stage then
+determines how the generative dynamics must be modified to realize the
+prescribed target.
 
-The three stages of the framework correspond to the main contributions of this
-thesis:
+This separation leads to a central distinction from the approaches most closely
+related to ours. Existing guidance methods typically prescribe the strength of
+the intervention and observe the resulting change in the generated scenario.
+We instead specify the desired outcome first and adapt the guidance strength to
+reach it. To do so, we parameterize guidance through a prescribed profile over
+the flow and determine its overall magnitude separately for each
+forecast step.
+
+We investigate this approach using ArchesWeather
+\parencite{couairon2024archesweather}, a medium-range probabilistic weather
+model based on flow matching. As an experimental case study, we focus on
+regional surface-temperature heatwaves and specify the target through a
+prescribed temperature trajectory over a selected spatial region. The
+underlying formulation is nevertheless not restricted to temperature: the same
+approach can in principle be applied to other differentiable functionals of the
+forecast state. More generally, although extreme weather provides the
+application considered in this thesis, the proposed formulation can be used to
+generate alternative weather trajectories toward any suitably specified
+target.
+
+The main contributions of this thesis are the following.
 
 \begin{enumerate}[noitemsep]
+    \item We provide a common formulation of guidance-strength schedules that
+    separates the overall guidance magnitude from its distribution over
+    generative flow time.
 
-\item \textbf{Specify.}
-We formalize the desired scenario as a quantitative target trajectory of a
-selected atmospheric quantity over a prescribed spatial region.
-We consider two complementary constructions.
-For controlled evaluation of the guidance method, targets are defined as
-prescribed relative deviations from a matched unguided forecast.
-For storyline generation, targets are constructed from data-driven historical
-weather trajectories, providing complete temporal evolutions toward which the
-model can be steered.
+    \item We formulate the specification of a target weather scenario through a
+    spatial mask and a scalar target trajectory, separating the desired outcome
+    from the guidance mechanism used to realize it.
 
-\item \textbf{Guide.}
-We develop a target-driven, gradient-based guidance method for
-flow-matching weather models.
-Rather than selecting a fixed guidance strength and accepting the resulting
-level of extremeness, guidance is formulated around an explicit target
-trajectory and adapted to drive the remaining gap toward zero.
-Guidance strength is therefore treated as the means of reaching a specified
-scenario rather than as the scenario definition itself.
+    \item We develop a target-driven gradient-based guidance method that
+    prescribes the relative distribution of guidance over flow time and adapts
+    its overall magnitude to the specified target.
 
-\item \textbf{Evaluate.}
-We develop a set of diagnostics for both guidance behavior and weather
-plausibility.
-Beyond measuring whether the target trajectory is reached, we evaluate how
-the generated scenarios behave across space, pressure levels, variables,
-and forecast time.
-In particular, we construct a historical benchmark in which observed
-weather states provide plausibility anchors and the corresponding unguided
-forecast provides a baseline for quantifying the effects of guidance.
-
+    \item We systematically investigate how the placement of guidance over flow
+    time affects the resulting scenarios and use the selected configuration to
+    generate and evaluate extreme-weather storylines.
 \end{enumerate}
-
-If successful, such a framework enables several forms of controlled extreme
-scenario generation.
-Starting from a given weather state, one may generate alternative future
-trajectories at different prescribed levels of extremeness.
-Data-driven extreme trajectories may instead be used as explicit targets for
-constructing weather storylines conditioned on a particular initial state.
-In either case, multiple trajectories and intensity levels can be sampled to
-explore not a single deterministic extreme, but a family of guided scenarios.
-Although extreme events provide the focus of this thesis, the underlying idea
-is more general: guidance can be used to explore alternative weather
-trajectories that deliberately depart from the base forecast toward any
-suitably defined target.
 
 The remainder of the thesis is organized as follows.
 \Cref{ch:background} introduces the technical background on flow matching and
 guidance, reviews existing approaches to controlled weather generation, and
-describes ArchesWeather.
-\Cref{ch:specify,ch:guide,ch:eval} develop the three stages of the framework in
-turn: specifying the target trajectory, designing the guidance method, and
-defining the evaluation framework.
-\Cref{ch:experiments} presents the experimental results, which are discussed in
-\Cref{ch:discussion}.
-Finally, \Cref{ch:conclusion} summarizes the main findings and outlines
-directions for future work.
+describes ArchesWeather. \Cref{ch:specify} develops the specification of target
+weather scenarios, while \Cref{ch:guide} presents the guidance method used to
+realize them. \Cref{ch:evaluation} introduces the criteria used to assess the
+resulting trajectories, and \Cref{ch:experiments} presents the experimental
+results, which are discussed in \Cref{ch:discussion}. Finally,
+\Cref{ch:conclusion} summarizes the main findings and outlines directions for
+future work.

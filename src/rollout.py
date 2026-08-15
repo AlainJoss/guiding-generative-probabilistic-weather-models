@@ -176,25 +176,25 @@ def rollout(
                     )
                     append_to_zarr(rollout_dir, "gui_det", save_state)
 
-                # gui_ung_res is the unguided LATENT z_t trajectory over flow steps t (the same
-                # thing the guided pass traces as "res"). The analysis reconstructs the actual
-                # unguided state x_t = x_det + sigma_res * z_t from it (+ gui_det); the final
-                # slice still == the final unguided state (x_hat_T == x_T at t=-1).
+                # gui_ung_res is the unguided LATENT trajectory z_0..z_T (length T+1) over flow steps t
+                # (the same thing the guided pass traces as "res"). x_t = x_det + sigma_res * z_t
+                # reconstructs the actual unguided state and reaches the true final x_T at t=-1.
                 ung_res = torch.stack(ung_trace["res"], dim=0)
                 save_state = tdict_to_xr(
-                    create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params=sweep_params),
+                    create_slice_zarr_container(m, n, t_dim=True, T=T + 1, sweep_params=sweep_params),
                     ung_res,
                     t_dim=True
                 )
                 append_to_zarr(rollout_dir, "gui_ung_res", save_state)
 
                 for trace_type, trace in sampling_trace.items():
-                    # the guided latent trace is persisted as gui_res (symmetry with
-                    # gui_ung_res / ung_res); vfs and grads keep their names.
+                    # the guided latent trace is persisted as gui_res (symmetry with gui_ung_res /
+                    # ung_res) and holds z_0..z_T (length T+1); vfs and grads are per-step (length T).
                     store_type = "gui_res" if trace_type == "res" else trace_type
+                    t_len = T + 1 if trace_type == "res" else T
                     save_trace = torch.stack(trace, dim=0)
                     save_trace = tdict_to_xr(
-                        create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params=sweep_params),
+                        create_slice_zarr_container(m, n, t_dim=True, T=t_len, sweep_params=sweep_params),
                         save_trace,
                         t_dim=True
                     )
@@ -209,7 +209,7 @@ def rollout(
                 # guided gui_det.zarr (which carries sweep dims) in a shared rollout dir.
                 ung_res = torch.stack(ung_trace["res"], dim=0)
                 save_state = tdict_to_xr(
-                    create_slice_zarr_container(m, n, t_dim=True, T=T, sweep_params={}),
+                    create_slice_zarr_container(m, n, t_dim=True, T=T + 1, sweep_params={}),
                     ung_res,
                     t_dim=True
                 )

@@ -140,15 +140,15 @@ def date_times(start, N):
 def main() -> None:
     args = parse_args()
     rollout_dir = get_rollout_dir(args.rollout_id)
-    d = get_dict_from_json(rollout_dir / "config.json")
+    starts_path = rollout_dir / "starts.json"
     # ONE era5_input.nc per date subfolder, each holding just that date's [d-1 .. d+N] window
-    if "STARTS" in d:
-        # legacy outer configs predate the top-level "N"; read it from a per-date config
-        N = int(d["N"]) if "N" in d else get_config(f"{args.rollout_id}/{d['STARTS'][0]}").N
+    if starts_path.exists():
+        d = get_dict_from_json(starts_path)            # {"STARTS": [...], "N": N}
+        N = int(d["N"])
         items = [(datetime.strptime(name, STARTS_FMT), rollout_dir / name / "era5_input.nc")
                  for name in d["STARTS"]]
     else:
-        cfg = get_config(args.rollout_id)              # plain rollout: file in the rollout dir
+        cfg = get_config(args.rollout_id)              # flat rollout: file in the rollout dir
         N, items = int(cfg.N), [(cfg.START_TS, rollout_dir / "era5_input.nc")]
     for start, out in items:
         print(f"=== {out.parent.name} ===", flush=True)

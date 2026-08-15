@@ -94,21 +94,22 @@ def get_container_args(rollout_type):
     # tuples: (file type, t_dim_flag)
     match rollout_type:
         case "ung":
-            # ung_res holds the FULL flow-step LATENT z_t trajectory; ung_det holds THIS run's own
-            # deterministic core x_det (its conditioning follows the UNGUIDED rollout, so for n>=1 it
-            # differs from the guided pass's gui_det). Together: x_t = x_det + sigma_res * z_t.
+            # ung_res holds the FULL latent trajectory z_0..z_T (length T+1); ung_det holds THIS run's
+            # own deterministic core x_det (its conditioning follows the UNGUIDED rollout, so for n>=1 it
+            # differs from the guided pass's gui_det). Together: x_t = x_det + sigma_res * z_t, reaching
+            # the true final x_T at res[-1].
             return [("ung_res", True), ("ung_det", False)]
         case "gui":
-            # raw primitives only: grads = dL/dz, vfs = u*s_t, gui_res = latent z_t.
+            # raw primitives only: grads = dL/dz, vfs = u*s_t, gui_res = latent trajectory z_0..z_T.
             # gui_vec / gui_vf / clean_preds are reconstructed in the UI.
-            # gui_ung_res = the unguided (same-seed twin) latent z_t trajectory.
+            # gui_ung_res = the unguided (same-seed twin) latent trajectory z_0..z_T.
             return [
                 ("grads", True),
                 ("vfs", True),
                 ("gui_res", True),
                 ("gui", False),
                 ("gui_det", False),
-                ("gui_ung_res", True)
+                ("gui_ung_res", True),
             ]
         case _:
             return []
@@ -164,7 +165,9 @@ def create_zarr_containers(rollout_type, rollout_id, M, N, T, sweep_params):
         # wiped); only missing ones are created -- e.g. gui_det on older stores
         if save_path.exists():
             continue
-        container_ds = create_full_zarr_container(M, N, t_dim_flag, T, sweep_params)
+        # the latent res stores hold z_0..z_T (T+1 slices); vfs/grads are per Euler step (T)
+        t_len = T + 1 if container_type in {"ung_res", "gui_res", "gui_ung_res"} else T
+        container_ds = create_full_zarr_container(M, N, t_dim_flag, t_len, sweep_params)
         # compute=False: write only metadata + coords (dask-backed NaN chunks are
         # never materialized); append_to_zarr fills real (m, n, sweep) chunks later.
         container_ds.to_zarr(save_path, mode="w", compute=False)
@@ -226,11 +229,12 @@ def main() -> None:
     print("Loading model")
     flow_model = get_model(get_device())
 
-    # A multi-start experiment holds an OUTER config.json with {"STARTS": [...]} and one
-    # subdir per start_ts; loop those subdirs. A plain rollout dir (no STARTS) runs directly.
-    outer = get_dict_from_json(get_rollout_dir(args.rollout_id) / "config.json")
-    if "STARTS" in outer:
-        for s in outer["STARTS"]:
+    # A multi-start experiment holds starts.json = {"STARTS": [...], "N": N} at its root plus a
+    # shared config.json/sweep_params.json; loop the start subdirs (get_config injects each
+    # subdir's START_TS). A flat rollout dir (no starts.json) runs directly.
+    starts_path = get_rollout_dir(args.rollout_id) / "starts.json"
+    if starts_path.exists():
+        for s in get_dict_from_json(starts_path)["STARTS"]:
             print(f"=== start {s} ===")
             run_one(f"{args.rollout_id}/{s}", args.rollout_type, flow_model)
     else:

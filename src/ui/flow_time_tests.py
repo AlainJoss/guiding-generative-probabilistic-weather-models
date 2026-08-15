@@ -72,21 +72,51 @@ def _():
     )
 
 
+@app.cell(hide_code=True)
+def _(open_store, residual_scaler, xr):
+    # Reconstruct the unguided STATE store from the new latent format: x_t = x_det + sigma_res*z_t.
+    # Drop-in for open_store(dir, prefix, var) where prefix in {"gui_ung","ung"} -- new rollouts persist the
+    # latent (gui_ung_res / ung_res) + det core (gui_det / ung_det) instead of the physical state. The det
+    # core is the guided pass's gui_det for the same-seed twin, but the independent run's own ung_det for
+    # "ung". Falls back to the legacy {prefix} clean-pred store for pre-switch experiments.
+    def open_unguided_state(rollout_dir, prefix, var):
+        if not (rollout_dir / f"{prefix}_res.zarr").exists():
+            return open_store(rollout_dir, prefix, var)               # legacy clean-pred store
+        _det = "ung_det" if prefix == "ung" else "gui_det"
+        if not (rollout_dir / f"{_det}.zarr").exists():
+            _det = "gui_det"
+        _z = open_store(rollout_dir, f"{prefix}_res", var)            # latent z_t: (..., t, [level], lat, lon)
+        _dc = open_store(rollout_dir, _det, var)                      # x_det: (..., [level], lat, lon), no t
+        if "level" in _z.dims:
+            _sig = xr.DataArray([residual_scaler("level", var, int(_L)) for _L in _z["level"].values],
+                                dims=("level",), coords={"level": _z["level"]})
+        else:
+            _sig = residual_scaler("surface", var)
+        # match the res store's dim order (m,n,t,lat,lon,sweep) so lat/lon stay the trailing axes.
+        # {prefix}_res holds z_0..z_T (length T+1), so x_t = x_det + sigma_res*z_t reaches the true
+        # final x_T at t=-1 with no splice.
+        return (_dc + _sig * _z).transpose(*_z.dims)
+
+    return (open_unguided_state,)
+
+
 @app.cell
 def _(mo):
     mo.md(r"""
     # Flow-time tests
 
     Flow step $t$ = the $T$ internal Euler steps of one `sample()` call; $n$ indexes the weather step and
-    $\hat{x}_{n,t}$ the clean-state estimate. Metrics score the guided channel `VAR@LEVEL` through the
-    masked average $\mathcal{M}_m$ (mask $m$), pooled over ensemble members, guided weather steps $n$,
-    and the selected experiment's subexperiments, per guidance schedule (flow-time profile $\gamma_t$,
-    here `spike@k`). Metrics recompute automatically on selection.
+    $x_{n,t}$ the actual flow state. Metrics score the guided channel `VAR@LEVEL` through the masked average
+    $\mathcal{M}_m$ (mask $m$), pooled over ensemble members, guided weather steps $n$, and the selected
+    experiment's subexperiments — per **guidance schedule** (flow-time profile $\gamma_t$, e.g. `spike@k` /
+    `spread@i-j`) and per **intensity level** $\rho_H$. The selectors up top pin the sweep context and pick
+    the plotted intensity; metrics recompute automatically.
 
     - **T1 Reliability**: did we reach the target? Final gap $\xi_n=\mathcal{M}_m(x_n^{\mathrm{gui}})-y_n^\star$.
-    - **T2 Guidance effect**: how much change was inflicted to other variables.
+    - **T2 Guidance effect**: how much change was inflicted on other variables.
     - **T3 Closeness**: how far the guided flow strays from the unguided one (PCA latent space).
     - **T4 Realism**: does the guidance footprint match the mask?
+    - **T5 Footprint spread**: how repeatable is that footprint across members?
     """)
     return
 
@@ -102,19 +132,37 @@ def _(get_rollout_ids, mo):
     return (experiment_dropdown,)
 
 
+@app.cell(hide_code=True)
+def _(experiment_dropdown, get_rollout_ids, mo):
+    # rollouts (start_ts) of the selected experiment; ALL selected by default. Untick the ones still
+    # running to drop them from the pool and keep seeing intermediate results from the finished ones.
+    _avail = sorted(rid for rid in get_rollout_ids("gui") if rid.split("/", 1)[0] == experiment_dropdown.value)
+    _rollout_opts = {(rid.split("/", 1)[1] if "/" in rid else rid): rid for rid in _avail}   # start_ts -> full rid
+    rollout_multiselect = mo.ui.multiselect(_rollout_opts, value=list(_rollout_opts.keys()), label="rollouts: ")
+    return (rollout_multiselect,)
+
+
 @app.cell
-def _(
-    experiment_dropdown,
-    get_rollout_ids,
-    load_rollout,
-    mask_bbox,
-    np,
-    sweep_points,
-):
+def _(get_rollout_dir, load_rollout, mask_bbox, mo, np, rollout_multiselect):
     # all date-subexperiments of the selected experiment(s) -> metrics are pooled and
     # averaged over them (they share VAR/LEVEL/mask/sweep, hence one bbox + one PCA basis)
-    _sel_exps = {experiment_dropdown.value}
-    EXPS = [rid for rid in get_rollout_ids("gui") if rid.split("/", 1)[0] in _sel_exps]
+    _selected = sorted(rollout_multiselect.value)   # rollouts ticked in the multiselect above
+    def _rollout_ready(_rid):
+        # analyzable once the guided pass wrote every store the T-cells read -> skip the ones
+        # still running so "select all" shows whatever is finished instead of crashing
+        _d = get_rollout_dir(_rid)
+        if not (_d / "guidance_schedule.json").exists():
+            return False
+        if not all((_d / f"{_s}.zarr").exists() for _s in ("gui", "gui_det", "vfs", "grads")):
+            return False
+        return all((_d / f"{_a}.zarr").exists() or (_d / f"{_bb}.zarr").exists()
+                   for _a, _bb in (("gui_res", "res"), ("gui_ung_res", "gui_ung"),
+                                   ("ung_res", "ung"), ("ung_det", "gui_det")))
+    EXPS = [rid for rid in _selected if _rollout_ready(rid)]
+    ROLLOUTS_SKIPPED = [rid.split("/")[-1] for rid in _selected if rid not in EXPS]
+    mo.stop(not EXPS, mo.md("**No ready rollouts.** "
+                            + (f"Still running / incomplete: {', '.join(ROLLOUTS_SKIPPED)}. " if ROLLOUTS_SKIPPED else "")
+                            + "Tick a finished rollout (or add guided data) and re-run."))
     _rid0 = EXPS[0]
     _dir0, config0, sweep_values0, records0, mask0 = load_rollout(_rid0)
     mask0 = np.asarray(mask0, dtype=float)
@@ -125,13 +173,88 @@ def _(
     N = int(config0["N"])
     M = int(config0["M"])
     BBOX = mask_bbox(mask0)
-    points = sweep_points(sweep_values0, records0)
-    # order the sweep points by the a_t_mode order authored in sweep_params.json
-    # (sweep_values0), not the zarr coord/append order
+    return (
+        BBOX,
+        EXPS,
+        LEVEL,
+        M,
+        MASK0,
+        N,
+        PARTITION,
+        ROLLOUTS_SKIPPED,
+        VAR,
+        records0,
+        sweep_values0,
+    )
+
+
+@app.cell(hide_code=True)
+def _(mo, sweep_values0):
+    # --- pin the non-schedule / non-intensity sweep axes (e.g. GUI_REF, MASK_MODE, mask_shift, sigma_div).
+    # --- Schedule axes (GUIDANCE_MODE + its GUIDANCE_METHOD_HYPERS: a_t_mode / fgwnolr_w_init / eta / phi)
+    # --- stay as the compared rows; GUIDANCE_DELTA is the intensity axis (handled separately). Single-valued
+    # --- axes are pinned silently. Mirrors intensity_comparison.py's pin_dropdowns.
+    from src.rollout_config import GUIDANCE_METHOD_HYPERS as _GMH
+    _pin_skip = {"GUIDANCE_MODE", "GUIDANCE_DELTA"} | {_h for _hs in _GMH.values() for _h in _hs}
+    _pin = {}
+    for _k, _vals in sweep_values0.items():
+        if _k in _pin_skip or not isinstance(_vals, list) or len(_vals) <= 1:
+            continue
+        _srt = sorted(_vals) if all(isinstance(_v, (int, float)) for _v in _vals) else list(_vals)
+        _pin[_k] = mo.ui.dropdown([str(_v) for _v in _srt], value=str(_srt[0]), label=f"{_k}: ")
+    pin_dropdowns = mo.ui.dictionary(_pin)
+    def pinned_records(_recs, _base):
+        # keep only records matching the pinned (coord-labeled) context; empty _base -> all records
+        return [_r for _r in _recs if all(_r["sweep"].get(_k) == _v for _k, _v in _base.items())]
+
+    return pin_dropdowns, pinned_records
+
+
+@app.cell(hide_code=True)
+def _(pin_dropdowns, sweep_values0):
+    # --- coord-labeled selection for the pinned axes (recovered from the dropdowns); drives record
+    # --- filtering. Empty when no non-schedule axis varies (current data). Mirrors base_sel.
+    from src.utils import sweep_coord_label as _scl
+    def _pin_recover(_k, _raw):
+        for _v in sweep_values0[_k]:
+            if str(_v) == _raw:
+                return _v
+        return sweep_values0[_k][0]
+    base_pin = {_k: _scl(_k, _pin_recover(_k, _raw), sweep_values0) for _k, _raw in pin_dropdowns.value.items()}
+    return (base_pin,)
+
+
+@app.cell(hide_code=True)
+def _(base_pin, pinned_records, records0, sweep_points, sweep_values0):
+    # sweep points for the PINNED context; label = GUIDANCE_MODE + varying mode-hypers (+ delta index if
+    # delta varies), ordered by the a_t_mode order authored in sweep_params.json. label_delta maps each
+    # label to its GUIDANCE_DELTA index (per-intensity leaderboards + the plot intensity filter).
+    points = sweep_points(sweep_values0, pinned_records(records0, base_pin))
     _atm_ord = {str(_v): _i for _i, _v in enumerate(sweep_values0.get('a_t_mode', []))}
     points = dict(sorted(points.items(),
                          key=lambda _kv: _atm_ord.get(str(_kv[1].get('a_t_mode', '')), len(_atm_ord))))
-    return BBOX, EXPS, LEVEL, M, MASK0, N, PARTITION, VAR, points
+    label_delta = {_lb: _sel.get("GUIDANCE_DELTA", 0) for _lb, _sel in points.items()}
+    return label_delta, points
+
+
+@app.cell(hide_code=True)
+def _(N, mo, sweep_values0):
+    # intensity (GUIDANCE_DELTA) levels: enumerate + a PLOT-only selector to show one level at a time.
+    # delta_labels[i] = peak%, delta_order = peak-sorted (lowest first). Mirrors intensity_comparison.py.
+    _DELTAS_FT = sweep_values0["GUIDANCE_DELTA"]
+    delta_order = sorted(range(len(_DELTAS_FT)), key=lambda _i: max(_DELTAS_FT[_i][:N]))
+    delta_labels = {_i: f"peak@{100 * max(_DELTAS_FT[_i][:N]):+.3g}%" for _i in delta_order}
+    intensity_dropdown = mo.ui.dropdown({delta_labels[_i]: _i for _i in delta_order},
+                                        value=delta_labels[delta_order[0]], label="intensity (plots): ")
+    return delta_labels, delta_order, intensity_dropdown
+
+
+@app.cell(hide_code=True)
+def _(intensity_dropdown, label_delta, point_multiselect):
+    # labels drawn in the PLOTS: the multiselected schedules at the chosen intensity level (== all
+    # multiselected labels when there is a single delta). Tables/leaderboards keep every schedule x delta.
+    plot_labels = [lb for lb in point_multiselect.value if label_delta.get(lb) == intensity_dropdown.value]
+    return (plot_labels,)
 
 
 @app.cell
@@ -158,12 +281,26 @@ def _(mo):
 
 
 @app.cell
-def _(EXPS, experiment_dropdown, mo, n_slider, point_multiselect):
+def _(
+    EXPS,
+    ROLLOUTS_SKIPPED,
+    experiment_dropdown,
+    intensity_dropdown,
+    mo,
+    n_slider,
+    pin_dropdowns,
+    point_multiselect,
+    rollout_multiselect,
+):
     mo.vstack([
         experiment_dropdown,
-        mo.md(f"_averaging over **{len(EXPS)}** subexperiment(s): "
-              f"{', '.join(e.split('/')[-1] for e in EXPS)}_"),
+        rollout_multiselect,
+        mo.md(f"_averaging over **{len(EXPS)}** ready subexperiment(s): "
+              f"{', '.join(e.split('/')[-1] for e in EXPS)}_"
+              + (f"  ·  _skipped (not ready): {', '.join(ROLLOUTS_SKIPPED)}_" if ROLLOUTS_SKIPPED else "")),
         mo.hstack([point_multiselect, n_slider], justify="start", align="center"),
+        mo.hstack([mo.md("_sweep:_"), *[pin_dropdowns[_k] for _k in pin_dropdowns.value], intensity_dropdown],
+                  justify="start", align="center"),
     ], align="start")
     return
 
@@ -177,6 +314,7 @@ def _(
     PARTITION,
     PCA_REGION,
     VAR,
+    base_pin,
     basis,
     channel,
     clean_pred_trajectory_primitive,
@@ -191,7 +329,9 @@ def _(
     load_rollout,
     np,
     open_store,
+    open_unguided_state,
     pathlength,
+    pinned_records,
     plt,
     point_multiselect,
     project,
@@ -226,10 +366,10 @@ def _(
             _mask = np.asarray(_mask, dtype=float)
             mask_bbox_ref = _mask[BBOX[0], BBOX[1]]
             _c = residual_scaler(PARTITION, VAR, LEVEL)
-            _sp = sweep_points(_sv, _recs)
+            _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
             _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
             try:
-                _ung_final = np.asarray(channel(open_store(_dir, "ung", VAR), _cfg).isel(t=-1), float)
+                _ung_final = np.asarray(channel(open_unguided_state(_dir, "ung", VAR), _cfg).isel(t=-1), float)
                 _ung_base = get_masked_mean(_ung_final, _mask)
             except Exception:
                 _ung_base = None
@@ -244,7 +384,7 @@ def _(
                 _ref = str(_sel.get("GUI_REF") or (_sv.get("GUI_REF", ["UNG"])[0]))
                 _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
                 _gui = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)
-                _tw = channel(select_point(open_store(_dir, "gui_ung", VAR), _sel), _cfg)
+                _tw = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)
                 for _m in range(_gui.sizes["m"]):
                     for _n in range(N):
                         if float(_p[_n]) == 0.0:
@@ -275,8 +415,14 @@ def _(
                         _kick = region_latent(_traj - _c * _vel["s"][:, None, None] * _vel["gui_vec"], PCA_REGION)
                         _pk = project(basis, _kick)
                         _vfs_lat = region_latent(_c * _vel["vfs"], PCA_REGION)   # vfs field -> region latents
-                        _pgx = project(basis, _g - _vfs_lat)                       # actual state x_t = clean-pred - c*vfs
-                        _pkx = project(basis, _kick - _vfs_lat)                    # x_t kick branch
+                        _xt_lat = _g - _vfs_lat; _xk_lat = _kick - _vfs_lat        # x_t (clean-pred - c*vfs, ends x_{T-1})
+                        # append the true converged endpoint x_T = gui so the guided x_t reaches x_T,
+                        # matching the res-based gui_ung / ung trajectories (now length T+1, reaching x_T)
+                        _gui_lat = region_latent(_guif, PCA_REGION)[None]
+                        _xt_lat = np.concatenate([_xt_lat, _gui_lat], axis=0)
+                        _xk_lat = np.concatenate([_xk_lat, _gui_lat], axis=0)
+                        _pgx = project(basis, _xt_lat)                             # actual state x_t
+                        _pkx = project(basis, _xk_lat)                             # x_t kick branch
                         _gstep, _pstep = ftt.step_sums(_g, _kick)
                         _end = float(np.linalg.norm(_g[-1] - _u[-1]) / np.sqrt(_g.shape[1]))
                         _tv = ftt.realism_tv(_guif, _ungf, _mask)
@@ -302,8 +448,8 @@ def _(
             if _pts:
                 _sel0 = next(iter(_pts.values()))
                 _p0 = np.asarray(_sv["GUIDANCE_DELTA"][_sel0["GUIDANCE_DELTA"]], float)[:N]
-                _ung_da = channel(open_store(_dir, "ung", VAR), _cfg)
-                _giu_da = channel(select_point(open_store(_dir, "gui_ung", VAR), _sel0), _cfg)
+                _ung_da = channel(open_unguided_state(_dir, "ung", VAR), _cfg)
+                _giu_da = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel0), _cfg)
                 for _m in range(_ung_da.sizes["m"]):
                     for _n in range(N):
                         if float(_p0[_n]) == 0.0:
@@ -342,7 +488,6 @@ def _(
     return (
         gt_proj,
         guiung_traj,
-        mask_bbox_ref,
         metrics,
         ref_metrics,
         sched_colors,
@@ -352,56 +497,125 @@ def _(
 
 
 @app.cell
-def _(glabel, interf_data, metrics, mo, np):
+def _(
+    delta_labels,
+    delta_order,
+    glabel,
+    interf_data,
+    label_delta,
+    metrics,
+    mo,
+    np,
+    realism_data,
+):
     if metrics is None:
         leaderboard = mo.md("## Leaderboard\n\n_press **compute metrics**_")
     else:
         _has_i = interf_data is not None
+        _rd = realism_data  # T4 all-fields + T5 target/all (None until 'compute field profiles')
         def _push(_lb):
             return interf_data["avg_score_ms"].get(_lb) if _has_i else None
-        def _reached(_r):
+        def _reached_ms(_r):
             _n = _r["n_pool"]; _p = (_r["reached_count"] / _n) if _n else float("nan")
             _sd = float(np.sqrt(max(_p * (1.0 - _p), 0.0) / _n)) if _n else float("nan")
             return (_p, _sd)
         def _dist_ms(_r):
-            # PC-space dist to gui_ung + first-order propagated std from the dPC stds
-            _mu = (_r["dpc1"][0], _r["dpc2"][0], _r["dpc3"][0])
-            _sd = (_r["dpc1"][1], _r["dpc2"][1], _r["dpc3"][1])
+            _mu = (_r["dpc1"][0], _r["dpc2"][0], _r["dpc3"][0]); _sd = (_r["dpc1"][1], _r["dpc2"][1], _r["dpc3"][1])
             _d = float(np.sqrt(sum(_x * _x for _x in _mu)))
             _ds = float(np.sqrt(sum((_x * _y) ** 2 for _x, _y in zip(_mu, _sd))) / _d) if _d > 0 else 0.0
             return (_d, _ds)
-        # per-column winners: max everywhere, except dPC = max |deviation|
-        _bre = max((_reached(_r)[0] for _r in metrics.values() if np.isfinite(_reached(_r)[0])), default=None)
-        _bpu = max((v[0] for v in (_push(_lb) for _lb in metrics) if v is not None and np.isfinite(v[0])), default=None)
-        _bd = {_k: max(abs(_r[_k][0]) for _r in metrics.values()) for _k in ("dpc1", "dpc2", "dpc3")}
-        _bdi = max(_dist_ms(_r)[0] for _r in metrics.values())
-        _bt = max(_r["realism_tv"][0] for _r in metrics.values())
         def _f(_ms, _is_best, signed=False):
             if _ms is None or not np.isfinite(_ms[0]):
                 return "—"
             _s = f"{_ms[0]:+.3f} ± {_ms[1]:.3f}" if signed else f"{_ms[0]:.3f} ± {_ms[1]:.3f}"
             return f"**{_s}**" if _is_best else _s
-        _rows = ["| sweep point | reached ratio | push score | ΔPC1 | ΔPC2 | ΔPC3 | dist to gui_ung | realism TV |",
-                 "|---|---|---|---|---|---|---|---|"]
-        for _lb, _r in metrics.items():
-            _rc = _reached(_r); _dm = _dist_ms(_r); _pu = _push(_lb)
-            _rows.append(
-                f"| {glabel(_lb)} "
-                f"| {_f(_rc, _bre is not None and _rc[0] == _bre)} "
-                f"| {_f(_pu, _pu is not None and _bpu is not None and _pu[0] == _bpu)} "
-                f"| {_f(_r['dpc1'], abs(_r['dpc1'][0]) == _bd['dpc1'], signed=True)} "
-                f"| {_f(_r['dpc2'], abs(_r['dpc2'][0]) == _bd['dpc2'], signed=True)} "
-                f"| {_f(_r['dpc3'], abs(_r['dpc3'][0]) == _bd['dpc3'], signed=True)} "
-                f"| {_f(_dm, _dm[0] == _bdi)} "
-                f"| {_f(_r['realism_tv'], _r['realism_tv'][0] == _bt)} |")
-        leaderboard = mo.vstack([
-            mo.md("## Leaderboard"),
-            mo.md("mean ± std over the pool (3 dp); **bold** = winner per column. **reached ratio** = fraction of "
-                  "pooled runs within 1% of the target (± binomial std). Winners are **max** everywhere except "
-                  "ΔPCk = **max |deviation|** (most divergent on that PC) and dist to gui_ung = **max** (most divergent). "
-                  "**push score** = variable-normalized avg-space push (needs the **interference profiles** computed, else —). "
-                  "ΔPCk = signed endpoint deviation from gui_ung along PCk; dist to gui_ung = its PC-space norm."),
-            mo.md("\n".join(_rows))])
+        def _agg_ms(_lst):
+            # mean-of-means / mean-of-stds over the finite entries; (nan, nan) if none
+            _v = [x for x in _lst if x is not None and np.isfinite(x[0])]
+            if not _v:
+                return (float("nan"), float("nan"))
+            return (float(np.mean([x[0] for x in _v])), float(np.mean([x[1] for x in _v])))
+
+        def _board(_entries):
+            # _entries: list of (name, r, push_ms, rdl); r carries n_pool/reached_count/dpc1-3/realism_tv
+            _ta = lambda rdl: rdl["tv_all"] if rdl else None
+            _tt = lambda rdl: rdl["t5_target"] if rdl else None
+            _tl = lambda rdl: rdl["t5_all"] if rdl else None
+            _bre = max((_reached_ms(r)[0] for _, r, _, _ in _entries if np.isfinite(_reached_ms(r)[0])), default=None)
+            _bpu = max((p[0] for _, _, p, _ in _entries if p is not None and np.isfinite(p[0])), default=None)
+            _bd = {k: max(abs(r[k][0]) for _, r, _, _ in _entries) for k in ("dpc1", "dpc2", "dpc3")}
+            _bdi = max(_dist_ms(r)[0] for _, r, _, _ in _entries)
+            _bt = max(r["realism_tv"][0] for _, r, _, _ in _entries)
+            _bta = max((_ta(rdl)[0] for _, _, _, rdl in _entries if _ta(rdl) is not None and np.isfinite(_ta(rdl)[0])), default=None)
+            _bst = max((_tt(rdl)[0] for _, _, _, rdl in _entries if _tt(rdl) is not None and np.isfinite(_tt(rdl)[0])), default=None)
+            _bsa = max((_tl(rdl)[0] for _, _, _, rdl in _entries if _tl(rdl) is not None and np.isfinite(_tl(rdl)[0])), default=None)
+            _rows = ["| sweep point | reached ratio | push score | ΔPC1 | ΔPC2 | ΔPC3 | dist to gui_ung | realism TV | realism TV (all) | fp-spread (target) | fp-spread (all) |",
+                     "|---|---|---|---|---|---|---|---|---|---|---|"]
+            for _name, r, p, rdl in _entries:
+                _rc = _reached_ms(r); _dm = _dist_ms(r)
+                _rows.append(
+                    f"| {_name} "
+                    f"| {_f(_rc, _bre is not None and _rc[0] == _bre)} "
+                    f"| {_f(p, p is not None and _bpu is not None and p[0] == _bpu)} "
+                    f"| {_f(r['dpc1'], abs(r['dpc1'][0]) == _bd['dpc1'], signed=True)} "
+                    f"| {_f(r['dpc2'], abs(r['dpc2'][0]) == _bd['dpc2'], signed=True)} "
+                    f"| {_f(r['dpc3'], abs(r['dpc3'][0]) == _bd['dpc3'], signed=True)} "
+                    f"| {_f(_dm, _dm[0] == _bdi)} "
+                    f"| {_f(r['realism_tv'], r['realism_tv'][0] == _bt)} "
+                    f"| {_f(_ta(rdl), _bta is not None and _ta(rdl) is not None and _ta(rdl)[0] == _bta)} "
+                    f"| {_f(_tt(rdl), _bst is not None and _tt(rdl) is not None and _tt(rdl)[0] == _bst)} "
+                    f"| {_f(_tl(rdl), _bsa is not None and _tl(rdl) is not None and _tl(rdl)[0] == _bsa)} |")
+            return mo.md("\n".join(_rows))
+
+        # group labels by intensity level (δ#idx); one leaderboard block per delta when >1
+        _by_delta = {}
+        for _lb in metrics:
+            _by_delta.setdefault(label_delta.get(_lb, 0), []).append(_lb)
+        _multi = len(_by_delta) > 1
+        _desc = mo.md("mean ± std over the pool (3 dp); **bold** = winner per column (within each block). "
+                      "**reached ratio** = fraction of pooled runs within 1% of the target (± binomial std); winners "
+                      "are **max** everywhere except ΔPCk = **max |deviation|** and dist to gui_ung = **max** (most "
+                      "divergent). **push score** needs the **interference profiles** compute; **realism TV (all)** / "
+                      "**fp-spread** need **compute field profiles** (else —).")
+        _blocks = [mo.md("## Leaderboard"), _desc]
+        if _multi:
+            for _di in delta_order:
+                if _di not in _by_delta:
+                    continue
+                _ents = [(glabel(_lb), metrics[_lb], _push(_lb), (_rd.get(_lb) if _rd else None)) for _lb in _by_delta[_di]]
+                _blocks.append(mo.md(f"### Intensity {delta_labels[_di]}"))
+                _blocks.append(_board(_ents))
+            # cross-intensity summary: rows = schedules (label minus δ#), metrics meaned across levels
+            def _skey(_lb):
+                return _lb.rsplit(" δ#", 1)[0]
+            _by_sched = {}
+            for _lb in metrics:
+                _by_sched.setdefault(_skey(_lb), []).append(_lb)
+            _sents = []
+            for _sk, _lbs in _by_sched.items():
+                _rs = [metrics[_l] for _l in _lbs]
+                _rag = {"n_pool": sum(_r["n_pool"] for _r in _rs),
+                        "reached_count": sum(_r["reached_count"] for _r in _rs),
+                        "dpc1": _agg_ms([_r["dpc1"] for _r in _rs]),
+                        "dpc2": _agg_ms([_r["dpc2"] for _r in _rs]),
+                        "dpc3": _agg_ms([_r["dpc3"] for _r in _rs]),
+                        "realism_tv": _agg_ms([_r["realism_tv"] for _r in _rs])}
+                _pag = _agg_ms([_push(_l) for _l in _lbs])
+                _rdag = None
+                if _rd:
+                    _xs = [_rd.get(_l) for _l in _lbs]
+                    if any(_x is not None for _x in _xs):
+                        _rdag = {"tv_all": _agg_ms([_x["tv_all"] for _x in _xs if _x]),
+                                 "t5_target": _agg_ms([_x["t5_target"] for _x in _xs if _x]),
+                                 "t5_all": _agg_ms([_x["t5_all"] for _x in _xs if _x])}
+                _sents.append((glabel(_sk), _rag, _pag, _rdag))
+            _blocks.append(mo.md("### Summary across intensities  \n_each metric meaned over the intensity levels per "
+                                 "schedule; reached ratio re-pooled over levels._"))
+            _blocks.append(_board(_sents))
+        else:
+            _ents = [(glabel(_lb), metrics[_lb], _push(_lb), (_rd.get(_lb) if _rd else None)) for _lb in metrics]
+            _blocks.append(_board(_ents))
+        leaderboard = mo.vstack(_blocks)
     leaderboard
     return
 
@@ -431,6 +645,7 @@ def _(
     mo,
     n_slider,
     np,
+    plot_labels,
     plt,
     sched_colors,
     traj_grid,
@@ -441,7 +656,7 @@ def _(
     if metrics is None or traj_grid is None:
         reliability_conv_view = mo.md("_press **compute metrics**_")
     else:
-        _n = int(n_slider.value) - 1; _agg = aggregate_m_checkbox.value; _labels = list(sched_colors)
+        _n = int(n_slider.value) - 1; _agg = aggregate_m_checkbox.value; _labels = plot_labels
         _items = []
         for _ei in range(len(EXPS)):
             _items.append(mo.md(f"**{EXPS[_ei].split(chr(47))[-1]}**  (n={_n + 1})"))
@@ -499,11 +714,12 @@ def _(mo):
     ## T2: Guidance effect
 
     How much the guidance perturbs the flow, profiled across **all** variables/levels.
-    **T2a — Push across all variables** gives three masked-mean profiles per level variable (aggregated over
-    experiments): the **absolute** guided intensity $\mathcal{M}_m(x^{\mathrm{gui}})$, its deviation from
-    **ground truth** $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gt}})$, and the **push**
-    relative to the unguided twin $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gui\_ung}})$.
-    **T2b** — push as the guidance kick $\|\nabla\mathcal{L}\|$ (lower = better).
+    - **T2a — Push across all variables**: three masked-mean profiles per level variable (aggregated over
+      experiments) — the **absolute** guided intensity $\mathcal{M}_m(x^{\mathrm{gui}})$, its deviation from
+      **ground truth**, and the **push** relative to the unguided twin
+      $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gui\_ung}})$.
+    - **T2b–d — per-variable kick tables**: the raw kick $\lVert\nabla\mathcal{L}\rVert$, the applied kick,
+      and the **collateral** (non-target kick per unit of 2m-temperature kick). Ranked; ★ = best-$k$.
     """)
     return
 
@@ -513,11 +729,94 @@ def _(mo, sched_colors):
     # T2 interference subtests (T2a/T2b): the per-channel push across ALL variables is heavy
     # (~1-2 min over the pool), so it is gated behind a button; the top-k slider then re-renders
     # the tables/grids instantly from the cached result.
-    interf_button = mo.ui.run_button(label="compute interference profiles (~1-2 min)")
+    interf_button = mo.ui.run_button(label="compute field profiles: interference + realism (~1-2 min)")
     interf_k_slider = mo.ui.slider(1, max(len(sched_colors), 2), value=min(3, max(len(sched_colors), 1)),
                                    step=1, label="top-k schedules: ", show_value=True)
     mo.hstack([interf_button, interf_k_slider], justify="start", align="center")
     return interf_button, interf_k_slider
+
+
+@app.cell(hide_code=True)
+def _(
+    EVAL_W,
+    EXPS,
+    INTERF_LEVEL_VARS,
+    INTERF_SURFACE_PAIR,
+    M,
+    N,
+    VAR,
+    channel,
+    ftt,
+    interf_button,
+    load_rollout,
+    np,
+    open_store,
+    open_unguided_state,
+    region_realism_tv,
+    sched_colors,
+    select_point,
+    sweep_points,
+    xr,
+):
+    # ---- heavy realism + footprint-spread across ALL fields (button-gated, reuses the T2 button) ----
+    # Companions to the target-field T4 realism (metrics["realism_tv"]):
+    #   realism TV (all fields): ftt.realism_tv(x_gui, x_gui_ung, mask) per channel, MEAN over all 6
+    #                            level variables x levels (+ surface pair), over the EVAL REGION. -> T4 col.
+    #   footprint spread  (T5) : per-pixel std over ensemble members m of the guidance footprint
+    #                            |x_gui - x_gui_ung|, then masked-mean -> a scalar. Target field
+    #                            (t5_target) and MEAN over all fields (t5_all). Pooled over (exp, guided n).
+    realism_data = None
+    if interf_button.value and sched_colors is not None:
+        _labels = list(sched_colors)
+        _wsum = float(EVAL_W.sum()) or 1.0
+        _tv_all = {lb: [] for lb in _labels}   # per (exp,m,n): mean-over-channels realism TV
+        _t5_tg = {lb: [] for lb in _labels}    # per (exp,n): target-field footprint spread
+        _t5_all = {lb: [] for lb in _labels}   # per (exp,n): mean-over-channels footprint spread
+        for _ei, _rid in enumerate(EXPS):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
+            _mask = np.asarray(_mask, float)
+            _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
+            _gui = xr.open_zarr(_dir / "gui.zarr")
+            for _lb, _sel in _pts.items():
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _gns = [nn for nn in range(N) if _p[nn] != 0.0] or [0]
+                _gt = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)      # target guided
+                _tt = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)  # target twin
+                for _n in _gns:
+                    # --- target-field footprint spread (T5 target): std over m of |gui-giu|, masked-mean ---
+                    _tg_foot = [np.abs(np.asarray(_gt.isel(m=_m, n=_n), float)
+                                       - np.asarray(_tt.isel(m=_m, n=_n).isel(t=-1), float)) for _m in range(M)]
+                    if len(_tg_foot) >= 2:
+                        _t5_tg[_lb].append(float((np.std(np.stack(_tg_foot, 0), axis=0) * EVAL_W).sum() / _wsum))
+                    # --- all-fields realism TV + footprint spread ---
+                    _foot_ch = {}   # (var, level) -> list over m of |gui - giu| footprint
+                    for _m in range(M):
+                        _tv_ch_m = []
+                        for _vv in INTERF_LEVEL_VARS:
+                            _levs = list(_gui[_vv]["level"].values)
+                            _g3 = np.asarray(select_point(_gui[_vv], _sel).isel(m=_m, n=_n), float)   # (level,lat,lon)
+                            _ud = select_point(open_unguided_state(_dir, "gui_ung", _vv), _sel).isel(m=_m, n=_n)
+                            _u3 = np.asarray(_ud.isel(t=-1) if "t" in _ud.dims else _ud, float)        # (level,lat,lon)
+                            for _li, _L in enumerate(_levs):
+                                _tv_ch_m.append(region_realism_tv(_g3[_li], _u3[_li], _mask, EVAL_W))
+                                _foot_ch.setdefault((_vv, _L), []).append(np.abs(_g3[_li] - _u3[_li]))
+                            if _vv in INTERF_SURFACE_PAIR:
+                                _svar = INTERF_SURFACE_PAIR[_vv]
+                                _gs = np.asarray(select_point(_gui[_svar], _sel).isel(m=_m, n=_n), float)  # (lat,lon)
+                                _usd = select_point(open_unguided_state(_dir, "gui_ung", _svar), _sel).isel(m=_m, n=_n)
+                                _us = np.asarray(_usd.isel(t=-1) if "t" in _usd.dims else _usd, float)
+                                _tv_ch_m.append(region_realism_tv(_gs, _us, _mask, EVAL_W))
+                                _foot_ch.setdefault((_svar, None), []).append(np.abs(_gs - _us))
+                        _tv_all[_lb].append(float(np.nanmean(_tv_ch_m)))
+                    _t5_ch = [float((np.std(np.stack(_fs, 0), axis=0) * EVAL_W).sum() / _wsum)
+                              for _fs in _foot_ch.values() if len(_fs) >= 2]
+                    if _t5_ch:
+                        _t5_all[_lb].append(float(np.mean(_t5_ch)))
+        realism_data = {lb: {"tv_all": ftt.aggregate_mean_std(_tv_all[lb]),
+                             "t5_target": ftt.aggregate_mean_std(_t5_tg[lb]),
+                             "t5_all": ftt.aggregate_mean_std(_t5_all[lb]),
+                             "n_pool": len(_t5_tg[lb])} for lb in _labels}
+    return (realism_data,)
 
 
 @app.cell
@@ -561,6 +860,7 @@ def _(
     interf_button,
     load_rollout,
     np,
+    open_unguided_state,
     sched_colors,
     select_point,
     sweep_points,
@@ -603,7 +903,7 @@ def _(
             _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
             _mask = np.asarray(_mask, float); _msum = float(_mask.sum())
             _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
-            _gui = xr.open_zarr(_dir / "gui.zarr"); _giu = xr.open_zarr(_dir / "gui_ung.zarr"); _gr = xr.open_zarr(_dir / "grads.zarr")
+            _gui = xr.open_zarr(_dir / "gui.zarr"); _gr = xr.open_zarr(_dir / "grads.zarr")
             try:
                 # GT valid state (member-independent). N+1 times: index 0 = init, n+1 = forecast step n.
                 _gtr = get_gt_rollout(N + 1, datetime.fromisoformat(_cfg["START_TS"]),
@@ -621,7 +921,7 @@ def _(
                         for _var in INTERF_LEVEL_VARS:
                             _levs = list(_gui[_var]["level"].values)
                             _g = np.asarray(select_point(_gui[_var], _sel).isel(m=_m, n=_n), float)      # (level,lat,lon)
-                            _ud = select_point(_giu[_var], _sel).isel(m=_m, n=_n)
+                            _ud = select_point(open_unguided_state(_dir, "gui_ung", _var), _sel).isel(m=_m, n=_n)
                             _u = np.asarray(_ud.isel(t=-1) if "t" in _ud.dims else _ud, float)            # (level,lat,lon)
                             _gg = np.asarray(select_point(_gr[_var], _sel).isel(m=_m, n=_n), float)       # (t,level,lat,lon)
                             _ga = (_g * _mask).sum((-2, -1)) / _msum                                       # (level,) M(x_gui)
@@ -647,7 +947,7 @@ def _(
                             if _var in INTERF_SURFACE_PAIR:
                                 _svar = INTERF_SURFACE_PAIR[_var]
                                 _gs = np.asarray(select_point(_gui[_svar], _sel).isel(m=_m, n=_n), float)  # (lat,lon)
-                                _usd = select_point(_giu[_svar], _sel).isel(m=_m, n=_n)
+                                _usd = select_point(open_unguided_state(_dir, "gui_ung", _svar), _sel).isel(m=_m, n=_n)
                                 _us = np.asarray(_usd.isel(t=-1) if "t" in _usd.dims else _usd, float)
                                 _grs = np.asarray(select_point(_gr[_svar], _sel).isel(m=_m, n=_n), float)  # (t,lat,lon)
                                 _pts = ((_grs ** 2) * _mask).sum((-2, -1))                                  # (t,)
@@ -1009,38 +1309,25 @@ def _(interf_render):
 def _(mo):
     mo.md(r"""
     ## T3: Closeness
-    How far the guided flow strays from the unguided, in the mask-region PCA latent space (fit on the 12:00 climatology).
-    - **path length**: length of the clean-pred trajectory $\hat{x}_{n,t}$ in the 3-PC space.
-    - **guidance / pushback steps**: per-flow-step norm of the guided step vs. the unguided pushback (full mask-bbox space).
-    - **$\Delta$PC$_k$ / dist to gui\_ung**: signed endpoint deviation from gui\_ung per PC, and its norm $\lVert\mathrm{PC}(x^{\mathrm{gui}}_{n,T})-\mathrm{PC}(x^{\mathrm{ung}}_{n,T})\rVert$.
-    - PCA grid (one per experiment): ERA5 12:00 cloud, guided (solid), and gui\_ung / ung / GT reference points.
+    How far the guided flow strays from the unguided, in the mask-region PCA latent space (fit on the 12:00
+    climatology). Both views below share the eval-region + intensity + 3-D view controls:
+    - **T3.1 PCA path grid** (one per experiment): the guided actual-state $x_{n,t}$ trajectory (solid), the
+      independent `ung` and same-seed `gui_ung` trajectories, ERA5 cloud + GT reference.
+    - **T3.2 Ping-pong**: the same guided $x_{n,t}$ path with a per-step **guidance jump** whisker — the kick
+      injected at each flow step.
+
+    Table (per schedule × intensity): **path length** of the clean-pred trajectory in 3-PC space; per-flow-step
+    **guidance / pushback** norms; **$\Delta$PC$_k$ / dist to gui\_ung** = signed endpoint deviation from
+    `gui_ung` per PC and its norm.
     """)
     return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    # PCA view controls (3D angle + zoom-to-trajectories) -- live in the Closeness subsection
-    elev_slider = mo.ui.slider(0, 90, value=0, step=5, label="elev: ", show_value=True)
-    azim_slider = mo.ui.slider(-180, 180, value=0, step=5, label="azim: ", show_value=True)
-    zoom_traj_checkbox = mo.ui.checkbox(label="zoom to trajectories", value=True)
-    zoom_pad_slider = mo.ui.slider(-0.4, 2.0, step=0.05, value=0, label="zoom pad: ", show_value=True)
-    xt_checkbox = mo.ui.checkbox(value=False, label="actual state x_t (drop vfs)")
-    mo.hstack([elev_slider, azim_slider, zoom_traj_checkbox, zoom_pad_slider, xt_checkbox], justify="start", align="center")
-    return (
-        azim_slider,
-        elev_slider,
-        xt_checkbox,
-        zoom_pad_slider,
-        zoom_traj_checkbox,
-    )
 
 
 @app.cell
 def _(mo):
     # PCA region: fit/project the latent space on the whole globe, the mask footprint, or its
     # complement (see what guidance does inside vs. outside the target)
-    pca_region_dropdown = mo.ui.dropdown(["mask", "globe", "!mask"], value="mask", label="PCA region: ")
+    pca_region_dropdown = mo.ui.dropdown(["mask", "globe", "!mask"], value="mask", label="eval region: ")
     pca_region_dropdown
     return (pca_region_dropdown,)
 
@@ -1050,6 +1337,38 @@ def _(MASK0, pca_region_dropdown, region_bool):
     PCA_REGION = region_bool(MASK0, pca_region_dropdown.value)
     PCA_REGION_MODE = pca_region_dropdown.value
     return PCA_REGION, PCA_REGION_MODE
+
+
+@app.cell(hide_code=True)
+def _(BBOX, MASK0, PCA_REGION, PCA_REGION_MODE, np):
+    # eval region (the renamed selector) applied to T4/T5: image CROP window, a display BOOLEAN
+    # (NaN pixels outside the region), a per-pixel metric WEIGHT, and the mask reference cropped to the
+    # same window. 'mask' = current tight bbox + mask-weighting; 'globe' = whole grid, uniform; '!mask' =
+    # whole grid with the mask footprint blanked, uniform over the complement.
+    def region_realism_tv(_g, _u, _maskf, _w):
+        # TV between the guidance footprint |gui-ung| and the mask, restricted to the eval region support
+        _p = np.abs(np.asarray(_g, float) - np.asarray(_u, float))
+        _supp = np.asarray(_w, float) > 0
+        _pp = np.where(_supp, _p, 0.0); _qq = np.where(_supp, np.asarray(_maskf, float), 0.0)
+        _ps = _pp.sum(); _qs = _qq.sum()
+        if not (_ps > 0 and _qs > 0):
+            return np.nan
+        return float(0.5 * np.abs(_pp / _ps - _qq / _qs).sum())
+
+    if PCA_REGION_MODE == "mask":
+        EVAL_CROP = BBOX
+        EVAL_IMG_BOOL = None
+        EVAL_W = np.asarray(MASK0, float)
+    elif PCA_REGION_MODE == "globe":
+        EVAL_CROP = (slice(None), slice(None))
+        EVAL_IMG_BOOL = None
+        EVAL_W = np.ones_like(np.asarray(MASK0, float))
+    else:  # !mask
+        EVAL_CROP = (slice(None), slice(None))
+        EVAL_IMG_BOOL = np.asarray(PCA_REGION, bool)
+        EVAL_W = np.asarray(PCA_REGION, float)
+    eval_mask_ref = np.asarray(MASK0, float)[EVAL_CROP[0], EVAL_CROP[1]]
+    return EVAL_CROP, EVAL_IMG_BOOL, EVAL_W, eval_mask_ref, region_realism_tv
 
 
 @app.cell
@@ -1077,6 +1396,18 @@ def _(LEVEL, PCA_REGION, VAR, basis, project, region_cloud_sample):
     return (cloud_proj,)
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    # --- T3 subsection 1 (PCA path grid): view controls, independent of subsection 2 ---
+    elev_slider = mo.ui.slider(0, 90, value=0, step=5, label="elev: ", show_value=True)
+    azim_slider = mo.ui.slider(-180, 180, value=0, step=5, label="azim: ", show_value=True)
+    zoom_traj_checkbox = mo.ui.checkbox(label="zoom to trajectories", value=True)
+    zoom_pad_slider = mo.ui.slider(-0.4, 2.0, step=0.05, value=0, label="zoom pad: ", show_value=True)
+    mo.vstack([mo.md("### T3.1 — PCA path grid"),
+               mo.hstack([elev_slider, azim_slider, zoom_traj_checkbox, zoom_pad_slider], justify="start", align="center")])
+    return azim_slider, elev_slider, zoom_pad_slider, zoom_traj_checkbox
+
+
 @app.cell
 def _(
     EXPS,
@@ -1092,12 +1423,12 @@ def _(
     mo,
     n_slider,
     np,
+    plot_labels,
     plt,
     ref_metrics,
     sched_colors,
     traj_grid,
     ung_traj,
-    xt_checkbox,
     zoom_pad_slider,
     zoom_traj_checkbox,
 ):
@@ -1105,7 +1436,7 @@ def _(
     if metrics is None or traj_grid is None:
         t3_view = mo.md("_press **compute metrics**_")
     else:
-        _n = int(n_slider.value) - 1; _labels = list(sched_colors)
+        _n = int(n_slider.value) - 1; _labels = plot_labels
         _items = []
         for _ei in range(len(EXPS)):
             _items.append(mo.md(f"**{EXPS[_ei].split(chr(47))[-1]}**  (n={_n + 1}, EVR={basis.evr.sum():.0%})"))
@@ -1116,7 +1447,7 @@ def _(
                 _cell = traj_grid.get((_ei, _m, _n), {})
                 for _lb in _labels:
                     if _lb not in _cell: continue
-                    _pg = np.asarray(_cell[_lb]["pgx" if xt_checkbox.value else "pg"]); _c = sched_colors[_lb]
+                    _pg = np.asarray(_cell[_lb]["pgx"]); _c = sched_colors[_lb]
                     _ax.plot(_pg[:, 0], _pg[:, 1], _pg[:, 2], "-", color=_c, linewidth=1.4, alpha=0.9, label=glabel(_lb).split()[-1])
                     _ax.scatter(_pg[-1, 0], _pg[-1, 1], _pg[-1, 2], marker="o", s=45, color=_c, depthshade=False)
                     _grp.append(_pg)
@@ -1135,13 +1466,15 @@ def _(
                     _ax.scatter(_pu[-1, 0], _pu[-1, 1], _pu[-1, 2], marker="o", s=34, color="#888888", depthshade=False)
                     _grp.append(_pu)
                 if _cell:
-                    _sp = np.asarray(next(iter(_cell.values()))["pgx" if xt_checkbox.value else "pg"])[0]
+                    _sp = np.asarray(next(iter(_cell.values()))["pgx"])[0]
                     _ax.scatter(_sp[0], _sp[1], _sp[2], marker="o", s=45, facecolors="#FFD700", edgecolors="black", linewidths=1.2, depthshade=False, label="start")
                     pass
                 if zoom_traj_checkbox.value and _grp:
-                    _pts = np.vstack(_grp); _lo, _hi = _pts.min(0), _pts.max(0)
-                    _pad = zoom_pad_slider.value * float((_hi - _lo).max())
-                    _ax.set_xlim(_lo[0]-_pad, _hi[0]+_pad); _ax.set_ylim(_lo[1]-_pad, _hi[1]+_pad); _ax.set_zlim(_lo[2]-_pad, _hi[2]+_pad)
+                    _pts = np.vstack(_grp); _pts = _pts[np.isfinite(_pts).all(axis=1)]   # drop NaN (pending members)
+                    if _pts.shape[0]:
+                        _lo, _hi = _pts.min(0), _pts.max(0)
+                        _pad = zoom_pad_slider.value * float((_hi - _lo).max())
+                        _ax.set_xlim(_lo[0]-_pad, _hi[0]+_pad); _ax.set_ylim(_lo[1]-_pad, _hi[1]+_pad); _ax.set_zlim(_lo[2]-_pad, _hi[2]+_pad)
                 _ax.set_xlabel("PC1", fontsize=7); _ax.set_ylabel("PC2", fontsize=7); _ax.set_zlabel("PC3", fontsize=7)
                 _ax.view_init(elev=elev_slider.value, azim=azim_slider.value)
                 _ax.set_title(f"m={_m}", fontsize=9)
@@ -1176,21 +1509,33 @@ def _(
                 _d1 = _mss(_r["dpc1"]); _d2 = _mss(_r["dpc2"]); _d3 = _mss(_r["dpc3"]); _dc = f"{_dist(_r):.3g}"
                 _rows.append(f"| _{_rlb}_ | {_npv} | {_Lc} | 0 | 0 | {_d1} | {_d2} | {_d3} | {_dc} |")
         t3_view = mo.vstack(_items + [mo.md("\n".join(_rows)),
-            mo.md(r"Length = PCA path length of the clean-pred trajectory. $\Delta$PC$_k$ = signed "
+            mo.md(r"Grid = actual-state $x_t$ trajectories (guided solid). Length = PCA path length of the clean-pred trajectory. $\Delta$PC$_k$ = signed "
                   r"endpoint deviation from gui\_ung along PC$_k$. Guidance/pushback in full bbox "
                   r"space (0 for the unguided ung / gui\_ung reference rows).")])
     t3_view
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    # --- T3 subsection 2 (ping-pong): its own view controls, independent of subsection 1 ---
+    elev_slider2 = mo.ui.slider(0, 90, value=0, step=5, label="elev: ", show_value=True)
+    azim_slider2 = mo.ui.slider(-180, 180, value=0, step=5, label="azim: ", show_value=True)
+    zoom_traj_checkbox2 = mo.ui.checkbox(label="zoom to trajectories", value=True)
+    zoom_pad_slider2 = mo.ui.slider(-0.4, 2.0, step=0.05, value=0, label="zoom pad: ", show_value=True)
+    mo.vstack([mo.md("### T3.2 — Ping-pong (guidance jumps)"),
+               mo.hstack([elev_slider2, azim_slider2, zoom_traj_checkbox2, zoom_pad_slider2], justify="start", align="center")])
+    return azim_slider2, elev_slider2, zoom_pad_slider2, zoom_traj_checkbox2
+
+
 @app.cell
 def _(
     EXPS,
     M,
-    azim_slider,
+    azim_slider2,
     basis,
     cloud_proj,
-    elev_slider,
+    elev_slider2,
     glabel,
     gt_proj,
     guiung_traj,
@@ -1198,25 +1543,23 @@ def _(
     mo,
     n_slider,
     np,
+    plot_labels,
     plt,
     sched_colors,
     traj_grid,
     ung_traj,
-    xt_checkbox,
-    zoom_pad_slider,
-    zoom_traj_checkbox,
+    zoom_pad_slider2,
+    zoom_traj_checkbox2,
 ):
-    # ---- Closeness (ping-pong): per-step guidance kick vs. pushback anatomy, rows=exp, cols=m ----
-    # Same PCA grid as T3 above, but every schedule is drawn as its ping-pong decomposition
-    # (ported from the gui_ung compare plot in latent_trajectories.py): solid = guidance step
-    # (base_t -> kick_t), dotted = pushback step (kick_t -> base_{t+1}); markers = kick endpoints.
+    # ---- Closeness (ping-pong): full x_t trajectory + per-step guidance jumps, rows=exp, cols=m ----
+    # Same PCA grid as T3 above: each schedule's FULL guided x_t trajectory (solid, as in T3) with a
+    # per-step JUMP whisker (dotted) = the kick guidance injected at that step (pgx_t - pkx_t =
+    # c*s_t*gui_vec_t; zero where guidance is off). ung / gui_ung drawn as full trajectories.
     if metrics is None or traj_grid is None:
         t3pp_view = mo.md("_press **compute metrics**_")
     else:
-        _n = int(n_slider.value) - 1; _labels = list(sched_colors)
-        _items = [mo.md(r"### Ping-pong anatomy — solid = guidance step "
-                        r"($\mathrm{base}_t\!	o\!\mathrm{kick}_t$), dotted = pushback "
-                        r"($\mathrm{kick}_t\!	o\!\mathrm{base}_{t+1}$); per schedule, coloured as in T3.")]
+        _n = int(n_slider.value) - 1; _labels = plot_labels
+        _items = [mo.md(r"### Ping-pong — full guided **x_t** trajectory (solid, as in T3) with a per-step guidance **jump** (dotted whisker = the kick injected at that step); **ung** / **gui_ung** shown as full trajectories, coloured as in T3.")]
         for _ei in range(len(EXPS)):
             _items.append(mo.md(f"**{EXPS[_ei].split(chr(47))[-1]}**  (n={_n + 1}, EVR={basis.evr.sum():.0%})"))
             _f, _axs = plt.subplots(1, M, figsize=(4.6*M, 4.4), subplot_kw={"projection": "3d"}, squeeze=False, dpi=110)
@@ -1225,39 +1568,51 @@ def _(
                 _ax.scatter(cloud_proj[:, 0], cloud_proj[:, 1], cloud_proj[:, 2], color="#BBBBBB", s=8, alpha=0.45, depthshade=False, label=f"ERA5 cloud ({cloud_proj.shape[0]})")
                 _cell = traj_grid.get((_ei, _m, _n), {})
                 for _lb in _labels:
-                    if _lb not in _cell or "pk" not in _cell[_lb]: continue
-                    _bp = np.asarray(_cell[_lb]["pgx" if xt_checkbox.value else "pg"]); _kp = np.asarray(_cell[_lb]["pkx" if xt_checkbox.value else "pk"]); _c = sched_colors[_lb]
+                    if _lb not in _cell or "pkx" not in _cell[_lb]: continue
+                    _bp = np.asarray(_cell[_lb]["pgx"]); _kp = np.asarray(_cell[_lb]["pkx"]); _c = sched_colors[_lb]
+                    # full guided x_t trajectory (continuous, as in the T3 path grid)
+                    _ax.plot(_bp[:, 0], _bp[:, 1], _bp[:, 2], "-", color=_c, linewidth=1.4, alpha=0.9,
+                             label=glabel(_lb).split()[-1])
+                    # per-step guidance JUMP whisker: x_t -> x_t-without-this-kick (== injected kick
+                    # c*s_t*gui_vec_t). A spike schedule puts one huge kick early; cap the DRAWN length to
+                    # _WCAP (0.5 x trajectory span) so it stays a visible spur instead of shooting off-frame
+                    # (direction kept, magnitude clipped). Capped tips join _grp so pad=0 still contains them.
+                    _tspan = float(np.linalg.norm(np.nanmax(_bp, 0) - np.nanmin(_bp, 0)))
+                    _WCAP = 0.5 * _tspan if _tspan > 0 else 1.0
                     for _t in range(len(_bp)):
-                        _seg = np.stack([_bp[_t], _kp[_t]])
-                        _ax.plot(_seg[:, 0], _seg[:, 1], _seg[:, 2], "-", color=_c, linewidth=1.4, alpha=0.9,
-                                 label=(glabel(_lb).split()[-1] if _t == 0 else "_nolegend_"))
-                        if _t + 1 < len(_bp):
-                            _seg = np.stack([_kp[_t], _bp[_t + 1]])
-                            _ax.plot(_seg[:, 0], _seg[:, 1], _seg[:, 2], ":", color=_c, linewidth=1.0, alpha=0.55, label="_nolegend_")
-                    _ax.scatter(_kp[:, 0], _kp[:, 1], _kp[:, 2], s=np.linspace(6, 34, len(_kp)), color=_c, depthshade=False)
-                    _ax.scatter(_kp[-1, 0], _kp[-1, 1], _kp[-1, 2], marker="o", s=42, color=_c, depthshade=False)
-                    _grp.append(_bp); _grp.append(_kp)
+                        _vv = _kp[_t] - _bp[_t]; _nv = float(np.linalg.norm(_vv))
+                        if _nv < 1e-9: continue
+                        _tip = _bp[_t] + _vv * (min(_nv, _WCAP) / _nv)
+                        _seg = np.stack([_bp[_t], _tip])
+                        _ax.plot(_seg[:, 0], _seg[:, 1], _seg[:, 2], ":", color=_c, linewidth=1.1, alpha=0.7, label="_nolegend_")
+                        _grp.append(_tip[None, :])
+                    _ax.scatter(_bp[-1, 0], _bp[-1, 1], _bp[-1, 2], marker="o", s=42, color=_c, depthshade=False)
+                    _grp.append(_bp)
                 if (_ei, _n) in gt_proj:
                     _tp = np.asarray(gt_proj[(_ei, _n)])
                     _ax.scatter(_tp[0], _tp[1], _tp[2], marker="*", s=70, color="#FFD700", edgecolors="black", linewidths=1.0, depthshade=False, label="gt")
                     _grp.append(_tp[None, :])
                 if (_ei, _m, _n) in ung_traj:
                     _pn = np.asarray(ung_traj[(_ei, _m, _n)])
-                    _ax.scatter(_pn[-1, 0], _pn[-1, 1], _pn[-1, 2], marker="o", s=30, color="#111111", depthshade=False, label="ung")
-                    _grp.append(_pn[-1][None, :])
+                    _ax.plot(_pn[:, 0], _pn[:, 1], _pn[:, 2], "-", color="#111111", linewidth=1.2, alpha=0.85, label="ung")
+                    _ax.scatter(_pn[-1, 0], _pn[-1, 1], _pn[-1, 2], marker="o", s=30, color="#111111", depthshade=False)
+                    _grp.append(_pn)
                 if _n > 0 and (_ei, _m, _n) in guiung_traj:
                     _pu = np.asarray(guiung_traj[(_ei, _m, _n)])
                     _ax.plot(_pu[:, 0], _pu[:, 1], _pu[:, 2], "--", color="#888888", linewidth=1.0, alpha=0.7, label="gui_ung")
                     _grp.append(_pu)
                 if _cell:
-                    _sp = np.asarray(next(iter(_cell.values()))["pgx" if xt_checkbox.value else "pg"])[0]
+                    _sp = np.asarray(next(iter(_cell.values()))["pgx"])[0]
                     _ax.scatter(_sp[0], _sp[1], _sp[2], marker="o", s=45, facecolors="#FFD700", edgecolors="black", linewidths=1.2, depthshade=False, label="start")
-                if zoom_traj_checkbox.value and _grp:
-                    _pts = np.vstack(_grp); _lo, _hi = _pts.min(0), _pts.max(0)
-                    _pad = zoom_pad_slider.value * float((_hi - _lo).max())
-                    _ax.set_xlim(_lo[0]-_pad, _hi[0]+_pad); _ax.set_ylim(_lo[1]-_pad, _hi[1]+_pad); _ax.set_zlim(_lo[2]-_pad, _hi[2]+_pad)
+                if zoom_traj_checkbox2.value and _grp:
+                    _pts = np.vstack(_grp); _pts = _pts[np.isfinite(_pts).all(axis=1)]   # drop NaN (pending members)
+                    if _pts.shape[0]:
+                        _lo, _hi = _pts.min(0), _pts.max(0)
+                        _ctr = 0.5 * (_lo + _hi)                                          # centre the view on the content
+                        _half = max(0.5 * float((_hi - _lo).max()) * (1.0 + zoom_pad_slider2.value), 1e-6)  # cubic half-extent
+                        _ax.set_xlim(_ctr[0]-_half, _ctr[0]+_half); _ax.set_ylim(_ctr[1]-_half, _ctr[1]+_half); _ax.set_zlim(_ctr[2]-_half, _ctr[2]+_half)
                 _ax.set_xlabel("PC1", fontsize=7); _ax.set_ylabel("PC2", fontsize=7); _ax.set_zlabel("PC3", fontsize=7)
-                _ax.view_init(elev=elev_slider.value, azim=azim_slider.value)
+                _ax.view_init(elev=elev_slider2.value, azim=azim_slider2.value)
                 _ax.set_title(f"m={_m}", fontsize=9)
                 if _m == M - 1 and _cell:
                     _ax.legend(fontsize=6, loc="upper left", bbox_to_anchor=(1.02, 1.0))
@@ -1273,14 +1628,19 @@ def _(mo):
     mo.md(r"""
     ## T4: Realism
     Does the guidance footprint match the mask $m$?
-    - One figure per experiment. Row 1: guidance effect $|x_n^{\mathrm{gui}}-x_n^{\mathrm{ung}}|$; Row 2: trajectory-averaged $|$guidance vector$|$ (mask-normalized), per schedule.
-    - One side colorbar (norm = common / experiment max). **realism TV** between footprint and mask (**higher = better**); **guidance vs residual** = cosine similarity of the guidance vector to $|x^{\mathrm{gui}}-x^{\mathrm{ung}}|$.
+    - One figure per experiment. Row 1: guidance effect $|x_n^{\mathrm{gui}}-x_n^{\mathrm{ung}}|$; Row 2:
+      trajectory-averaged $|$guidance vector$|$ (mask-normalized), per schedule — for the **selected field**
+      and **eval region**, under one shared colorbar.
+    - **realism TV** = total-variation distance between the footprint and the mask (0 = footprint exactly
+      mask-shaped). The table reports it for the **target** field and, in the last column, **averaged across
+      ALL fields** (6 level variables $\times$ all levels + surface pair) — one global number per schedule
+      (needs **compute field profiles**; else —).
     """)
     return
 
 
 @app.cell
-def _(M, N, mo):
+def _(M, N, mo, pca_region_dropdown):
     realism_cmap_dropdown = mo.ui.dropdown(
         ["viridis", "magma", "inferno", "Reds", "hot", "warm (RdBu_r)"],
         value="viridis", label="realism cmap: ")
@@ -1288,8 +1648,21 @@ def _(M, N, mo):
         ["common max", "experiment max"], value="common max", label="norm: ")
     realism_m_slider = mo.ui.slider(0, max(M - 1, 1), value=0, step=1, label="m: ", show_value=True)
     realism_n_slider = mo.ui.slider(1, max(N, 2), value=1, step=1, label="n: ", show_value=True)
-    mo.hstack([realism_m_slider, realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start")
+    # field selector for the T4/T5 images (same combo as experiment_builder): pick which field's
+    # footprint / spread is shown; level 0 = surface tick.
+    field_var_dropdown = mo.ui.dropdown(
+        ["geopotential", "u_component_of_wind", "v_component_of_wind", "temperature",
+         "specific_humidity", "vertical_velocity", "mean_sea_level_pressure"],
+        value="temperature", label="field: ")
+    field_level_slider = mo.ui.slider(steps=[0, 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
+                                      value=0, label="level: ", show_value=True)
+    mo.vstack([
+        mo.hstack([realism_m_slider, realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start"),
+        mo.hstack([field_var_dropdown, field_level_slider, pca_region_dropdown], justify="start"),
+    ], align="start")
     return (
+        field_level_slider,
+        field_var_dropdown,
         realism_cmap_dropdown,
         realism_m_slider,
         realism_n_slider,
@@ -1297,43 +1670,147 @@ def _(M, N, mo):
     )
 
 
+@app.cell(hide_code=True)
+def _(INTERF_SURFACE_PAIR, field_level_slider, field_var_dropdown):
+    # resolve the T4/T5 field selector (dropdown + level slider) -> (var, partition, level),
+    # same mapping as experiment_builder.py (level 0 = surface tick; surface-paired vars map to
+    # their 2m/10m twin; a level-only var at the surface tick falls back to its lowest level).
+    def _resolve_field(_base, _lvl):
+        if _lvl == 0:
+            if _base in INTERF_SURFACE_PAIR:
+                return INTERF_SURFACE_PAIR[_base], "surface", 0
+            if _base == "mean_sea_level_pressure":
+                return _base, "surface", 0
+            return _base, "level", 50
+        if _base == "mean_sea_level_pressure":
+            return _base, "surface", 0
+        return _base, "level", _lvl
+
+    fvar, fpartition, flevel = _resolve_field(field_var_dropdown.value, int(field_level_slider.value))
+    return flevel, fpartition, fvar
+
+
+@app.cell(hide_code=True)
+def _(
+    EVAL_CROP,
+    EVAL_IMG_BOOL,
+    EVAL_W,
+    EXPS,
+    M,
+    N,
+    flevel,
+    fpartition,
+    ftt,
+    fvar,
+    guided_velocity_primitive,
+    load_rollout,
+    metrics,
+    np,
+    open_store,
+    open_unguided_state,
+    region_realism_tv,
+    residual_scaler,
+    sched_colors,
+    select_point,
+    sweep_points,
+):
+    # ---- selected-field footprint grid + metrics for the T4/T5 plots and their first table column ----
+    # Reactive to the field selector AND the eval region. gfield=|x_gui-x_gui_ung|, gvec_avg=traj-avg
+    # |guidance vector|, cropped/blanked to the eval region (EVAL_CROP + EVAL_IMG_BOOL). field_metrics =
+    # realism TV + footprint spread aggregated over the eval region (EVAL_W), for the SELECTED field.
+    # n-indexed, so changing n stays instant; changing field or region recomputes.
+    field_grid = None
+    field_metrics = None
+    if metrics is not None and sched_colors is not None:
+        _labels = list(sched_colors)
+        _cf = residual_scaler(fpartition, fvar, flevel)
+        _lvl = flevel if fpartition == "level" else None
+        _wsum = float(EVAL_W.sum()) or 1.0
+        def _crop_img(_full):
+            _img = np.asarray(_full, float)[EVAL_CROP[0], EVAL_CROP[1]]
+            if EVAL_IMG_BOOL is not None:
+                _img = np.where(EVAL_IMG_BOOL[EVAL_CROP[0], EVAL_CROP[1]], _img, np.nan)
+            return _img
+        field_grid = {}
+        _tv_acc = {lb: [] for lb in _labels}
+        _t5_acc = {lb: [] for lb in _labels}
+        for _ei, _rid in enumerate(EXPS):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
+            _mask = np.asarray(_mask, float)
+            _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
+            for _lb, _sel in _pts.items():
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _gd = select_point(open_store(_dir, "gui", fvar), _sel)
+                _ud0 = select_point(open_unguided_state(_dir, "gui_ung", fvar), _sel)
+                for _n in range(N):
+                    if float(_p[_n]) == 0.0:
+                        continue
+                    _foot_m = []
+                    for _m in range(M):
+                        _g = _gd.isel(m=_m, n=_n)
+                        _u = _ud0.isel(m=_m, n=_n); _u = _u.isel(t=-1) if "t" in _u.dims else _u
+                        if _lvl is not None:
+                            _g = _g.sel(level=_lvl); _u = _u.sel(level=_lvl)
+                        _guif = np.asarray(_g, float); _ungf = np.asarray(_u, float)
+                        _foot = np.abs(_guif - _ungf)
+                        _foot_m.append(_foot)
+                        _tv_acc[_lb].append(region_realism_tv(_guif, _ungf, _mask, EVAL_W))
+                        _vel = guided_velocity_primitive(_dir, _sel, _m, _n, fvar, _cf, level=_lvl)
+                        field_grid.setdefault((_ei, _m, _n), {})[_lb] = {
+                            "gfield": _crop_img(_foot),
+                            "gvec_avg": _crop_img(np.abs(_vel["gui_vec"]).mean(axis=0))}
+                    if len(_foot_m) >= 2:
+                        _std = np.std(np.stack(_foot_m, 0), axis=0)
+                        _t5_acc[_lb].append(float((_std * EVAL_W).sum() / _wsum))
+        field_metrics = {lb: {"tv": ftt.aggregate_mean_std(_tv_acc[lb]),
+                              "t5": ftt.aggregate_mean_std(_t5_acc[lb]),
+                              "n_pool": len(_t5_acc[lb])} for lb in _labels}
+    return field_grid, field_metrics
+
+
 @app.cell
 def _(
     EXPS,
+    PCA_REGION_MODE,
     WARM_CMAP,
+    eval_mask_ref,
+    field_grid,
+    field_metrics,
+    flevel,
+    fvar,
     glabel,
-    mask_bbox_ref,
     metrics,
     mo,
     np,
+    plot_labels,
     plt,
     realism_cmap_dropdown,
+    realism_data,
     realism_m_slider,
     realism_n_slider,
     realism_norm_dropdown,
     sched_colors,
-    traj_grid,
 ):
     # ---- Realism: guidance footprint vs mask; correct aspect + one side colorbar per figure ----
-    if metrics is None or traj_grid is None:
+    if metrics is None or field_grid is None:
         t4_view = mo.md("_press **compute metrics**_")
     else:
         _m = int(realism_m_slider.value); _n = int(realism_n_slider.value) - 1
         _labels = list(sched_colors)
         _cmap = WARM_CMAP if realism_cmap_dropdown.value == "warm (RdBu_r)" else realism_cmap_dropdown.value
         _common = realism_norm_dropdown.value == "common max"
-        _cols = ["mask"] + _labels
-        _mk = np.asarray(mask_bbox_ref, float); _mkp = _mk/_mk.sum() if _mk.sum() > 0 else _mk
+        _cols = ["mask"] + plot_labels
+        _mk = np.asarray(eval_mask_ref, float); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
         _grids = []; _exmax = []
         for _ei in range(len(EXPS)):
-            _cell = traj_grid.get((_ei, _m, _n), {})
+            _cell = field_grid.get((_ei, _m, _n), {})
             _r0, _r1 = [], []
             for _col in _cols:
                 if _col == "mask":
                     _r0.append(_mkp); _r1.append(_mkp)
                 elif _col in _cell:
-                    _gf = np.asarray(_cell[_col]["gfield"], float); _r0.append(_gf/_gf.sum() if _gf.sum() > 0 else _gf)
-                    _gv = np.asarray(_cell[_col]["gvec_avg"], float); _r1.append(_gv/_gv.sum() if _gv.sum() > 0 else _gv)
+                    _gf = np.asarray(_cell[_col]["gfield"], float); _gfs = np.nansum(_gf); _r0.append(_gf/_gfs if _gfs > 0 else _gf)
+                    _gv = np.asarray(_cell[_col]["gvec_avg"], float); _gvs = np.nansum(_gv); _r1.append(_gv/_gvs if _gvs > 0 else _gv)
                 else:
                     _r0.append(None); _r1.append(None)
             _grids.append((_r0, _r1))
@@ -1345,7 +1822,7 @@ def _(
         _figs = []
         for _ei, (_r0, _r1) in enumerate(_grids):
             _vmax = _gmax if _common else _exmax[_ei]
-            _figs.append(mo.md(f"**{EXPS[_ei].split(chr(47))[-1]}**  (m={_m}, n={_n + 1})"))
+            _figs.append(mo.md(f"**{EXPS[_ei].split(chr(47))[-1]}**  ({fvar}@{flevel}, m={_m}, n={_n + 1})"))
             _f = plt.figure(figsize=(_fw, _fh), dpi=120)
             _gs = _f.add_gridspec(2, _ncol, left=0.045, right=0.9, top=0.88, bottom=0.04, wspace=0.06, hspace=0.08)
             _im = None
@@ -1364,19 +1841,188 @@ def _(
                 _cb = _f.colorbar(_im, cax=_cax)
                 _cb.set_ticks(list(np.linspace(0.0, _vmax, 5))); _cax.tick_params(labelsize=7)
             _figs.append(mo.as_html(_f))
-        _besttv = max(_r["realism_tv"][0] for _r in metrics.values())
-        _rows = ["| sweep point | n_pool | realism TV |", "|---|---|---|"]
-        for _lb, _r in metrics.items():
-            _tv = _r["realism_tv"]; _tvc = f"{_tv[0]:.3f}+/-{_tv[1]:.3f}"; _tvc = f"**{_tvc}**" if _tv[0]==_besttv else _tvc
-            _npv = _r["n_pool"]
-            _rows.append(f"| {glabel(_lb)} | {_npv} | {_tvc} |")
+        _fm = field_metrics  # selected-field realism TV (follows the field selector)
+        _rd = realism_data   # all-fields companions (None until 'compute field profiles' pressed)
+        _besttv = max((_fm[_l]["tv"][0] for _l in _fm if np.isfinite(_fm[_l]["tv"][0])), default=None) if _fm else None
+        _besttva = max((_rd[_l]["tv_all"][0] for _l in _rd if np.isfinite(_rd[_l]["tv_all"][0])), default=None) if _rd else None
+        _rows = ["| sweep point | n_pool | realism TV (selected field) | realism TV (all fields) |", "|---|---|---|---|"]
+        for _lb in _labels:
+            _tvc = "\u2014"
+            if _fm and _lb in _fm and np.isfinite(_fm[_lb]["tv"][0]):
+                _tv = _fm[_lb]["tv"]; _tvc = f"{_tv[0]:.3f}\u00b1{_tv[1]:.3f}"
+                _tvc = f"**{_tvc}**" if _besttv is not None and _tv[0]==_besttv else _tvc
+            _tva = "\u2014"
+            if _rd and _lb in _rd and np.isfinite(_rd[_lb]["tv_all"][0]):
+                _av = _rd[_lb]["tv_all"]; _tva = f"{_av[0]:.3f}\u00b1{_av[1]:.3f}"
+                _tva = f"**{_tva}**" if _besttva is not None and _av[0]==_besttva else _tva
+            _npv = _fm[_lb]["n_pool"] if (_fm and _lb in _fm) else "\u2014"
+            _rows.append(f"| {glabel(_lb)} | {_npv} | {_tvc} | {_tva} |")
         t4_view = mo.vstack([
             mo.md(f"**Realism** \u2014 top: guidance effect; bottom: avg-guidance (traj-avg |guidance vector|). "
-                  f"Mask-normalized; colour scale = **{realism_norm_dropdown.value}**.  (m={_m}, n={_n + 1})"),
+                  f"Field = **{fvar}** @ {flevel}, eval region = **{PCA_REGION_MODE}** (from the selectors). Mask-normalized; colour scale = "
+                  f"**{realism_norm_dropdown.value}**.  (m={_m}, n={_n + 1})"),
             *_figs,
-            mo.md("TV vs mask (**higher = better**)."),
+            mo.md("**realism TV (selected field)** = TV distance between the guidance footprint "
+                  "$|x^{gui}-x^{ung}|$ of the **selected field** and the mask (0 = footprint exactly mask-shaped); follows the "
+                  "field selector above. **realism TV (all fields)** = the same TV **averaged over ALL fields** "
+                  "(6 level vars \u00d7 all levels + surface pair), one global number per schedule "
+                  "(needs **compute field profiles**; else \u2014)."),
             mo.md("\n".join(_rows))])
     t4_view
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## T5: Footprint spread
+    How repeatable is the guidance footprint across ensemble members? Take the **same guidance-effect object**
+    as T4 — the footprint $|x^{\mathrm{gui}}-x^{\mathrm{ung}}|$ — and compute its **standard deviation across
+    members $m$** per pixel, then aggregate (masked-mean) over the mask. Small = the guidance draws essentially
+    the same footprint for every member; large = the footprint wanders member-to-member.
+    - **fp-spread (target)** = target field (2m-temperature).
+    - **fp-spread (all fields)** = the same, **averaged across ALL fields** (6 level variables $\times$ all pressure levels + surface pair).
+    _Needs **compute field profiles** pressed (shared with T2/T4); std needs $\geq 2$ members._
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    field_level_slider,
+    field_var_dropdown,
+    mo,
+    pca_region_dropdown,
+    realism_cmap_dropdown,
+    realism_n_slider,
+    realism_norm_dropdown,
+):
+    # T5 controls (same widgets as T4 — marimo keeps them in sync): field selector + eval region + view opts
+    mo.hstack([field_var_dropdown, field_level_slider, pca_region_dropdown,
+               realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start")
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    EXPS,
+    M,
+    PCA_REGION_MODE,
+    WARM_CMAP,
+    eval_mask_ref,
+    field_grid,
+    flevel,
+    fvar,
+    glabel,
+    metrics,
+    mo,
+    np,
+    plot_labels,
+    plt,
+    realism_cmap_dropdown,
+    realism_n_slider,
+    realism_norm_dropdown,
+):
+    # ---- T5 footprint-spread IMAGES: same layout as T4, but per-pixel std over members m ----
+    # Row 1 = std_m(guidance effect |x_gui-x_ung|); Row 2 = std_m(avg-guidance), for the SELECTED field
+    # (from field_grid). Shares T4's field / n / cmap / norm controls.
+    if metrics is None or field_grid is None:
+        t5_spread_view = mo.md("_press **compute metrics**_")
+    else:
+        _n = int(realism_n_slider.value) - 1
+        _labels = plot_labels
+        _cmap = WARM_CMAP if realism_cmap_dropdown.value == "warm (RdBu_r)" else realism_cmap_dropdown.value
+        _common = realism_norm_dropdown.value == "common max"
+        _cols = ["mask"] + _labels
+        _mk = np.asarray(eval_mask_ref, float); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
+
+        def _std_over_m(_ei, _lb, _key):
+            _stack = [np.asarray(field_grid[(_ei, _mm, _n)][_lb][_key], float)
+                      for _mm in range(M)
+                      if (_ei, _mm, _n) in field_grid and _lb in field_grid[(_ei, _mm, _n)]]
+            if len(_stack) < 2:
+                return None
+            return np.std(np.stack(_stack, 0), axis=0)
+
+        _grids = []; _exmax = []
+        for _ei in range(len(EXPS)):
+            _r0, _r1 = [], []
+            for _col in _cols:
+                if _col == "mask":
+                    _r0.append(_mkp); _r1.append(_mkp)
+                else:
+                    _sf = _std_over_m(_ei, _col, "gfield")
+                    _sv = _std_over_m(_ei, _col, "gvec_avg")
+                    _r0.append(_sf/np.nansum(_sf) if (_sf is not None and np.nansum(_sf) > 0) else _sf)
+                    _r1.append(_sv/np.nansum(_sv) if (_sv is not None and np.nansum(_sv) > 0) else _sv)
+            _grids.append((_r0, _r1))
+            _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 + _r1 if _p is not None), default=1.0))
+        _gmax = max(_exmax) if _exmax else 1.0
+        _H, _W = _mkp.shape; _ncol = len(_cols)
+        _fw = 1.35 * _ncol + 1.0
+        _fh = 2.0 * (0.85 * _fw / _ncol) * (_H / _W) / 0.84 + 0.35
+        _figs = []
+        for _ei, (_r0, _r1) in enumerate(_grids):
+            _vmax = _gmax if _common else _exmax[_ei]
+            _figs.append(mo.md(f"**{EXPS[_ei].split(chr(47))[-1]}**  ({fvar}@{flevel}, std over m, n={_n + 1})"))
+            _f = plt.figure(figsize=(_fw, _fh), dpi=120)
+            _gs = _f.add_gridspec(2, _ncol, left=0.045, right=0.9, top=0.88, bottom=0.04, wspace=0.06, hspace=0.08)
+            _im = None
+            for _ri, _rowd in enumerate((_r0, _r1)):
+                for _ci in range(_ncol):
+                    _ax = _f.add_subplot(_gs[_ri, _ci])
+                    if _rowd[_ci] is not None:
+                        _im = _ax.imshow(_rowd[_ci], cmap=_cmap, vmin=0.0, vmax=_vmax)
+                    _ax.set_xticks([]); _ax.set_yticks([])
+                    if _ri == 0:
+                        _ax.set_title("mask" if _cols[_ci] == "mask" else glabel(_cols[_ci].split()[-1]), fontsize=8)
+                    if _ci == 0:
+                        _ax.set_ylabel("footprint spread" if _ri == 0 else "avg-guid. spread", fontsize=7)
+            if _im is not None:
+                _cax = _f.add_axes([0.915, 0.04, 0.011, 0.84])
+                _cb = _f.colorbar(_im, cax=_cax)
+                _cb.set_ticks(list(np.linspace(0.0, _vmax, 5))); _cax.tick_params(labelsize=7)
+            _figs.append(mo.as_html(_f))
+        t5_spread_view = mo.vstack([
+            mo.md(f"**Footprint-spread images** — per-pixel std over ensemble members $m$ of the T4 fields: "
+                  f"top = guidance effect $|x^{{\\mathrm{{gui}}}}-x^{{\\mathrm{{ung}}}}|$, bottom = avg-guidance. "
+                  f"Field = **{fvar}** @ {flevel}, eval region = **{PCA_REGION_MODE}**. Mask-normalized; colour scale = **{realism_norm_dropdown.value}**. "
+                  f"Uses T4's field/$n$/cmap/norm controls. "
+                  f"(std over m, n={_n + 1})"),
+            *_figs])
+    t5_spread_view
+    return
+
+
+@app.cell(hide_code=True)
+def _(field_metrics, glabel, mo, np, realism_data, sched_colors):
+    # T5 footprint-spread table: selected field (field_metrics, follows the selector) + all fields (realism_data, gated)
+    if field_metrics is None:
+        t5_view = mo.md("_press **compute metrics**_")
+    else:
+        _fm = field_metrics; _rd = realism_data
+        _labels = list(sched_colors)
+        _bt = max((_fm[_l]["t5"][0] for _l in _fm if np.isfinite(_fm[_l]["t5"][0])), default=None)
+        _ba = max((_rd[_l]["t5_all"][0] for _l in _rd if np.isfinite(_rd[_l]["t5_all"][0])), default=None) if _rd else None
+        def _cell(_ms, _best):
+            if _ms is None or not np.isfinite(_ms[0]):
+                return "—"
+            _s = f"{_ms[0]:.4g}±{_ms[1]:.2g}"
+            return f"**{_s}**" if _best is not None and _ms[0] == _best else _s
+        _rows = ["| sweep point | n_pool | fp-spread (selected field) | fp-spread (all fields) |", "|---|---|---|---|"]
+        for _lb in _labels:
+            _sel_ms = _fm[_lb]["t5"] if _lb in _fm else None
+            _all_ms = _rd[_lb]["t5_all"] if (_rd and _lb in _rd) else None
+            _npv = _fm[_lb]["n_pool"] if _lb in _fm else "—"
+            _rows.append(f"| {glabel(_lb)} | {_npv} | {_cell(_sel_ms, _bt)} | {_cell(_all_ms, _ba)} |")
+        t5_view = mo.vstack([
+            mo.md("**Footprint spread** — per-pixel std over ensemble members $m$ of the guidance footprint "
+                  "$|x^{gui}-x^{ung}|$, then masked-mean over the mask. Higher = the guidance effect varies more "
+                  "member-to-member. **fp-spread (selected field)** follows the field selector; **fp-spread "
+                  "(all fields)** = mean over ALL fields (needs **compute field profiles**). Pooled over "
+                  "(exp, guided $n$); **bold** = per-column max."),
+            mo.md("\n".join(_rows))])
+    t5_view
     return
 
 

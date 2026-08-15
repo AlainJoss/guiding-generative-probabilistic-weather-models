@@ -135,6 +135,7 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
                                  for _v in _gui_ung_raw.data_vars})
     else:
         gui_ung_xr = _gui_ung_raw  # legacy clean-pred store
+    # gui_ung_xr = x_det + sigma_res*z (z = z_0..z_T) already reaches the true final x_T at t=-1
     gui_ung_final_xr = gui_ung_xr.isel(t=-1) if "t" in gui_ung_xr.dims else gui_ung_xr
     guided_xr = _h["gui"].sel(sweep_point)
     res_xr = _h["res"].sel(sweep_point) if _h["res"] is not None else None
@@ -176,18 +177,13 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
         # step with z_T recovered from the final guided state. The applied guidance
         # vector follows as gui_vec = (vfs - gui_vfs) / s_t, so unguided steps
         # (e.g. spike a_t past its index) give gui_vfs == vfs identically.
-        _det_zT = get_rollout("gui_det", rollout_id).sel(sweep_point)
-        _z_T = xr.Dataset(
-            {_v: (guided_xr[_v] - _det_zT[_v]) / res_scale_map[_v] for _v in res_xr.data_vars}
-        )
-        _z_next = xr.concat(
-            [res_xr.isel(t=slice(1, None)).assign_coords(t=res_xr.t.values[:-1]),
-             _z_T.expand_dims(t=[int(res_xr.t.values[-1])])],
-            dim="t",
-        )
-        gui_vfs_xr = (_z_next - res_xr) * _s_da / _h_da
+        # res_xr holds z_0..z_T (length T+1); align the T Euler-step slices with vfs/grads (length T)
+        _res_prev = res_xr.isel(t=slice(0, -1)).assign_coords(t=grads_xr.t)   # z_0..z_{T-1}
+        _z_next = res_xr.isel(t=slice(1, None)).assign_coords(t=grads_xr.t)   # z_1..z_T
+        _z_T = res_xr.isel(t=-1)                                              # the endpoint z_T
+        gui_vfs_xr = (_z_next - _res_prev) * _s_da / _h_da
         gui_vec_xr = (vfs_xr - gui_vfs_xr) / _s_da
-        _dev = (res_xr + vfs_xr) - _z_T
+        _dev = (_res_prev + vfs_xr) - _z_T
         clean_preds_xr = xr.Dataset(
             {_v: guided_xr[_v] + _dev[_v] * res_scale_map[_v] for _v in _dev.data_vars}
         ).transpose("m", "n", "t", ...)
@@ -222,8 +218,8 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
         if res_xr is None:
             raise KeyError("no res trace")
         _det_up = get_rollout("gui_det", rollout_id).sel(sweep_point)
-        _s_up, _h_up = _flow_grids(res_xr.sizes["t"])
-        _hs_up = xr.DataArray(_h_up / _s_up, dims=("t",), coords={"t": res_xr.t})
+        _s_up, _h_up = _flow_grids(grads_xr.sizes["t"])
+        _hs_up = xr.DataArray(_h_up / _s_up, dims=("t",), coords={"t": grads_xr.t})
         _land_up = xr.Dataset({
             _v: _det_up[_v] + res_scale_map[_v] * (res_xr[_v] + _hs_up * gui_vfs_xr[_v])
             for _v in res_xr.data_vars
@@ -245,7 +241,7 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
         _det_l2 = get_rollout("gui_det", rollout_id).sel(sweep_point)
         _rlat = xr.Dataset({_v: (_traj_phys[_v] - _det_l2[_v]) / res_scale_map[_v]
                             for _v in _traj_phys.data_vars})
-        _T2 = _rlat.sizes["t"]
+        _T2 = grads_xr.sizes["t"]                  # T Euler steps over the z_0..z_{T-1} portion
         _s2, _h2 = _flow_grids(_T2)
         _z2 = res_xr.isel(t=0, drop=True)
         _vf_list = []
@@ -253,7 +249,7 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
             _vf_i = _rlat.isel(t=_i2, drop=True) - _z2
             _vf_list.append(_vf_i)
             _z2 = _z2 + (_h2[_i2] / _s2[_i2]) * _vf_i
-        _vf_tr = xr.concat(_vf_list, dim="t").assign_coords(t=_rlat.t)
+        _vf_tr = xr.concat(_vf_list, dim="t").assign_coords(t=grads_xr.t)
         _a2 = _msk(_vf_tr); _b2 = _msk(_vf_tr.shift(t=1))
         return (_a2 * _b2).sum(dim=_sp), ((_a2 ** 2).sum(dim=_sp) * (_b2 ** 2).sum(dim=_sp)) ** 0.5
 
@@ -286,9 +282,9 @@ def compute_reductions_for_sweep(rollout_id, sweep_point, *, spatial="full"):
         if res_xr is None:
             raise KeyError("no res trace")
         _det_s = get_rollout("gui_det", rollout_id).sel(sweep_point)
-        _s_st, _h_st = _flow_grids(res_xr.sizes["t"])
-        _hs_st = xr.DataArray(_h_st / _s_st, dims=("t",), coords={"t": res_xr.t})
-        _state_ds = xr.Dataset({_v: _det_s[_v] + res_scale_map[_v] * res_xr[_v]
+        _s_st, _h_st = _flow_grids(grads_xr.sizes["t"])
+        _hs_st = xr.DataArray(_h_st / _s_st, dims=("t",), coords={"t": grads_xr.t})
+        _state_ds = xr.Dataset({_v: _det_s[_v] + res_scale_map[_v] * res_xr[_v]   # x_t, reaches x_T at t=-1
                                 for _v in res_xr.data_vars})
         _land_ds = xr.Dataset({_v: _det_s[_v] + res_scale_map[_v] * (res_xr[_v] + _hs_st * gui_vfs_xr[_v])
                                for _v in res_xr.data_vars})

@@ -843,15 +843,15 @@ def _(
         outer = experiment_dir()
         N = int(N_slider.value)
         names = [d.strftime(fmt) for d in dates]
-        # OUTER config = the picked date list + rollout length. run.py loops STARTS;
-        # `python -m src.download --rollout_id <id>` derives the per-date windows from STARTS + N.
-        dump_json({"STARTS": names, "N": N}, outer / "config.json")
-        for d, name in zip(dates, names):
-            cfg = RolloutConfig(
-                M=M_slider.value, N=N, T=T_slider.value, START_TS=d,
-                PARTITION=partition, LEVEL=level, VAR=var, MASK_CORNERS=list(mask_corners))
-            (outer / name).mkdir(parents=True, exist_ok=True)
-            dump_json(cfg.to_dict(), outer / name / "config.json")
+        # starts.json = the picked date list + rollout length (run.py / download loop STARTS).
+        # ONE shared config.json holds what all dates share; START_TS varies per date -> None here
+        # (get_config injects each date's start from its subdir name). The date subdirs are created
+        # by `python -m src.download`.
+        dump_json({"STARTS": names, "N": N}, outer / "starts.json")
+        cfg = RolloutConfig(
+            M=M_slider.value, N=N, T=T_slider.value, START_TS=None,
+            PARTITION=partition, LEVEL=level, VAR=var, MASK_CORNERS=list(mask_corners))
+        dump_json(cfg.to_dict(), outer / "config.json")
         return mo.md(
             f"✅ saved {len(names)} dates (N={N}) under `{outer}`\n\n"
             f"download the model input with `python -m src.download --rollout_id {outer.name}`")

@@ -1,9 +1,9 @@
 \babel@toc {english}{}\relax 
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {2.1}{\ignorespaces Computational graph of one ArchesWeather forecast step. The deterministic model produces the base forecast \(\hat {x}^{\mathrm {det}}_{n+1}\), while the flow model generates the residual through \(T\) Euler steps before both components are combined. \relax }}{21}{figure.caption.8}%
+\contentsline {figure}{\numberline {2.1}{\ignorespaces Computational graph of one ArchesWeather forecast step. The deterministic model produces the base forecast \(\hat {x}^{\mathrm {det}}_{n+1}\), while the flow model generates the residual through \(T\) Euler steps before both components are combined. \relax }}{20}{figure.caption.8}%
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {3.1}{\ignorespaces Example of the spatial target mask. The rectangular support determines which grid cells are included, while the latitude-dependent weights account for differences in physical grid-cell area. \relax }}{24}{figure.caption.9}%
+\contentsline {figure}{\numberline {3.1}{\ignorespaces Example of the spatial target mask. The rectangular support determines which grid cells are included, while the latitude-dependent weights account for differences in physical grid-cell area. \relax }}{23}{figure.caption.9}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
