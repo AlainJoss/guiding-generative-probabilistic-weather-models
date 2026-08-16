@@ -1,211 +1,303 @@
 \chapter{Guidance design}
 \label{ch:guide}
 
-The previous chapter specified the scenario to be generated through a mask
-$\pi$ and a set of member-specific target trajectories. We now address the
-second component of the framework: how the generative forecast should be
-steered toward these prescribed targets.
+The previous chapter specified the scenario of interest through a target mask
+$\pi$ and relative intensity trajectory $\rho_{1:H}$. Together with the
+unguided reference ensemble, these determine the member-specific target
+trajectories $y^\star_{1:H,m}$. We now address the second component of the
+framework: how the generative forecast is steered toward these targets.
 
 Because guidance is applied independently to each ensemble member, we suppress
-the ensemble-member index throughout this chapter. Accordingly, $y_n^\star$
-denotes the target associated with the member currently being generated.
+the member index throughout this chapter. Accordingly, $y_n^\star$ denotes the
+target associated with the member currently being generated.
 
-(TODO: this can probably be specified better connecting to something previous instead of restating again)
-We formulate the problem as \emph{target-driven guidance}. Rather than choosing
-a guidance strength beforehand and observing the resulting change in the
-forecast, the desired outcome is specified first. Guidance strength then
-becomes a means of realizing this target. At each weather step, we use the
-target discrepancy evaluated on the intermediate clean-state estimates to
-construct a local guidance direction, while the magnitude of the intervention
-is adapted separately to close the remaining target gap at the end of the
-generative flow.
+We formulate this problem as \emph{target-driven guidance}. At each weather
+step, the discrepancy between the prescribed target and intermediate
+clean-state estimates provides a local direction in which to modify the
+generative flow. Rather than fixing the magnitude of this intervention
+beforehand, we prescribe how guidance is distributed over flow time and adapt
+its overall gain to realize the target at the end of the flow.
 
-Several strategies can be considered for this target-realization problem. One
-possibility is to adapt the intervention locally such that the target gap
-follows a prescribed evolution during the flow. A more general alternative is
-to optimize the guidance strengths at all flow steps jointly. In this work, we
-instead prescribe the relative distribution of guidance over flow time and
-adapt only a single scalar controlling its overall magnitude. Preliminary
-investigations of the former approaches are discussed in
-\Cref{app:target-realization-development}; the scalar-gain formulation retained
-here provides the basis for the experiments in this thesis.
+This separates two aspects of the guidance-strength design: a flow-time profile
+$\gamma_t$, which determines the relative placement of guidance within the
+generative trajectory, and a weather-step-specific gain $w_n$, which determines
+its overall magnitude. Once the profile has been chosen, target realization
+therefore reduces to adapting a single scalar gain while generating each
+weather state.
 
-TODO: here we can state that it becomes clear from the experiments why this formulation doesn't demand for any optimization of the schedule under the DPS formulation.
-
-
+We first describe how guidance is incorporated into the autoregressive
+ArchesWeather rollout and define the local guidance objective. We then
+introduce the guidance-strength design and discuss alternative ways of
+controlling the intervention over flow time. Finally, we formulate target
+realization as a scalar root-finding problem and adapt $w_n$ independently at
+each guided weather step.
 \section{Target-driven guidance}
 \label{sec:target-driven-guidance}
 
-ArchesWeather generates a forecast trajectory autoregressively. Given the
-atmospheric context available at weather step $n$, the model generates the next
-state $x_{n+1}$. Guidance is applied within the residual flow used to generate
-this state.
+ArchesWeather generates forecast trajectories autoregressively. At weather
+step $n$, the states $x_{n-2}$ and $x_{n-1}$ form the atmospheric context from
+which $x_n$ is generated. Guidance acts within the residual flow used to
+generate this state by modifying its velocity field.
 
-Although the guidance problem is solved separately at each weather step, its
-effects propagate through weather time. Once a guided state
-$x_{n+1}^{\mathrm{gui}}$ has been generated, it becomes part of the
-conditioning context used to generate the following state. Consequently,
-guidance applied at one weather step can influence all subsequent states of the
-guided forecast trajectory.
+Although guidance is applied separately at each weather step, its effects
+propagate through weather time. Once a guided state $x_n^{\mathrm{gui}}$ has
+been generated, it becomes part of the conditioning context used at subsequent
+weather steps. Guidance applied while generating one state can therefore
+influence the remainder of the autoregressive forecast trajectory.
 
+To distinguish the different trajectories involved in this process, we
+introduce three weather-state objects. We denote by
 
+\[
+    x_n^{\mathrm{ung}}
+    \equiv
+    x_n^{\mathrm{ung}\mid\mathrm{ung}}
+\]
+
+the state of the unguided reference rollout introduced in
+\Cref{ch:specify}. Both the current residual flow and the preceding atmospheric
+states are unguided. This rollout provides the reference from which the
+member-specific target $y_n^\star$ is constructed.
+
+We denote by
+
+\[
+    x_n^{\mathrm{gui}}
+    \equiv
+    x_n^{\mathrm{gui}\mid\mathrm{gui}}
+\]
+
+the state obtained by applying guidance to the current residual flow while
+conditioning on the preceding guided states.
+
+Finally, we define
+
+\[
+    x_n^{\mathrm{ung}\mid\mathrm{gui}}
+\]
+
+as the state obtained by running the current residual flow without guidance
+while retaining the same guided atmospheric context used to generate
+$x_n^{\mathrm{gui}}$. The two states
+$x_n^{\mathrm{ung}\mid\mathrm{gui}}$ and $x_n^{\mathrm{gui}}$ therefore share
+the same preceding weather states, deterministic forecast, and initial
+residual-noise realization $z_{n,0}$; they differ only in whether guidance is
+applied within the current residual flow. This state will later provide the
+zero-gain evaluation of the target-realization procedure.
+
+At a given weather step, the same initial residual-noise realization is also
+used for the corresponding state of the unguided reference rollout. Thus,
+$x_n^{\mathrm{ung}}$ and $x_n^{\mathrm{gui}}$ remain paired through their
+stochastic realization, while their atmospheric conditioning contexts
+generally differ once guidance has altered the preceding trajectory.
+
+The distinction between $x_n^{\mathrm{ung}}$ and
+$x_n^{\mathrm{ung}\mid\mathrm{gui}}$ therefore becomes important after the
+guided and unguided trajectories have diverged. Their deterministic forecasts
+are, respectively,
+
+\begin{align}
+    \hat{x}_n^{\mathrm{det}\mid\mathrm{ung}}
+    &=
+    F_{\mathrm{det}}
+    \left(
+        x_{n-2}^{\mathrm{ung}},
+        x_{n-1}^{\mathrm{ung}}
+    \right),
+    \\
+    \hat{x}_n^{\mathrm{det}\mid\mathrm{gui}}
+    &=
+    F_{\mathrm{det}}
+    \left(
+        x_{n-2}^{\mathrm{gui}},
+        x_{n-1}^{\mathrm{gui}}
+    \right).
+\end{align}
+
+The latter deterministic forecast is shared by
+$x_n^{\mathrm{ung}\mid\mathrm{gui}}$ and $x_n^{\mathrm{gui}}$, since their
+difference arises only from the guidance applied within the residual flow.
+
+At the first generated weather state, $n=1$, the unguided reference and
+unguided-under-guided-context constructions share both the initial atmospheric
+context $(x_{-1},x_0)$ and the same initial residual noise. Consequently,
+
+\begin{equation}
+    x_1^{\mathrm{ung}\mid\mathrm{gui}}
+    =
+    x_1^{\mathrm{ung}}.
+    \label{eq:first-step-unguided-equivalence}
+\end{equation}
+
+For $n>1$, this equality no longer holds in general, since the preceding
+guided states can differ from their unguided reference counterparts.
+
+TODO: Insert summary figure illustrating
+$x_n^{ung}, x_n^{ung|gui}, x_n^{gui},
+\hat{x}_n^{det|ung}, \hat{x}_n^{det|gui}, y_n^\star.$
 \subsection{Guidance objective}
 \label{sec:guidance-objective}
 
 At weather step $n$, the specification procedure introduced in
-\Cref{ch:specify} provides the target value $y_{n+1}^\star$ for the state being
-generated. During the residual flow, ArchesWeather provides a clean-state
-estimate $\hat{x}_{n+1,t}$ at each flow step $t$. We define its discrepancy
-from the prescribed target as
+\Cref{ch:specify} provides the member-specific target value $y_n^\star$ in
+physical units. During the residual flow, ArchesWeather provides the
+corresponding physical-space clean-state estimate
+$\hat{x}^{\mathrm{phys}}_{n,t}$ from the current noisy residual state
+$z_{n,t}$, as defined in \Cref{eq:arches-physical-clean-state}.
+
+We define the discrepancy from the prescribed target as
 
 \begin{equation}
-    \xi_{n+1,t}
+    \xi_{n,t}
     :=
     \mathcal{M}_\pi
     \left(
-        \hat{x}_{n+1,t}
+        \hat{x}^{\mathrm{phys}}_{n,t}
     \right)
     -
-    y_{n+1}^\star,
+    y_n^\star,
     \label{eq:guidance-gap}
 \end{equation}
 
-where $\mathcal{M}_\pi$ denotes the masked functional defined in
-\Cref{ch:specify}. We refer to $\xi_{n+1,t}$ as the \emph{target gap} at flow
-step $t$.
+where $\mathcal{M}_\pi$ denotes the area-weighted regional mean operator
+defined in \Cref{ch:specify}. We refer to $\xi_{n,t}$ as the \emph{target gap}
+at flow step $t$.
 
-The corresponding guidance objective is the squared target gap,
+We use the squared target gap as the guidance loss,
 
 \begin{equation}
-    \mathcal{L}_{n+1,t}
+    \mathcal{L}_{n,t}
     :=
-    \xi_{n+1,t}^{\,2}
+    \xi_{n,t}^{\,2}
     =
     \left[
         \mathcal{M}_\pi
         \left(
-            \hat{x}_{n+1,t}
+            \hat{x}^{\mathrm{phys}}_{n,t}
         \right)
         -
-        y_{n+1}^\star
+        y_n^\star
     \right]^2.
     \label{eq:guidance-loss}
 \end{equation}
 
-Evaluating the objective on the clean-state estimate follows the local
-clean-estimate guidance formulation introduced in
-\Cref{sec:guidance-as-posterior-sampling}. It makes the conditioning objective
-available throughout the generative flow and therefore provides a guidance
-direction at every intermediate state.
+Following the clean-estimate approximation derived in
+\Cref{eq:clean-likelihood-approximation}, the objective is evaluated on the
+current clean-state estimate rather than directly on the unknown clean
+endpoint. The inverse normalization used to obtain
+$\hat{x}^{\mathrm{phys}}_{n,t}$ remains differentiable, so the objective can
+still be differentiated with respect to the normalized noisy residual state
+$z_{n,t}$.
 
 An alternative would be to define the objective only on the final generated
-state and differentiate it backwards through the complete flow. Such a
-formulation is possible and corresponds to the control perspective discussed
-in \Cref{sec:guidance-as-control}. The distinction is therefore not whether
-the final state can be differentiated through, but where the intervention is
-defined. Here, we retain the local posterior-style construction: the clean
-estimate determines the guidance direction at each flow step, while the
-resulting terminal target gap is used separately to determine how strongly
-this direction must be applied.
+state and propagate its gradient backwards through the complete residual flow.
+This corresponds to the control perspective discussed in
+\Cref{sec:guidance-as-control}. Such a formulation requires differentiating the
+terminal objective through the sequence of flow updates in order to determine
+interventions at earlier states. The local clean-estimate formulation instead
+obtains the guidance direction from the current model evaluation alone. We
+retain this posterior-style construction and use the terminal target
+discrepancy separately to determine the overall magnitude of guidance.
 
-For the experiments in this thesis, $\mathcal{M}_\pi$ is the area-weighted
-regional mean surface temperature introduced in \Cref{ch:specify}. The
-guidance construction itself is more general, however, and can be applied to
-other differentiable functionals of the forecast state.
-
-
+For the experiments in this thesis, $\mathcal{M}_\pi$ represents the
+area-weighted regional mean surface temperature introduced in
+\Cref{ch:specify}. The guidance construction itself is more general and can in
+principle be applied to other differentiable functionals of the forecast
+state.
 \subsection{Gradient-based flow guidance}
 \label{sec:gradient-flow-guidance}
 
-We index the discrete residual flow such that
-$z_{n+1,0}$ denotes the initial noise and $t=1,\ldots,T$ indexes the successive
-flow updates,
+For each weather state $x_n$, the residual flow starts from Gaussian noise
+
+\[
+    z_{n,0}
+    \sim
+    \mathcal{N}(0,I)
+\]
+
+and produces the final residual state $z_{n,T}$ through $T$ sampling steps,
+indexed by $t=0,\ldots,T-1$. At sampling step $t$, ArchesWeather evaluates the
+velocity $u_{n,t}$ and clean-state estimate from the current noisy residual
+state $z_{n,t}$ before advancing to $z_{n,t+1}$.
+
+Following the loss-based guidance formulation introduced in the background
+chapter, we define the local guidance gradient as
 
 \begin{equation}
-    z_{n+1,0}
-    \xrightarrow{\;1\;}
-    z_{n+1,1}
-    \xrightarrow{\;2\;}
-    \cdots
-    \xrightarrow{\;T\;}
-    z_{n+1,T}.
-    \label{eq:guided-flow-indexing}
-\end{equation}
-
-At flow step $t$, the model evaluates the velocity field and clean-state
-estimate from the current noisy state $z_{n+1,t-1}$. The local guidance
-direction is obtained by differentiating the loss in
-\Cref{eq:guidance-loss} with respect to this state,
-
-\begin{equation}
-    g_{n+1,t}
+    g_{n,t}
     :=
-    \nabla_{z_{n+1,t-1}}
-    \mathcal{L}_{n+1,t}.
+    \nabla_{z_{n,t}}
+    \mathcal{L}_{n,t}.
     \label{eq:guidance-gradient}
 \end{equation}
 
-For the squared target-gap objective, this can be written as
+For the squared target-gap loss in \Cref{eq:guidance-loss}, this gives
 
 \begin{equation}
-    g_{n+1,t}
+    g_{n,t}
     =
-    2\xi_{n+1,t}\,
-    \nabla_{z_{n+1,t-1}}
+    2\xi_{n,t}\,
+    \nabla_{z_{n,t}}
     \mathcal{M}_\pi
     \left(
-        \hat{x}_{n+1,t}
+        \hat{x}^{\mathrm{phys}}_{n,t}
     \right).
     \label{eq:guidance-gradient-expanded}
 \end{equation}
 
-Although the loss is defined through the masked quantity
-$\mathcal{M}_\pi(\hat{x}_{n+1,t})$, the gradient is propagated through the
-mapping from the noisy residual state to the complete clean-state estimate.
-The resulting direction therefore describes how the current noisy state can
-be modified, through the learned generative model, to change the targeted
-forecast quantity. It is not restricted to modifying only the entries selected
-by the mask.
+Although the loss is evaluated on the physical-space quantity
+$\mathcal{M}_\pi(\hat{x}^{\mathrm{phys}}_{n,t})$, differentiation is performed
+with respect to the normalized noisy residual state $z_{n,t}$. The gradient
+therefore propagates through both the inverse normalization and the learned
+mapping from the noisy residual to the clean-state estimate. The resulting
+guidance direction consequently lives in the normalized residual space in
+which the generative flow evolves.
 
-Following the loss-based guidance formulation introduced in the background
-chapter, the velocity field is modified according to
+Moreover, although the objective depends only on the regional quantity selected
+by $\pi$, the gradient is taken with respect to the complete residual state.
+It can therefore contain non-zero components outside the explicitly targeted
+variable and region. Rather than directly perturbing the selected atmospheric
+entries, the guidance gradient describes how the current residual state should
+change, through the learned generative model, to modify the targeted regional
+quantity.
+
+The velocity field is then modified according to
 
 \begin{equation}
-    \tilde{u}_{n+1,t}
+    \tilde{u}_{n,t}
     =
-    u_{n+1,t}
+    u_{n,t}
     -
-    \lambda_{n,t} g_{n+1,t},
+    \lambda_{n,t} g_{n,t},
     \label{eq:target-driven-guided-velocity}
 \end{equation}
 
-where $\lambda_{n,t}\geq0$ controls the guidance magnitude at weather step $n$
-and flow step $t$. The resulting Euler update is
+where $\lambda_{n,t}\geq0$ denotes the \emph{guidance strength} at weather
+step $n$ and flow step $t$. The corresponding Euler update becomes
 
 \begin{equation}
-    z_{n+1,t}
+    z_{n,t+1}
     =
-    z_{n+1,t-1}
+    z_{n,t}
     +
     h_t
-    \tilde{u}_{n+1,t},
+    \tilde{u}_{n,t},
     \qquad
-    t=1,\ldots,T.
+    t=0,\ldots,T-1.
     \label{eq:guided-euler-update}
 \end{equation}
 
-The local guidance direction is therefore fully determined by the specified
-target and the current generative state. What remains to be determined is the
-sequence of guidance magnitudes $\lambda_{n,t}$ required to realize the
-prescribed target. We address this design problem next.
-
+The guidance gradient $g_{n,t}$ is therefore determined locally by the
+prescribed target and the current generative state. What remains to be
+specified is the guidance strength $\lambda_{n,t}$ with which this direction
+is applied over the flow.
 \section{Guidance-strength design}
 \label{sec:guidance-strength-design}
 
-The background formulation in \Cref{sec:guidance-strength-schedules} decomposes
-the guidance strength into an overall magnitude, a flow-time profile, and an
-optional normalization factor. Applied independently at each weather step, this
-gives
+The general formulation in \Cref{sec:guidance-strength-schedules} decomposes
+the guidance strength into an overall gain, a flow-time profile, and an
+optional normalization factor. Applied independently at each weather step,
+this gives
 
 \begin{equation}
     \lambda_{n,t}
@@ -214,15 +306,17 @@ gives
     \label{eq:guidance-strength-decomposition}
 \end{equation}
 
-where $w_n$ controls the overall guidance magnitude used to generate
-$x_{n+1}$, $\gamma_t$ determines its relative variation over flow time, and
+where $w_n$ is the overall \emph{guidance gain} used while generating $x_n$,
+$\gamma_t$ determines the relative variation of guidance over flow time, and
 $\nu_{n,t}$ represents an optional additional normalization.
 
-In our method, we apply the raw guidance gradient without an additional
+In our method, we apply the raw guidance gradient without additional
 normalization and therefore set
 
 \begin{equation}
-    \nu_{n,t}=1.
+    \nu_{n,t}
+    =
+    1.
 \end{equation}
 
 The guidance strength consequently reduces to
@@ -230,210 +324,255 @@ The guidance strength consequently reduces to
 \begin{equation}
     \lambda_{n,t}
     =
-    w_n\gamma_t.
+    w_n\gamma_t,
     \label{eq:scalar-gain-guidance-strength}
 \end{equation}
 
-We prescribe $\gamma_t$ as a non-negative flow-time profile and normalize it
-such that
+and the guided velocity in
+\Cref{eq:target-driven-guided-velocity} becomes
 
 \begin{equation}
-    \max_{t=1,\ldots,T-1}\gamma_t = 1.
+    \tilde{u}_{n,t}
+    =
+    u_{n,t}
+    -
+    w_n\gamma_t g_{n,t}.
+    \label{eq:scalar-gain-guided-velocity}
+\end{equation}
+
+
+\subsection{Final flow step}
+
+Guidance is applied during the first $T-1$ Euler updates but omitted from the
+final update, indexed by $t=T-1$. This convention follows from the
+clean-prediction parameterization of ArchesWeather.
+
+At the beginning of the final update, the residual state is $z_{n,T-1}$ and
+the remaining noise level is $s_{T-1}$. From
+\Cref{eq:arches-velocity}, the corresponding velocity is
+
+\begin{equation}
+    u_{n,T-1}
+    =
+    \frac{
+        \hat{r}_{n,T-1}
+        -
+        z_{n,T-1}
+    }{
+        s_{T-1}
+    }.
+    \label{eq:final-flow-velocity}
+\end{equation}
+
+Since the endpoint has noise level $s_T=0$, the final Euler step size is
+
+\begin{equation}
+    h_{T-1}
+    =
+    s_{T-1}-s_T
+    =
+    s_{T-1}.
+\end{equation}
+
+Without guidance, the final update therefore becomes
+
+\begin{align}
+    z_{n,T}
+    &=
+    z_{n,T-1}
+    +
+    s_{T-1}u_{n,T-1}
+    \\
+    &=
+    z_{n,T-1}
+    +
+    \hat{r}_{n,T-1}
+    -
+    z_{n,T-1}
+    \\
+    &=
+    \hat{r}_{n,T-1}.
+    \label{eq:final-flow-snap}
+\end{align}
+
+The final update thus maps the noisy residual state directly onto the current
+clean-residual prediction. Applying guidance at this step would perturb the
+resulting residual without any subsequent model evaluation in which the
+modified state could be processed. We therefore set
+
+\begin{equation}
+    \gamma_{T-1}
+    =
+    \lambda_{n,T-1}
+    =
+    0.
+    \label{eq:no-final-guidance}
+\end{equation}
+
+Hence, $t=T-2$ is the final guided flow step. Omitting guidance at the final
+noise level is also consistent with the precipitation-guidance procedure of
+\textcite{ueyama2026guided}.
+
+
+\subsection{Flow-time profile}
+
+We prescribe $\gamma_t$ as a non-negative profile over the guided flow steps.
+Since its overall scale can be absorbed into $w_n$, we normalize it such that
+
+\begin{equation}
+    \max_{t=0,\ldots,T-2}
+    \gamma_t
+    =
+    1.
     \label{eq:guidance-profile-normalization}
 \end{equation}
 
-Only the relative variation of $\gamma_t$ over flow time is therefore encoded
-by the profile, while its overall magnitude is carried entirely by $w_n$.
-Conceptually, the two quantities address different aspects of the guidance
-problem: $\gamma_t$ determines \emph{where} along the generative flow guidance
-is applied, whereas $w_n$ determines \emph{how strongly} it is applied at the
-current weather step. The profile families considered in this thesis are
+The two components of the guidance strength therefore have distinct roles:
+$\gamma_t$ determines \emph{where} along the generative flow guidance is
+applied, whereas $w_n$ determines its overall magnitude while generating the
+current weather state. The profile families considered in this thesis are
 introduced together with the experimental design.
-
-Substituting \Cref{eq:scalar-gain-guidance-strength} into
-\Cref{eq:target-driven-guided-velocity} gives the update used throughout the
-main experiments,
-
-\begin{equation}
-    \tilde{u}_{n+1,t}
-    =
-    u_{n+1,t}
-    -
-    w_n\gamma_t g_{n+1,t}.
-    \label{eq:scalar-gain-guided-velocity}
-\end{equation}
 
 
 \subsection{Alternative target-realization strategies}
 
 The decomposition above leaves several possibilities for determining the
-guidance strengths required to realize the prescribed target. During the
-development of the method, we considered three increasingly constrained
-formulations.
+guidance strengths required to realize the prescribed target. During method
+development, we considered three ways of doing so.
 
-A first approach adapts the guidance magnitude locally at every flow step such
+A first approach adapts the guidance strength locally at every flow step such
 that the remaining target gap follows a prescribed trajectory toward zero.
-This directly controls the evolution of the gap during generation, but requires
-specifying how quickly the target should be approached within the internal
-flow.
+This directly controls the evolution of the target gap during generation, but
+requires specifying how quickly it should close within the internal flow.
 
 A second possibility treats the individual guidance strengths
-$\lambda_{n,1},\ldots,\lambda_{n,T-1}$ as independent optimization variables
-and determines them jointly from the final target discrepancy. This provides
-substantially more flexibility, but replaces the scalar guidance-strength
-choice by a higher-dimensional optimization problem.
 
-The formulation retained in this thesis instead fixes their relative structure
-through $\gamma_t$ and adapts only the scalar gain $w_n$. Preliminary
-experiments showed that this restricted formulation was sufficient to realize
-the prescribed targets while reducing the target-realization problem to a
-single dimension. The additional flexibility of the former approaches was
-therefore not required for the experiments considered here. Their formulations
-and their role in the development of the final method are documented in
-\Cref{app:target-realization-development}.
+\[
+    \lambda_{n,0},\ldots,\lambda_{n,T-2}
+\]
 
+as independent optimization variables and determines them jointly from the
+terminal target discrepancy. This provides greater flexibility over the
+placement of guidance but introduces a higher-dimensional optimization
+problem.
 
-\subsection{Final flow step}
-
-Guidance is applied during the first $T-1$ flow updates but omitted from the
-final update. This convention follows directly from the clean-prediction
-parameterization of ArchesWeather.
-
-At the final flow step, the current residual state is
-$z_{n+1,T-1}$ and the remaining noise level is $s_T$. From
-\Cref{eq:arches-velocity}, the corresponding velocity is
-
-\begin{equation}
-    u_{n+1,T}
-    =
-    \frac{
-        \hat{r}_{n+1,T}
-        -
-        z_{n+1,T-1}
-    }{
-        s_T
-    }.
-    \label{eq:final-flow-velocity}
-\end{equation}
-
-Because the final Euler step integrates the remaining noise level completely,
-its step size is $h_T=s_T$. Without guidance,
-
-\begin{align}
-    z_{n+1,T}
-    &=
-    z_{n+1,T-1}
-    +
-    s_T u_{n+1,T}
-    \\
-    &=
-    z_{n+1,T-1}
-    +
-    \hat{r}_{n+1,T}
-    -
-    z_{n+1,T-1}
-    \\
-    &=
-    \hat{r}_{n+1,T}.
-    \label{eq:final-flow-snap}
-\end{align}
-
-The final update therefore maps the noisy residual state directly onto the
-current clean-residual prediction. A guidance correction applied at this step
-would perturb the resulting residual without any subsequent model evaluation
-in which the modified state could be processed. We consequently set
-
-\begin{equation}
-    \gamma_T
-    =
-    \lambda_{n,T}
-    =
-    0,
-    \label{eq:no-final-guidance}
-\end{equation}
-
-such that $t=T-1$ is the final guided flow step. Omitting guidance at the final
-noise level is also consistent with the precipitation-guidance procedure of
-\textcite{ueyama2026guided}.
-
+The formulation retained in this thesis instead fixes the relative flow-time
+structure through $\gamma_t$ and adapts only the scalar guidance gain $w_n$.
+This reduces target realization to a one-dimensional problem while preserving
+explicit control over where guidance is applied during the flow. The empirical
+implications of this restriction are examined in the experimental analysis.
 
 \section{Target realization by gain adaptation}
 \label{sec:target-realization}
 
 Once the flow-time profile $\gamma_t$ has been fixed, the only remaining
-guidance parameter at weather step $n$ is the scalar gain $w_n$. Rather than
-choosing this gain beforehand, we determine it from the target that was
-specified for the state $x_{n+1}$.
+guidance parameter for generating $x_n$ is the scalar gain $w_n$. Rather than
+choosing this gain independently of the desired outcome, we determine it from
+the prescribed target $y_n^\star$.
 
-For a fixed atmospheric context, flow-time profile, and initial noise
-realization $z_{n+1,0}$, running the complete guided residual flow defines the
-generated state as a function of the gain,
+For a fixed guided atmospheric context
+
+\[
+    \left(
+        x_{n-2}^{\mathrm{gui}},
+        x_{n-1}^{\mathrm{gui}}
+    \right),
+\]
+
+flow-time profile $\gamma_t$, and initial residual-noise realization
+$z_{n,0}$, running the complete residual flow defines the generated state as a
+function of the scalar gain,
 
 \begin{equation}
-    x_{n+1}^{\mathrm{gui}}(w_n).
+    x_n^{\mathrm{gui}}(w_n).
+    \label{eq:guided-state-as-function-of-gain}
 \end{equation}
 
-We define the corresponding terminal target gap by
+Setting $w_n=0$ removes guidance from the current residual flow while leaving
+its atmospheric conditioning context and stochastic realization unchanged.
+By the definition introduced in \Cref{sec:target-driven-guidance},
 
 \begin{equation}
-    \xi_{n+1}(w_n)
+    x_n^{\mathrm{gui}}(0)
+    =
+    x_n^{\mathrm{ung}\mid\mathrm{gui}}.
+    \label{eq:zero-gain-state}
+\end{equation}
+
+Positive values of $w_n$ instead modify the residual flow according to the
+fixed profile $\gamma_t$.
+
+As in the local guidance objective, target realization is evaluated in
+physical units. We therefore define the terminal target gap as
+
+\begin{equation}
+    \xi_n(w_n)
     :=
     \mathcal{M}_\pi
     \left(
-        x_{n+1}^{\mathrm{gui}}(w_n)
+        \mathcal{D}
+        \left(
+            x_n^{\mathrm{gui}}(w_n)
+        \right)
     \right)
     -
-    y_{n+1}^\star.
+    y_n^\star,
     \label{eq:terminal-target-gap}
 \end{equation}
 
-This quantity differs from the intermediate gap
-$\xi_{n+1,t}$ in \Cref{eq:guidance-gap}. The latter is evaluated on a clean
-estimate during the flow and determines the local guidance direction, whereas
-$\xi_{n+1}(w_n)$ is evaluated on the final generated state and measures whether
-the prescribed target was actually realized.
+where $\mathcal{D}$ denotes the inverse data normalization introduced in
+\Cref{eq:arches-physical-clean-state}.
 
-The target-realization problem is therefore the scalar root-finding problem
+This terminal gap should be distinguished from the intermediate target gap
+$\xi_{n,t}$ in \Cref{eq:guidance-gap}. The latter is evaluated on the
+physical-space clean-state estimate during the residual flow and determines
+the local guidance gradient. In contrast, $\xi_n(w_n)$ is evaluated on the
+final generated weather state and measures whether the prescribed target has
+actually been realized.
+
+Target realization therefore amounts to solving the scalar root-finding
+problem
 
 \begin{equation}
-    \xi_{n+1}(w_n^\star)
+    \xi_n(w_n^\star)
     =
     0.
     \label{eq:target-realization-root}
 \end{equation}
 
-This formulation directly reflects the target-driven nature of the method:
-the desired endpoint is fixed first, and the role of $w_n$ is solely to
-determine the guidance magnitude required to reach it.
+The flow-time profile $\gamma_t$ determines the relative placement of guidance
+within the residual flow, while $w_n^\star$ determines the overall gain
+required for that profile to realize the target.
 
 
 \subsection{Secant search}
 
-Since evaluating $\xi_{n+1}(w_n)$ requires running the complete guided
-residual flow, we seek its root without computing derivatives with respect to
-the gain. We use the secant method, which constructs a local linear
-approximation from two previously evaluated gains.
+Evaluating $\xi_n(w_n)$ requires running the complete residual flow. Rather
+than differentiating the terminal target gap with respect to $w_n$, we solve
+\Cref{eq:target-realization-root} using the secant method, which estimates the
+root from successive evaluations of the scalar function.
 
-Given $w_n^{(j-1)}$ and $w_n^{(j)}$, the next candidate is
+Given two previously evaluated gains $w_n^{(j-1)}$ and $w_n^{(j)}$, the next
+candidate is
 
 \begin{equation}
     w_n^{(j+1)}
     =
     w_n^{(j)}
     -
-    \xi_{n+1}
+    \xi_n
     \left(
         w_n^{(j)}
     \right)
     \frac{
         w_n^{(j)}-w_n^{(j-1)}
     }{
-        \xi_{n+1}
+        \xi_n
         \left(
             w_n^{(j)}
         \right)
         -
-        \xi_{n+1}
+        \xi_n
         \left(
             w_n^{(j-1)}
         \right)
@@ -441,42 +580,38 @@ Given $w_n^{(j-1)}$ and $w_n^{(j)}$, the next candidate is
     \label{eq:secant-guidance-gain}
 \end{equation}
 
-The first evaluation uses $w_n=0$, corresponding to generation of the current
-weather step without flow guidance, and a second evaluation uses a positive
-initial gain. For later weather steps, the $w_n=0$ evaluation should not be
-confused with the matched unguided trajectory used to define the target in
-\Cref{ch:specify}. Previous guided states already form part of the
-autoregressive conditioning context, so removing guidance from the current
-residual flow does not in general recover the independently generated unguided
-forecast.
+The first evaluation uses $w_n=0$ and therefore produces
+$x_n^{\mathrm{ung}\mid\mathrm{gui}}$. A second evaluation uses a positive
+initial gain, after which the secant updates are applied iteratively.
 
-All evaluations performed by the secant search use the same initial noise
-realization $z_{n+1,0}$. Consequently, the mapping
+All evaluations at weather step $n$ use the same guided atmospheric context,
+the same flow-time profile, and the same initial residual-noise realization
+$z_{n,0}$. Consequently, the mapping
 
 \[
     w_n
     \longmapsto
-    \xi_{n+1}(w_n)
+    \xi_n(w_n)
 \]
 
-changes only through the guidance magnitude and not through stochastic
-differences between repeated flow samples. Importantly, the local guidance
-gradients $g_{n+1,t}$ are nevertheless recomputed during every evaluation,
-since changing $w_n$ changes the sequence of noisy states and therefore the
-clean-state estimates encountered along the flow.
+changes only through the guidance gain rather than through stochastic or
+conditioning differences between repeated flow evaluations. The local
+guidance gradients $g_{n,t}$ are nevertheless recomputed during every
+evaluation, since changing $w_n$ changes the noisy states and clean-state
+estimates encountered along the flow.
 
-The secant iteration is restricted to non-negative gains. If the target is
+The secant search is restricted to non-negative gains. If the target is
 reached within the prescribed tolerance, the corresponding gain is retained.
 If no root is obtained within the numerical safeguards or evaluation budget,
-we instead select the evaluated value that leaves the smallest absolute
-terminal gap,
+we instead select the evaluated gain producing the smallest absolute terminal
+gap,
 
 \begin{equation}
     w_n^\star
     :=
     \arg\min_{w\in\mathcal{W}_n}
     \left|
-        \xi_{n+1}(w)
+        \xi_n(w)
     \right|,
     \label{eq:best-evaluated-gain}
 \end{equation}
@@ -486,14 +621,13 @@ The concrete initialization, convergence tolerance, step safeguards, and
 maximum number of evaluations are specified together with the experimental
 setup.
 
-This procedure is repeated independently at every guided weather step. The
-resulting sequence of gains
+This procedure is repeated while generating each guided weather state
+$n=1,\ldots,H$. The resulting sequence
 
 \[
-    w_0^\star,\ldots,w_{H-1}^\star
+    w_1^\star,\ldots,w_H^\star
 \]
 
-therefore adapts the overall guidance magnitude to the member-specific target
-at each point along the prescribed trajectory. For weather states beyond the
-guided horizon, $n+1>H$, no target is imposed and the autoregressive forecast
-continues without guidance.
+adapts the overall guidance gain to the member-specific target at each weather
+step. For $n>H$, no target is imposed and the autoregressive forecast continues
+without guidance.

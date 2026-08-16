@@ -806,6 +806,42 @@
       \verb 10.48550/arXiv.2207.12598
       \endverb
     \endentry
+    \entry{flowsanddiffusions2026}{misc}{}
+      \name{author}{2}{}{%
+        {{hash=303c0e663d9eb9c3002e162593a4c2e9}{%
+           family={Holderrieth},
+           familyi={H\bibinitperiod},
+           given={Peter},
+           giveni={P\bibinitperiod}}}%
+        {{hash=4c5faa1844af121d86dcc6d290b918b7}{%
+           family={Erives},
+           familyi={E\bibinitperiod},
+           given={Ezra},
+           giveni={E\bibinitperiod}}}%
+      }
+      \strng{namehash}{585737a56834b089681962cc3cbdc5c2}
+      \strng{fullhash}{585737a56834b089681962cc3cbdc5c2}
+      \strng{bibnamehash}{585737a56834b089681962cc3cbdc5c2}
+      \strng{authorbibnamehash}{585737a56834b089681962cc3cbdc5c2}
+      \strng{authornamehash}{585737a56834b089681962cc3cbdc5c2}
+      \strng{authorfullhash}{585737a56834b089681962cc3cbdc5c2}
+      \field{sortinit}{H}
+      \field{sortinithash}{23a3aa7c24e56cfa16945d55545109b5}
+      \field{labelnamesource}{author}
+      \field{labeltitlesource}{title}
+      \field{eprinttype}{arXiv}
+      \field{title}{Introduction to Flow Matching and Diffusion Models}
+      \field{year}{2026}
+      \verb{eprint}
+      \verb 2506.02070
+      \endverb
+      \verb{urlraw}
+      \verb https://diffusion.csail.mit.edu/
+      \endverb
+      \verb{url}
+      \verb https://diffusion.csail.mit.edu/
+      \endverb
+    \endentry
     \entry{hua2024weather}{article}{}
       \name{author}{4}{}{%
         {{hash=9ea3ffb7216dde05913b360766718675}{%

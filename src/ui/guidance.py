@@ -15,6 +15,7 @@ def _(
     # Reductions store: precomputed spatial reductions for the analysis charts.
     # Built once for the whole sweep grid -> every slide reads tiny in-memory arrays.
     if notebook_mode == "analyze_rollout":
+        mo.stop(rollout_id is None)   # no rollout -> gated with a hint in the config cell
         build_reductions_button = mo.ui.run_button(label="build reductions")
         if not reductions_grid_matches(rollout_id):
             _rs_msg = "⚠️ to build"
@@ -423,6 +424,8 @@ def _(
             sweep_params_widget = None
 
         case "analyze_rollout":
+            # gated in the config cell: no rollout -> stop the analyze sweep-control cascade
+            mo.stop(rollout_id is None)
             experiment_params = get_sweep_dict(rollout_id)
 
             # Every swept axis is defined here from the rollout's own sweep dict (so a
@@ -830,7 +833,7 @@ def _(
 
 
 @app.cell(hide_code=True)
-def config_cell(get_config, notebook_mode, rollout_id):
+def config_cell(get_config, mo, notebook_mode, rollout_id):
     # config = the loaded rollout's pinned settings, independent of the sweep selection.
     # Kept in its own cell (not bundled with ZHCJ's sweep-dependent data loads) so changing a
     # sweep axis (R, etc.) doesn't re-run config -> T/M/N -> reset the t/m/n sliders.
@@ -838,6 +841,14 @@ def config_cell(get_config, notebook_mode, rollout_id):
         case "unguided_rollout":
             config = None
         case "guided_rollout" | "analyze_rollout":
+            # no rollout selected yet (e.g. analyze mode before any guided run exists) -> halt
+            # this cell and every analysis cell that reads `config`, showing a hint instead of a
+            # NoneType cascade. Generating a run + pressing refresh clears the gate.
+            mo.stop(
+                rollout_id is None,
+                mo.md("⚠️ **No rollout available.** `analyze_rollout` needs a generated guided "
+                      "run — switch to `guided_rollout` to create one, then press **refresh**."),
+            )
             config = get_config(rollout_id)
         case _:
             config = None
@@ -4644,9 +4655,9 @@ def _(
                 # blue = the GUIDANCE move stacked on top (unguided -> guided landing).
                 # The two stack to the full step; circles mark the realized states.
                 _bar_off = 0.16
-                _flow_move = _land_ung[m] - _states[m, :_T_len]
+                _flow_move = _land_ung[m] - _states[m, :_T_flow]
                 _gui_move = _states[m, 1:] - _land_ung[m]
-                _ax.bar(_xt[1:] - _bar_off, _flow_move, bottom=_states[m, :_T_len], width=0.28,
+                _ax.bar(_xt[1:] - _bar_off, _flow_move, bottom=_states[m, :_T_flow], width=0.28,
                         color="#C0392B", alpha=0.35, edgecolor="#C0392B", linewidth=0.5, zorder=3,
                         label=r"flow move  (state$_t$ $\to$ gui\_ung landing)")
                 _ax.bar(_xt[1:] + _bar_off, _gui_move, bottom=_land_ung[m], width=0.28,
@@ -4660,7 +4671,7 @@ def _(
                 # branching sparks: from each realized state to where the SAVED unguided
                 # vf would land (rollout-trajectories guided_unguided grammar), in the
                 # landing marker's violet
-                for _ti in range(_T_len):
+                for _ti in range(_T_flow):
                     _ax.plot([_xt[_ti], _xt[_ti + 1]], [_states[m, _ti], _land_ung[m, _ti]],
                              linestyle="--", linewidth=1.2, color="#800080", alpha=0.6,
                              zorder=5, label="_nolegend_")
@@ -4669,7 +4680,7 @@ def _(
                          label=r"gui\_ung landing  $M(\hat{x}^{\text{gui\_det}}+\sigma_r(z_t+h_t u_t)) - y_n$")
                 if _is_tgt:
                     _ax.axhline(0.0, color="#888888", linewidth=1.0, alpha=0.8, zorder=1)
-                _ax.set_xlim(-1.0, _T_len + 0.4)
+                _ax.set_xlim(-1.0, _T_flow + 0.4)
                 _ax.set_xticks(_xt)
                 # breathing room so the noise anchor doesn't sit on the axis, then a
                 # direction-arrow strip inside the bottom margin (red row above blue)
@@ -4765,7 +4776,7 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         "eta":            (0.01,  1.0,   False, False),
         # sigma_div: mask hyper shared by ALL mask modes -- extent / sigma_div
         # (2.0 = base box, 4.0 = half, 1.0 = double)
-        "sigma_div":      (0.5,   4.0,   False, False),
+        "sigma_div":      (2,   4.0,   False, False),
         # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
         "phi":            (0.01,  1.0,   True,  False),
     }

@@ -2,44 +2,52 @@
 \label{ch:specify}
 
 The first stage of our approach addresses \emph{what} weather scenario should
-be generated. We specify an event through two components: a mask $\pi$ that
-selects the atmospheric variable and spatial region of interest, and a target
-trajectory (TODO: insert y here with correct notation) describing the desired evolution of the corresponding regional
-quantity over the guided forecast horizon.
+be generated. We specify an event through two components: a mask $\pi$, which
+selects the atmospheric variable and spatial region of interest, and a relative
+intensity trajectory $\rho_{1:H}$, which describes how strongly the targeted
+quantity should deviate from an unguided reference over the guided forecast
+horizon.
 
-Throughout this thesis, we focus on regional surface-temperature heatwaves.
-Accordingly, $\pi$ selects surface temperature over a prescribed region, while
-the target trajectory specifies how its regional average should evolve over
-the guided weather steps. The formulation is nevertheless not restricted to
-temperature and can be applied to other variables or (TODO: reformulate) differentiable regional
-functionals of the forecast state.
+Throughout this thesis, we focus on regional high-temperature scenarios.
+Accordingly, $\pi$ selects surface temperature over a prescribed region, and
+$\rho_{1:H}$ controls the requested increase of its regional mean. The
+underlying formulation is not restricted to temperature: the regional mean
+used here could be replaced by another differentiable functional of the
+forecast state.
 
-(TODO: improve introductory sentence)
-As generative model, ArchesWeather weather can generate ensemble forecasts by drawing multiple samples.
-To generate weather scenarios we want to specify the guidance target 
-to retain the properties of the ensemble. Rather than guiding all
-members toward the same absolute trajectory, we define a common relative
-displacement and apply it to each member with respect to its matched unguided
-forecast. This preserves the member-specific structure of the target
-trajectories instead of imposing an artificial collapse onto a single value.
+Since ArchesWeather is a generative model, the same initial atmospheric context can
+produce an ensemble of different forecast trajectories. We therefore avoid
+assigning every ensemble member the same absolute target. Instead, we first
+generate an unguided reference ensemble and apply a common relative change
+$\rho_n$ to each member's own reference value. This yields member-specific
+absolute targets while retaining the differences present across the reference
+ensemble.
 
-We first define the target variable and region through the spatial mask
-$\pi$. We then construct the target trajectory over the guided horizon and
-derive the corresponding member-specific targets to use in the guidance
-algorithm.
+The relative change $\rho_n$ can be interpreted through the corresponding
+change in the ensemble-mean targeted quantity. In the experiments considered
+here, it serves as a controlled intensity parameter rather than as a
+climatological definition of extremeness. Numerical choices of its magnitude
+are introduced together with the experimental setup.
 
+We first define the target variable and spatial region through the mask $\pi$.
+We then construct the relative intensity trajectory and derive the
+member-specific targets used by the guidance algorithm. Finally, we summarize
+the complete specification pipeline from the unguided reference ensemble to
+the resulting target trajectories.
 \section{Target variable and region}
 
-We jointly specify the target variable and spatial region through a mask
-$\pi$ over the weather state. Let
+We specify the atmospheric quantity of interest through a mask $\pi$ over the
+weather state. Since the targets in this chapter are defined in physical
+units, we denote the corresponding physical-space weather state by
 
 \[
-    x_n \in \mathbb{R}^{V\times I\times J}
+    x_{n,\mathrm{phys}}
+    \in
+    \mathbb{R}^{V\times I\times J},
 \]
 
-denote a weather state, where $V$ indexes atmospheric fields, while $I$ and
-$J$ index latitude and longitude. We denote the corresponding spatial
-coordinates by
+where $V$ indexes atmospheric fields and $I$ and $J$ index latitude and
+longitude. The corresponding spatial coordinates are denoted by
 
 \[
     (\varphi_i,\psi_j),
@@ -49,21 +57,20 @@ coordinates by
     j=1,\ldots,J.
 \]
 
-Let $v^\star$ denote the target variable, and let
+Let $v^\star$ denote the target variable and let
 
 \[
     k_{ij}\in\{0,1\}
 \]
 
-indicate whether spatial grid cell $(i,j)$ lies inside the selected target
-region. In this thesis, the spatial support is defined through a rectangular
-bounding box on the latitude--longitude grid.
+indicate whether grid cell $(i,j)$ lies inside the selected target region.
+In this thesis, the spatial support is defined by a rectangular bounding box
+on the latitude--longitude grid.
 
 The mask is non-zero only for the selected variable and within the selected
-region. To obtain an area-weighted regional average, each included grid cell
-is weighted according to the physical surface area that it represents. For a
-regular latitude--longitude grid, the area contribution of latitude row $i$ is
-proportional to
+region. To obtain a regional average that accounts for differences in the
+physical area represented by each grid cell, we weight each included latitude
+row according to
 
 \begin{equation}
     a_i
@@ -73,9 +80,9 @@ proportional to
     \label{eq:mask-cell-area}
 \end{equation}
 
-where $[\beta_i^-,\beta_i^+]$ denotes the latitude extent of the corresponding
-grid cell. Since the longitudinal grid spacing is constant, its contribution
-cancels during normalization.
+where $[\beta_i^-,\beta_i^+]$ denotes the latitude extent of row $i$.
+Because the longitudinal grid spacing is constant, its contribution cancels
+under normalization.
 
 We therefore define the normalized mask as
 
@@ -102,28 +109,30 @@ such that
 The corresponding masked-average operator is
 
 \begin{equation}
-    \mathcal{M}_\pi(x_n)
+    \mathcal{M}_\pi(x_{n,\mathrm{phys}})
     :=
     \sum_{v,i,j}
-    \pi_{vij}\,x_{n,vij}.
+    \pi_{vij}\,
+    x_{n,\mathrm{phys},vij}.
     \label{eq:masked-average}
 \end{equation}
 
-For the experiments considered in this thesis,
-$\mathcal{M}_\pi(x_n)$ therefore represents the area-weighted mean surface
-temperature within the selected target region.
+For the experiments in this thesis, $v^\star$ is surface temperature, such
+that $\mathcal{M}_\pi(x_{n,\mathrm{phys}})$ represents the area-weighted mean
+surface temperature within the selected target region.
 
-Area weighting prevents the regional average from being biased toward
+Area weighting prevents the regional mean from being biased toward
 high-latitude grid cells, which represent a smaller physical area on the
 sphere. This follows the latitude-weighting convention used in
 WeatherBench~2 \parencite{rasp2024weatherbench2}.
 
-Figure~\ref{fig:target-mask-example} illustrates the resulting area-weighted
-mask for an example target region over South America. Its spatial support is
-rectangular on the latitude--longitude grid, while the normalized weights vary
-with latitude according to the physical area represented by each grid cell.
+Figure~\ref{fig:target-mask-example} illustrates the resulting mask for an
+example target region over South America. Its support is rectangular on the
+latitude--longitude grid, while the normalized weights vary with latitude
+according to the physical area represented by each grid cell.
 
-TODO: improve the figure by having a single colorbar on the side and the globe has the same diameter as the side of the rectangle.
+% TODO: Improve the figure by using a single colorbar and matching the globe
+% diameter to the side length of the rectangular representation.
 \begin{figure}[t]
     \centering
     \begin{subfigure}[c]{0.48\textwidth}
@@ -148,139 +157,153 @@ TODO: improve the figure by having a single colorbar on the side and the globe h
     \label{fig:target-mask-example}
 \end{figure}
 
-Using a binary spatial support makes the target region explicit. Within the
-selected region, grid cells differ only through their physical area and are
-otherwise treated uniformly. This avoids introducing an additional spatial
-preference, as would occur, for example, with a bell-shaped mask whose center
-is weighted more strongly than its boundaries. Normalizing $\pi$ to sum to one
-ensures that $\mathcal{M}_\pi$ remains an average and is therefore directly
-comparable across regions of different sizes.
+The binary spatial support treats all locations within the selected region
+equally apart from the correction for physical grid-cell area. Normalizing
+$\pi$ to sum to one ensures that $\mathcal{M}_\pi$ remains an average and is
+therefore directly comparable across regions of different sizes.
 
-Although $\pi$ selects one particular variable and region, its spatial support
-$k_{ij}$ can be reused to construct analogous regional averages for other
-atmospheric fields. This becomes useful when evaluating how guidance applied to
-surface temperature affects other variables and pressure levels over the same
-region.
-
+Although we use $\mathcal{M}_\pi$ to compute a regional mean, the subsequent
+guidance formulation does not fundamentally depend on this particular choice.
+It can in principle be replaced by another differentiable functional of the
+physical forecast state.
 \section{Target trajectory}
 \label{sec:target-trajectory}
 
-Once the target variable and region have been specified through the mask
-$\pi$, the remaining task is to define the desired evolution of the targeted
-quantity. Let $H\leq N$ denote the final guided weather step. We first describe
-this evolution at the ensemble level through the target trajectory
+Once the target variable and region have been specified through $\pi$, the
+remaining task is to define how strongly the targeted quantity should deviate
+from an unguided reference over weather time.
 
-\[
-    y^\star_{1:H}
-    =
-    \left(y^\star_1,\ldots,y^\star_H\right),
-\]
+Let $M$ denote the number of ensemble members, $N$ the full experimental
+forecast horizon, and $H\leq N$ the final guided weather step. Guidance is
+applied for $n=1,\ldots,H$, while the forecast is continued without guidance
+for $n>H$. This allows us to examine how the generated scenario evolves after
+the intervention is removed.
 
-and subsequently translate it into member-specific targets
-$y^\star_{1:H,m}$. No target is imposed for $n>H$.
 
-TODO: make sure that $N$ is actually defined in the background, it also doesn't hurt to respecify it here. 
+\subsection{Reference ensemble and member-specific targets}
 
-\subsection{Guiding an ensemble}
-
-At each weather step, ensemble members generally attain different values of
-the targeted quantity $\mathcal{M}_\pi(x_n)$, with their spread typically
-increasing as forecast uncertainty grows with lead time.
-
-Assigning the same absolute target trajectory to every member would ignore
-these differences and prescribe zero ensemble spread in
-$\mathcal{M}_\pi(x_n)$. (TODO: check wording) We therefore define the guidance target as desired change relative to each
-member's own matched unguided trajectory.
-
-Each guided rollout is paired with a matched unguided rollout
+Before generating a guided ensemble, we first generate a complete unguided
+reference ensemble over the experimental horizon,
 
 \[
     \left\{
-        x_{n,m}^{\mathrm{ung}}
-    \right\}_{n=1}^{N},
-    \qquad
-    m=1,\ldots,M,
+        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+    \right\}_{
+        \substack{
+            n=1,\ldots,N\\
+            m=1,\ldots,M
+        }
+    }.
 \]
 
-using the same initial atmospheric context and matched stochastic realizations.
-At weather step $n$, we prescribe a common relative change $\rho_n$ across the
-ensemble and define the target of member $m$ as
+All members start from the same initial atmospheric context but differ through
+their stochastic residual realizations. For each member and weather step, the
+initial residual-noise realization used in the reference rollout is retained
+and later reused when generating the corresponding guided member. The
+stochastic realizations are therefore paired, although the autoregressive
+conditioning states generally differ once guidance has altered the trajectory.
+
+For convenience, we denote the targeted quantity of reference member $m$ at
+weather step $n$ by
+
+\begin{equation}
+    q_{n,m}^{\mathrm{ung}}
+    :=
+    \mathcal{M}_\pi
+    \left(
+        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+    \right).
+    \label{eq:unguided-target-quantity}
+\end{equation}
+
+Rather than assigning every member the same absolute target, we prescribe a
+common relative change $\rho_n$ and apply it to each member's own reference
+value:
 
 \begin{equation}
     y_{n,m}^\star
     :=
     (1+\rho_n)\,
-    \mathcal{M}_\pi
-    \left(
-        x_{n,m}^{\mathrm{ung}}
-    \right),
+    q_{n,m}^{\mathrm{ung}},
     \qquad
     n=1,\ldots,H.
     \label{eq:member-target}
 \end{equation}
 
-The corresponding ensemble-level target is the mean of the member-specific
-targets,
-
-\begin{equation}
-    y_n^\star
-    :=
-    \frac{1}{M}
-    \sum_{m=1}^{M}
-    y_{n,m}^\star
-    =
-    (1+\rho_n)
-    \frac{1}{M}
-    \sum_{m=1}^{M}
-    \mathcal{M}_\pi
-    \left(
-        x_{n,m}^{\mathrm{ung}}
-    \right).
-    \label{eq:ensemble-target}
-\end{equation}
-
-Applying the same relative change to all members retains the differences
-between their matched unguided trajectories. Let
-$\operatorname{std}_m[\cdot]$ denote the standard deviation across the
-ensemble-member index $m=1,\ldots,M$ at a fixed weather step $n$. Then, for
-$1+\rho_n>0$, the spread of the member-specific targets satisfies
-
-\begin{equation}
-    \operatorname{std}_m
-    \left[
-        y_{n,m}^\star
-    \right]
-    =
-    (1+\rho_n)\,
-    \operatorname{std}_m
-    \left[
-        \mathcal{M}_\pi
-        \left(
-            x_{n,m}^{\mathrm{ung}}
-        \right)
-    \right].
-    \label{eq:target-ensemble-spread}
-\end{equation}
-
-The target ensemble therefore inherits the lead-time-dependent spread of the
-matched unguided ensemble, scaled by the prescribed relative change, rather
-than collapsing all members onto a common trajectory. Whether the guided
-ensemble reflects the spread implied by these member-specific
-targets ultimately depends on the dynamics of the guidance algorithm. 
+The member-specific targets therefore retain the differences present across
+the unguided reference ensemble. Members with different reference values are
+assigned correspondingly different absolute targets instead of being forced
+toward a common trajectory. This property concerns the construction of the
+target ensemble; whether the resulting guided ensemble retains the implied
+spread depends on the behaviour of the guidance algorithm.
 
 
 \subsection{Prescribing the relative change}
 
-It remains to specify the relative change $\rho_n$. In principle, the shape
-and magnitude of $\rho_{1:H}$ could be informed by historical events,
-climatological statistics, or other application-specific definitions of the
-scenario of interest. Historical events could, for example, provide a
-reference for how the requested relative intensity evolves over time.
+The dimensionless quantity $\rho_n$ controls the requested intensity of the
+scenario at weather step $n$. Its magnitude can be related to a more physically
+interpretable change in the ensemble-mean targeted quantity.
 
-(TODO: state this also in the intro for consistency)
-The focus of this thesis, however, is to evaluate the behaviour of the guidance
-method under controlled settings. We therefore prescribe $\rho_n$ directly and
-use a simple linear increase over the guided horizon,
+Define the unguided ensemble mean as
+
+\begin{equation}
+    \bar{q}_n^{\mathrm{ung}}
+    :=
+    \frac{1}{M}
+    \sum_{m=1}^{M}
+    q_{n,m}^{\mathrm{ung}}.
+    \label{eq:unguided-ensemble-mean}
+\end{equation}
+
+Under \Cref{eq:member-target}, the mean of the member-specific targets is
+
+\begin{equation}
+    \bar{y}_n^\star
+    =
+    (1+\rho_n)\,
+    \bar{q}_n^{\mathrm{ung}}.
+    \label{eq:ensemble-target}
+\end{equation}
+
+The corresponding requested change in the ensemble mean is therefore
+
+\begin{equation}
+    \Delta\bar{q}_n^\star
+    :=
+    \bar{y}_n^\star
+    -
+    \bar{q}_n^{\mathrm{ung}}
+    =
+    \rho_n\,
+    \bar{q}_n^{\mathrm{ung}}.
+    \label{eq:ensemble-mean-change}
+\end{equation}
+
+Equivalently, a desired ensemble-mean change can be translated into the
+relative intensity parameter through
+
+\begin{equation}
+    \rho_n
+    =
+    \frac{
+        \Delta\bar{q}_n^\star
+    }{
+        \bar{q}_n^{\mathrm{ung}}
+    }.
+    \label{eq:relative-change-from-mean-change}
+\end{equation}
+
+For the surface-temperature experiments in this thesis,
+$\Delta\bar{q}_n^\star$ corresponds to a requested increase in regional mean
+temperature. We nevertheless use $\rho_n$ as the parameter of the
+specification, since the same construction can be applied independently of the
+units of the targeted quantity.
+
+In principle, the trajectory $\rho_{1:H}$ could be chosen from historical
+events, climatological statistics, or another application-specific definition
+of the desired scenario. Here, however, our aim is to study the guidance method
+under controlled and progressively more demanding conditions. We therefore use
+the simple linear trajectory
 
 \begin{equation}
     \rho_n
@@ -291,75 +314,116 @@ use a simple linear increase over the guided horizon,
     \label{eq:relative-target-schedule}
 \end{equation}
 
-where $\rho_H$ denotes the maximum requested relative change and $H$ the final
-guided weather step.
+where $\rho_H$ denotes the requested relative intensity at the final guided
+weather step.
 
-This construction gradually increases the requested deviation rather than
-imposing its full magnitude from the first forecast step. Because the relative
-change is applied to each member's matched unguided value through
-\Cref{eq:member-target}, the target trajectory continues to inherit the
-individual temporal evolution of that member while progressively moving away
-from its unguided forecast. At step $H$, the prescribed relative change reaches
-$\rho_H$ and guidance is subsequently stopped.
+The linear trajectory gradually increases the requested deviation rather than
+imposing its full magnitude from the beginning of the forecast. It is chosen
+for experimental simplicity and interpretability rather than as a model of the
+temporal evolution of real high-temperature events. Different choices of
+$\rho_H$ therefore define different experimental intensity levels, whose
+numerical values are introduced in the experimental setup.
 
-For the surface-temperature experiments considered here, $\rho_H$ is therefore
-a scale-dependent experimental intensity parameter rather than a climatological
-measure of heatwave extremeness.
-TODO: specify this how we will use it in our experiments (we will define multiple levels of intensity and assess results under the different levels)
-
+After weather step $H$, no target is imposed. The forecast is nevertheless
+continued until $N$, allowing us to assess how the guided trajectory evolves
+once guidance is switched off.
 
 \section{Pipeline overview}
-In practical terms, the elements specified throughout this chapter are changed together as follows.
-Starting from an initial atmospheric context
-$(x_{-1},x_0)$, we first define the mask $\pi$, which specifies the target
-variable and spatial region. For each ensemble member $m=1,\ldots,M$, we then
-generate a matched unguided rollout
+
+The complete specification procedure is summarized in
+\Cref{fig:specification-pipeline}. Starting from an initial atmospheric
+context $(x_{-1},x_0)$, we first choose the mask $\pi$, which determines the
+target variable and spatial region.
+
+For each ensemble member $m=1,\ldots,M$, we then generate an unguided
+reference rollout over the full experimental horizon,
 
 \[
     \left\{
-        x_{n,m}^{\mathrm{ung}}
-    \right\}_{n=1}^{N},
+        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+    \right\}_{n=1}^{N}.
 \]
 
-which serves as the reference trajectory for constructing the target.
+Together with the mask, this reference ensemble determines the corresponding
+regional quantities
 
-A relative intensity trajectory $\rho_{1:H}$ is prescribed over the guided
-horizon and applied to each matched unguided member according to
-\Cref{eq:member-target}. This yields the set of member-specific target
-trajectories
+\[
+    q_{n,m}^{\mathrm{ung}}
+    =
+    \mathcal{M}_\pi
+    \left(
+        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+    \right),
+\]
+
+and their ensemble mean $\bar{q}_n^{\mathrm{ung}}$.
+
+We next prescribe the relative intensity trajectory $\rho_{1:H}$. As discussed
+in \Cref{sec:target-trajectory}, its magnitude can equivalently be motivated
+through a desired change $\Delta\bar{q}_n^\star$ in the ensemble-mean targeted
+quantity, with
+
+\[
+    \rho_n
+    =
+    \frac{
+        \Delta\bar{q}_n^\star
+    }{
+        \bar{q}_n^{\mathrm{ung}}
+    }.
+\]
+
+Applying the resulting relative change to each reference member yields the
+member-specific target trajectories
 
 \[
     \left\{
         y_{1:H,m}^\star
-    \right\}_{m=1}^{M}.
+    \right\}_{m=1}^{M},
 \]
 
-The output of the specification stage is therefore
+where
 
-\begin{equation}
-    \left(
-        \pi,\,
-        \left\{
-            y_{1:H,m}^\star
-        \right\}_{m=1}^{M}
-    \right),
-    \label{eq:specification-output}
-\end{equation}
+\[
+    y_{n,m}^\star
+    =
+    (1+\rho_n)\,
+    q_{n,m}^{\mathrm{ung}}.
+\]
 
-where $\pi$ determines which atmospheric quantity is targeted, while the
-member-specific trajectories determine its desired evolution during the guided
-forecast horizon. For $n>H$, no target is imposed and the forecast continues
-without guidance until the end of the rollout at $N$.
+The scenario specification is therefore characterized by the target mask
+$\pi$ and relative intensity trajectory $\rho_{1:H}$. For a given unguided
+reference ensemble, these induce the absolute member-specific targets
 
-TODO: include here the rollout trajectories planning figure.
+\[
+    \left\{
+        y_{1:H,m}^\star
+    \right\}_{m=1}^{M},
+\]
 
-These objects define \emph{what} the model should generate independently of
-\emph{how} the generative process is modified to realize them. The next chapter
-addresses this complementary guidance problem.
+which are passed to the guidance stage developed in the next chapter.
 
-% TODO: Add a figure illustrating the resulting ensemble of target trajectories,
-% together with the corresponding matched unguided trajectories.
+Guidance is applied only for $n=1,\ldots,H$. The resulting forecast is then
+continued without guidance until the experimental horizon $N$, allowing us to
+examine how the generated scenario evolves after the intervention has ended.
 
-TODO: somewhere around here we should show the graph that this creates.
+% TODO: Add a figure showing several unguided reference trajectories and the
+% corresponding member-specific target trajectories. Mark the end of the
+% guided horizon H and the full experimental horizon N.
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/rollout-trajectories.png}
+    \caption{
+        Schematic illustration of the specification procedure. Each unguided
+        reference member defines a baseline trajectory for the targeted
+        regional quantity. Applying the common relative intensity trajectory
+        $\rho_{1:H}$ produces a corresponding member-specific target trajectory
+        over the guided horizon. No target is imposed after weather step $H$,
+        while the experiment continues until step $N$.
+    }
+    \label{fig:specification-pipeline}
+\end{figure}
 
-\includegraphics{figures/rollout-trajectories.png}
+This completes the specification of \emph{what} the model should generate.
+The next chapter addresses \emph{how} the residual flow is modified to realize
+these member-specific targets.
