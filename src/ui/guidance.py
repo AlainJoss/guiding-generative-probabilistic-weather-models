@@ -2394,7 +2394,7 @@ def _(
 
                 # x_det is an ABSOLUTE field: keep it out of the shared limits, the
                 # zero-anchored clamps and the white-below masking of the true diffs
-                _ABS_PANELS = {"$x_{n}^{\\text{gui\\_det}}$", "$x_{n}^{\\text{gui_ung}}$", "$x_{n}^{gui}$", "$x_{n}^{ung}$", "$x_{n}^{\\text{gt}}$"}
+                _ABS_PANELS = {"$x_{n}^{\\text{gui\\_det}}$", "$x_{n}^{\\text{ung|gui}}$", "$x_{n}^{gui}$", "$x_{n}^{ung}$", "$x_{n}^{\\text{gt}}$"}
                 diff_vmin = min(float(np.nanmin(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
                 diff_vmax = max(float(np.nanmax(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
                 # same_scale for the ABSOLUTE panels: shared range across x_det /
@@ -2511,7 +2511,7 @@ def _(
             case "absolute":
                 absolute_panels = [
                     ("$x_{n}^{\\text{gt}}$", gt_curr),
-                    ("$x_{n}^{\\text{gui_ung}}$", gui_ung_curr),
+                    ("$x_{n}^{\\text{ung|gui}}$", gui_ung_curr),
                     ("$x_{n}^{gui}$", gui_curr),
                     ("$x_{n}^{ung}$", ung_curr),
                     ("$x_{n}^{\\text{ung\\_det}}$", ung_det_n_slice),
@@ -2567,7 +2567,7 @@ def _(
                     absolute_maps[label] = add_map_stats(absolute_maps[label], arr)
 
                 curr_map = absolute_maps["$x_{n}^{\\text{gt}}$"]
-                prev_map = absolute_maps["$x_{n}^{\\text{gui_ung}}$"]
+                prev_map = absolute_maps["$x_{n}^{\\text{ung|gui}}$"]
                 ung_map = absolute_maps["$x_{n}^{ung}$"]
                 gui_map = absolute_maps["$x_{n}^{gui}$"]
                 ung_det_abs_map = absolute_maps["$x_{n}^{\\text{ung\\_det}}$"]
@@ -2576,18 +2576,18 @@ def _(
             case "difference":
                 difference_panels = [
                     ("$x_{n}^{ung} - x_{n}^{\\text{gt}}$", ung_gt),
-                    ("$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{gt}}$", gui_ung_gt),
+                    ("$x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{gt}}$", gui_ung_gt),
                     ("$x_{n}^{gui} - x_{n}^{\\text{gt}}$", gui_gt),
-                    ("$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{ung}}$", gui_ung_minus_ung),
+                    ("$x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{ung}}$", gui_ung_minus_ung),
                     ("$x_{n}^{gui} - x_{n}^{\\text{ung}}$", gui_minus_ung),
                     ("$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung}}$", gui_det_ung),
                     ("$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung\\_det}}$", gui_det_ung_det),
                     ("$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{gt}}$", gui_det_gt),
-                    ("guidance effect: $r_n^{gui} - r_n^{\\text{gui\\_ung}}$  $(= x_{n}^{gui} - x_{n}^{\\text{gui\\_ung}})$", gui_gui_ung),
+                    ("guidance effect: $r_n^{gui} - r_n^{\\text{ung|gui}}$  $(= x_{n}^{gui} - x_{n}^{\\text{ung|gui}})$", gui_gui_ung),
                     ("$r_n^{gui} = x_{n}^{gui} - x_{n}^{\\text{gui\\_det}}$", gui_det_res),
-                    ("$r_n^{\\text{gui_ung}} = x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{ung\\_det}}$", gui_ung_det_res),
+                    ("$r_n^{\\text{ung|gui}} = x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{ung\\_det}}$", gui_ung_det_res),
                     ("$x_{n}^{\\text{gui\\_det}}$", to_display_units(det_n_slice, var)[0]),  # absolute field: K -> degC etc.
-                    ("$x_{n}^{\\text{gui_ung}}$", to_display_units(gui_ung_curr, var)[0]),
+                    ("$x_{n}^{\\text{ung|gui}}$", to_display_units(gui_ung_curr, var)[0]),
                     ("$x_{n}^{gui}$", to_display_units(gui_curr, var)[0]),
                     ("$x_{n}^{ung}$", to_display_units(ung_curr, var)[0]),
                     ("$x_{n}^{\\text{gt}}$", to_display_units(gt_curr, var)[0]),
@@ -2620,7 +2620,7 @@ def _(
 
                 # x_det is an ABSOLUTE field: keep it out of the shared limits, the
                 # zero-anchored clamps and the white-below masking of the true diffs
-                _ABS_PANELS = {"$x_{n}^{\\text{gui\\_det}}$", "$x_{n}^{\\text{gui_ung}}$", "$x_{n}^{gui}$", "$x_{n}^{ung}$", "$x_{n}^{\\text{gt}}$"}
+                _ABS_PANELS = {"$x_{n}^{\\text{gui\\_det}}$", "$x_{n}^{\\text{ung|gui}}$", "$x_{n}^{gui}$", "$x_{n}^{ung}$", "$x_{n}^{\\text{gt}}$"}
                 diff_vmin = min(float(np.nanmin(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
                 diff_vmax = max(float(np.nanmax(_zoom_lim(arr))) for _lbl, arr in difference_panels if _lbl not in _ABS_PANELS)
                 # same_scale for the ABSOLUTE panels: shared range across x_det /
@@ -2729,18 +2729,18 @@ def _(
                     difference_maps[label] = add_map_stats(difference_maps[label], arr)
 
                 ung_gt_map = difference_maps["$x_{n}^{ung} - x_{n}^{\\text{gt}}$"]
-                gui_ung_gt_map = difference_maps["$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{gt}}$"]
+                gui_ung_gt_map = difference_maps["$x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{gt}}$"]
                 gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gt}}$"]
-                gui_ung_ung_map = difference_maps["$x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{ung}}$"]
-                gui_ung_map = difference_maps["guidance effect: $r_n^{gui} - r_n^{\\text{gui\\_ung}}$  $(= x_{n}^{gui} - x_{n}^{\\text{gui\\_ung}})$"]
+                gui_ung_ung_map = difference_maps["$x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{ung}}$"]
+                gui_ung_map = difference_maps["guidance effect: $r_n^{gui} - r_n^{\\text{ung|gui}}$  $(= x_{n}^{gui} - x_{n}^{\\text{ung|gui}})$"]
                 gui_minus_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{ung}}$"]
                 gui_det_ung_map = difference_maps["$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung}}$"]
                 gui_det_ung_det_map = difference_maps["$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung\\_det}}$"]
                 gui_det_gt_map = difference_maps["$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{gt}}$"]
                 r_n_map = difference_maps["$r_n^{gui} = x_{n}^{gui} - x_{n}^{\\text{gui\\_det}}$"]
-                r_n_gui_ung_map = difference_maps["$r_n^{\\text{gui_ung}} = x_{n}^{\\text{gui_ung}} - x_{n}^{\\text{ung\\_det}}$"]
+                r_n_gui_ung_map = difference_maps["$r_n^{\\text{ung|gui}} = x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{ung\\_det}}$"]
                 x_det_map = difference_maps["$x_{n}^{\\text{gui\\_det}}$"]
-                x_gui_ung_abs_dmap = difference_maps["$x_{n}^{\\text{gui_ung}}$"]
+                x_gui_ung_abs_dmap = difference_maps["$x_{n}^{\\text{ung|gui}}$"]
                 x_gui_abs_dmap = difference_maps["$x_{n}^{gui}$"]
                 x_ung_abs_dmap = difference_maps["$x_{n}^{ung}$"]
                 x_gt_abs_dmap = difference_maps["$x_{n}^{\\text{gt}}$"]
@@ -2765,7 +2765,7 @@ def _(
                     (r"$\|\nabla x_n^{\text{gt}}\|$", gradmap_gt_mag),
                     (r"$\|\nabla x_n^{\text{ung}}\|$", gradmap_ung_mag),
                     (r"$\|\nabla x_n^{\text{gui}}\|$", gradmap_gui_mag),
-                    (r"$\|\nabla (x_n^{\text{gui_ung}})\|$", gradmap_gui_ung_mag),
+                    (r"$\|\nabla (x_n^{\text{ung|gui}})\|$", gradmap_gui_ung_mag),
                 ]
 
                 gradmap_mag_vmin = min(float(np.nanmin(_zoom_lim(gradmap_arr))) for _, gradmap_arr in gradmap_mag_panels)
@@ -2835,8 +2835,8 @@ def _(
                 sobel_diff_panels = [
                     (r"$\|\nabla x_n^{\text{gt}}\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gt_mag - sobel_ung_mag),
                     (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gui_mag - sobel_ung_mag),
-                    (r"$\|\nabla (x_n^{\text{gui_ung}})\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gui_ung_mag - sobel_ung_mag),
-                    (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla (x_n^{\text{gui_ung}})\|$", sobel_gui_mag - sobel_gui_ung_mag),
+                    (r"$\|\nabla (x_n^{\text{ung|gui}})\| - \|\nabla x_n^{\text{ung}}\|$", sobel_gui_ung_mag - sobel_ung_mag),
+                    (r"$\|\nabla x_n^{\text{gui}}\| - \|\nabla (x_n^{\text{ung|gui}})\|$", sobel_gui_mag - sobel_gui_ung_mag),
                 ]
 
                 sobel_diff_vmin = min(float(np.nanmin(_zoom_lim(arr))) for _, arr in sobel_diff_panels)
@@ -3668,9 +3668,9 @@ def _(
             return float(np.nansum(np.asarray(_a) * np.asarray(mask)))
 
         map_specs = [
-            ("diff_gt_gui_ung_map", diff_gt_gui_ung_slice, r"$x_{n}^{\text{gui_ung}} - x_{n}^{\text{gt}}$", -1, 1),
+            ("diff_gt_gui_ung_map", diff_gt_gui_ung_slice, r"$x_{n}^{\text{ung|gui}} - x_{n}^{\text{gt}}$", -1, 1),
             ("diff_gt_clean_pred_map", diff_gt_clean_pred_slice, r"$\hat{x}_t^{\text{gui}} - x_{n}^{\text{gt}}$", -1, 1),
-            ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$\hat{x}_t^{\text{gui}} - \hat{x}_t^{\text{gui\_ung}}$", -1, 1),
+            ("gui_ung_clean_diff_map", gui_ung_clean_diff_slice, r"$\hat{x}_t^{\text{gui}} - \hat{x}_t^{\text{ung|gui}}$", -1, 1),
             ("clean_preds_diff_map", clean_preds_diff_slice, r"$\hat{x}_t^{\text{gui}} - \hat{x}_{t-1}^{\text{gui}}$", -1, 1),
             ("grads_map", grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t$", -1, 1),
             ("vfs_map", vfs_phys_slice, rf"$\sigma_r\, h_t u_t$ (mask avg {_mavg(vfs_phys_slice):+.3g})", -0.001, 0.001),
@@ -3683,9 +3683,9 @@ def _(
             ("step_inc_map", step_inc_slice, r"$\sigma_r\, h_t u^{\text{gui}}_t$", -0.001, 0.001),
             ("clean_res_map", clean_res_slice, r"$\hat{r}_t = \sigma_r\,(z^t + s_t u_t)$", -1, 1),
             ("gui_vec_map", gui_vec_phys_slice, r"$\sigma_r\,\lambda_t h_t\,\nabla_{z_t}\mathcal{L}_t$", -1, 1),
-            ("landing_diff_map", landing_diff_slice, r"guidance effect  $x_t^{\text{gui}} - x_t^{\text{gui\_ung}}$  ($x_t=\hat{x}^{\text{gui\_det}}+\sigma_r z_t$; $=0$ at the noise step)", -1, 1),
+            ("landing_diff_map", landing_diff_slice, r"guidance effect  $x_t^{\text{gui}} - x_t^{\text{ung|gui}}$  ($x_t=\hat{x}^{\text{gui\_det}}+\sigma_r z_t$; $=0$ at the noise step)", -1, 1),
             ("masked_residual_land_map", masked_residual_land_slice, r"$(x_t - (1+\phi_n)\,x^{\text{ref}}) \cdot \text{mask}$", -1, 1),
-            ("gui_land_vs_ung_final_map", gui_land_vs_ung_final_slice, r"$x_t^{\text{gui}} - x_T^{\text{gui\_ung}}$  (landing vs final unguided state)", -1, 1),
+            ("gui_land_vs_ung_final_map", gui_land_vs_ung_final_slice, r"$x_t^{\text{gui}} - x_T^{\text{ung|gui}}$  (landing vs final unguided state)", -1, 1),
             ("r_land_gui_map", r_land_gui_slice, r"$r_t^{\text{gui}} = \sigma_r\,(z_t + h_t u^{\text{gui}}_t)$", -1, 1),
             ("r_land_map", r_land_slice, r"$r_t = \sigma_r\,(z_t + h_t u_t)$", -1, 1),
             ("diff_grads_map", diff_grads_slice, "$\\nabla_{z_t} \\mathcal{L}_t - \\nabla_{z_{t-1}} \\mathcal{L}_{t-1}$", -1, 1),

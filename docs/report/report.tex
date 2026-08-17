@@ -12,6 +12,49 @@
 \pagenumbering{Roman}
 
 \section*{Abstract}
+
+An increasingly important class of machine-learning weather models is formed
+by generative probabilistic models. By learning the conditional distribution
+of future atmospheric states, they naturally enable the generation of ensemble
+forecasts through repeated sampling. Their generative formulation can also be
+exploited to steer the sampling process toward desired outcomes.
+While \emph{guidance} is widely used in image generation, it remains
+comparatively unexplored in the weather domain. This thesis investigates
+whether generative weather models can be deliberately steered to produce
+plausible extreme-weather trajectories.
+
+Existing guidance approaches commonly prescribe the strength of the
+intervention and subsequently observe how the generated sample changes. We
+invert this procedure by specifying the desired outcome first and determining
+the guidance strength required to realize it separately. We formulate the
+resulting approach in two stages, \emph{Specify} and \emph{Guide}. In the first
+stage, we specify the scenario through a target variable, a spatial region, and
+a trajectory describing how the corresponding regional quantity should evolve
+over the forecast horizon. In the second stage, we steer the generative
+dynamics toward these targets using gradient-based guidance.
+
+To realize these targets, we distribute guidance over the generative process
+according to a prescribed relative strength profile and determine the required
+scalar gain independently at each weather step through a root-finding
+procedure.
+
+We investigate this approach using ArchesWeather, a medium-range probabilistic
+weather model based on flow matching. As a case study, we generate regional
+high-temperature scenarios by prescribing trajectories for the regional mean
+surface temperature. We systematically study how different distributions of guidance across the
+generative process affect target realization and the properties of the
+resulting trajectories.
+
+We find that concentrating guidance at the second flow step consistently yields
+the most favorable results across different evaluation perspectives.
+
+Our results show how guidance can extend generative probabilistic weather
+models beyond sampling likely forecast trajectories toward the controlled
+generation of prescribed weather scenarios, providing a means to explore
+low-probability alternatives beyond those represented in finite forecast
+ensembles.
+
+
 \thispagestyle{firststyle}
 
 \tableofcontents
@@ -28,6 +71,7 @@
 \include{chapters/specify}
 \include{chapters/guidance}
 % \include{chapters/4-guidance-design}
+\include{chapters/evaluation}
 \include{chapters/5-evaluation-framework}
 \include{chapters/6-experiments}
 \include{chapters/7-discussion}

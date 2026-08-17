@@ -1,0 +1,150 @@
+\chapter{Evaluation}
+\label{ch:eval}
+
+This chapter evaluates the guidance method in two stages. We first compare
+different choices for the guidance-strength profile through a structured set of
+quantitative experiments and select the configuration used in the remainder of
+the thesis. With this configuration fixed, we then investigate how the method
+behaves under different scenario specifications, building an empirical
+understanding of how the requested target affects the resulting trajectories.
+
+Throughout the experiments, we use a small set of diagnostics to verify that
+guidance behaves as intended and to identify anomalous runs before interpreting
+their results.
+
+The first evaluation, T1, provides a systematic comparison of candidate
+guidance-strength profiles across multiple experimental settings. We assess
+each profile using a common set of complementary quantitative criteria and
+aggregate the resulting comparisons to identify a configuration that performs
+robustly across the considered settings.
+
+In T2, we fix the selected guidance configuration and vary the parameters that
+define the scenario of interest. Rather than producing another standardized
+ranking, this analysis examines how changes in the specification affect the
+generated trajectories. Quantitative measures are used alongside the resulting
+fields and trajectories where they help characterize and explain the observed
+behavior.
+
+The findings of these evaluations provide the basis for constructing and
+analyzing a complete high-temperature storyline in the following chapter.
+\section{T0: Experiment diagnostics}
+\label{sec:experiment-diagnostics}
+
+Before interpreting an experiment, we inspect a small set of diagnostics to
+verify that the guidance procedure behaved as intended. Specifically, we check
+
+\begin{itemize}[noitemsep]
+    \item whether each guided member reaches its prescribed target within a
+    defined tolerance;
+    \item how the targeted regional quantity evolves over the generative
+    process, in particular for oscillatory or irregular convergence;
+    \item whether the final guided field exhibits conspicuous spatial
+    artifacts relative to the unguided field; and
+    \item the spatial structure of the isolated guidance effect.
+\end{itemize}
+
+For the final diagnostic, we compare the guided state with its matched
+unguided-under-guided-context counterpart. Since
+$x_n^{\mathrm{gui}}$ and $x_n^{\mathrm{ung}\mid\mathrm{gui}}$ share the same
+conditioning states, deterministic forecast, and initial residual noise,
+
+\[
+    \Delta x_n^{\mathrm{guidance}}
+    :=
+    x_n^{\mathrm{gui}}
+    -
+    x_n^{\mathrm{ung}\mid\mathrm{gui}}
+    =
+    r_n^{\mathrm{gui}}
+    -
+    r_n^{\mathrm{ung}\mid\mathrm{gui}},
+\]
+
+isolates the effect of guidance within the current residual flow.
+
+These diagnostics provide a first check that an experiment is suitable for the
+more detailed evaluations that follow.
+
+\section{T1: Guidance-profile evaluation}
+\label{sec:guidance-profile-evaluation}
+
+We compare the candidate guidance-strength profiles through four complementary
+properties of the resulting guidance effect. Each metric is aggregated over
+ensemble members, guided weather steps, and the experiments included in the
+evaluation sweep. The resulting scores are combined in a leaderboard to compare
+the different flow-time profiles under a common set of criteria.
+
+
+\subsection{T1.1: Multivariate propagation of guidance}
+
+The first criterion measures how strongly an intervention targeted at regional
+surface temperature propagates to the remaining atmospheric state. We consider
+the guidance effect
+
+\[
+    \Delta x_n^{\mathrm{guidance}}
+    =
+    x_n^{\mathrm{gui}}
+    -
+    x_n^{\mathrm{ung}\mid\mathrm{gui}},
+\]
+
+and quantify its magnitude both within the target region and over the complete
+spatial domain. The resulting masked and global push scores summarize how
+strongly the intervention extends beyond the directly targeted quantity.
+
+
+\subsection{T1.2: Deviation from the unguided trajectory}
+
+We next measure how far the guided state is displaced from its matched
+unguided-under-guided-context counterpart. The comparison is performed in a
+low-dimensional representation of the atmospheric state obtained through
+principal component analysis. The resulting distance provides a common measure
+of how strongly each guidance profile modifies the trajectory relative to the
+corresponding unguided generation.
+
+
+\subsection{T1.3: Spatial deviation from the target mask}
+
+The guidance objective is defined using a simple rectangular spatial mask. A
+guided response that reproduces this pattern directly would indicate a strong
+imprint of the prescribed objective on the generated field. We therefore
+compare the spatial distribution of the guidance effect with the target mask
+using total variation distance.
+
+We compute this distance separately for the targeted surface-temperature field
+and across the complete atmospheric state. Larger values indicate a stronger
+departure from the imposed mask pattern.
+
+
+\subsection{T1.4: Guidance-effect diversity across ensemble members}
+
+Finally, we assess whether the spatial guidance effect remains dependent on the
+stochastic realization or converges toward a common perturbation across
+ensemble members. We quantify the spread of the guidance footprint across
+members, both for the target field and across all atmospheric fields.
+
+Larger footprint spread indicates greater member-to-member diversity in the
+response to guidance.
+
+% TODO:
+% - Define the candidate relative guidance-strength profiles.
+% - Define the experimental settings over which they are compared.
+% - Introduce the quantitative evaluation criteria.
+% - Explain how results are aggregated across experiments/members.
+% - Rank the candidate profiles.
+% - Select the profile used for the remaining experiments.
+
+
+\section{T2: Scenario-specification analysis}
+\label{sec:scenario-specification-analysis}
+
+% TODO:
+% - Fix the guidance configuration selected in T1.
+% - Vary the scenario-specification parameters.
+% - Investigate target intensity / trajectory.
+% - Investigate spatial region.
+% - Investigate target variable if included in the final experiments.
+% - Combine trajectory and field visualizations with quantitative measures
+%   where useful for supporting the analysis.
+% - Extract practical insights for the complete storyline experiment.
