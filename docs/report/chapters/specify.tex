@@ -1,8 +1,6 @@
 \chapter{Specifying events of interest}
 \label{ch:specify}
 
-TODO: state somewhere the thing about physical units and omit it everywhere otherwise
-
 The first stage of our approach addresses \emph{what} weather scenario should
 be generated. We specify an event through two components: a mask $\pi$, which
 selects the atmospheric variable and spatial region of interest, and a relative
@@ -36,14 +34,15 @@ We then construct the relative intensity trajectory and derive the
 member-specific targets used by the guidance algorithm. Finally, we summarize
 the complete specification pipeline from the unguided reference ensemble to
 the resulting target trajectories.
+
+
 \section{Target variable and region}
 
 We specify the atmospheric quantity of interest through a mask $\pi$ over the
-weather state. Since the targets in this chapter are defined in physical
-units, we denote the corresponding physical-space weather state by
+weather state
 
 \[
-    x_{n,\mathrm{phys}}
+    x_n
     \in
     \mathbb{R}^{V\times I\times J},
 \]
@@ -111,17 +110,21 @@ such that
 The corresponding masked-average operator is
 
 \begin{equation}
-    \mathcal{M}_\pi(x_{n,\mathrm{phys}})
+    \mathcal{M}_\pi(x_n)
     :=
     \sum_{v,i,j}
     \pi_{vij}\,
-    x_{n,\mathrm{phys},vij}.
+    x_{n,vij}.
     \label{eq:masked-average}
 \end{equation}
 
+Following the convention introduced in the ArchesWeather dataset description,
+the inverse normalization required to evaluate this diagnostic in physical
+units is implicit in $\mathcal{M}_\pi$.
+
 For the experiments in this thesis, $v^\star$ is surface temperature, such
-that $\mathcal{M}_\pi(x_{n,\mathrm{phys}})$ represents the area-weighted mean
-surface temperature within the selected target region.
+that $\mathcal{M}_\pi(x_n)$ represents the area-weighted mean surface
+temperature within the selected target region.
 
 Area weighting prevents the regional mean from being biased toward
 high-latitude grid cells, which represent a smaller physical area on the
@@ -167,7 +170,9 @@ therefore directly comparable across regions of different sizes.
 Although we use $\mathcal{M}_\pi$ to compute a regional mean, the subsequent
 guidance formulation does not fundamentally depend on this particular choice.
 It can in principle be replaced by another differentiable functional of the
-physical forecast state.
+forecast state.
+
+
 \section{Target trajectory}
 \label{sec:target-trajectory}
 
@@ -185,18 +190,18 @@ the intervention is removed.
 \subsection{Reference ensemble and member-specific targets}
 
 Before generating a guided ensemble, we first generate a complete unguided
-reference ensemble over the experimental horizon,
+reference ensemble
 
 \[
     \left\{
-        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+        x_{n,m}^{\mathrm{ung}}
     \right\}_{
         \substack{
-            n=1,\ldots,N\\
             m=1,\ldots,M
         }
-    }.
+    }
 \]
+over the experimental horizon, with $n=1,\ldots,N$.
 
 All members start from the same initial atmospheric context but differ through
 their stochastic residual realizations. For each member and weather step, the
@@ -213,7 +218,7 @@ weather step $n$ by
     :=
     \mathcal{M}_\pi
     \left(
-        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+        x_{n,m}^{\mathrm{ung}}
     \right).
     \label{eq:unguided-target-quantity}
 \end{equation}
@@ -238,6 +243,7 @@ assigned correspondingly different absolute targets instead of being forced
 toward a common trajectory. This property concerns the construction of the
 target ensemble; whether the resulting guided ensemble retains the implied
 spread depends on the behaviour of the guidance algorithm.
+
 
 
 \subsection{Prescribing the relative change}
@@ -342,7 +348,7 @@ reference rollout over the full experimental horizon,
 
 \[
     \left\{
-        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+        x_{n,m}^{\mathrm{ung}}
     \right\}_{n=1}^{N}.
 \]
 
@@ -354,7 +360,7 @@ regional quantities
     =
     \mathcal{M}_\pi
     \left(
-        x_{n,m,\mathrm{phys}}^{\mathrm{ung}}
+        x_{n,m}^{\mathrm{ung}}
     \right),
 \]
 

@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  17 AUG 2026 17:36
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  17 AUG 2026 18:09
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1176,11 +1176,11 @@ Package cleveref Info: loaded `english' language definitions on input line 871.
  [15]
 Package cleveref Info: loaded `english' language definitions on input line 930.
  [16]
-Package cleveref Info: loaded `english' language definitions on input line 989.
+Package cleveref Info: loaded `english' language definitions on input line 991.
  [17]
-Package cleveref Info: loaded `english' language definitions on input line 1049.
+Package cleveref Info: loaded `english' language definitions on input line 1048.
  [18]
-Package cleveref Info: loaded `english' language definitions on input line 1142.
+Package cleveref Info: loaded `english' language definitions on input line 1141.
  [19]
 Package cleveref Info: loaded `english' language definitions on input line 1235.
  [20] (./figures/pipeline_figure.tex))
@@ -1196,30 +1196,30 @@ Chapter 3.
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 109.
+Package cleveref Info: loaded `english' language definitions on input line 119.
  [23]
-<figures/mask_flat.png, id=731, 514.20105pt x 333.1647pt>
+<figures/mask_flat.png, id=730, 514.20105pt x 333.1647pt>
 File: figures/mask_flat.png Graphic file (type png)
 <use figures/mask_flat.png>
-Package pdftex.def Info: figures/mask_flat.png  used on input line 142.
+Package pdftex.def Info: figures/mask_flat.png  used on input line 145.
 (pdftex.def)             Requested size: 228.3519pt x 147.95424pt.
-<figures/mask_globe.png, id=733, 514.20105pt x 582.85754pt>
+<figures/mask_globe.png, id=732, 514.20105pt x 582.85754pt>
 File: figures/mask_globe.png Graphic file (type png)
 <use figures/mask_globe.png>
-Package pdftex.def Info: figures/mask_globe.png  used on input line 149.
+Package pdftex.def Info: figures/mask_globe.png  used on input line 152.
 (pdftex.def)             Requested size: 130.52715pt x 147.95424pt.
-Package cleveref Info: loaded `english' language definitions on input line 177.
+Package cleveref Info: loaded `english' language definitions on input line 182.
  [24 <./figures/mask_flat.png> <./figures/mask_globe.png>]
-Package cleveref Info: loaded `english' language definitions on input line 243.
+Package cleveref Info: loaded `english' language definitions on input line 249.
  [25]
-Package cleveref Info: loaded `english' language definitions on input line 328.
+Package cleveref Info: loaded `english' language definitions on input line 334.
  [26]
-Package cleveref Info: loaded `english' language definitions on input line 389.
+Package cleveref Info: loaded `english' language definitions on input line 395.
  [27]
-<figures/rollout-trajectories.png, id=767, 1243.40535pt x 415.5525pt>
+<figures/rollout-trajectories.png, id=766, 1243.40535pt x 415.5525pt>
 File: figures/rollout-trajectories.png Graphic file (type png)
 <use figures/rollout-trajectories.png>
-Package pdftex.def Info: figures/rollout-trajectories.png  used on input line 417.
+Package pdftex.def Info: figures/rollout-trajectories.png  used on input line 423.
 (pdftex.def)             Requested size: 476.98244pt x 159.40802pt.
 )
 Package cleveref Info: loaded `english' language definitions on input line 71.
@@ -1241,19 +1241,19 @@ Overfull \hbox (0.1344pt too wide) in paragraph at lines 28--33
 ]
 Package cleveref Info: loaded `english' language definitions on input line 100.
  [30]
-Package cleveref Info: loaded `english' language definitions on input line 193.
+Package cleveref Info: loaded `english' language definitions on input line 191.
  [31]
-Package cleveref Info: loaded `english' language definitions on input line 257.
+Package cleveref Info: loaded `english' language definitions on input line 262.
  [32]
-Package cleveref Info: loaded `english' language definitions on input line 322.
+Package cleveref Info: loaded `english' language definitions on input line 329.
  [33]
-Package cleveref Info: loaded `english' language definitions on input line 412.
+Package cleveref Info: loaded `english' language definitions on input line 415.
  [34]
-Package cleveref Info: loaded `english' language definitions on input line 468.
+Package cleveref Info: loaded `english' language definitions on input line 466.
  [35]
-Package cleveref Info: loaded `english' language definitions on input line 535.
+Package cleveref Info: loaded `english' language definitions on input line 540.
  [36]
-Package cleveref Info: loaded `english' language definitions on input line 620.
+Package cleveref Info: loaded `english' language definitions on input line 621.
  [37])
 Package cleveref Info: loaded `english' language definitions on input line 72.
  [38]
@@ -1380,18 +1380,18 @@ Package logreq Info: Writing requests to 'report.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 41758 strings out of 476025
- 841487 string characters out of 5790016
- 1869388 words of memory out of 5000000
- 61243 multiletter control sequences out of 15000+600000
+ 41755 strings out of 476025
+ 841403 string characters out of 5790016
+ 1868388 words of memory out of 5000000
+ 61241 multiletter control sequences out of 15000+600000
  540965 words of font info for 100 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  89i,12n,92p,1246b,3007s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc2074.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm0800.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfti1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftt1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfxc1728.pfb>
-Output written on report.pdf (68 pages, 1307992 bytes).
+Output written on report.pdf (68 pages, 1306095 bytes).
 PDF statistics:
- 1229 PDF objects out of 1440 (max. 8388607)
- 1075 compressed objects within 11 object streams
- 305 named destinations out of 1000 (max. 500000)
+ 1226 PDF objects out of 1440 (max. 8388607)
+ 1072 compressed objects within 11 object streams
+ 304 named destinations out of 1000 (max. 500000)
  636 words of extra memory for PDF output out of 10000 (max. 10000000)
 

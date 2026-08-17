@@ -983,9 +983,12 @@ Following the WeatherBench~2 evaluation protocol, dates from January 2020
 onward are reserved for evaluation.
 
 Both the deterministic and generative components operate in normalized data
-space.
-Unless stated otherwise, the variables introduced below therefore refer to
-their normalized representation.
+space. Unless stated otherwise, model states introduced below therefore refer
+to their normalized representation. Quantities defined in physical units are
+evaluated after applying the corresponding inverse normalization. For
+notational simplicity, this transformation is treated as part of the
+respective diagnostic operator and is omitted from subsequent notation.
+
 
 \subsection{Forecasting setup}
 
@@ -1030,6 +1033,7 @@ deterministic prediction as
 For a fixed conditioning context, sampling different residuals while keeping
 the deterministic forecast fixed therefore produces different ensemble members
 at the current weather step.
+
 \subsection{Residual flow model}
 
 Generating each stochastic residual requires a complete flow-matching
@@ -1116,7 +1120,7 @@ The model is trained using the clean-prediction objective
 In the notation of the previous sections, $\hat{r}_{n,t}$ thus plays the role
 of the clean estimate $\hat{x}_t$.
 Since the flow generates a residual rather than the complete weather state,
-the corresponding clean weather estimate in normalized model space is
+the corresponding clean weather estimate is
 
 \begin{equation}
     \hat{x}_{n,t}
@@ -1127,23 +1131,6 @@ the corresponding clean weather estimate in normalized model space is
     \label{eq:arches-clean-state}
 \end{equation}
 
-Guidance objectives in this thesis are evaluated in physical units. Before
-evaluating such an objective, we therefore apply the inverse data
-normalization, denoted by $\mathcal{D}$, and define
-
-\begin{equation}
-    \hat{x}^{\mathrm{phys}}_{n,t}
-    :=
-    \mathcal{D}
-    \left(
-        \hat{x}_{n,t}
-    \right).
-    \label{eq:arches-physical-clean-state}
-\end{equation}
-
-The resulting physical-space estimate
-$\hat{x}^{\mathrm{phys}}_{n,t}$ is the weather state on which the guidance
-objective is evaluated.
 \subsection{Sampling}
 
 Although the network predicts the clean residual, sampling requires the

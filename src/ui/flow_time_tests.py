@@ -1563,7 +1563,7 @@ def _(
         _bd1 = max(abs(metrics[_l]["dpc1"][0]) for _l in _sweep)
         _bd2 = max(abs(metrics[_l]["dpc2"][0]) for _l in _sweep)
         _bd3 = max(abs(metrics[_l]["dpc3"][0]) for _l in _sweep)
-        _rows = ["| row | pool | path length | guidance steps | pushback steps | \u0394PC1 | \u0394PC2 | \u0394PC3 | dist to ung|gui |",
+        _rows = ["| row | pool | path length | guidance steps | pushback steps | \u0394PC1 | \u0394PC2 | \u0394PC3 | dist to ung\\|gui |",
                  "|---|---|---|---|---|---|---|---|---|"]
         for _lb in _sweep:
             _r = metrics[_lb]; _npv = _r["n_pool"]; _Lc = _ms(_r["L"])
@@ -1578,7 +1578,7 @@ def _(
             if ref_metrics and _rlb in ref_metrics:
                 _r = ref_metrics[_rlb]; _npv = _r["n_pool"]; _Lc = _ms(_r["L"])
                 _d1 = _mss(_r["dpc1"]); _d2 = _mss(_r["dpc2"]); _d3 = _mss(_r["dpc3"]); _dc = f"{_dist(_r):.3g}"
-                _rows.append(f"| _{'ung|gui' if _rlb == 'gui_ung' else _rlb}_ | {_npv} | {_Lc} | 0 | 0 | {_d1} | {_d2} | {_d3} | {_dc} |")
+                _rows.append(f"| _{'ung\\|gui' if _rlb == 'gui_ung' else _rlb}_ | {_npv} | {_Lc} | 0 | 0 | {_d1} | {_d2} | {_d3} | {_dc} |")
         t3_view = mo.vstack(_items + [mo.md("\n".join(_rows)),
             mo.md(r"Grid = actual-state $x_t$ trajectories (guided solid). Length = PCA path length of the clean-pred trajectory. $\Delta$PC$_k$ = signed "
                   r"endpoint deviation from ung|gui along PC$_k$. Guidance/pushback in full bbox "

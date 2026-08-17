@@ -137,15 +137,15 @@ guided states can differ from their unguided reference counterparts.
 TODO: Insert summary figure illustrating
 $x_n^{ung}, x_n^{ung|gui}, x_n^{gui},
 \hat{x}_n^{det|ung}, \hat{x}_n^{det|gui}, y_n^\star.$
+
 \subsection{Guidance objective}
 \label{sec:guidance-objective}
 
 At weather step $n$, the specification procedure introduced in
-\Cref{ch:specify} provides the member-specific target value $y_n^\star$ in
-physical units. During the residual flow, ArchesWeather provides the
-corresponding physical-space clean-state estimate
-$\hat{x}^{\mathrm{phys}}_{n,t}$ from the current noisy residual state
-$z_{n,t}$, as defined in \Cref{eq:arches-physical-clean-state}.
+\Cref{ch:specify} provides the member-specific target value $y_n^\star$.
+During the residual flow, ArchesWeather provides the corresponding
+clean-state estimate $\hat{x}_{n,t}$ from the current noisy residual state
+$z_{n,t}$.
 
 We define the discrepancy from the prescribed target as
 
@@ -154,7 +154,7 @@ We define the discrepancy from the prescribed target as
     :=
     \mathcal{M}_\pi
     \left(
-        \hat{x}^{\mathrm{phys}}_{n,t}
+        \hat{x}_{n,t}
     \right)
     -
     y_n^\star,
@@ -175,7 +175,7 @@ We use the squared target gap as the guidance loss,
     \left[
         \mathcal{M}_\pi
         \left(
-            \hat{x}^{\mathrm{phys}}_{n,t}
+            \hat{x}_{n,t}
         \right)
         -
         y_n^\star
@@ -186,10 +186,7 @@ We use the squared target gap as the guidance loss,
 Following the clean-estimate approximation derived in
 \Cref{eq:clean-likelihood-approximation}, the objective is evaluated on the
 current clean-state estimate rather than directly on the unknown clean
-endpoint. The inverse normalization used to obtain
-$\hat{x}^{\mathrm{phys}}_{n,t}$ remains differentiable, so the objective can
-still be differentiated with respect to the normalized noisy residual state
-$z_{n,t}$.
+endpoint.
 
 An alternative would be to define the objective only on the final generated
 state and propagate its gradient backwards through the complete residual flow.
@@ -206,6 +203,7 @@ area-weighted regional mean surface temperature introduced in
 \Cref{ch:specify}. The guidance construction itself is more general and can in
 principle be applied to other differentiable functionals of the forecast
 state.
+
 \subsection{Gradient-based flow guidance}
 \label{sec:gradient-flow-guidance}
 
@@ -242,18 +240,17 @@ For the squared target-gap loss in \Cref{eq:guidance-loss}, this gives
     \nabla_{z_{n,t}}
     \mathcal{M}_\pi
     \left(
-        \hat{x}^{\mathrm{phys}}_{n,t}
+        \hat{x}_{n,t}
     \right).
     \label{eq:guidance-gradient-expanded}
 \end{equation}
 
-Although the loss is evaluated on the physical-space quantity
-$\mathcal{M}_\pi(\hat{x}^{\mathrm{phys}}_{n,t})$, differentiation is performed
-with respect to the normalized noisy residual state $z_{n,t}$. The gradient
-therefore propagates through both the inverse normalization and the learned
-mapping from the noisy residual to the clean-state estimate. The resulting
-guidance direction consequently lives in the normalized residual space in
-which the generative flow evolves.
+Although $\mathcal{M}_\pi$ evaluates the targeted quantity in physical units,
+differentiation is performed with respect to the normalized noisy residual
+state $z_{n,t}$. The gradient therefore implicitly propagates through the
+inverse normalization as well as the learned mapping from the noisy residual
+to the clean-state estimate. The resulting guidance direction consequently
+lives in the normalized residual space in which the generative flow evolves.
 
 Moreover, although the objective depends only on the regional quantity selected
 by $\pi$, the gradient is taken with respect to the complete residual state.
@@ -293,6 +290,7 @@ The guidance gradient $g_{n,t}$ is therefore determined locally by the
 prescribed target and the current generative state. What remains to be
 specified is the guidance strength $\lambda_{n,t}$ with which this direction
 is applied over the flow.
+
 \section{Guidance-strength design}
 \label{sec:guidance-strength-design}
 
@@ -506,32 +504,25 @@ By the definition introduced in \Cref{sec:target-driven-guidance},
 Positive values of $w_n$ instead modify the residual flow according to the
 fixed profile $\gamma_t$.
 
-As in the local guidance objective, target realization is evaluated in
-physical units. We therefore define the terminal target gap as
+We define the terminal target gap as
 
 \begin{equation}
     \xi_n(w_n)
     :=
     \mathcal{M}_\pi
     \left(
-        \mathcal{D}
-        \left(
-            x_n^{\mathrm{gui}}(w_n)
-        \right)
+        x_n^{\mathrm{gui}}(w_n)
     \right)
     -
     y_n^\star,
     \label{eq:terminal-target-gap}
 \end{equation}
 
-where $\mathcal{D}$ denotes the inverse data normalization introduced in
-\Cref{eq:arches-physical-clean-state}.
-
 This terminal gap should be distinguished from the intermediate target gap
-$\xi_{n,t}$ in \Cref{eq:guidance-gap}. The latter is evaluated on the clean-state estimate during the residual flow and determines
-the local guidance gradient. In contrast, $\xi_n(w_n)$ is evaluated on the
-final generated weather state and measures whether the prescribed target has
-actually been realized.
+$\xi_{n,t}$ in \Cref{eq:guidance-gap}. The latter is evaluated on the clean-state
+estimate during the residual flow and determines the local guidance gradient.
+In contrast, $\xi_n(w_n)$ is evaluated on the final generated weather state and
+measures whether the prescribed target has actually been realized.
 
 Target realization therefore amounts to solving the scalar root-finding
 problem
