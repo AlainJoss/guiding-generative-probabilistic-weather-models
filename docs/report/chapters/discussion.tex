@@ -1,5 +1,40 @@
 \chapter{Discussion}\label{ch:discussion}
 
+
+\subsection{T1.4: Prediction accuracy over flow time}
+\label{sec:experiments-prediction-noise}
+
+TODO: this should be in the discussion chapter not in here. 
+
+The preference for $\mathrm{spike@1}$ does not coincide with increased
+accuracy of the intermediate residual prediction. To examine this, we compute
+
+\begin{equation}
+    \operatorname{RMSE}\!\left(\hat z_t,z_T\right)
+\end{equation}
+
+between the intermediate prediction $\hat z_t$ and the final residual $z_T$.
+
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=\textwidth]{figures/T4.png}
+%     \caption{
+%         RMSE between the intermediate residual prediction $\hat z_t$ and the
+%         final residual $z_T$ over flow time. Curves summarize the four forecast
+%         initializations, with variation across ensemble members.
+%     }
+%     \label{fig:t1-prediction-noise}
+% \end{figure}
+
+For all four initializations, the prediction error reaches its maximum at
+$t=1$, precisely the flow step selected for guidance. Thereafter, the error
+decreases approximately monotonically toward the final residual. Thus, the
+effectiveness of $\mathrm{spike@1}$ cannot be explained by unusually accurate
+intermediate predictions. Instead, the relationship between prediction
+accuracy and guidance effectiveness is non-monotonic and remains unresolved by
+the present experiments.
+
+
 \section{Quantitative evaluation}
 
 The analyze metrics provide information but only accompagned with the intuition that we gain when looking at the generated guidance effect maps and absolute maps themseleves.

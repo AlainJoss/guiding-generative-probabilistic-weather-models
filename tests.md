@@ -38,5 +38,5 @@ for each e in E we have ung|gui and gui
 
 T1.3
 After T1.2 we now understand that we will have the same structure again.
-Now the object to consider is 
+Now the object to consider is std_M(x^GE) (not abs), so the tables will not have the std over M this time, same goes for the plots. 
     

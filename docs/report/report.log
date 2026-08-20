@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  20 AUG 2026 11:08
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  20 AUG 2026 16:46
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -790,6 +790,15 @@ LaTeX Info: Redefining \labelcref on input line 2370.
 LaTeX Info: Redefining \labelcpageref on input line 2370.
 Package cleveref Info: `algorithmicx' support loaded on input line 3120.
 Package cleveref Info: `listings' support loaded on input line 3131.
+) (/usr/local/texlive/2023/texmf-dist/tex/latex/scalerel/scalerel.sty
+Package: scalerel 2016/12/29 v1.8 Routines for constrained scaling and stretching of objects, relative to a reference object or in absolute terms
+\thesrwidth=\skip82
+\thesrheight=\skip83
+\srblobheight=\skip84
+\srblobdepth=\skip85
+\mnxsrwidth=\skip86
+\LMex=\skip87
+\LMpt=\skip88
 ) (/usr/local/texlive/2023/texmf-dist/tex/latex/biblatex/biblatex.sty
 Package: biblatex 2023/03/05 v3.19 programmable bibliographies (PK/MW)
  (/usr/local/texlive/2023/texmf-dist/tex/latex/logreq/logreq.sty
@@ -841,14 +850,14 @@ File: logreq.def 2010/08/04 v1.0 logreq spec v1.0
 \blx@sectionciteorderinternal@0=\count411
 \blx@entrysetcounter=\count412
 \blx@biblioinstance=\count413
-\labelnumberwidth=\skip82
-\labelalphawidth=\skip83
-\biblabelsep=\skip84
-\bibitemsep=\skip85
-\bibnamesep=\skip86
-\bibinitsep=\skip87
-\bibparsep=\skip88
-\bibhang=\skip89
+\labelnumberwidth=\skip89
+\labelalphawidth=\skip90
+\biblabelsep=\skip91
+\bibitemsep=\skip92
+\bibnamesep=\skip93
+\bibinitsep=\skip94
+\bibparsep=\skip95
+\bibhang=\skip96
 \blx@bcfin=\read4
 \blx@bcfout=\write4
 \blx@langwohyphens=\language88
@@ -932,20 +941,20 @@ Package biblatex Info: ... file 'biblatex-dm.cfg' not found.
 \c@savedoriglanguage=\count482
 \c@pageref=\count483
 \c@savedpageref=\count484
-\shorthandwidth=\skip90
-\shortjournalwidth=\skip91
-\shortserieswidth=\skip92
-\shorttitlewidth=\skip93
-\shortauthorwidth=\skip94
-\shorteditorwidth=\skip95
-\locallabelnumberwidth=\skip96
-\locallabelalphawidth=\skip97
-\localshorthandwidth=\skip98
-\localshortjournalwidth=\skip99
-\localshortserieswidth=\skip100
-\localshorttitlewidth=\skip101
-\localshortauthorwidth=\skip102
-\localshorteditorwidth=\skip103
+\shorthandwidth=\skip97
+\shortjournalwidth=\skip98
+\shortserieswidth=\skip99
+\shorttitlewidth=\skip100
+\shortauthorwidth=\skip101
+\shorteditorwidth=\skip102
+\locallabelnumberwidth=\skip103
+\locallabelalphawidth=\skip104
+\localshorthandwidth=\skip105
+\localshortjournalwidth=\skip106
+\localshortserieswidth=\skip107
+\localshorttitlewidth=\skip108
+\localshortauthorwidth=\skip109
+\localshorteditorwidth=\skip110
 Package biblatex Info: Trying to load compatibility code...
 Package biblatex Info: ... file 'blx-compat.def' found.
  (/usr/local/texlive/2023/texmf-dist/tex/latex/biblatex/blx-compat.def
@@ -1025,7 +1034,21 @@ Package csquotes Info: Checking for multilingual support...
 Package csquotes Info: ... found 'babel' package.
 Package csquotes Info: Adjusting default style.
 Package csquotes Info: Redefining alias 'default' -> 'english'.
- (./report.aux (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation.aux) (./chapters/experiments.aux) (./chapters/7-discussion.aux) (./chapters/8-conclusion.aux) (./appendices/appendix1.aux))
+ (./report.aux (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation-new.aux) (./chapters/evaluation.aux
+
+LaTeX Warning: Label `ch:eval' multiply defined.
+
+
+LaTeX Warning: Label `ch:eval@cref' multiply defined.
+
+) (./chapters/experiments-new.aux) (./chapters/experiments.aux
+
+LaTeX Warning: Label `ch:experiments' multiply defined.
+
+
+LaTeX Warning: Label `ch:experiments@cref' multiply defined.
+
+) (./chapters/discussion.aux) (./chapters/storyline.aux) (./chapters/conclusion.aux) (./appendices/appendix1.aux))
 \openout1 = `report.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 5.
@@ -1145,22 +1168,23 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ) [2
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 57.
- [3])
+Package cleveref Info: loaded `english' language definitions on input line 55.
+ [3]
+Package cleveref Info: loaded `english' language definitions on input line 83.
+ [4])
 \tf@toc=\write6
 \openout6 = `report.toc'.
 
 Package cleveref Info: loaded `english' language definitions on input line 60.
- [4] (./report.lof
+ [5] (./report.lof
 Package cleveref Info: loaded `english' language definitions on input line 1.
- [5
-
-])
+)
 \tf@lof=\write7
 \openout7 = `report.lof'.
 
-Package cleveref Info: loaded `english' language definitions on input line 61.
- [6] (./report.lot
+ [6
+
+] (./report.lot
 Package cleveref Info: loaded `english' language definitions on input line 1.
 )
 \tf@lot=\write8
@@ -1224,15 +1248,15 @@ Package cleveref Info: loaded `english' language definitions on input line 872.
  [15]
 Package cleveref Info: loaded `english' language definitions on input line 932.
  [16]
-Package cleveref Info: loaded `english' language definitions on input line 987.
+Package cleveref Info: loaded `english' language definitions on input line 989.
  [17]
-Package cleveref Info: loaded `english' language definitions on input line 1038.
+Package cleveref Info: loaded `english' language definitions on input line 1040.
  [18]
-Package cleveref Info: loaded `english' language definitions on input line 1113.
+Package cleveref Info: loaded `english' language definitions on input line 1115.
  [19]
-Package cleveref Info: loaded `english' language definitions on input line 1226.
+Package cleveref Info: loaded `english' language definitions on input line 1228.
  [20] (./figures/pipeline_figure.tex)
-Package cleveref Info: loaded `english' language definitions on input line 1301.
+Package cleveref Info: loaded `english' language definitions on input line 1303.
  [21])
 Package cleveref Info: loaded `english' language definitions on input line 67.
  [22]
@@ -1248,7 +1272,7 @@ Chapter 3.
 ]
 Package cleveref Info: loaded `english' language definitions on input line 120.
  [24]
-<figures/mask_flat.png, id=783, 514.20105pt x 264.14685pt>
+<figures/mask_flat.png, id=772, 514.20105pt x 264.14685pt>
 File: figures/mask_flat.png Graphic file (type png)
 <use figures/mask_flat.png>
 Package pdftex.def Info: figures/mask_flat.png  used on input line 137.
@@ -1258,7 +1282,7 @@ Overfull \hbox (53.53238pt too wide) in paragraph at lines 137--138
  [][] 
  []
 
-<figures/mask_globe.png, id=785, 514.20105pt x 514.20105pt>
+<figures/mask_globe.png, id=774, 514.20105pt x 514.20105pt>
 File: figures/mask_globe.png Graphic file (type png)
 <use figures/mask_globe.png>
 Package pdftex.def Info: figures/mask_globe.png  used on input line 144.
@@ -1271,7 +1295,7 @@ Package cleveref Info: loaded `english' language definitions on input line 325.
  [27]
 Package cleveref Info: loaded `english' language definitions on input line 392.
  [28]
-<figures/rollouts.png, id=816, 698.77863pt x 295.5843pt>
+<figures/rollouts.png, id=805, 698.77863pt x 295.5843pt>
 File: figures/rollouts.png Graphic file (type png)
 <use figures/rollouts.png>
 Package pdftex.def Info: figures/rollouts.png  used on input line 409.
@@ -1312,32 +1336,48 @@ Package cleveref Info: loaded `english' language definitions on input line 618.
  [38])
 Package cleveref Info: loaded `english' language definitions on input line 71.
  [39]
-\openout2 = `chapters/evaluation.aux'.
+\openout2 = `chapters/evaluation-new.aux'.
 
- (./chapters/evaluation.tex
+ (./chapters/evaluation-new.tex
 Chapter 5.
-[40
+) [40
 
 
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 117.
- [41]
-Package cleveref Info: loaded `english' language definitions on input line 187.
+\openout2 = `chapters/evaluation.aux'.
+
+ (./chapters/evaluation.tex
+Chapter 6.
+[41
+
+
+
+
+]
+Package cleveref Info: loaded `english' language definitions on input line 99.
  [42]
-Package cleveref Info: loaded `english' language definitions on input line 273.
+Package cleveref Info: loaded `english' language definitions on input line 156.
  [43]
-Package cleveref Info: loaded `english' language definitions on input line 331.
- [44]
-Package cleveref Info: loaded `english' language definitions on input line 399.
- [45])
-Package cleveref Info: loaded `english' language definitions on input line 73.
- [46]
+Package cleveref Info: loaded `english' language definitions on input line 204.
+ [44])
+Package cleveref Info: loaded `english' language definitions on input line 74.
+ [45]
+\openout2 = `chapters/experiments-new.aux'.
+
+ (./chapters/experiments-new.tex
+Chapter 7.
+) [46
+
+
+
+
+]
 \openout2 = `chapters/experiments.aux'.
 
  (./chapters/experiments.tex
-Chapter 6.
+Chapter 8.
 [47
 
 
@@ -1346,131 +1386,70 @@ Chapter 6.
 ]
 File: figures/mask_flat.png Graphic file (type png)
 <use figures/mask_flat.png>
-Package pdftex.def Info: figures/mask_flat.png  used on input line 72.
+Package pdftex.def Info: figures/mask_flat.png  used on input line 67.
 (pdftex.def)             Requested size: 310.03566pt x 159.26723pt.
-Package cleveref Info: loaded `english' language definitions on input line 90.
+Package cleveref Info: loaded `english' language definitions on input line 95.
  [48]
-Package cleveref Info: loaded `english' language definitions on input line 158.
- [49]
-<figures/ung_gui.png, id=976, 865.50552pt x 439.54614pt>
-File: figures/ung_gui.png Graphic file (type png)
-<use figures/ung_gui.png>
-Package pdftex.def Info: figures/ung_gui.png  used on input line 198.
-(pdftex.def)             Requested size: 250.4487pt x 127.19012pt.
-<figures/gui.png, id=977, 865.50552pt x 439.25706pt>
-File: figures/gui.png Graphic file (type png)
-<use figures/gui.png>
-Package pdftex.def Info: figures/gui.png  used on input line 203.
-(pdftex.def)             Requested size: 250.62039pt x 127.19362pt.
-<figures/GE.png, id=978, 871.28712pt x 436.94443pt>
-File: figures/GE.png Graphic file (type png)
-<use figures/GE.png>
-Package pdftex.def Info: figures/GE.png  used on input line 209.
-(pdftex.def)             Requested size: 253.62402pt x 127.19067pt.
-Package cleveref Info: loaded `english' language definitions on input line 220.
- [50]
-<figures/T0.0.png, id=984, 1436.36626pt x 497.15738pt>
-File: figures/T0.0.png Graphic file (type png)
-<use figures/T0.0.png>
-Package pdftex.def Info: figures/T0.0.png  used on input line 225.
-(pdftex.def)             Requested size: 476.98244pt x 165.09413pt.
-<figures/T0.1.png, id=985, 1436.9685pt x 497.15738pt>
-File: figures/T0.1.png Graphic file (type png)
-<use figures/T0.1.png>
-Package pdftex.def Info: figures/T0.1.png  used on input line 229.
-(pdftex.def)             Requested size: 476.98244pt x 165.02586pt.
-Package cleveref Info: loaded `english' language definitions on input line 236.
- [51 <./figures/ung_gui.png> <./figures/gui.png> <./figures/GE.png>]
-Package cleveref Info: loaded `english' language definitions on input line 254.
- [52 <./figures/T0.0.png> <./figures/T0.1.png>]
-<figures/T00.png, id=1000, 901.26712pt x 336.65775pt>
-File: figures/T00.png Graphic file (type png)
-<use figures/T00.png>
-Package pdftex.def Info: figures/T00.png  used on input line 257.
-(pdftex.def)             Requested size: 476.98244pt x 178.1709pt.
-<figures/T01a.png, id=1002, 1074.71512pt x 365.56575pt>
-File: figures/T01a.png Graphic file (type png)
-<use figures/T01a.png>
-Package pdftex.def Info: figures/T01a.png  used on input line 278.
-(pdftex.def)             Requested size: 476.98244pt x 162.24951pt.
-<figures/T01b.png, id=1003, 1074.71512pt x 365.56575pt>
-File: figures/T01b.png Graphic file (type png)
-<use figures/T01b.png>
-Package pdftex.def Info: figures/T01b.png  used on input line 282.
-(pdftex.def)             Requested size: 476.98244pt x 162.24951pt.
-Package cleveref Info: loaded `english' language definitions on input line 294.
- [53 <./figures/T00.png>]
-<figures/T02a.png, id=1011, 926.4458pt x 245.16208pt>
-File: figures/T02a.png Graphic file (type png)
-<use figures/T02a.png>
-Package pdftex.def Info: figures/T02a.png  used on input line 320.
-(pdftex.def)             Requested size: 476.98244pt x 126.2206pt.
-<figures/T02b.png, id=1012, 926.4458pt x 245.16208pt>
-File: figures/T02b.png Graphic file (type png)
-<use figures/T02b.png>
-Package pdftex.def Info: figures/T02b.png  used on input line 324.
-(pdftex.def)             Requested size: 476.98244pt x 126.2206pt.
-Package cleveref Info: loaded `english' language definitions on input line 334.
- [54 <./figures/T01a.png> <./figures/T01b.png>]
-<figures/T1.png, id=1020, 1436.66737pt x 497.15738pt>
-File: figures/T1.png Graphic file (type png)
-<use figures/T1.png>
-Package pdftex.def Info: figures/T1.png  used on input line 348.
-(pdftex.def)             Requested size: 476.98244pt x 165.0562pt.
-Package cleveref Info: loaded `english' language definitions on input line 357.
- [55 <./figures/T02a.png> <./figures/T02b.png>]
-<figures/T2.1.png, id=1027, 826.58812pt x 223.73587pt>
-File: figures/T2.1.png Graphic file (type png)
-<use figures/T2.1.png>
-Package pdftex.def Info: figures/T2.1.png  used on input line 366.
-(pdftex.def)             Requested size: 476.98244pt x 129.10799pt.
-<figures/T3.1.png, id=1028, 826.58812pt x 223.73587pt>
-File: figures/T3.1.png Graphic file (type png)
-<use figures/T3.1.png>
-Package pdftex.def Info: figures/T3.1.png  used on input line 382.
-(pdftex.def)             Requested size: 476.98244pt x 129.10799pt.
-Package cleveref Info: loaded `english' language definitions on input line 390.
- [56 <./figures/T1.png> <./figures/T2.1.png>]
-Package cleveref Info: loaded `english' language definitions on input line 467.
- [57 <./figures/T3.1.png>]
-Overfull \hbox (6.81302pt too wide) in paragraph at lines 525--531
+
+LaTeX Warning: Reference `...' on page 49 undefined on input line 154.
+
+Package cleveref Info: loaded `english' language definitions on input line 159.
+[49]
+
+LaTeX Warning: Reference `..' on page 50 undefined on input line 215.
+
+
+LaTeX Warning: Reference `fig:t0-early-late' on page 50 undefined on input line 222.
+
+Package cleveref Info: loaded `english' language definitions on input line 257.
+[50]
+Package cleveref Info: loaded `english' language definitions on input line 344.
+ [51]
+Overfull \hbox (6.81302pt too wide) in paragraph at lines 362--368
 \T1/cmr/m/n/12 Taken to-gether, the temporal-localization and spread-ing ex-per-i-ments sup-port re-tain-ing $[]$.
  []
 
-Package cleveref Info: loaded `english' language definitions on input line 548.
-[58]
-<figures/T4.png, id=1048, 527.87213pt x 246.9225pt>
-File: figures/T4.png Graphic file (type png)
-<use figures/T4.png>
-Package pdftex.def Info: figures/T4.png  used on input line 556.
-(pdftex.def)             Requested size: 476.98244pt x 223.12866pt.
 )
-Package cleveref Info: loaded `english' language definitions on input line 75.
- [59 <./figures/T4.png>]
-\openout2 = `chapters/7-discussion.aux'.
+Package cleveref Info: loaded `english' language definitions on input line 76.
+ [52]
+\openout2 = `chapters/discussion.aux'.
 
- (./chapters/7-discussion.tex
-Chapter 7.
-[60
+ (./chapters/discussion.tex
+Chapter 9.
+
+Package hyperref Warning: Difference (2) between bookmark levels is greater 
+(hyperref)                than one, level fixed on input line 4.
+
+[53
 
 
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 48.
- [61])
 Package cleveref Info: loaded `english' language definitions on input line 76.
- [62]
-\openout2 = `chapters/8-conclusion.aux'.
+ [54])
+Package cleveref Info: loaded `english' language definitions on input line 77.
+ [55]
+\openout2 = `chapters/storyline.aux'.
 
- (./chapters/8-conclusion.tex
-Chapter 8.
-) [63
+ (./chapters/storyline.tex
+Chapter 10.
+) [56
 
 
 
 
-] [64
+]
+\openout2 = `chapters/conclusion.aux'.
+
+ (./chapters/conclusion.tex
+Chapter 11.
+) [57
+
+
+
+
+] [58
 
 
 
@@ -1479,62 +1458,65 @@ Chapter 8.
 
  (./appendices/appendix1.tex
 Appendix A.
-[65
+[59
 
 
 ]
 Package cleveref Info: loaded `english' language definitions on input line 146.
- [66]
+ [60]
 Package cleveref Info: loaded `english' language definitions on input line 214.
- [67])
-Package cleveref Info: loaded `english' language definitions on input line 87.
- [68]
-Overfull \hbox (23.74425pt too wide) in paragraph at lines 90--90
+ [61])
+Package cleveref Info: loaded `english' language definitions on input line 89.
+ [62]
+Overfull \hbox (23.74425pt too wide) in paragraph at lines 92--92
 \T1/cmr/m/n/12 Gen-er-a-tive Model for Ef-fi-cient ML Weather Fore-cast-ing^^Q. In: \T1/cmr/m/it/12 arXiv preprint arXiv:2412.12971
  []
 
 
-Overfull \hbox (8.17903pt too wide) in paragraph at lines 90--90
+Overfull \hbox (8.17903pt too wide) in paragraph at lines 92--92
 []\T1/cmr/m/n/12 Kanxuan He and Hong-shan Guo. ^^P  Prob-a-bilis-tic Se-quence Gen-er-a-tion Guided by Intensity--
  []
 
-[69
+[63
 
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 89.
- [70]
-Overfull \hbox (11.12402pt too wide) in paragraph at lines 90--90
+Package cleveref Info: loaded `english' language definitions on input line 91.
+ [64]
+Overfull \hbox (11.12402pt too wide) in paragraph at lines 92--92
 []\T1/cmr/m/n/12 World Me-te-o-ro-log-i-cal Or-ga-ni-za-tion. \T1/cmr/m/it/12 At-las of Mor-tal-ity and Eco-nomic Losses from Weather,
  []
 
-Package cleveref Info: loaded `english' language definitions on input line 91.
-[71] [72] (./report.aux
+Package cleveref Info: loaded `english' language definitions on input line 93.
+[65] [66] (./report.aux
 Package cleveref Info: loaded `english' language definitions on input line 20.
- (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation.aux) (./chapters/experiments.aux) (./chapters/7-discussion.aux) (./chapters/8-conclusion.aux) (./appendices/appendix1.aux))
+ (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation-new.aux) (./chapters/evaluation.aux) (./chapters/experiments-new.aux) (./chapters/experiments.aux) (./chapters/discussion.aux) (./chapters/storyline.aux) (./chapters/conclusion.aux) (./appendices/appendix1.aux))
 
 LaTeX Warning: There were undefined references.
 
+
+LaTeX Warning: There were multiply-defined labels.
+
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: 453F6A208953C84BFD443E14B75C6D91;13268.
+(rerunfilecheck)             Checksum: F0986CD8C06746CDB41D0E9326B625E6;13944.
 Package logreq Info: Writing requests to 'report.run.xml'.
 \openout1 = `report.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 43688 strings out of 476025
- 884356 string characters out of 5790016
- 1872388 words of memory out of 5000000
- 63079 multiletter control sequences out of 15000+600000
+ 43692 strings out of 476025
+ 885530 string characters out of 5790016
+ 1870388 words of memory out of 5000000
+ 63093 multiletter control sequences out of 15000+600000
  540339 words of font info for 98 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 89i,13n,120p,1246b,3007s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 89i,12n,120p,1246b,3030s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc2074.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm0800.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfti1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftt1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfxc1728.pfb>
-Output written on report.pdf (80 pages, 8180940 bytes).
+Output written on report.pdf (74 pages, 1516855 bytes).
 PDF statistics:
- 1383 PDF objects out of 1440 (max. 8388607)
- 1188 compressed objects within 12 object streams
- 344 named destinations out of 1000 (max. 500000)
- 690 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 1293 PDF objects out of 1440 (max. 8388607)
+ 1132 compressed objects within 12 object streams
+ 322 named destinations out of 1000 (max. 500000)
+ 668 words of extra memory for PDF output out of 10000 (max. 10000000)
 

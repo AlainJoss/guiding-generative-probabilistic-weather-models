@@ -2,30 +2,26 @@
 \label{ch:eval}
 
 This chapter develops the framework used to evaluate the guidance method.
-All evaluations are conducted on single-weather-step experiments, allowing us
-to isolate the behaviour of the guidance procedure without the additional
-effects of autoregressive propagation.
 
 We first inspect representative guided samples qualitatively to establish an
 intuitive picture of the resulting interventions (T0). We then compare
 candidate flow-time guidance profiles using three complementary criteria (T1):
 the multivariate propagation of the guidance effect, the spatial deviation of
 its footprint from the prescribed target mask, and the variability of this
-footprint across ensemble members. Target realization is treated as a
-prerequisite throughout this comparison.
+footprint across ensemble members. 
 
 Finally, with the guidance profile fixed, we examine how the generated state
 changes when varying the two components of the scenario specification: target
-intensity and target region (T2).
-
-The framework developed here is applied in the following chapter to select the
-guidance configuration and scenario setting used for the construction of a
-complete high-temperature storyline.
+intensity and target region (both in terms of shift and size) (T2).
 
 \section{Evaluation setup}
 \label{sec:evaluation-setup}
+We conduct all evaluations on single-weather-step experiments, allowing us
+to isolate the behaviour of the guidance procedure without the additional
+effects of autoregressive propagation.
 
-We first introduce the notation shared by the evaluations below.
+\subsection{Notation}
+We now introduce the notation shared by the evaluations below.
 
 Let
 \[
@@ -44,31 +40,57 @@ compared. An experimental setting $e\in E$ specifies the quantities held fixed
 across candidate profiles: the initial forecast context, the target mask
 $\pi_e$, including its target variable $v_e^\star$, level $\ell_e^\star$, and
 spatial support, and the prescribed relative intensity $\rho_H(e)$. Since all
-experiments in this chapter consist of a single weather step, this intensity
-directly determines the target for the generated state.
+experiments consist of a single weather step, this intensity
+directly determines the target for the generated state. We thus simplify the intensity level to $\rho_e$.
 
-For each experimental setting, all candidate profiles are therefore evaluated
+For each experimental setting, all candidate profiles are evaluated
 on the same scenario specification. The scalar guidance gain is adapted
 independently for each ensemble member to realize the prescribed target, while
 $\gamma$ determines how this guidance is distributed over the residual flow.
 
-For each $e\in E$, we evaluate $M$ ensemble members and collect the resulting
-instances in
-\begin{equation}
-    \mathcal{A}
+TODO: copy pasted, has to be integrated
+We define the evaluation region
+\[
+    \mathcal{R}_{\mathrm{mask}}
     :=
-    \left\{
-        (e,m)
-        \;:\;
-        e\in E,\;
-        m=1,\ldots,M
-    \right\}.
-    \label{eq:evaluation-index-set}
-\end{equation}
-When convenient, we write $a=(e,m)\in\mathcal{A}$ for a single evaluation
-instance.
+    \{(i,j): k_{ij}=1\},
+    \qquad
+    \mathcal{R}_{\neg\mathrm{mask}}
+    :=
+    \{(i,j): k_{ij}=0\},
+\]
+and let $\mathcal{R}_{\mathrm{global}}$ denote the complete spatial grid. In
+the following,
+\[
+    r\in
+    \{\mathrm{mask},\neg\mathrm{mask},\mathrm{global}\}
+\]
+denotes one of these spatial domains.
 
-A central object throughout the evaluation is the state change attributable to
+
+\subsection{Paired stochastic realizations}
+\label{sec:experimental-seeding}
+
+Comparisons between guidance configurations use matched stochastic
+realizations. The random seed is determined from the weather-step and
+ensemble-member indices as
+
+\begin{equation}
+    \mathrm{seed}(n,m)=1000n+m.
+    \label{eq:experimental-seed}
+\end{equation}
+
+The seed is kept fixed across configurations that are compared directly.
+Corresponding guided and unguided states therefore originate from the same
+initial residual-noise realization. This controls sampling noise in paired
+comparisons while retaining stochastic variability across ensemble members.
+
+
+
+\subsection{Guidance effect}
+
+TODO: connect with previous subsection
+The central object of the evaluation is the state change attributable to
 guidance itself. For a guided state $x_{e,m}^{\mathrm{gui},\gamma}$ and its
 matched unguided-under-guided-context counterpart
 $x_{e,m}^{\mathrm{ung}\mid\mathrm{gui},\gamma}$, we define the
@@ -88,20 +110,6 @@ deterministic forecast, and initial residual-noise realization, and differ only
 in whether guidance is applied during the residual flow. Their difference
 therefore isolates the state change induced by guidance.
 
-For analyses concerned with the magnitude and spatial structure of this
-intervention, we additionally define the non-negative \emph{guidance
-footprint} component-wise as
-\begin{equation}
-    G_{e,m,v\ell ij}^{\gamma}
-    :=
-    \left|
-        \Delta x_{e,m,v\ell ij}^{\mathrm{gui},\gamma}
-    \right|,
-    \qquad
-    \ell\in\mathcal{L}_v.
-    \label{eq:guidance-footprint}
-\end{equation}
-
 
 \section{T0: Qualitative evaluation}
 \label{sec:qualitative-evaluation}
@@ -110,15 +118,7 @@ Before quantitatively comparing the candidate guidance profiles, we first
 inspect representative guided samples qualitatively. The aim is to establish
 an intuitive picture of how guidance modifies the generated weather state.
 
-We examine the convergence of the targeted quantity during the residual flow,
-the distribution of the guidance effect across atmospheric variables and
-vertical levels, and its spatial structure across the flow for representative experimental
-settings.
-
-These diagnostics are used for interpretation only and do not enter the
-quantitative comparison developed in T1.
-
-
+We examine ... (T01-T06)
 
 \section{T1: Guidance-profile evaluation}
 \label{sec:guidance-profile-evaluation}
@@ -126,258 +126,22 @@ quantitative comparison developed in T1.
 \subsection{T1.1: Multivariate propagation of guidance}
 \label{sec:multivariate-propagation}
 
-The first criterion examines how strongly an intervention targeted at a
-particular variable, level, and region propagates through the atmospheric
-state. We evaluate this response within the target region, outside the target
-region, and over the complete spatial domain.
-
-Because the target region is part of the experimental setting $e$, we define
-\[
-    \mathcal{R}_{\mathrm{mask}}^e
-    :=
-    \{(i,j): k_{ij}^e=1\},
-    \qquad
-    \mathcal{R}_{\neg\mathrm{mask}}^e
-    :=
-    \{(i,j): k_{ij}^e=0\},
-\]
-and let $\mathcal{R}_{\mathrm{global}}$ denote the complete spatial grid. In
-the following,
-\[
-    r\in
-    \{\mathrm{mask},\neg\mathrm{mask},\mathrm{global}\}
-\]
-denotes one of these spatial domains.
-
-(TODO: we are not actually using mathcal A, so why bother. 
-In addition, why not define some $\mathcal{G}$ instead)
-For an evaluation instance $(e,m)\in\mathcal{A}$, variable $v$, level
-$\ell\in\mathcal{L}_v$, and guidance profile $\gamma\in\Gamma$, we define the
-total guidance effect over region $r$ as
-\begin{equation}
-    A_{e,m,v\ell}^{r,\gamma}
-    :=
-    \sum_{(i,j)\in\mathcal{R}_r^e}
-    G_{e,m,v\ell ij}^{\gamma}
-    =
-    \sum_{(i,j)\in\mathcal{R}_r^e}
-    \left|
-        \Delta x_{e,m,v\ell ij}^{\mathrm{gui},\gamma}
-    \right|.
-    \label{eq:absolute-guidance-response}
-\end{equation}
-
-To characterize the response of a variable as a whole, we aggregate over all
-levels on which that variable is defined,
-\begin{equation}
-    A_{e,m,v}^{r,\gamma}
-    :=
-    \sum_{\ell\in\mathcal{L}_v}
-    A_{e,m,v\ell}^{r,\gamma}.
-    \label{eq:variable-guidance-response}
-\end{equation}
-For surface variables, $\mathcal{L}_v=\{0\}$, while for upper-air variables
-the sum extends over all available pressure levels. The level-resolved
-quantities $A_{e,m,v\ell}^{r,\gamma}$ are retained separately to inspect the
-vertical distribution of the response.
-
-Because the magnitude of the guidance effect differs substantially across
-atmospheric variables, we normalize each variable relative to the candidate
-profiles evaluated at the same target intensity. Let
-\[
-    E_{\rho}
-    :=
-    \left\{
-        e\in E :
-        \rho_H(e)=\rho
-    \right\}
-\]
-denote the experimental settings with final relative intensity $\rho$. For
-each variable, region, and guidance profile, we compute the response averaged
-over experimental settings and ensemble members,
-\begin{equation}
-    \overline{A}_{v}^{r,\gamma,\rho}
-    :=
-    \frac{1}{|E_{\rho}|M}
-    \sum_{e\in E_{\rho}}
-    \sum_{m=1}^{M}
-    A_{e,m,v}^{r,\gamma},
-    \label{eq:pooled-variable-guidance-response}
-\end{equation}
-and define
-\begin{equation}
-    A_{v,\max}^{r,\rho}
-    :=
-    \max_{\gamma'\in\Gamma}
-    \overline{A}_{v}^{r,\gamma',\rho}.
-    \label{eq:guidance-response-normalization}
-\end{equation}
-
-The \emph{multivariate propagation score} for an individual experimental
-setting and ensemble member is then
-\begin{equation}
-    S_{\mathrm{prop},e,m}^{r,\gamma}
-    :=
-    \frac{1}{V}
-    \sum_{v=1}^{V}
-    \frac{
-        A_{e,m,v}^{r,\gamma}
-    }{
-        A_{v,\max}^{r,\rho_H(e)}
-    }.
-    \label{eq:multivariate-propagation-score}
-\end{equation}
-
-Normalizing each variable independently prevents variables with intrinsically
-larger responses from dominating the comparison and gives equal weight to each
-atmospheric variable. A larger $S_{\mathrm{prop}}^{r,\gamma}$ indicates a
-stronger multivariate guidance response in region $r$ relative to the other
-candidate profiles evaluated at the same target intensity.
+The first criterion examines how strongly an intervention propagates through the atmospheric
+state. We evaluate this response within the target region ... (not sure)
 
 
 \subsection{T1.2: Spatial deviation from the target mask}
 \label{sec:spatial-mask-deviation}
 
-The propagation score introduced above measures the magnitude of the guidance
-effect, but not its spatial shape. We therefore examine how closely the
-guidance footprint on the targeted variable--level channel follows the
-prescribed target mask.
-
-For an evaluation instance $(e,m)\in\mathcal{A}$ and guidance profile
-$\gamma\in\Gamma$, we restrict the guidance footprint to the targeted variable
-and level,
-\begin{equation}
-    G_{e,m,ij}^{\gamma}
-    :=
-    G_{e,m,v_e^\star\ell_e^\star ij}^{\gamma}
-    =
-    \left|
-        \Delta x_{e,m,v_e^\star\ell_e^\star ij}^{\mathrm{gui},\gamma}
-    \right|.
-    \label{eq:target-guidance-footprint}
-\end{equation}
-
-To compare spatial shape independently of the overall magnitude of the
-intervention, we normalize this footprint to sum to one,
-\begin{equation}
-    \widetilde{G}_{e,m,ij}^{\gamma}
-    :=
-    \frac{
-        G_{e,m,ij}^{\gamma}
-    }{
-        \displaystyle
-        \sum_{i',j'}
-        G_{e,m,i'j'}^{\gamma}
-    }.
-    \label{eq:normalized-guidance-footprint}
-\end{equation}
-
-The target mask $\pi_e$ is already normalized by construction. Restricted to
-its targeted variable--level channel, it defines the spatial distribution
-\[
-    \pi_{e,ij}
-    :=
-    \pi_{e,v_e^\star\ell_e^\star ij},
-    \qquad
-    \sum_{i,j}\pi_{e,ij}=1.
-\]
-
-We measure the discrepancy between the normalized guidance footprint and the
-target mask using total variation distance,
-\begin{equation}
-    D_{e,m}^{\mathrm{TV},\gamma}
-    :=
-    \frac{1}{2}
-    \sum_{i,j}
-    \left|
-        \widetilde{G}_{e,m,ij}^{\gamma}
-        -
-        \pi_{e,ij}
-    \right|.
-    \label{eq:guidance-footprint-tv}
-\end{equation}
-
-Since both terms are normalized spatial distributions,
-\[
-    D_{e,m}^{\mathrm{TV},\gamma}\in[0,1].
-\]
-A value of zero indicates that the guidance footprint exactly matches the
-spatial distribution of the prescribed mask, while larger values indicate
-increasing spatial deviation. Such deviations may arise because the guidance
-effect extends beyond the target region or because it is distributed
-non-uniformly within it.
-
-For each experimental setting and guidance profile, we report the mean and
-standard deviation of $D_{e,m}^{\mathrm{TV},\gamma}$ across ensemble members.
-Lower values indicate closer spatial alignment between the guidance footprint
-and the target mask.
-
-Because the footprint is normalized before computing the distance, this
-criterion is independent of the overall magnitude of the guidance effect and
-therefore complements the multivariate propagation score in
-\Cref{sec:multivariate-propagation}.
-
 
 \subsection{T1.3: Ensemble variability of the guidance footprint}
 \label{sec:guidance-footprint-variability}
 
-The preceding criterion characterizes the spatial shape of the guidance
-footprint, but not how consistently that footprint emerges across ensemble
-members. We therefore quantify the variability of its local magnitude across
-stochastic realizations.
-
-For a fixed experimental setting $e$ and guidance profile $\gamma$, we consider
-the footprint on the targeted variable--level channel,
-\[
-    G_{e,m,ij}^{\gamma}
-    =
-    \left|
-        \Delta x_{e,m,v_e^\star\ell_e^\star ij}^{\mathrm{gui},\gamma}
-    \right|.
-\]
-We compute its pixel-wise standard deviation across the $M$ ensemble members,
-\begin{equation}
-    \sigma_{e,ij}^{\gamma}
-    :=
-    \operatorname{std}_{m}
-    \left(
-        G_{e,m,ij}^{\gamma}
-    \right).
-    \label{eq:guidance-footprint-pixel-spread}
-\end{equation}
-
-This produces a spatial map of the ensemble variability of the guidance
-footprint. Unlike the normalized footprint used in
-\Cref{sec:spatial-mask-deviation}, its magnitude is retained, such that
-$\sigma_{e,ij}^{\gamma}$ remains expressed in the physical units of the
-targeted atmospheric variable.
-
-To summarize this variability within the prescribed target region, we apply
-the area-weighted masked-average operator introduced in \Cref{ch:specify},
-\begin{equation}
-    S_{e}^{\mathrm{ens},\gamma}
-    :=
-    \mathcal{M}_{\pi_e}
-    \left(
-        \sigma_{e}^{\gamma}
-    \right).
-    \label{eq:guidance-footprint-ensemble-spread}
-\end{equation}
-
-A smaller $S_{e}^{\mathrm{ens},\gamma}$ indicates that the local magnitude of
-the guidance footprint is more consistent across ensemble members, while a
-larger value indicates stronger dependence on the stochastic realization.
-The metric requires at least two ensemble members.
-
-For each guidance profile, we compare
-$S_{e}^{\mathrm{ens},\gamma}$ across experimental settings and prescribed
-intensities. This criterion complements the preceding evaluations by measuring
-ensemble variability rather than the overall strength or spatial alignment of
-the guidance effect.
-
 
 \subsection{T1.4: Profile comparison and selection}
 \label{sec:guidance-profile-selection}
+
+TODO: shorten to the essence
 
 The three criteria are considered jointly when comparing guidance profiles:
 larger multivariate propagation indicates a stronger coupled atmospheric
@@ -391,6 +155,8 @@ profile $\gamma^\star$ in the following chapter.
 
 \section{T2: Scenario-specification analysis}
 \label{sec:scenario-specification-analysis}
+
+TODO: shorten to the essence
 
 With the guidance profile fixed, we next examine how the generated state
 depends on the scenario specification. We vary the two components introduced
@@ -422,3 +188,35 @@ over regions of different size.
 Together, T0--T2 define the evaluation framework used in the following chapter
 to compare candidate guidance profiles and characterize the sensitivity of the
 method to the prescribed scenario.
+
+
+\section{Notes}
+These notes specify exactly how the chapter should be built in addition to a few useful notes.
+
+Experiment tuple notation: $\mathcal{E} = (\Tau, \mathcal{P}, \Pi)$
+for $\tau$ start date, $\rho$ intensity level, $\pi$ mask (target var,level,spatial region).
+Also define the different eval regions $\mathcal{R}$
+
+Seeding, and what this enables (DeltaxGE).
+
+King of evaluation is DeltaxGE, member, var and level specific.
+We evaluate is across experiments e in E.
+
+T0: 
+- descriptive stats (current Descriptive statistics)
+- example maps (gui, ung|gui, DeltaxGE) take from guidance.py notebook in Inspect states section under diff mode you will find those three charts, select one experiment, m=0, and a use the selected rho as always.
+- example DeltaxGE across selected variables (same as the ones used of the ones used for the current "T01: Convergence over flow time" and plot in the same grid) 
+- T0.4a,b: masked mean charts x2 (T04: Absolute intensity and T05: Relative to ground truth)
+- convergence charts (T01: Convergence over flow time)
+- decomposition chart (T02: Convergence decomposition (landings))
+
+Note in T1 we specify which region is considered for the eval 
+T1:
+- T1.1 multivariate propagation (better name than spread) - object of interest: abs(DeltaxGE)
+- T1.2 mask deviation - object of interest: norm(abs(DeltaxGE)) - mask
+- T1.3 std\_m(DeltaxGE)
+Protocol: since every test consider the object DeltaxGE from different perspectives, we can build the evaluation for each T1.i around the same structure.
+- visual example charts selected vars at selected levels
+- chart for all vars at selected levels (explain once how the charts are created)
+- table funnel (attention, T1.3 looses the variance for each experiment since std is itself the considered object)
+    here we should explain only once how the tables are generated / aggregated

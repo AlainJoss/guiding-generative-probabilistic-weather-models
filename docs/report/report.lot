@@ -5,8 +5,10 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {6.1}{\ignorespaces Summary of the temporal-localization experiment across the four initializations and two target intensities. Larger values correspond to the preferred behaviour for all three evaluation criteria. \relax }}{57}{table.caption.21}%
-\contentsline {table}{\numberline {6.2}{\ignorespaces Comparison of $\mathrm {spike@1}$ with guidance distributed over neighbouring flow steps, summarized across the four initializations and two target intensities. Larger values correspond to the preferred behaviour for all three criteria. \relax }}{58}{table.caption.22}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {8.1}{\ignorespaces Summary of the temporal-localization experiment across the four initializations and two target intensities. Larger values correspond to the preferred behaviour for all three evaluation criteria. \relax }}{51}{table.caption.13}%
+\addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }

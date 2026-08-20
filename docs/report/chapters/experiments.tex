@@ -1,10 +1,8 @@
 \chapter{Experiments and Results}
 \label{ch:experiments}
 
-TODO: in chapter 5 we should make deltaxGE the king of the evaluation.
-
 TODO throughout:
-- reference eval equivalent
+- reference eval equivalent text or formulas
 - if in ch5 some formulas are missing we have to add them. in particular all plot lines and all values in the tables
 
 This chapter applies the evaluation framework of \Cref{ch:eval} to characterize
@@ -12,16 +10,14 @@ the proposed guidance method. We first inspect representative guided samples
 qualitatively, then compare alternative flow-time guidance profiles, and finally
 study the effect of varying the target specification.
 
-
 \section{Experimental setup}
 \label{sec:experimental-setup}
 
 \subsection{Experimental settings}
 \label{sec:experimental-settings}
 
-All experiments consider a single generated weather state, as specified in
-\Cref{ch:eval}. We denote an experimental setting by
-
+TODO: this should be in the eval chapter
+We denote an experimental setting by
 \begin{equation}
     e = (\tau,\rho_H,\pi),
     \label{eq:experimental-setting}
@@ -45,21 +41,20 @@ Europe and the four forecast initializations
 
 Each initialization is evaluated at
 
-TODO: it would be nice to have the implied temperature for each experiment.
-Or if not we can in the qualitative analysis show a table statistic with the min,max,mean,std.
-
 \begin{equation}
     \rho_H \in \{0.002,\,0.004\},
     \label{eq:t1-target-intensities}
 \end{equation}
 
 corresponding to relative target increases of $0.2\%$ and $0.4\%$.
+TODO: this ($e=(\tau,\rho_H)$) should be in the eval chapter
 Since the mask is fixed throughout T1, we abbreviate these settings as
 $e=(\tau,\rho_H)$. The four initializations and two intensities yield eight
 experimental settings.
 
 For each setting, we generate $M=5$ stochastic ensemble members indexed by
 
+TODO: no reason to specify the indexing again 
 \begin{equation}
     m \in \{0,\ldots,M-1\}.
 \end{equation}
@@ -76,23 +71,6 @@ paired realizations.
     \label{fig:t1-target-mask}
 \end{figure}
 
-
-\subsection{Paired stochastic realizations}
-\label{sec:experimental-seeding}
-
-Comparisons between guidance configurations use matched stochastic
-realizations. The random seed is determined from the weather-step and
-ensemble-member indices as
-
-\begin{equation}
-    \mathrm{seed}(n,m)=1000n+m.
-    \label{eq:experimental-seed}
-\end{equation}
-
-The seed is kept fixed across configurations that are compared directly.
-Corresponding guided and unguided states therefore originate from the same
-initial residual-noise realization. This controls sampling noise in paired
-comparisons while retaining stochastic variability across ensemble members.
 
 
 \subsection{Guidance-profile search}
@@ -151,6 +129,8 @@ TODO: insert rest once chapter done
 \section{T0: Qualitative evaluation}
 \label{sec:experiments-qualitative}
 
+TODO: remember to add that contour lines are added to facilitate 
+
 We begin with a qualitative inspection of representative guided samples.
 Unless stated otherwise, we use
 
@@ -168,14 +148,10 @@ Unless stated otherwise, we use
 \subsection{Descriptive statistics}
 
 We start with a dry factual description of what happened.
-Put ung on left and gui on right for each metric in a split row.
-Put here table with min,max,mean,std for each experiment and rho (rhos tables with exps rows). 
-
 
 \subsection{Guided and matched unguided states}
 
-In the following we show the t2m field for the ung | gui and gui states with the corresponding guidance effect (the difference between the two objects).
-Figure~\ref{fig:t0-state-comparison} illustrates the three objects used
+Figure~\ref{...} illustrates the three objects used
 throughout the evaluation: the matched unguided state
 $x^{\mathrm{ung}\mid\mathrm{gui}}$, the guided state $x^{\mathrm{gui}}$, and
 their difference $\Delta x^{\mathrm{GE}}$.
@@ -184,87 +160,63 @@ This shows us where the guidance effect has taken place, and how the guided stat
 
 The top of the charts also report descriptive statistics to orient oneself.
 
-%%%%%%%%%%%%
-TODO: fill the page in a smarter way
+% \begin{figure}[H]
+%     \centering
+%     % Top row: ung|gui and GE
+%     \includegraphics[
+%         width=\textwidth,
+%         height=0.2\textheight,
+%         keepaspectratio
+%     ]{figures/....png}
+%     \includegraphics[
+%         width=\textwidth,
+%         height=0.2\textheight,
+%         keepaspectratio
+%     ]{figures/....png}
+%     % Bottom row: gui
+%     \includegraphics[
+%         width=\textwidth,
+%         height=0.2\textheight,
+%         keepaspectratio
+%     ]{figures/...png}
 
-\begin{figure}[H]
-    \centering
-
-    % Top row: ung|gui and GE
-    \includegraphics[
-        width=\textwidth,
-        height=0.2\textheight,
-        keepaspectratio
-    ]{figures/ung_gui.png}
-    \includegraphics[
-        width=\textwidth,
-        height=0.2\textheight,
-        keepaspectratio
-    ]{figures/gui.png}
-    % Bottom row: gui
-    \includegraphics[
-        width=\textwidth,
-        height=0.2\textheight,
-        keepaspectratio
-    ]{figures/GE.png}
-
-    \caption{
-        Matched unguided state $x^{\mathrm{ung}\mid\mathrm{gui}}$ (top left),
-        guidance effect $\Delta x^{\mathrm{GE}}$ (top right), and guided state
-        $x^{\mathrm{gui}}$ (bottom) for the representative experiment
-        $e_{\mathrm{ex}}$ using $\mathrm{spike@1}$.
-    }
-    \label{fig:t0-state-comparison}
-\end{figure}
-%%%%%%%%%%%%
+%     \caption{
+%         ...
+%     }
+%     \label{...}
+% \end{figure}
 
 \subsection{Masked mean}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T0.0.png}
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=\textwidth]{figures/T0.0.png}
 
-    \vspace{0.5em}
+%     \vspace{0.5em}
 
-    \includegraphics[width=\textwidth]{figures/T0.1.png}
+%     \includegraphics[width=\textwidth]{figures/T0.1.png}
 
-    \caption{
-        ...
-    }
-    \label{fig:...}
-\end{figure}
-
-TODO: split figures and put after corresponding text chunks
+%     \caption{
+%         ...
+%     }
+%     \label{fig:...}
+% \end{figure}
 
 First one shows the average value, to be able to understand the magnitude of the guidance effect.
 (not so much visually from the plot, enables us to anchor to reality)
 
 Second one shows where the effect has taken place in the levels (we can compare levels) in terms of the masked value wrt to the one of the ung|gui.
 
-
 Here we should notice how guiding at the last step clearly doesn't produce any change in the other variables. Which can also be observed under the second "Evolution through the residual flow" plot and 
 under the "Spatial structure of the guidance effect"
 
 \subsection{Evolution through the residual flow}
 
-Figure~\ref{fig:t00} shows the evolution of
-$\bar z^{\mathrm{gui}}_{t,m,v}$ over flow time for the selected variables.
+Figure~\ref{..} shows the evolution of ... over flow time for the selected variables.
 The curves show the ensemble mean, while the shaded region spans the minimum
 and maximum across the five ensemble members. The shading enables to see the variance of the noise drawings (different starting points) and the less varying end points of the trajectories.
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T00.png}
-    \caption{
-        Evolution of the masked guided residual
-        $\bar z^{\mathrm{gui}}_{t,m,v}$ for selected atmospheric variables.
-        Curves show the ensemble mean, while the shaded region spans the
-        minimum and maximum across ensemble members. Upper-air variables are
-        shown at their highest available pressure level for visualization.
-    }
-    \label{fig:t00}
-\end{figure}
-
+...
 
 We next inspect how the intervention acts along the residual flow, by visualizing the same object but splitting guided and unguided steps along the trajectory.
 Figure~\ref{fig:t0-early-late} compares an early intervention,
@@ -273,35 +225,27 @@ experimental setting and stochastic realization.
 (TODO: The plot also let you see visually that guidance is concentrated in one single step)
 
 (TODO: the plot has 1-e5 over q ... remove)
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T01a.png}
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=\textwidth]{figures/T01a.png}
 
-    \vspace{0.5em}
+%     \vspace{0.5em}
 
-    \includegraphics[width=\textwidth]{figures/T01b.png}
+%     \includegraphics[width=\textwidth]{figures/T01b.png}
 
-    \caption{
-        Step-wise decomposition of the guided residual-flow trajectory for
-        $\mathrm{spike@1}$ (top) and $\mathrm{spike@17}$ (bottom), using the
-        same experimental setting and ensemble realization. The panels show
-        the current state, the corresponding
-        unguided-under-guided-context landing, and the contributions of the
-        flow and guidance moves at each flow step.
-    }
-    \label{fig:t0-early-late}
-\end{figure}
+%     \caption{
+%         Step-wise decomposition of the guided residual-flow trajectory for
+%         $\mathrm{spike@1}$ (top) and $\mathrm{spike@17}$ (bottom), using the
+%         same experimental setting and ensemble realization. The panels show
+%         the current state, the corresponding
+%         unguided-under-guided-context landing, and the contributions of the
+%         flow and guidance moves at each flow step.
+%     }
+%     \label{fig:t0-early-late}
+% \end{figure}
 
 To compare the residual trajectories across atmospheric variables, we apply
 the spatial target mask to the guided residual state and define
-
-TODO: simply rewrite with the mask operator and distinguish gui and ung step.
-
-
-Across all experiments, all candidate spike profiles reach their
-prescribed targets. The profiles therefore differ in the atmospheric response
-through which the target is realized, which we compare quantitatively next.
-
 
 \section{T1: Guidance-profile evaluation}
 \label{sec:experiments-guidance-profiles}
@@ -312,81 +256,6 @@ defined in \Cref{sec:guidance-profile-evaluation}.
 
 \subsection{T1.1: Temporal localization of guidance}
 \label{sec:experiments-temporal-localization}
-
-TODO: this is now the sample charts for exposing the quantity.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T02a.png}
-
-    \vspace{0.5em}
-
-    \includegraphics[width=\textwidth]{figures/T02b.png}
-
-    \caption{
-        Spatial guidance effect $\Delta x^{\mathrm{GE}}$ for 2\,m temperature
-        (top) and geopotential at 1000\,hPa (bottom) in the representative
-        experiment. The response in geopotential illustrates how an
-        intervention targeted at 2\,m temperature propagates to another
-        atmospheric variable.
-    }
-    \label{fig:t0-spatial-effect}
-\end{figure}
-
-We first compare the seven profiles in
-$\Gamma_{\mathrm{spike}}$, which differ only in the flow step at which guidance
-is applied.
-
-Figure~\ref{fig:t1-propagation} shows the resulting multivariate propagation.
-The response peaks at $\mathrm{spike@1}$ and decreases strongly as guidance is
-shifted toward later flow steps.
-(TODO: this is correct, but there is also spike@0 which before spike@1 that is less. same argument goes for the next two tests)
-
-(TODO: this is the same chart as the second of the masked average subsection just in terms of absolute values so we can see how much levels where pushed respectively, instead of the direction)
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T1.png}
-    \caption{
-        Multivariate propagation of the guidance effect for the candidate
-        spike profiles. Earlier interventions, and in particular
-        $\mathrm{spike@1}$, produce a stronger response across atmospheric
-        variables and pressure levels.
-    }
-    \label{fig:t1-propagation}
-\end{figure}
-
-TODO: reference the criteria from latest chapter (this is something we have to do throughout)
-The spatial-deviation criterion exhibits the same preference for early
-guidance. Early interventions depart more strongly from the prescribed mask,
-whereas later interventions increasingly reproduce its spatial structure.
-
-TODO: should also add the z1000 one.
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T2.1.png}
-    \caption{
-        Spatial deviation of the normalized guidance footprint from the
-        prescribed target mask, measured by total-variation distance. Larger
-        values indicate a stronger departure from the imposed mask geometry.
-    }
-    \label{fig:t1-spatial-deviation}
-\end{figure}
-
-Ensemble variability follows the same pattern. It is largest for
-$\mathrm{spike@1}$ and decreases toward later flow steps, indicating that
-early guidance retains a stronger dependence on the stochastic realization.
-
-TODO: should also add the z1000 one.
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T3.1.png}
-    \caption{
-        Ensemble variability of the guidance footprint for the candidate spike
-        profiles. Larger values indicate a stronger dependence of the induced
-        perturbation on the stochastic ensemble realization.
-    }
-    \label{fig:t1-ensemble-variability}
-\end{figure}
 
 The three criteria are summarized in
 \Cref{tab:t1-spike-summary}. 
@@ -474,43 +343,11 @@ the resulting response. We compare it with
     \label{eq:spread-profile-set}
 \end{equation}
 
-using the same experimental settings and paired stochastic realizations as in
+We augment the experimental setting by defining additional intensity levels + 0.6\%, 0.8\%, 1\%.
+For the rest we use the same experimental settings and paired stochastic realizations as in
 T1.1. The pooled results are summarized in
-\Cref{tab:t1-spread-summary}.
 
-\begin{table}[H]
-    \centering
-    \caption{
-        Comparison of $\mathrm{spike@1}$ with guidance distributed over
-        neighbouring flow steps, summarized across the four initializations
-        and two target intensities. Larger values correspond to the preferred
-        behaviour for all three criteria.
-    }
-    \label{tab:t1-spread-summary}
-    \begin{tabular}{lccc}
-        \toprule
-        Profile
-        & Multivariate propagation
-        & Spatial deviation
-        & Ensemble variability \\
-        \midrule
-        $\mathrm{spike@1}$
-        & $\mathbf{0.999\pm0.098}$
-        & $0.357\pm0.053$
-        & $\mathbf{0.1080\pm0.035}$ \\
-
-        $\mathrm{spread@0\text{-}2}$
-        & $0.746\pm0.045$
-        & $0.345\pm0.047$
-        & $0.0980\pm0.032$ \\
-
-        $\mathrm{spread@1\text{-}3}$
-        & $0.949\pm0.073$
-        & $\mathbf{0.359\pm0.050}$
-        & $0.1077\pm0.036$ \\
-        \bottomrule
-    \end{tabular}
-\end{table}
+NEW TABLE (when results are ready)
 
 Spreading guidance over steps $0$--$2$ reduces all three scores.
 For $\mathrm{spread@1\text{-}3}$, the differences are smaller:
@@ -538,40 +375,6 @@ and select
 \end{equation}
 
 for the remaining experiments.
-
-\subsection{T1.4: Prediction accuracy over flow time}
-\label{sec:experiments-prediction-noise}
-
-The preference for $\mathrm{spike@1}$ does not coincide with increased
-accuracy of the intermediate residual prediction. To examine this, we compute
-
-\begin{equation}
-    \operatorname{RMSE}\!\left(\hat z_t,z_T\right)
-\end{equation}
-
-between the intermediate prediction $\hat z_t$ and the final residual $z_T$.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\textwidth]{figures/T4.png}
-    \caption{
-        RMSE between the intermediate residual prediction $\hat z_t$ and the
-        final residual $z_T$ over flow time. Curves summarize the four forecast
-        initializations, with variation across ensemble members.
-    }
-    \label{fig:t1-prediction-noise}
-\end{figure}
-
-For all four initializations, the prediction error reaches its maximum at
-$t=1$, precisely the flow step selected for guidance. Thereafter, the error
-decreases approximately monotonically toward the final residual. Thus, the
-effectiveness of $\mathrm{spike@1}$ cannot be explained by unusually accurate
-intermediate predictions. Instead, the relationship between prediction
-accuracy and guidance effectiveness is non-monotonic and remains unresolved by
-the present experiments.
-
-
-
 
 
 % \section{T2: Scenario-specification analysis}

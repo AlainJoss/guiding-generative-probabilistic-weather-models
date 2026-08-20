@@ -20,6 +20,7 @@ def _():
     from src import flow_time_tests as ftt
     from src.mask import get_masked_mean
     from src.ui.plot_trajectory import plot_trajectory
+    from src.ui.map import visualize_map, get_mask_center
     from src.utils import get_rollout_ids, get_gt_rollout, get_rollout_dir, find_era5_input
     from datetime import datetime
     import xarray as xr
@@ -49,12 +50,14 @@ def _():
         find_era5_input,
         ftt,
         get_gt_rollout,
+        get_mask_center,
         get_masked_mean,
         get_rollout_dir,
         get_rollout_ids,
         guided_velocity_primitive,
         load_rollout,
         mask_bbox,
+        mcolors,
         mo,
         np,
         open_store,
@@ -67,6 +70,7 @@ def _():
         residual_scaler,
         select_point,
         sweep_points,
+        visualize_map,
         xr,
     )
 
@@ -111,10 +115,11 @@ def _(mo):
     `spike@k` / `spread@i-j`) and per **intensity level** $\rho_H$. The selectors up top pin the sweep
     context and pick the plotted intensity; metrics recompute automatically.
 
-    - **T0 — Qualitative analysis**: convergence over flow time (T01), its decomposition (T02), and the
-      absolute-intensity (T04) / vs-ground-truth (T05) profiles.
+    - **T0 — Qualitative analysis**: descriptive **statistics** (T01), the **example maps** and
+      $\Delta x^{\mathrm{GE}}$ across variables (T02–T03), the **absolute-intensity** (T04) / vs-ground-truth
+      (T05) profiles, and the flow-time **convergence** grid (T06) with its **decomposition** (T07).
     - **T1 — Temporal localization of guidance**: multivariate propagation (T1.1, opening with the
-      guidance-effect maps over flow time, T03), spatial deviation from the mask (T1.2), and ensemble diversity
+      guidance-effect maps over flow time), spatial deviation from the mask (T1.2), and ensemble diversity
       of the footprint (T1.3).
     - **Support**: realized-target table, leaderboard, guidance-kick decomposition, latent-space closeness,
       and the prediction-noise check.
@@ -154,9 +159,13 @@ def hdr_tables_readme(mo):
     and aggregated into a **single score** $R=\big(\sum_v N_v\big)/\max_{\gamma'}\sum_v N_v'$. Tables report $\mu\pm\sigma$ of $N_v$
     (per-variable views $V_2$) or $R$ (single-score views $V_1$); see T1.1 for the two paired summary views.
 
-    **T1.2 / T1.3 per-variable tables.** Rows = the seven variables $t,u,v,z,q,w,\mathrm{mslp}$; columns =
-    schedule $\gamma$; cells = the raw per-variable metric (realism TV, footprint spread). **Bold** = the max
-    schedule per variable (per row).
+    **T1.2 / T1.3 scores.** Both reuse the T1.1 construction on their own object — the spatial-deviation $D$
+    (T1.2) or the signed-effect ensemble spread $s=\mathcal{M}_\pi(\operatorname{std}_m\,\Delta x^{\mathrm{GE}})$
+    (T1.3) — in place of $\mathcal{M}_\pi(|\Delta x^{\mathrm{GE}}|)$: per variable $A_v=\sum_\ell(\text{object})$,
+    per-member normalized $N_v=A_v/\max_{\gamma'}A_v'$, single score $R=(\sum_v N_v)/\max_{\gamma'}\sum_v N_v'$,
+    shown in the same paired per-variable ($V_2$, $\mu\pm\sigma$ of $N_v$) and single-score ($V_1$, of $R$)
+    views. **T1.3 has no member axis** ($\operatorname{std}_m$ already consumes the members), so its cells carry
+    a single value and any $\pm$ runs over startdates/$\rho$ only.
 
     **Descriptive statistics** (Support) pool differently: each cell is the ensemble avg $\pm$ std of a
     per-instance spatial statistic (min/max over the mask support; area-weighted masked mean $\mathcal{M}_\pi$ and weighted std) over the pool selected schedules
@@ -167,10 +176,39 @@ def hdr_tables_readme(mo):
 
 
 @app.cell
+def hdr_export(mo):
+    md_export = r"""
+    ## Exporting figures
+
+    The **⬇ save all charts → figures/** button saves every currently-rendered chart to
+    `docs/report/figures/` as a separate PNG (150 dpi), one file per panel, named by test id — e.g.
+    `\includegraphics{figures/T02a.png}`:
+
+    | test | ids |
+    | --- | --- |
+    | T02 | `T02a`, `T02b`, `T02c` |
+    | T03 | `T03a`–`T03g` |
+    | T04 | `T04` |
+    | T05 | `T05` |
+    | T06 | `T06a`–`T06d` |
+    | T07 | `T07a`–`T07d` |
+    | T1.1 / T1.2 / T1.3 charts | `T1.1`, `T1.2`, `T1.3` |
+    | visual examples | `T1.1a`, `T1.2a`, `T1.3a` |
+
+    Only currently-rendered charts are saved — first compute what you want (press **compute field profiles**
+    for T04/T05 and the T1.1–T1.3 charts), then press export. Each press overwrites, so the files always match
+    the current selection.
+    """
+    mo.md(md_export)
+    return (md_export,)
+
+
+@app.cell
 def table_report_cell(
     copyable,
     md_closeness,
     md_descstats,
+    md_export,
     md_kick,
     md_leaderboard,
     md_prednoise,
@@ -182,12 +220,22 @@ def table_report_cell(
     md_t03,
     md_t04,
     md_t05,
+    md_t0_gegrid,
+    md_t0_maps,
     md_t1,
     md_t11,
     md_t11_def,
     md_t11_scores,
     md_t12,
+    md_t12_def,
+    md_t12_scores,
+    md_t12_visual,
+    md_t12_whymask,
     md_t13,
+    md_t13_def,
+    md_t13_scores,
+    md_t13_visual,
+    md_t14,
     md_target_real,
     md_title,
     mo,
@@ -199,6 +247,7 @@ def table_report_cell(
     report_propagation,
     report_realism,
     report_reliability,
+    report_t14,
 ):
     # --- global "table report": the full notebook as one markdown chunk (section headers + explanations
     # interleaved with every table, in document order). Copyable via the button below. The inline chart
@@ -206,18 +255,22 @@ def table_report_cell(
     _order = [
         ("md", md_title),
         ("md", md_reading),
+        ("md", md_export),
         ("md", md_t0),
-        ("md", md_t01),
-        ("md", md_t02),
+        ("md", md_descstats), ("tbl", report_descstats),
+        ("md", md_t0_maps),
+        ("md", md_t0_gegrid),
         ("md", md_t04),
         ("md", md_t05),
+        ("md", md_t01),
+        ("md", md_t02),
         ("md", md_t1),
         ("md", md_t11), ("md", md_t03), ("md", md_t11_def), ("md", md_t11_scores), ("tbl", report_propagation),
-        ("md", md_t12), ("tbl", report_realism),
-        ("md", md_t13), ("tbl", report_diversity),
+        ("md", md_t12), ("md", md_t12_visual), ("md", md_t12_def), ("md", md_t12_scores), ("tbl", report_realism), ("md", md_t12_whymask),
+        ("md", md_t13), ("md", md_t13_visual), ("md", md_t13_def), ("md", md_t13_scores), ("tbl", report_diversity),
+        ("md", md_t14), ("tbl", report_t14),
         ("md", md_support),
         ("md", md_target_real), ("tbl", report_reliability),
-        ("md", md_descstats), ("tbl", report_descstats),
         ("md", md_leaderboard), ("tbl", report_leaderboard),
         ("md", md_kick),
         ("md", md_closeness), ("tbl", report_closeness),
@@ -236,6 +289,20 @@ def table_report_cell(
     ], align="start")
     table_report
     return
+
+
+@app.cell
+def export_charts(mo):
+    # ---- Export: one-click save of every plotted chart to the report figures folder (separate PNG per panel) ----
+    from pathlib import Path
+    FIG_DIR = Path("/Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/docs/report/figures")
+    export_button = mo.ui.run_button(label="⬇ save all charts → figures/")
+    def save_chart(_fig, _name):
+        FIG_DIR.mkdir(parents=True, exist_ok=True)
+        _fig.savefig(FIG_DIR / f"{_name}.png", dpi=150, bbox_inches="tight")
+        return _name
+    mo.vstack([export_button, mo.md(f"_Press to save every plotted chart (T02–T07, T1.1–T1.3 + visual examples) to_ `docs/report/figures/` _as separate PNGs. Compute the relevant data first._")])
+    return export_button, save_chart
 
 
 @app.cell
@@ -345,10 +412,18 @@ def _(pin_dropdowns, sweep_values0):
 
 @app.cell(hide_code=True)
 def _(base_pin, pinned_records, records0, sweep_points, sweep_values0):
-    # sweep points for the PINNED context; label = GUIDANCE_MODE + varying mode-hypers (+ delta index if
-    # delta varies), ordered by the a_t_mode order authored in sweep_params.json. label_delta maps each
-    # label to its GUIDANCE_DELTA index (per-intensity leaderboards + the plot intensity filter).
-    points = sweep_points(sweep_values0, pinned_records(records0, base_pin))
+    # sweep points for the PINNED context. In THIS notebook a_t_mode is ALWAYS the analysis axis (the
+    # schedule γ), never a collapsed sweepable — so it is injected into every label even when single-valued;
+    # other varying mode-hypers and the delta index are kept as sweep_points authored them. Ordered by the
+    # a_t_mode order in sweep_params.json. label_delta maps each label to its GUIDANCE_DELTA index.
+    _raw = sweep_points(sweep_values0, pinned_records(records0, base_pin))
+    points = {}
+    for _lb, _sel in _raw.items():
+        _am = _sel.get("a_t_mode")
+        if _am is not None and "a_t_mode=" not in _lb:
+            _bits = _lb.split(" ")
+            _lb = " ".join([_bits[0], f"a_t_mode={_am}"] + _bits[1:])
+        points[_lb] = _sel
     _atm_ord = {str(_v): _i for _i, _v in enumerate(sweep_values0.get('a_t_mode', []))}
     points = dict(sorted(points.items(),
                          key=lambda _kv: _atm_ord.get(str(_kv[1].get('a_t_mode', '')), len(_atm_ord))))
@@ -369,19 +444,34 @@ def _(N, mo, sweep_values0):
 
 
 @app.cell(hide_code=True)
-def _(intensity_dropdown, label_delta, point_multiselect):
+def _(intensity_dropdown, label_delta, selected_point_labels):
     # labels drawn in the PLOTS: the multiselected schedules at the chosen intensity level (== all
     # multiselected labels when there is a single delta). Tables/leaderboards keep every schedule x delta.
-    plot_labels = [lb for lb in point_multiselect.value if label_delta.get(lb) == intensity_dropdown.value]
+    plot_labels = [lb for lb in selected_point_labels if label_delta.get(lb) == intensity_dropdown.value]
     return (plot_labels,)
 
 
 @app.cell
-def _(mo, points):
-    point_multiselect = mo.ui.multiselect(
-        list(points), value=list(points), label="sweep points: "
-    )
+def _(gname, mo, points):
+    # "sweep points" selector: only the a_t_modes (schedule γ), NOT the per-δ combos. Selecting a γ
+    # auto-includes ALL its combos (every intensity δ × mask variant) downstream via selected_point_labels.
+    # γ is shown in the chart form (back-shifted, LaTeX stripped) so it matches the plots/tables/leaderboards.
+    _gammas = list(dict.fromkeys(
+        gname(_lb).replace(r"\text{-}", "-").replace(r"$\mathrm{", "").replace("}$", "").replace("$", "")
+        for _lb in points
+    ))
+    point_multiselect = mo.ui.multiselect(_gammas, value=_gammas, label="sweep points (γ): ")
     return (point_multiselect,)
+
+
+@app.cell(hide_code=True)
+def sweep_point_expand(gname, point_multiselect, points):
+    # Expand the selected a_t_modes (γ) to every underlying combo label (all intensities δ × mask variants).
+    # Downstream (sched_colors, plot_labels, tables) stays keyed by combos, so nothing else changes.
+    def _gdisp(_lb):
+        return gname(_lb).replace(r"\text{-}", "-").replace(r"$\mathrm{", "").replace("}$", "").replace("$", "")
+    selected_point_labels = [_lb for _lb in points if _gdisp(_lb) in point_multiselect.value]
+    return (selected_point_labels,)
 
 
 @app.cell(hide_code=True)
@@ -449,21 +539,406 @@ def _(mo):
     mean scaled by the relative intensity $\rho_n$ (Ch. 3), with $x_n^{\mathrm{ung}}$ the matched unguided
     reference. The intermediate guided state is reconstructed as
     $\hat{x}_t=\hat{x}^{\mathrm{gui\_det}}+\sigma_r z_t$, and the **guidance effect** is the same-seed twin
-    difference $\Delta x^{\mathrm{gui}}_t=x_t^{\mathrm{gui}}-x_t^{\mathrm{ung}\mid\mathrm{gui}}$ (guided minus
+    difference $\Delta x^{\mathrm{GE}}_t=x_t^{\mathrm{gui}}-x_t^{\mathrm{ung}\mid\mathrm{gui}}$ (guided minus
     unguided-under-guided-context).
 
-    Four views: the flow-time **convergence** grid (T01) and its per-step **decomposition** (T02); and the
-    profiles of **absolute intensity** (T04) and **deviation from ground truth** (T05) across all variables and
-    levels. The guidance-effect **maps** over flow time (T03) now open **T1.1**.
+    Seven views: descriptive **statistics** of the target field (T01); the **example maps**
+    $x^{\mathrm{ung}\mid\mathrm{gui}}$, $x^{\mathrm{gui}}$, $\Delta x^{\mathrm{GE}}$ (T02) and $\Delta x^{\mathrm{GE}}$
+    **across variables** (T03); the profiles of **absolute intensity** (T04) and **deviation from ground truth**
+    (T05); and the flow-time **convergence** grid (T06) with its per-step **decomposition** (T07).
     """
     mo.md(md_t0)
     return (md_t0,)
 
 
 @app.cell(hide_code=True)
+def hdr_descstats(mo):
+    md_descstats = r"""
+    ### T01: Descriptive statistics
+
+    For each intensity $\rho$ and experiment, the four per-instance spatial statistics
+    $\{\min,\max,\mathrm{mean},\mathrm{std}\}$ of the **target field** (`VAR`) over the target region
+    defined by the mask $\pi$ — **mean**/**std** use the area-weighted masked mean $\mathcal{M}_\pi(x)=\sum_{ij}\pi_{ij}x_{ij}/\sum_{ij}\pi_{ij}$ and the corresponding weighted std, while **min**/**max** are over the mask support ($\pi>0$), reported for the guided state $x^{\mathrm{gui}}$
+    and its same-seed unguided twin $x^{\mathrm{ung}\mid\mathrm{gui}}$. Each cell is the **ensemble avg
+    $\pm$ std** of that statistic over the pool (selected schedules $\times$ members $m$ $\times$ guided
+    steps $n$); the four statistics are the columns, each split into an ung$\mid$gui and a gui subcolumn.
+    """
+    mo.md(md_descstats)
+    return (md_descstats,)
+
+
+@app.cell(hide_code=True)
+def descstats_compute(
+    EXPS,
+    M,
+    N,
+    VAR,
+    channel,
+    gamma_key,
+    label_delta,
+    load_rollout,
+    metrics,
+    np,
+    open_store,
+    open_unguided_state,
+    sched_colors,
+    select_point,
+    sweep_points,
+):
+    # ---- Descriptive statistics of the target field over the target region (Support) ----
+    # For each intensity rho (delta) x experiment: the four per-instance spatial statistics
+    # (min, max, mean, std) of the TARGET variable field over the target region defined by the mask:
+    # mean/std are the area-weighted masked mean M_pi = sum(pi*x)/sum(pi) and its weighted std; min/max
+    # are over the mask support (pi>0). For the guided state (gui) and same-seed unguided twin. Pool =
+    # selected schedules x members m x guided steps n; the table reports the ensemble avg +/- std per stat.
+    descstats = None
+    if metrics is not None:
+        _labs = sorted(sched_colors, key=gamma_key)   # all selected schedules across BOTH intensities
+        _toff = 273.15 if VAR in ("2m_temperature", "temperature") else 0.0   # K -> C for temperature (std shift-invariant)
+        def _four_stats(_f2d, _mk, _wsum, _supp):
+            _f = np.asarray(_f2d, float) - _toff
+            _mean = float((_f * _mk).sum() / _wsum)                          # area-weighted masked mean (M_pi)
+            _std = float(np.sqrt((_mk * (_f - _mean) ** 2).sum() / _wsum))    # area-weighted masked std
+            _px = _f[_supp]
+            return {"min": float(_px.min()), "max": float(_px.max()), "mean": _mean, "std": _std}
+        descstats = {}
+        for _ei, _rid in enumerate(EXPS):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
+            _mk = np.asarray(_mask, float); _wsum = float(_mk.sum()) or 1.0; _supp = _mk > 0   # per-experiment target region
+            _sp = sweep_points(_sv, _recs)
+            for _lb in _labs:
+                if _lb not in _sp:
+                    continue
+                _dd = label_delta.get(_lb); _sel = _sp[_lb]
+                _g = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)
+                _t = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _gns = [nn for nn in range(N) if _p[nn] != 0.0] or [0]
+                _acc = descstats.setdefault((_ei, _dd),
+                    {"gui": {_s: [] for _s in ("min", "max", "mean", "std")},
+                     "ung": {_s: [] for _s in ("min", "max", "mean", "std")}})
+                for _m in range(M):
+                    for _n in _gns:
+                        _tf = _t.isel(m=_m, n=_n); _tf = _tf.isel(t=-1) if "t" in _tf.dims else _tf
+                        _sg = _four_stats(_g.isel(m=_m, n=_n), _mk, _wsum, _supp); _st = _four_stats(_tf, _mk, _wsum, _supp)
+                        for _s in ("min", "max", "mean", "std"):
+                            _acc["gui"][_s].append(_sg[_s]); _acc["ung"][_s].append(_st[_s])
+    return (descstats,)
+
+
+@app.cell(hide_code=True)
+def descstats_table(
+    EXPS,
+    VAR,
+    copyable,
+    delta_labels,
+    delta_order,
+    descstats,
+    mo,
+    np,
+):
+    report_descstats = []
+    # two-level table: 4 stat columns (min/max/mean/std), each split into ung|gui and gui subcolumns;
+    # rows = experiments; one table per intensity rho. Cell = ensemble avg +/- std of that statistic.
+    if descstats is None:
+        descstats_view = mo.md("_press **compute metrics**_")
+    else:
+        _stats = ["min", "max", "mean", "std"]
+        _blocks = []
+        for _dd in delta_order:
+            _present = [(_ei, descstats[(_ei, _dd)]) for _ei in range(len(EXPS)) if (_ei, _dd) in descstats]
+            if not _present:
+                continue
+            _rows_html = []
+            _md = ["| experiment | " + " | ".join(f"{_s} ung/gui | {_s} gui" for _s in _stats) + " |",
+                   "|" + "---|" * (2 * len(_stats) + 1)]
+            for _ei, _acc in _present:
+                _en = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+                _tds = []; _mds = []
+                for _s in _stats:
+                    for _side in ("ung", "gui"):
+                        _v = _acc[_side][_s]
+                        _txt = f"{np.mean(_v):.4g} ± {np.std(_v):.2g}" if _v else "—"
+                        _tds.append(f"<td style='padding:2px 9px;text-align:right;white-space:nowrap'>{_txt}</td>")
+                        _mds.append(_txt)
+                _rows_html.append(f"<tr><td style='padding:2px 9px'>{_en}</td>" + "".join(_tds) + "</tr>")
+                _md.append(f"| {_en} | " + " | ".join(_mds) + " |")
+            _head = ("<thead><tr><th rowspan='2' style='padding:2px 9px;border-bottom:1px solid #999;text-align:left'>experiment</th>"
+                     + "".join(f"<th colspan='2' style='padding:2px 9px;border-bottom:1px solid #999'>{_s}</th>" for _s in _stats)
+                     + "</tr><tr>"
+                     + "".join("<th style='padding:1px 9px;font-weight:normal;opacity:.75'>ung|gui</th><th style='padding:1px 9px'>gui</th>" for _ in _stats)
+                     + "</tr></thead>")
+            _tbl = f"<table style='border-collapse:collapse;font-size:12.5px'>{_head}<tbody>{''.join(_rows_html)}</tbody></table>"
+            _rho = delta_labels.get(_dd, f"delta#{_dd}")
+            _title = (f"**intensity {_rho}** — descriptive statistics of the target field "
+                      f"`{VAR}` over the target region (mask π: weighted mean/std, min/max over support); each cell = ensemble avg ± std of the "
+                      f"per-instance spatial statistic, pooled over selected schedules × members × steps.")
+            report_descstats.append(_title + "\n\n" + "\n".join(_md))
+            _blocks.append(mo.vstack([mo.md(_title), copyable(_title + "\n\n" + "\n".join(_md)), mo.Html(_tbl)], align="start"))
+        descstats_view = mo.vstack(_blocks, align="start")
+    descstats_view
+    return (report_descstats,)
+
+
+@app.cell(hide_code=True)
+def md_t0_maps(mo):
+    md_t0_maps = r"""
+    ### T02: Example maps
+
+    The three objects the evaluation is built on, for the selected experiment and schedule at member $m{=}0$
+    (target field, mask bbox): the matched unguided twin $x^{\mathrm{ung}\mid\mathrm{gui}}$, the guided state
+    $x^{\mathrm{gui}}$, and their difference — the **guidance effect**
+    $\Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}$ (diverging, white $=0$). The two
+    state panels share a colour scale; each panel reports descriptive stats over the mask ($\mu\pm\sigma$,
+    [min, max]) to orient oneself.
+    """
+    mo.md(md_t0_maps)
+    return (md_t0_maps,)
+
+
+@app.cell(hide_code=True)
+def t0_selectors(
+    EXPS,
+    delta_order,
+    gamma_key,
+    gname,
+    mo,
+    mode_of,
+    sched_colors,
+):
+    # T0 example selectors: browse the startdate (experiment) and the schedule γ (a_t_mode); intensity ρ and
+    # all other sweep dims are fixed to the first (default). Only startdate and γ are user-selectable (m=0).
+    _dd0 = delta_order[0] if delta_order else 0
+    _t0_opts = {}
+    for _ei in range(len(EXPS)):
+        _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+        _key = _date if _date not in _t0_opts else f"{_date} #{_ei}"
+        _t0_opts[_key] = (_ei, _dd0)
+    t0_exp = mo.ui.dropdown(options=_t0_opts, value=(next(iter(_t0_opts)) if _t0_opts else None), label="example startdate: ")
+    _t0_gs = {}
+    for _l in sorted(sched_colors, key=gamma_key):
+        _t0_gs.setdefault(mode_of(_l), gname(_l))
+    t0_sched = mo.ui.dropdown(options=_t0_gs, value=(next(iter(_t0_gs)) if _t0_gs else None), label="example schedule γ: ")
+    return t0_exp, t0_sched
+
+
+@app.cell(hide_code=True)
+def t0_maps(
+    EXPS,
+    N,
+    VAR,
+    WARM_CMAP,
+    base_pin,
+    channel,
+    contour_checkbox_t02,
+    contour_color_dropdown_t02,
+    contour_levels_slider_t02,
+    cool_half_cmap,
+    delta_labels,
+    gname,
+    label_delta,
+    load_rollout,
+    metrics,
+    mo,
+    np,
+    open_store,
+    open_unguided_state,
+    pinned_records,
+    region_crop,
+    sched_colors,
+    select_point,
+    sweep_points,
+    t0_exp,
+    t0_sched,
+    viz_panel,
+    white_zero_cmap,
+    zoom_slider,
+):
+    # T0/T02 example maps — the exact guidance.py Inspect-states diff-mode panels: twin x^{ung|gui},
+    # guided x^{gui}, and Δx^GE, via visualize_map with the zoom command (target field, m=0).
+    if metrics is None or t0_exp.value is None or t0_sched.value is None:
+        t0_maps_view = mo.md("_press **compute metrics** / pick an experiment_")
+    else:
+        _ei, _dd = t0_exp.value
+        _dir, _cfg, _sv, _recs, _mask = load_rollout(EXPS[_ei])
+        _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
+        _lb = next((l for l in sched_colors if gname(l) == t0_sched.value and label_delta.get(l) == _dd and l in _sp), None)
+        if _lb is None:
+            t0_maps_view = mo.md("_selected schedule not available for this experiment_")
+        else:
+            _sel = _sp[_lb]
+            _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+            _n = next((nn for nn in range(N) if _p[nn] != 0.0), 0)
+            _gt = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)
+            _tt = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)
+            _toff = 273.15 if VAR in ("2m_temperature", "temperature") else 0.0   # K -> C for temperature
+            _xgui = np.asarray(_gt.isel(m=0, n=_n), float) - _toff
+            _xung = np.asarray(_tt.isel(m=0, n=_n).isel(t=-1), float) - _toff
+            _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)} · {t0_sched.value} · m=0"
+            _zz = int(zoom_slider.value)
+            _ws = region_crop(_xung, "globe", _zz); _wg = region_crop(_xgui, "globe", _zz)  # zoom-region windows
+            _svmin = float(min(np.nanmin(_ws), np.nanmin(_wg))); _svmax = float(max(np.nanmax(_ws), np.nanmax(_wg)))
+            if _svmin < 0.0 < _svmax:
+                _scmap, _scen = white_zero_cmap, 0.0
+            elif _svmin >= 0.0:
+                _scmap, _scen = WARM_CMAP, None
+            else:
+                _scmap, _scen = cool_half_cmap, None
+            _wge = region_crop(_xgui - _xung, "globe", _zz); _gm = (float(np.nanmax(np.abs(_wge))) if np.isfinite(_wge).any() else 0.0) or 1e-9
+            _panels = mo.hstack([
+                viz_panel(_xung, r"$x^{\mathrm{ung}\mid\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02a", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value),
+                viz_panel(_xgui, r"$x^{\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02b", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value),
+                viz_panel(_xgui - _xung, r"$\Delta x^{\mathrm{GE}}$", True, _ovmin=-_gm, _ovmax=_gm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename="T02c", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value),
+            ], justify="start", align="start")
+            t0_maps_view = mo.vstack([mo.md(f"_{_en}_"), _panels], align="start")
+    mo.vstack([mo.hstack([t0_exp, t0_sched, zoom_slider, contour_checkbox_t02, contour_levels_slider_t02, contour_color_dropdown_t02], justify="start"), t0_maps_view], align="start")
+    return
+
+
+@app.cell(hide_code=True)
+def md_t0_gegrid(mo):
+    md_t0_gegrid = r"""
+    ### T03: Δx^GE across selected variables
+
+    The guidance effect $\Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}$ at the
+    final guided state, for the seven convergence variables (T06) (each at its surface value, else level $1000$) in the same
+    $2\times4$ grid, for the selected experiment and schedule at $m{=}0$ (diverging, white $=0$; mask bbox).
+    Shows how an intervention on $2\mathrm{m}$ temperature propagates across atmospheric variables and levels.
+    """
+    mo.md(md_t0_gegrid)
+    return (md_t0_gegrid,)
+
+
+@app.cell(hide_code=True)
+def t0_gegrid(
+    EXPS,
+    INTERF_SHORT,
+    INTERF_SURFACE_PAIR,
+    N,
+    VAR_ORDER,
+    base_pin,
+    contour_checkbox_t03,
+    contour_color_dropdown_t03,
+    contour_levels_slider_t03,
+    delta_labels,
+    gname,
+    label_delta,
+    load_rollout,
+    metrics,
+    mo,
+    np,
+    open_store,
+    open_unguided_state,
+    pinned_records,
+    reliability_var_meta,
+    sched_colors,
+    select_point,
+    sweep_points,
+    t0_exp,
+    t0_sched,
+    viz_panel,
+    zoom_slider,
+):
+    # T0/T03 — Δx^GE across the 7 convergence variables (final guided state minus twin) via the exact
+    # guidance.py visualize_map renderer + zoom, m=0.
+    if metrics is None or t0_exp.value is None or t0_sched.value is None:
+        t0_gegrid_view = mo.md("_press **compute metrics** / pick an experiment_")
+    else:
+        _ei, _dd = t0_exp.value
+        _dir, _cfg, _sv, _recs, _mask = load_rollout(EXPS[_ei])
+        _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
+        _lb = next((l for l in sched_colors if gname(l) == t0_sched.value and label_delta.get(l) == _dd and l in _sp), None)
+        if _lb is None:
+            t0_gegrid_view = mo.md("_selected schedule not available for this experiment_")
+        else:
+            _sel = _sp[_lb]
+            _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+            _n = next((nn for nn in range(N) if _p[nn] != 0.0), 0)
+            def _resolve(_b):
+                if _b in INTERF_SURFACE_PAIR:
+                    return INTERF_SURFACE_PAIR[_b], "surface", 0
+                if _b == "mean_sea_level_pressure":
+                    return _b, "surface", 0
+                return _b, "level", 1000
+            _maps = []
+            for _var in VAR_ORDER:
+                _rv, _rp, _rl = _resolve(_var); _lev = _rl if _rp == "level" else None
+                _gd = select_point(open_store(_dir, "gui", _rv), _sel)
+                _ud = select_point(open_unguided_state(_dir, "gui_ung", _rv), _sel)
+                _gd = _gd.sel(level=_lev) if (_lev is not None and "level" in _gd.dims) else _gd
+                _ud = _ud.sel(level=_lev) if (_lev is not None and "level" in _ud.dims) else _ud
+                _xg = np.asarray(_gd.isel(m=0, n=_n), float)
+                _ux = _ud.isel(m=0, n=_n); _ux = np.asarray(_ux.isel(t=-1) if "t" in _ux.dims else _ux, float)
+                _lbl = reliability_var_meta.get(_var, (INTERF_SHORT.get(_var, _var), False))[0]
+                _maps.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T03{chr(97 + VAR_ORDER.index(_var))}", _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value, _contour_color=contour_color_dropdown_t03.value))
+            _rows = [mo.hstack(_maps[_i:_i + 4], justify="start", align="start") for _i in range(0, len(_maps), 4)]
+            _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)} · {t0_sched.value} · m=0 (final state)"
+            t0_gegrid_view = mo.vstack([mo.md(rf"_$\Delta x^{{\mathrm{{GE}}}}$ — {_en}_")] + _rows, align="start")
+    mo.vstack([mo.hstack([t0_exp, t0_sched, zoom_slider, contour_checkbox_t03, contour_levels_slider_t03, contour_color_dropdown_t03], justify="start"), t0_gegrid_view], align="start")
+    return
+
+
+@app.cell(hide_code=True)
+def hdr_t04(mo):
+    md_t04 = r"""
+    ### T04: Absolute intensity
+
+    The masked-mean of the guided state $\mathcal{M}_\pi(x^{\mathrm{gui}})$ per variable and vertical level, one
+    line per top-$k$ schedule $\gamma$; dashed grey = unguided twin (ung$\mid$gui), dashed green = ground
+    truth. One chart per level variable, $x$ = channels (surface→top); pooled across experiments
+    (exp$\times m\times n$).
+    """
+    mo.md(md_t04)
+    return (md_t04,)
+
+
+@app.cell(hide_code=True)
+def _(interf_profile_render):
+    interf_abs_view = interf_profile_render(
+        "abs",
+        r"",
+        r"Masked-mean of the **guided state** $\mathcal{M}_m(x^{\mathrm{gui}})$ per variable/level, one line "
+        r"per top-$k$ schedule; dashed grey = unguided twin (ung|gui), dashed green = ground truth (gt). "
+        r"One chart per level variable — $x$ = channels (surface→top). Pooled across experiments (exp×m×n).",
+        r"$\mathcal{M}_m(x^{\mathrm{gui}})$",
+    )
+    interf_abs_view
+    return
+
+
+@app.cell(hide_code=True)
+def hdr_t05(mo):
+    md_t05 = r"""
+    ### T05: Relative to ground truth
+
+    The same masked-mean minus the ground-truth valid state at lead $n{+}1$:
+    $\mathcal{M}_\pi(x^{\mathrm{gui}})-\mathcal{M}_\pi(x^{\mathrm{gt}})$ — how far each variable/level sits from
+    truth (GT = zero line). Dashed grey = unguided twin (ung$\mid$gui). One chart per level variable, $x$ =
+    channels (surface→top); pooled across experiments (exp$\times m\times n$).
+    """
+    mo.md(md_t05)
+    return (md_t05,)
+
+
+@app.cell(hide_code=True)
+def _(interf_profile_render):
+    interf_vsgt_view = interf_profile_render(
+        "vsgt",
+        r"",
+        r"The same masked-mean, minus the ground-truth valid state at lead $n{+}1$: how far each "
+        r"variable/level sits from truth. GT is the zero line (green); dashed grey = unguided twin "
+        r"(ung|gui). One chart per level variable — $x$ = channels (surface→top). Pooled across "
+        r"experiments (exp×m×n).",
+        r"$\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gt}})$",
+    )
+    interf_vsgt_view
+    return
+
+
+@app.cell(hide_code=True)
 def hdr_r2(mo):
     md_t01 = r"""
-    ### T01: Convergence over flow time
+    ### T06: Convergence over flow time
 
     The intermediate gap $\xi_{n,t}=\mathcal{M}_\pi(\hat{x}_{n,t})-y_n^\star$ along flow time $t$, converging
     to $0$ for the target field ($^\star$); the other six fields show the guidance effect
@@ -480,6 +955,7 @@ def _(
     EXPS,
     M,
     VAR_ORDER,
+    export_button,
     gamma_key,
     gname,
     metrics,
@@ -493,6 +969,7 @@ def _(
     reliability_states,
     reliability_twin,
     reliability_var_meta,
+    save_chart,
     sched_colors,
 ):
     # ---- Reliability: guided-state convergence over flow time, 7-field grid per experiment ----
@@ -535,6 +1012,8 @@ def _(
             if _h:
                 _lax.legend(_h, _l, fontsize=7, loc="upper right", frameon=False)
             _f.tight_layout(pad=0.5)
+            if export_button.value:
+                save_chart(_f, f"T06{chr(97 + _ei)}")
             _items.append(mo.as_html(_f))
         reliability_conv_view = mo.vstack([
             mo.hstack([reliability_m_slider, reliability_shade_checkbox], justify="start"),
@@ -547,7 +1026,7 @@ def _(
 @app.cell(hide_code=True)
 def hdr_r3(mo):
     md_t02 = r"""
-    ### T02: Convergence decomposition (landings)
+    ### T07: Convergence decomposition (landings)
 
     The same 7-field grid decomposed per flow step: the state $\mathcal{M}_\pi(\hat{x}_t)$ (gold) splits each
     step's move into the **flow move** ($\mathcal{M}_\pi(\hat{x}_t)\to$ ung$\mid$gui landing) and the
@@ -562,6 +1041,7 @@ def hdr_r3(mo):
 def wf_plot(
     EXPS,
     VAR_ORDER,
+    export_button,
     metrics,
     mo,
     n_slider,
@@ -572,6 +1052,7 @@ def wf_plot(
     reliability_states,
     reliability_var_meta,
     reliability_wf_sched,
+    save_chart,
 ):
     # ---- Reliability 1.3: convergence decomposition (landings waterfall), 7-field grid ----
     # guidance.py "landings" grammar, thesis-ready: per flow step the state M_pi(x_t) (gold) splits into the
@@ -617,6 +1098,8 @@ def wf_plot(
             if _h:
                 _lax.legend(_h, _l, fontsize=8, loc="upper right", frameon=False)
             _f.tight_layout(pad=0.5)
+            if export_button.value:
+                save_chart(_f, f"T07{chr(97 + _ei)}")
             _items.append(mo.as_html(_f))
         reliability_wf_view = mo.vstack([
             mo.hstack([reliability_wf_sched, reliability_m_slider], justify="start"),
@@ -627,70 +1110,13 @@ def wf_plot(
 
 
 @app.cell(hide_code=True)
-def hdr_t04(mo):
-    md_t04 = r"""
-    ### T04: Absolute intensity
-
-    The masked-mean of the guided state $\mathcal{M}_m(x^{\mathrm{gui}})$ per variable and vertical level, one
-    line per top-$k$ schedule $\gamma$; dashed grey = unguided twin (ung$\mid$gui), dashed green = ground
-    truth. One chart per level variable, $x$ = channels (surface→top); pooled across experiments
-    (exp$\times m\times n$).
-    """
-    mo.md(md_t04)
-    return (md_t04,)
-
-
-@app.cell(hide_code=True)
-def _(interf_profile_render):
-    interf_abs_view = interf_profile_render(
-        "abs",
-        r"",
-        r"Masked-mean of the **guided state** $\mathcal{M}_m(x^{\mathrm{gui}})$ per variable/level, one line "
-        r"per top-$k$ schedule; dashed grey = unguided twin (ung|gui), dashed green = ground truth (gt). "
-        r"One chart per level variable — $x$ = channels (surface→top). Pooled across experiments (exp×m×n).",
-        r"$\mathcal{M}_m(x^{\mathrm{gui}})$",
-    )
-    interf_abs_view
-    return
-
-
-@app.cell(hide_code=True)
-def hdr_t05(mo):
-    md_t05 = r"""
-    ### T05: Relative to ground truth
-
-    The same masked-mean minus the ground-truth valid state at lead $n{+}1$:
-    $\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gt}})$ — how far each variable/level sits from
-    truth (GT = zero line). Dashed grey = unguided twin (ung$\mid$gui). One chart per level variable, $x$ =
-    channels (surface→top); pooled across experiments (exp$\times m\times n$).
-    """
-    mo.md(md_t05)
-    return (md_t05,)
-
-
-@app.cell(hide_code=True)
-def _(interf_profile_render):
-    interf_vsgt_view = interf_profile_render(
-        "vsgt",
-        r"",
-        r"The same masked-mean, minus the ground-truth valid state at lead $n{+}1$: how far each "
-        r"variable/level sits from truth. GT is the zero line (green); dashed grey = unguided twin "
-        r"(ung|gui). One chart per level variable — $x$ = channels (surface→top). Pooled across "
-        r"experiments (exp×m×n).",
-        r"$\mathcal{M}_m(x^{\mathrm{gui}})-\mathcal{M}_m(x^{\mathrm{gt}})$",
-    )
-    interf_vsgt_view
-    return
-
-
-@app.cell(hide_code=True)
 def hdr_t1(mo):
     md_t1 = r"""
     ## T1: Temporal localization of guidance
 
     *Where does the guidance effect land — across variables, in space, and across the ensemble?* The guidance
     effect is the same-seed twin difference
-    $\Delta x^{\mathrm{guidance}}=x_n^{\mathrm{gui}}-x_n^{\mathrm{ung}\mid\mathrm{gui}}$ (guided minus
+    $\Delta x^{\mathrm{GE}}=x_n^{\mathrm{gui}}-x_n^{\mathrm{ung}\mid\mathrm{gui}}$ (guided minus
     unguided-under-guided-context). Three views: its **multivariate propagation** across variables/levels
     (T1.1), the **spatial deviation** of its footprint from the target mask (T1.2), and its **ensemble
     diversity** across members (T1.3).
@@ -736,6 +1162,7 @@ def effect_plot(
     INTERF_SURFACE_PAIR,
     VAR_ORDER,
     base_pin,
+    export_button,
     gamma_key,
     gname,
     load_rollout,
@@ -753,6 +1180,7 @@ def effect_plot(
     reliability_m_slider,
     reliability_var_meta,
     residual_scaler,
+    save_chart,
     select_point,
     sweep_points,
 ):
@@ -821,6 +1249,8 @@ def effect_plot(
                     if _ci == 0:
                         _ax.set_ylabel(gname(_lb), fontsize=10, rotation=0, ha="right", va="center", labelpad=20)
             _fig.subplots_adjust(left=0.08, right=0.995, top=0.85, bottom=0.03, wspace=0.06, hspace=0.12)
+            if export_button.value:
+                save_chart(_fig, f"T1.1{chr(97 + _vars.index(_vb))}")
             _items.append(mo.as_html(_fig)); plt.close(_fig)
         reliability_effect_view = mo.vstack([
             mo.hstack([reliability_effect_vars, reliability_effect_modes, reliability_m_slider], justify="start"),
@@ -843,6 +1273,8 @@ def md_t11_def(mo):
     the area-weighted mean of the pointwise magnitude over the target mask $\pi$ — the visual example above,
     reduced to one scalar per level.
 
+    **Eval region.** A selector switches the spatial domain: **mask** = the masked mean $\mathcal{M}_\pi(|\Delta x^{\mathrm{GE}}|)$; **!mask** = the summed magnitude outside the mask $\sum_{\lnot\mathrm{mask}}|\Delta x^{\mathrm{GE}}|$; **full** = over the whole grid $\sum_{\mathrm{grid}}|\Delta x^{\mathrm{GE}}|$. The per-variable scores $N$/$R$ are scale-invariant, so they rank $\gamma$ within whichever region is selected.
+
     **Chart** (one per experiment, selectable): per variable, $x=$ channels (surface→top), one line per
     $\gamma$ of $g_{v\ell}$; the solid line is member $m{=}0$ and the band spans $[\min_m,\max_m]$ over the $M$
     members.
@@ -852,64 +1284,20 @@ def md_t11_def(mo):
 
 
 @app.cell
-def _(
-    EXPS,
-    INTERF_SHORT,
-    M,
-    VAR_ORDER,
-    delta_labels,
-    gamma_key,
-    gname,
-    interf_chan_order,
-    interf_data,
-    label_delta,
-    mo,
-    np,
-    plt,
-    sched_colors,
-    t11_exp,
-):
-    # T1.1 — per-experiment guidance-effect profile chart for the selected (startdate × ρ) experiment.
-    # Per (var, level) value g = M_pi(|Δx^GE|). One line per γ; solid = member m=0, band = min-max over M.
+def _(M, interf_data, mo, t11_exp, t11_region, t1x_chart):
+    # T1.1 — per-experiment guidance-effect profile chart for the selected experiment + eval region.
     if interf_data is None or "chan_em" not in interf_data:
         t11_chart_view = mo.md("_press **compute field profiles** above_")
     elif t11_exp.value is None:
         t11_chart_view = mo.md("_no experiment selected_")
     else:
-        _ei, _dd = t11_exp.value
-        _ce = interf_data["chan_em"]
-        _labs = sorted((_l for _l in interf_data["labels"] if label_delta.get(_l) == _dd), key=gamma_key)
-        _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)}"
-        _fig, _axs = plt.subplots(2, 4, figsize=(20, 7), dpi=120)
-        _slots = [(_r, _c) for _r in range(2) for _c in range(4) if (_r, _c) != (0, 3)]
-        for _si, _var in enumerate(VAR_ORDER):
-            _ax = _axs[_slots[_si][0]][_slots[_si][1]]
-            _cos = interf_chan_order(_var); _xs = list(range(len(_cos)))
-            for _lb in _labs:
-                _y0, _ylo, _yhi = [], [], []
-                for _cl in _cos:
-                    _d = _ce.get(_lb, {}).get(_var, {}).get(_cl, {})
-                    _vals = [_d[(_ei, _mm)] for _mm in range(M) if (_ei, _mm) in _d]
-                    _y0.append(_d.get((_ei, 0), np.nan))
-                    _ylo.append(min(_vals) if _vals else np.nan); _yhi.append(max(_vals) if _vals else np.nan)
-                _col = sched_colors[_lb]
-                _ax.fill_between(_xs, _ylo, _yhi, color=_col, alpha=0.15, linewidth=0)
-                _ax.plot(_xs, _y0, "-o", ms=3, lw=1.7, color=_col, label=gname(_lb))
-            _ax.set_xticks(_xs); _ax.set_xticklabels(_cos, fontsize=6, rotation=90)
-            _ax.set_xlim(-0.5, len(_cos) - 0.5)
-            _ax.set_title(INTERF_SHORT.get(_var, _var), fontsize=9, pad=4)
-            _ax.set_axisbelow(True); _ax.grid(True, axis="y", color="#E6E6E6", linewidth=0.7); _ax.tick_params(labelsize=7)
-            for _s in ("top", "right"):
-                _ax.spines[_s].set_visible(False)
-        _lax = _axs[0][3]; _lax.axis("off")
-        _hh, _ll = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
-        _lax.legend(_hh, _ll, fontsize=8, loc="upper right", frameon=False)
-        _fig.tight_layout()
-        t11_chart_view = mo.vstack([
-            mo.md(rf"**{_en}** — $g_{{v\ell}}=\mathcal{{M}}_\pi(|\Delta x^{{\mathrm{{GE}}}}|)$ per channel (surface→top); one line per $\gamma$, solid $=m{{=}}0$, band $=[\min_m,\max_m]$ over the $M={M}$ members."),
-            mo.as_html(_fig)], align="start")
-        plt.close(_fig)
-    mo.vstack([t11_exp, t11_chart_view], align="start")
+        _rk = t11_region.value
+        _ryl = {"avgabs": r"$\mathcal{M}_\pi(|\Delta x^{\mathrm{GE}}|)$ (mask masked-mean)",
+                "nabs": r"$\sum_{\lnot\mathrm{mask}}|\Delta x^{\mathrm{GE}}|$ (outside the mask)",
+                "absum": r"$\sum_{\mathrm{grid}}|\Delta x^{\mathrm{GE}}|$ (whole grid)"}.get(_rk, "")
+        t11_chart_view = t1x_chart(_rk, t11_exp.value[0], t11_exp.value[1],
+            rf"{_ryl} per channel (surface→top); one line per $\gamma$, solid $=m{{=}}0$, band $=[\min_m,\max_m]$ over $M={M}$.", _savename="T1.1")
+    mo.vstack([mo.hstack([t11_exp, t11_region], justify="start"), t11_chart_view], align="start")
     return
 
 
@@ -946,59 +1334,24 @@ def md_t11_scores(mo):
 @app.cell(hide_code=True)
 def t11_tables(
     EXPS,
-    INTERF_SHORT,
-    INTERF_VARS,
     M,
-    VAR_ORDER,
-    copyable_table,
     delta_labels,
-    gamma_key,
-    gname,
     interf_data,
     interf_score_tables,
-    label_delta,
     mo,
-    np,
     t11_exp,
+    t11_region,
+    t1x_pertable,
 ):
-    # T1.1 — per-experiment score table (selected experiment) + the two paired summary views.
     if interf_data is None or "val_em" not in interf_data:
         t11_tables_view = mo.md("_press **compute field profiles** above_")
     elif t11_exp.value is None:
         t11_tables_view = mo.md("_no experiment selected_")
     else:
-        _ei, _dd = t11_exp.value
-        _ve = interf_data["val_em"]["avgabs"]
-        _labs = sorted((_l for _l in interf_data["labels"] if label_delta.get(_l) == _dd), key=gamma_key)
+        _ei, _dd = t11_exp.value; _rk = t11_region.value
+        _rn = {"avgabs": "mask", "nabs": "!mask", "absum": "full"}.get(_rk, _rk)
         _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)}"
-        _Vv = list(INTERF_VARS)
-        _N = {}; _R = {}
-        for _mm in range(M):
-            _A = {_lb: {v: _ve[_lb].get((_ei, _mm), {}).get(v, float("nan")) for v in _Vv} for _lb in _labs}
-            _vmx = {v: (max((_A[_lb][v] for _lb in _labs if np.isfinite(_A[_lb][v])), default=1.0) or 1.0) for v in _Vv}
-            _N[_mm] = {_lb: {v: _A[_lb][v] / _vmx[v] for v in _Vv} for _lb in _labs}
-            _sums = {_lb: sum(_N[_mm][_lb][v] for v in _Vv) for _lb in _labs}
-            _mx = max((s for s in _sums.values() if np.isfinite(s)), default=1.0) or 1.0
-            _R[_mm] = {_lb: _sums[_lb] / _mx for _lb in _labs}
-        _rows = ["| variable | " + " | ".join(gname(_lb) for _lb in _labs) + " |", "|" + "---|" * (len(_labs) + 1)]
-        for _v in [x for x in VAR_ORDER if x in _Vv]:
-            _mus = {_lb: float(np.mean([_N[_mm][_lb][_v] for _mm in range(M)])) for _lb in _labs}
-            _best = max(_mus.values(), default=None)
-            _cells = []
-            for _lb in _labs:
-                _sd = float(np.std([_N[_mm][_lb][_v] for _mm in range(M)]))
-                _t = f"{_mus[_lb]:.3f}±{_sd:.3f}"
-                _cells.append(f"**{_t}**" if (_best is not None and _mus[_lb] == _best) else _t)
-            _rows.append(f"| {INTERF_SHORT[_v]} | " + " | ".join(_cells) + " |")
-        _smus = {_lb: float(np.mean([_R[_mm][_lb] for _mm in range(M)])) for _lb in _labs}
-        _sbest = max(_smus.values(), default=None)
-        _scells = []
-        for _lb in _labs:
-            _sd = float(np.std([_R[_mm][_lb] for _mm in range(M)]))
-            _t = f"{_smus[_lb]:.3f}±{_sd:.3f}"
-            _scells.append(f"**{_t}**" if (_sbest is not None and _smus[_lb] == _sbest) else _t)
-        _rows.append("| **single score** $R$ | " + " | ".join(_scells) + " |")
-        _tbl = copyable_table("\n".join(_rows), rf"**{_en}** — per-variable score $N_v=A_v/\max_\gamma A_v$ (rows) × schedule $\gamma$; **single score** $R=\sum_v N_v/\max_\gamma\sum_v N_v$; mean ± std over the $M={M}$ members; **bold** = max $\gamma$ per row.")
+        _tbl = t1x_pertable(_rk, _ei, _dd, rf"**{_en}** · region **{_rn}** — per-variable score $N_v=A_v/\max_\gamma A_v$ (rows) × schedule $\gamma$; **single score** $R=\sum_v N_v/\max_\gamma\sum_v N_v$; mean ± std over the $M={M}$ members; **bold** = max $\gamma$ per row.")
         t11_tables_view = mo.vstack([_tbl, interf_score_tables], align="start")
     t11_tables_view
     return
@@ -1009,23 +1362,35 @@ def _(mo):
     md_t12 = r"""
     ### T1.2: Spatial-deviation
 
-    For each flow-time profile $\gamma$, the guidance footprint
-    $|\Delta x^{\mathrm{guidance}}| = |x_n^{\mathrm{gui}} - x_n^{\mathrm{ung}\mid\mathrm{gui}}|$ is normalized to
-    sum one over the eval region and compared to the normalized target mask $\pi$ by the total-variation
-    distance $D^{\mathrm{TV},\gamma} = \tfrac12 \sum_{ij} \lvert \widetilde{G}^{\gamma}_{ij} - \pi_{ij} \rvert$
-    ($0$ = footprint exactly mask-shaped; larger = stronger departure from the prescribed pattern).
+    *How far does the guidance footprint's shape depart from the prescribed target mask, across variables and
+    levels?* Same eval procedure as T1.1 — only the per-(variable, level) object changes.
     """
     mo.md(md_t12)
     return (md_t12,)
 
 
+@app.cell(hide_code=True)
+def md_t12_visual(mo):
+    md_t12_visual = r"""
+    ### Visual example
+
+    The object T1.2 scores, shown directly: the spatially-normalized absolute guidance effect
+    $\widetilde{G}_{v\ell} = |\Delta x^{\mathrm{GE}}_{v\ell}| / \sum_{ij}|\Delta x^{\mathrm{GE}}_{v\ell}|$ as a
+    spatial footprint per schedule $\gamma$ (columns), one row per experiment; the first column is the
+    normalized target mask $\widetilde{\pi}$. Use the field / region / member controls to browse variables and
+    levels.
+    """
+    mo.md(md_t12_visual)
+    return (md_t12_visual,)
+
+
 @app.cell
-def _(M, N, mo, pca_region_dropdown):
+def _(M, N, mo):
     realism_cmap_dropdown = mo.ui.dropdown(
         ["viridis", "magma", "inferno", "Reds", "hot", "warm (RdBu_r)"],
-        value="viridis", label="realism cmap: ")
+        value="inferno", label="realism cmap: ")
     realism_norm_dropdown = mo.ui.dropdown(
-        ["common max", "experiment max"], value="common max", label="norm: ")
+        ["common max", "experiment max"], value="experiment max", label="norm: ")
     realism_m_slider = mo.ui.slider(0, max(M - 1, 1), value=0, step=1, label="m: ", show_value=True)
     realism_n_slider = mo.ui.slider(1, max(N, 2), value=1, step=1, label="n: ", show_value=True)
     # field selector for the T4/T5 images (same combo as experiment_builder): pick which field's
@@ -1036,9 +1401,11 @@ def _(M, N, mo, pca_region_dropdown):
         value="temperature", label="field: ")
     field_level_slider = mo.ui.slider(steps=[0, 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
                                       value=0, label="level: ", show_value=True)
+    t12_region = mo.ui.dropdown(["mask", "globe", "!mask"], value="globe", label="T1.2 eval region: ")
+    t12_zoom = mo.ui.slider(1, 8, value=1, step=1, label="T1.2 zoom: ", show_value=True)
     mo.vstack([
         mo.hstack([realism_m_slider, realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start"),
-        mo.hstack([field_var_dropdown, field_level_slider, pca_region_dropdown], justify="start"),
+        mo.hstack([field_var_dropdown, field_level_slider, t12_region, t12_zoom], justify="start"),
     ], align="start")
     return (
         field_level_slider,
@@ -1047,74 +1414,68 @@ def _(M, N, mo, pca_region_dropdown):
         realism_m_slider,
         realism_n_slider,
         realism_norm_dropdown,
+        t12_region,
+        t12_zoom,
     )
 
 
 @app.cell
 def _(
     EXPS,
-    INTERF_SHORT,
-    INTERF_VARS,
-    PCA_REGION_MODE,
-    VAR_ORDER,
     WARM_CMAP,
-    copyable_table,
-    delta_labels,
-    eval_mask_ref,
+    export_button,
     field_grid,
-    field_metrics,
     flevel,
     fvar,
     gamma_key,
     gname,
-    intensity_dropdown,
-    label_delta,
     metrics,
     mo,
     np,
     plot_labels,
     plt,
     realism_cmap_dropdown,
-    realism_data,
     realism_m_slider,
     realism_n_slider,
     realism_norm_dropdown,
-    sched_colors,
+    region_crop,
+    region_maskref,
+    save_chart,
+    t12_region,
+    t12_zoom,
 ):
-    report_realism = []
-    # ---- Realism: guidance footprint vs mask; correct aspect + one side colorbar per figure ----
+    # T1.2 visual example — normalized guidance footprint maps for the selected field, over the T1.2 eval
+    # region (default globe: whole-grid footprint, matching the whole-grid D score). G~ = |Δ| / Σ|Δ|.
     if metrics is None or field_grid is None:
         t4_view = mo.md("_press **compute metrics**_")
     else:
         _m = int(realism_m_slider.value); _n = int(realism_n_slider.value) - 1
-        _labels = [_l for _l in sched_colors if label_delta.get(_l) == intensity_dropdown.value]
+        _reg = t12_region.value
         _cmap = WARM_CMAP if realism_cmap_dropdown.value == "warm (RdBu_r)" else realism_cmap_dropdown.value
         _common = realism_norm_dropdown.value == "common max"
         _cols = ["mask"] + sorted(plot_labels, key=gamma_key)
-        _mk = np.asarray(eval_mask_ref, float); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
+        _mk = region_maskref(_reg, int(t12_zoom.value)); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
         _grids = []; _exmax = []
         for _ei in range(len(EXPS)):
             _cell = field_grid.get((_ei, _m, _n), {})
-            _r0, _r1 = [], []
+            _r0 = []
             for _col in _cols:
                 if _col == "mask":
-                    _r0.append(_mkp); _r1.append(_mkp)
+                    _r0.append(_mkp)
                 elif _col in _cell:
-                    _gf = np.asarray(_cell[_col]["gfield"], float); _gfs = np.nansum(_gf); _r0.append(_gf/_gfs if _gfs > 0 else _gf)
-                    _gv = np.asarray(_cell[_col]["gvec_avg"], float); _gvs = np.nansum(_gv); _r1.append(_gv/_gvs if _gvs > 0 else _gv)
+                    _gf = region_crop(_cell[_col]["gfield"], _reg, int(t12_zoom.value)); _gfs = np.nansum(_gf); _r0.append(_gf/_gfs if _gfs > 0 else _gf)
                 else:
-                    _r0.append(None); _r1.append(None)
-            _grids.append((_r0, _r1))
+                    _r0.append(None)
+            _grids.append(_r0)
             _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 if _p is not None), default=1.0))
         _gmax = max(_exmax) if _exmax else 1.0
-        _H, _W = _mkp.shape; _ncol = len(_cols)
-        _nrow = len(_grids)
+        _H, _W = _mkp.shape; _ncol = len(_cols); _nrow = len(_grids)
         _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
         _fw = 1.3 * _ncol + 1.9
         _cellw = (_right - _left) * _fw / _ncol
         _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
         _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
-        for _ei, (_r0, _r1) in enumerate(_grids):
+        for _ei, _r0 in enumerate(_grids):
             _vmax = _gmax if _common else _exmax[_ei]
             for _ci in range(_ncol):
                 _ax = _axs[_ei][_ci]
@@ -1126,65 +1487,107 @@ def _(
                 if _ci == 0:
                     _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
         _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
-        _figs = [mo.as_html(_f)]
-        _fm = field_metrics
-        _t2by = {}
-        for _lb in _fm:
-            _t2by.setdefault(label_delta.get(_lb), []).append(_lb)
-        _t2blocks = []; _t2gS = {}
-        for _dd in sorted(_t2by, key=lambda _x: (_x is None, _x)):
-            _dl = sorted(_t2by[_dd], key=gamma_key)
-            _exps = sorted({_k[0] for _lb in _dl for _k in _fm[_lb]["tv_em"]})
-            _rows2 = ["| experiment | " + " | ".join(gname(_lb) for _lb in _dl) + " |", "|" + "---|" * (len(_dl) + 1)]
-            for _e in _exps:
-                _em = {_lb: [_fm[_lb]["tv_em"][_k] for _k in _fm[_lb]["tv_em"] if _k[0] == _e] for _lb in _dl}
-                _best = max((float(np.mean(_v)) for _v in _em.values() if _v), default=None)
-                _cs = []
-                for _lb in _dl:
-                    _v = _em[_lb]
-                    if not _v:
-                        _cs.append("—"); continue
-                    _t = f"{np.mean(_v):.3f}±{np.std(_v):.3f}"
-                    _cs.append(f"**{_t}**" if (_best is not None and float(np.mean(_v)) == _best) else _t)
-                _en = EXPS[_e].split(chr(47))[-1].split(chr(95))[0] if _e < len(EXPS) else f"exp{_e}"
-                _rows2.append(f"| {_en} | " + " | ".join(_cs) + " |")
-            for _lb in _dl:
-                _t2gS.setdefault(gname(_lb), []).extend(_fm[_lb]["tv_em"].values())
-            _dn = delta_labels.get(_dd, f"delta#{_dd}") if _dd is not None else "—"
-            _det2 = copyable_table(chr(10).join(_rows2), rf"**intensity {_dn}** — realism TV $D^{{\mathrm{{TV}}}}$ per experiment (rows) x schedule (cols); mean ± std over members m; **bold** = highest (largest departure from the mask).", into=report_realism)
-            if realism_data is not None and "tv_var" in next(iter(realism_data.values())):
-                _pvr2 = ["| var | " + " | ".join(gname(_lb) for _lb in _dl) + " |", "|" + "---|" * (len(_dl) + 1)]
-                for _pvv in [_x for _x in VAR_ORDER if _x in INTERF_VARS]:
-                    _msd = {_lb: realism_data[_lb]["tv_var"][_pvv] for _lb in _dl if _lb in realism_data}
-                    _bvv = max((_mm[0] for _mm in _msd.values() if np.isfinite(_mm[0])), default=None)
-                    _cs2 = []
-                    for _lb in _dl:
-                        _mm = _msd.get(_lb)
-                        if _mm is None or not np.isfinite(_mm[0]):
-                            _cs2.append("—"); continue
-                        _tt2 = f"{_mm[0]:.3f}±{_mm[1]:.3f}"
-                        _cs2.append(f"**{_tt2}**" if (_bvv is not None and _mm[0] == _bvv) else _tt2)
-                    _pvr2.append(f"| {INTERF_SHORT[_pvv]} | " + " | ".join(_cs2) + " |")
-                _pvt2 = copyable_table(chr(10).join(_pvr2), rf"**intensity {_dn}** — per-variable realism TV $D^{{\mathrm{{TV}}}}$ (rows = variable) × schedule; mean ± std over exp × members × n; **bold** = max per variable.", into=report_realism)
-                _t2blocks.append(mo.hstack([_det2, _pvt2], justify="start", align="start"))
-            else:
-                _t2blocks.append(_det2)
-        _t2gm = {_g: (float(np.mean(_v)), float(np.std(_v)), len(_v)) for _g, _v in _t2gS.items() if _v}
-        _t2bs = max((_mn for _mn, _st, _np2 in _t2gm.values()), default=None)
-        _t2summ = ["| schedule | pool | realism TV (mean ± std over exp × members × intensity) |", "|---|---|---|"]
-        for _g in sorted(_t2gm, key=lambda _x: -_t2gm[_x][0]):
-            _mn, _st, _np2 = _t2gm[_g]
-            _t = f"{_mn:.3f}±{_st:.3f}"
-            _t = f"**{_t}**" if (_t2bs is not None and _mn == _t2bs) else _t
-            _t2summ.append(f"| {_g} | {_np2} | {_t} |")
+        if export_button.value:
+            save_chart(_f, "T1.2a")
         t4_view = mo.vstack([
-            mo.md(rf"_Selected field **{fvar}**@{flevel}, eval region **{PCA_REGION_MODE}**, member $m={_m}$, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. Normalized guidance footprint $|\Delta x^{{\mathrm{{guidance}}}}|$ per schedule $\gamma$ (columns), one row per experiment; first column: the mask $\pi$._"),
-            *_figs,
-            *_t2blocks,
-            copyable_table(chr(10).join(_t2summ), "**Summary** — realism TV averaged across all experiments × members × intensity levels, one row per schedule (ranked descending; **bold** = highest).", into=report_realism),
-        ], align="start")
+            mo.md(rf"_Selected field **{fvar}**@{flevel}, T1.2 eval region **{_reg}**, zoom **{int(t12_zoom.value)}×**, member $m={_m}$, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. Normalized footprint $\widetilde{{G}}=|\Delta x^{{\mathrm{{GE}}}}|/\sum|\Delta x^{{\mathrm{{GE}}}}|$ per schedule $\gamma$ (columns), one row per experiment; first column: the normalized mask $\widetilde{{\pi}}$._"),
+            mo.as_html(_f)], align="start")
     t4_view
-    return (report_realism,)
+    return
+
+
+@app.cell(hide_code=True)
+def md_t12_def(mo):
+    md_t12_def = r"""
+    ### Definition and per-variable profiles
+
+    **Object.** For each experiment $e=(\text{startdate},\rho)$, member $m$, profile $\gamma$, variable $v$ and
+    level $\ell$ we compare the normalized footprint to the normalized mask over the **whole grid** and take the
+    $L_1$ distance (a total-variation-type deviation):
+    $$D_{e,m,\gamma,v\ell} \;=\; \sum_{ij} \big| \widetilde{G}_{e,m,\gamma,v\ell,ij} - \widetilde{\pi}_{ij} \big|,\qquad
+    \widetilde{G} = \frac{|\Delta x^{\mathrm{GE}}_{v\ell}|}{\sum_{ij}|\Delta x^{\mathrm{GE}}_{v\ell,ij}|},\quad
+    \widetilde{\pi} = \frac{\pi}{\sum_{ij}\pi_{ij}}.$$
+    $D=0$ means the footprint is exactly mask-shaped; larger $D$ = the response departs more from the mask
+    (spreads beyond it or concentrates differently).
+
+    **Chart** (one per experiment, selectable): per variable, $x=$ channels (surface→top), one line per
+    $\gamma$ of $D_{v\ell}$; the solid line is member $m{=}0$ and the band spans $[\min_m,\max_m]$ over the $M$
+    members.
+    """
+    mo.md(md_t12_def)
+    return (md_t12_def,)
+
+
+@app.cell(hide_code=True)
+def t12_chart(M, interf_data, mo, t12_exp, t1x_chart):
+    # T1.2 — per-experiment spatial-deviation profile chart (object D) for the selected experiment.
+    if interf_data is None or "chan_em" not in interf_data or "tvd" not in interf_data["chan_em"]:
+        t12_chart_view = mo.md("_press **compute field profiles** above_")
+    elif t12_exp.value is None:
+        t12_chart_view = mo.md("_no experiment selected_")
+    else:
+        t12_chart_view = t1x_chart("tvd", t12_exp.value[0], t12_exp.value[1],
+            rf"$D_{{v\ell}}=\sum_{{ij}}|\widetilde{{G}}_{{v\ell}}-\widetilde{{\pi}}|$ per channel (surface→top); one line per $\gamma$, solid $=m{{=}}0$, band $=[\min_m,\max_m]$ over the $M={M}$ members.", _savename="T1.2")
+    mo.vstack([t12_exp, t12_chart_view], align="start")
+    return
+
+
+@app.cell(hide_code=True)
+def md_t12_scores(mo):
+    md_t12_scores = r"""
+    ### Scores
+
+    Identical construction to T1.1, with $D$ in place of $g$: per-variable value
+    $A_{e,m,\gamma,v} = \sum_{\ell} D_{e,m,\gamma,v\ell}$; per-variable score
+    $N_{e,m,\gamma,v} = A_{e,m,\gamma,v} / \max_{\gamma'} A_{e,m,\gamma',v}$ (per member); single score
+    $R_{e,m,\gamma} = \big(\sum_v N_{e,m,\gamma,v}\big) / \max_{\gamma'} \sum_v N_{e,m,\gamma',v}$. The
+    per-experiment table (rows = variables + single-score row) and the two paired summary views ($V_1$
+    startdates × $\gamma$; $V_2$ variables × $\gamma$; per $\rho$ and across $\rho$) follow the same pooling as
+    T1.1. All spreads are population std; **bold** marks the max $\gamma$ per row.
+    """
+    mo.md(md_t12_scores)
+    return (md_t12_scores,)
+
+
+@app.cell(hide_code=True)
+def t12_tables(
+    EXPS,
+    M,
+    delta_labels,
+    interf_data,
+    interf_score_tables_t12,
+    mo,
+    t12_exp,
+    t1x_pertable,
+):
+    if interf_data is None or "val_em" not in interf_data or "tvd" not in interf_data["val_em"]:
+        t12_tables_view = mo.md("_press **compute field profiles** above_")
+    elif t12_exp.value is None:
+        t12_tables_view = mo.md("_no experiment selected_")
+    else:
+        _ei, _dd = t12_exp.value
+        _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)}"
+        _tbl = t1x_pertable("tvd", _ei, _dd, rf"**{_en}** — per-variable score $N_v=A_v/\max_\gamma A_v$ (rows, $A_v=\sum_\ell D_{{v\ell}}$) × schedule $\gamma$; **single score** $R=\sum_v N_v/\max_\gamma\sum_v N_v$; mean ± std over the $M={M}$ members; **bold** = max $\gamma$ per row.")
+        t12_tables_view = mo.vstack([_tbl, interf_score_tables_t12], align="start")
+    t12_tables_view
+    return
+
+
+@app.cell(hide_code=True)
+def md_t12_whymask(mo):
+    md_t12_whymask = r"""
+    ### Why not restrict the test to the mask
+
+    $D$ is measured over the **whole grid**, not the mask region. The multivariate response to the thermal
+    forcing is largely *non-local*: in a representative case only ~24–27% of the $z$, $u$ and $\mathrm{mslp}$
+    footprint mass sits inside the mask (vs ~62% for the target $2\mathrm{m}T$). Restricting the normalization
+    and sum to the mask would (i) discard this leakage — which *is* the spatial-deviation signal — and
+    (ii) invert the ranking: the strongly-propagating variables (whole-grid $D\approx1.5$) collapse to
+    $D\approx0.5$, *below* the target, wrongly reading as "more mask-shaped." A within-mask score would only
+    make sense as a separate controllability check on the target channel.
+    """
+    mo.md(md_t12_whymask)
+    return (md_t12_whymask,)
 
 
 @app.cell(hide_code=True)
@@ -1192,13 +1595,29 @@ def _(mo):
     md_t13 = r"""
     ### T1.3: Ensemble diversity
 
-    For each flow-time profile $\gamma$, the per-pixel standard deviation across ensemble members $m$ of the
-    guidance footprint $|\Delta x^{\mathrm{guidance}}| = |x_n^{\mathrm{gui}} - x_n^{\mathrm{ung}\mid\mathrm{gui}}|$,
-    then area-weighted masked-mean over the target mask $\pi$. Higher = the guidance effect varies more
-    member-to-member (physical field units; the std needs $\ge 2$ members).
+    *How much does the guidance effect still depend on the stochastic realization, across variables and levels?*
+    Same eval procedure as T1.1/T1.2 — the object is the ensemble std of the (signed) guidance effect, so the
+    member axis is consumed and the tables/plots carry no per-member spread.
     """
     mo.md(md_t13)
     return (md_t13,)
+
+
+@app.cell(hide_code=True)
+def md_t13_visual(mo):
+    md_t13_visual = r"""
+    ### Visual example
+
+    The **spatial footprint** of the object T1.3 scores: the per-pixel ensemble standard deviation of the
+    **signed** guidance effect, sum-normalized to a unit footprint $\widetilde{S}_{v\ell} =
+    \operatorname{std}_m(\Delta x^{\mathrm{GE}}_{v\ell}) / \sum_{ij}\operatorname{std}_m(\Delta x^{\mathrm{GE}}_{v\ell})$,
+    as a spatial map per schedule $\gamma$ (columns), one row per experiment; the first column is the normalized
+    target mask $\widetilde{\pi}$. This shows **where** the member-to-member response disagrees, not its
+    magnitude — the magnitude is what the score $s=\mathcal{M}_\pi(\operatorname{std}_m(\Delta x^{\mathrm{GE}}))$
+    below reports. Use the field / region controls to browse variables and levels.
+    """
+    mo.md(md_t13_visual)
+    return (md_t13_visual,)
 
 
 @app.cell(hide_code=True)
@@ -1206,24 +1625,23 @@ def _(
     field_level_slider,
     field_var_dropdown,
     mo,
-    pca_region_dropdown,
     realism_cmap_dropdown,
     realism_n_slider,
     realism_norm_dropdown,
 ):
-    # T5 controls (same widgets as T4 — marimo keeps them in sync): field selector + eval region + view opts
-    mo.hstack([field_var_dropdown, field_level_slider, pca_region_dropdown,
+    # T1.3 controls: field selector + T1.3 eval region (default mask) + view opts
+    t13_region = mo.ui.dropdown(["mask", "globe", "!mask"], value="mask", label="T1.3 eval region: ")
+    mo.hstack([field_var_dropdown, field_level_slider, t13_region,
                realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start")
-    return
+    return (t13_region,)
 
 
 @app.cell(hide_code=True)
 def _(
     EXPS,
     M,
-    PCA_REGION_MODE,
     WARM_CMAP,
-    eval_mask_ref,
+    export_button,
     field_grid,
     flevel,
     fvar,
@@ -1237,50 +1655,47 @@ def _(
     realism_cmap_dropdown,
     realism_n_slider,
     realism_norm_dropdown,
+    region_crop,
+    region_maskref,
+    save_chart,
+    t13_region,
 ):
-    # ---- T5 footprint-spread IMAGES: same layout as T4, but per-pixel std over members m ----
-    # Row 1 = std_m(guidance effect |x_gui-x_ung|); Row 2 = std_m(avg-guidance), for the SELECTED field
-    # (from field_grid). Shares T4's field / n / cmap / norm controls.
+    # T1.3 visual example — per-pixel ensemble std of the SIGNED guidance effect std_m(x_gui - x_ung) for the
+    # selected field, over the T1.3 eval region (default mask, matching the M_pi mask-domain score).
     if metrics is None or field_grid is None:
         t5_spread_view = mo.md("_press **compute metrics**_")
     else:
         _n = int(realism_n_slider.value) - 1
-        _labels = plot_labels
+        _reg = t13_region.value
         _cmap = WARM_CMAP if realism_cmap_dropdown.value == "warm (RdBu_r)" else realism_cmap_dropdown.value
         _common = realism_norm_dropdown.value == "common max"
         _cols = ["mask"] + sorted(plot_labels, key=gamma_key)
-        _mk = np.asarray(eval_mask_ref, float); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
-
-        def _std_over_m(_ei, _lb, _key):
-            _stack = [np.asarray(field_grid[(_ei, _mm, _n)][_lb][_key], float)
-                      for _mm in range(M)
-                      if (_ei, _mm, _n) in field_grid and _lb in field_grid[(_ei, _mm, _n)]]
+        _mk = region_maskref(_reg); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
+        def _std_over_m(_ei, _lb):
+            _stack = [np.asarray(field_grid[(_ei, _mm, _n)][_lb]["gfield_signed"], float)
+                      for _mm in range(M) if (_ei, _mm, _n) in field_grid and _lb in field_grid[(_ei, _mm, _n)]]
             if len(_stack) < 2:
                 return None
-            return np.std(np.stack(_stack, 0), axis=0)
-
+            return region_crop(np.std(np.stack(_stack, 0), axis=0), _reg)
         _grids = []; _exmax = []
         for _ei in range(len(EXPS)):
-            _r0, _r1 = [], []
+            _r0 = []
             for _col in _cols:
                 if _col == "mask":
-                    _r0.append(_mkp); _r1.append(_mkp)
+                    _r0.append(_mkp)
                 else:
-                    _sf = _std_over_m(_ei, _col, "gfield")
-                    _sv = _std_over_m(_ei, _col, "gvec_avg")
+                    _sf = _std_over_m(_ei, _col)
                     _r0.append(_sf/np.nansum(_sf) if (_sf is not None and np.nansum(_sf) > 0) else _sf)
-                    _r1.append(_sv/np.nansum(_sv) if (_sv is not None and np.nansum(_sv) > 0) else _sv)
-            _grids.append((_r0, _r1))
+            _grids.append(_r0)
             _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 if _p is not None), default=1.0))
         _gmax = max(_exmax) if _exmax else 1.0
-        _H, _W = _mkp.shape; _ncol = len(_cols)
-        _nrow = len(_grids)
+        _H, _W = _mkp.shape; _ncol = len(_cols); _nrow = len(_grids)
         _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
         _fw = 1.3 * _ncol + 1.9
         _cellw = (_right - _left) * _fw / _ncol
         _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
         _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
-        for _ei, (_r0, _r1) in enumerate(_grids):
+        for _ei, _r0 in enumerate(_grids):
             _vmax = _gmax if _common else _exmax[_ei]
             for _ci in range(_ncol):
                 _ax = _axs[_ei][_ci]
@@ -1292,91 +1707,197 @@ def _(
                 if _ci == 0:
                     _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
         _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
-        _figs = [mo.as_html(_f)]
+        if export_button.value:
+            save_chart(_f, "T1.3a")
         t5_spread_view = mo.vstack([
-            mo.md(rf"_Selected field **{fvar}**@{flevel}, eval region **{PCA_REGION_MODE}**, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. Per-pixel std across members $m$ of the guidance footprint $|\Delta x^{{\mathrm{{guidance}}}}|$ per schedule $\gamma$ (columns), one row per experiment; first column: the mask $\pi$._"),
-            *_figs])
+            mo.md(rf"_Selected field **{fvar}**@{flevel}, T1.3 eval region **{_reg}**, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. Per-pixel std across members $m$ of the **signed** guidance effect $\operatorname{{std}}_m(\Delta x^{{\mathrm{{GE}}}})$ per schedule $\gamma$ (columns), one row per experiment; first column: the normalized mask $\widetilde{{\pi}}$; each panel sum-normalized to a unit footprint (shape, not magnitude)._"),
+            mo.as_html(_f)])
     t5_spread_view
     return
 
 
 @app.cell(hide_code=True)
-def _(
+def md_t13_def(mo):
+    md_t13_def = r"""
+    ### Definition and per-variable profiles
+
+    **Object.** For each experiment $e=(\text{startdate},\rho)$, profile $\gamma$, variable $v$ and level $\ell$,
+    take the **per-pixel ensemble std of the signed guidance effect** and reduce it by the area-weighted masked
+    mean over the target region (mask domain, as motivated for the diversity criterion):
+    $$s_{e,\gamma,v\ell} \;=\; \mathcal{M}_\pi\!\big(\operatorname{std}_m(\Delta x^{\mathrm{GE}}_{v\ell})\big),\qquad
+    \Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}.$$
+    The std over the $M$ members **consumes the member axis**, so there is one value per $(e,\gamma,v,\ell)$ — no
+    per-member spread. Higher $s$ = the guidance effect varies more across the stochastic ensemble.
+
+    **Chart** (one per experiment, selectable): per variable, $x=$ channels (surface→top), one line per $\gamma$
+    of $s_{v\ell}$ — a single line each, no min–max band (the std already consumed the members).
+    """
+    mo.md(md_t13_def)
+    return (md_t13_def,)
+
+
+@app.cell(hide_code=True)
+def t13_chart_cell(mo, t13_chan, t13_chart, t13_exp):
+    # T1.3 — per-experiment ensemble-diversity profile chart for the selected experiment.
+    if t13_chan is None:
+        t13_chart_view = mo.md("_press **compute field profiles** above_")
+    elif t13_exp.value is None:
+        t13_chart_view = mo.md("_no experiment selected_")
+    else:
+        t13_chart_view = t13_chart(t13_exp.value[0], t13_exp.value[1],
+            rf"$s_{{v\ell}}=\mathcal{{M}}_\pi(\operatorname{{std}}_m(\Delta x^{{\mathrm{{GE}}}}))$ per channel (surface→top); one line per $\gamma$ (no member band — the std consumes $M$).", _savename="T1.3")
+    mo.vstack([t13_exp, t13_chart_view], align="start")
+    return
+
+
+@app.cell(hide_code=True)
+def md_t13_scores(mo):
+    md_t13_scores = r"""
+    ### Scores
+
+    Same construction as T1.1/T1.2, with $s$ as the object and **no per-member spread**: per-variable value
+    $A_{e,\gamma,v} = \sum_\ell s_{e,\gamma,v\ell}$; per-variable score
+    $N_{e,\gamma,v} = A_{e,\gamma,v} / \max_{\gamma'} A_{e,\gamma',v}$; single score
+    $R_{e,\gamma} = \big(\sum_v N_{e,\gamma,v}\big) / \max_{\gamma'} \sum_v N_{e,\gamma',v}$. The per-experiment
+    table has a single value per cell. In the two paired views the spread is over the **remaining** axes only:
+    $V_1$ (startdates × $\gamma$) shows single values per $\rho$ and mean ± std over $\rho$ across intensities;
+    $V_2$ (variables × $\gamma$) shows mean ± std over startdates (per $\rho$) or startdates × $\rho$ (across).
+    **Bold** marks the max $\gamma$ per row.
+    """
+    mo.md(md_t13_scores)
+    return (md_t13_scores,)
+
+
+@app.cell(hide_code=True)
+def t13_tables(
     EXPS,
-    INTERF_SHORT,
-    INTERF_VARS,
-    VAR_ORDER,
-    copyable_table,
     delta_labels,
-    field_metrics,
+    interf_score_tables_t13,
+    mo,
+    t13_chan,
+    t13_exp,
+    t13_pertable,
+):
+    if t13_chan is None:
+        t13_tables_view = mo.md("_press **compute field profiles** above_")
+    elif t13_exp.value is None:
+        t13_tables_view = mo.md("_no experiment selected_")
+    else:
+        _ei, _dd = t13_exp.value
+        _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)}"
+        _tbl = t13_pertable(_ei, _dd, rf"**{_en}** — per-variable score $N_v=A_v/\max_\gamma A_v$ (rows, $A_v=\sum_\ell s_{{v\ell}}$) × schedule $\gamma$; **single score** $R=\sum_v N_v/\max_\gamma\sum_v N_v$; one value per cell (no member spread); **bold** = max $\gamma$ per row.")
+        t13_tables_view = mo.vstack([_tbl, interf_score_tables_t13], align="start")
+    t13_tables_view
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, t13_chan, t13_views):
+    # T1.3 — paired summary views (V1 single score, V2 per-variable) over the signed ensemble-std object.
+    report_diversity = []
+    if t13_chan is None:
+        interf_score_tables_t13 = mo.md("_press **compute interference profiles** above_")
+    else:
+        interf_score_tables_t13 = t13_views(report_diversity, "diversity")
+    return interf_score_tables_t13, report_diversity
+
+
+@app.cell
+def hdr_t14(mo):
+    md_t14 = r"""
+    ### T1.4: Leaderboard
+
+    A single cross-eval summary. For each schedule $\gamma$ we take the **single score $R$** from each
+    temporal-localization eval — **T1.1** multivariate propagation, **T1.2** spatial deviation from the mask,
+    **T1.3** ensemble diversity — pooled over startdates × $\rho$ × members, and add an **Overall** column (the
+    mean of the three). Each $R$ is normalized within its own eval ($\max_\gamma R = 1$), so the columns are
+    comparable; higher = the schedule that maximizes that eval. Rows are sorted by Overall; **bold** = column max.
+    """
+    mo.md(md_t14)
+    return (md_t14,)
+
+
+@app.cell(hide_code=True)
+def t14_leaderboard(
+    EXPS,
+    M,
+    copyable_table,
+    delta_order,
     gamma_key,
     gname,
+    interf_data,
     label_delta,
     mo,
     np,
-    realism_data,
+    t13_NR,
+    t13_chan,
+    t1x_NR,
 ):
-    report_diversity = []
-    # T5 footprint-spread table: selected field (field_metrics, follows the selector) + all fields (realism_data, gated)
-    if field_metrics is None:
-        t5_view = mo.md("_press **compute metrics**_")
+    # T1.4 — cross-eval leaderboard: one row per schedule γ, columns = the three T1 single scores R
+    # (T1.1 avgabs propagation, T1.2 tvd spatial deviation, T1.3 signed-std diversity) + Overall (mean), pooled
+    # over startdates × ρ × members. Reuses t1x_NR / t13_NR. Higher = the schedule maximizing that eval.
+    report_t14 = []
+    if interf_data is None or "val_em" not in interf_data or "avgabs" not in interf_data.get("val_em", {}) or "tvd" not in interf_data.get("val_em", {}) or t13_chan is None:
+        t14_view = mo.md("_press **compute field profiles** above (T1.4 needs the T1.1–T1.3 data)_")
     else:
-        _fm = field_metrics
-        _t3by = {}
-        for _lb in _fm:
-            _t3by.setdefault(label_delta.get(_lb), []).append(_lb)
-        _t3blocks = []; _t3gS = {}
-        for _dd in sorted(_t3by, key=lambda _x: (_x is None, _x)):
-            _dl = sorted(_t3by[_dd], key=gamma_key)
-            _exps = sorted({_k[0] for _lb in _dl for _k in _fm[_lb]["t5_en"]})
-            _rows3 = ["| experiment | " + " | ".join(gname(_lb) for _lb in _dl) + " |", "|" + "---|" * (len(_dl) + 1)]
-            for _e in _exps:
-                _env = {_lb: [_fm[_lb]["t5_en"][_k] for _k in _fm[_lb]["t5_en"] if _k[0] == _e] for _lb in _dl}
-                _best = max((float(np.mean(_v)) for _v in _env.values() if _v), default=None)
-                _cs = []
-                for _lb in _dl:
-                    _v = _env[_lb]
-                    if not _v:
-                        _cs.append("—"); continue
-                    _t = f"{np.mean(_v):.4g}±{np.std(_v):.2g}"
-                    _cs.append(f"**{_t}**" if (_best is not None and float(np.mean(_v)) == _best) else _t)
-                _en = EXPS[_e].split(chr(47))[-1].split(chr(95))[0] if _e < len(EXPS) else f"exp{_e}"
-                _rows3.append(f"| {_en} | " + " | ".join(_cs) + " |")
-            for _lb in _dl:
-                _t3gS.setdefault(gname(_lb), []).extend(_fm[_lb]["t5_en"].values())
-            _dn = delta_labels.get(_dd, f"delta#{_dd}") if _dd is not None else "—"
-            _det3 = copyable_table(chr(10).join(_rows3), rf"**intensity {_dn}** — footprint spread (per-pixel std over members $m$, masked-mean over $\pi$) per experiment (rows) x schedule (cols); mean ± std over guided steps n; **bold** = largest.", into=report_diversity)
-            if realism_data is not None and "t5_var" in next(iter(realism_data.values())):
-                _pvr3 = ["| var | " + " | ".join(gname(_lb) for _lb in _dl) + " |", "|" + "---|" * (len(_dl) + 1)]
-                for _pvv in [_x for _x in VAR_ORDER if _x in INTERF_VARS]:
-                    _msd = {_lb: realism_data[_lb]["t5_var"][_pvv] for _lb in _dl if _lb in realism_data}
-                    _bvv = max((_mm[0] for _mm in _msd.values() if np.isfinite(_mm[0])), default=None)
-                    _cs3 = []
-                    for _lb in _dl:
-                        _mm = _msd.get(_lb)
-                        if _mm is None or not np.isfinite(_mm[0]):
-                            _cs3.append("—"); continue
-                        _tt3 = f"{_mm[0]:.4g}±{_mm[1]:.2g}"
-                        _cs3.append(f"**{_tt3}**" if (_bvv is not None and _mm[0] == _bvv) else _tt3)
-                    _pvr3.append(f"| {INTERF_SHORT[_pvv]} | " + " | ".join(_cs3) + " |")
-                _pvt3 = copyable_table(chr(10).join(_pvr3), rf"**intensity {_dn}** — per-variable footprint spread (rows = variable) × schedule; mean ± std over exp × n; **bold** = max per variable.", into=report_diversity)
-                _t3blocks.append(mo.hstack([_det3, _pvt3], justify="start", align="start"))
-            else:
-                _t3blocks.append(_det3)
-        _t3gm = {_g: (float(np.mean(_v)), float(np.std(_v)), len(_v)) for _g, _v in _t3gS.items() if _v}
-        _t3bs = max((_mn for _mn, _st, _np2 in _t3gm.values()), default=None)
-        _t3summ = ["| schedule | pool | fp-spread (mean ± std over exp × n × intensity) |", "|---|---|---|"]
-        for _g in sorted(_t3gm, key=lambda _x: -_t3gm[_x][0]):
-            _mn, _st, _np2 = _t3gm[_g]
-            _t = f"{_mn:.4g}±{_st:.2g}"
-            _t = f"**{_t}**" if (_t3bs is not None and _mn == _t3bs) else _t
-            _t3summ.append(f"| {_g} | {_np2} | {_t} |")
-        t5_view = mo.vstack([
-            *_t3blocks,
-            copyable_table(chr(10).join(_t3summ), "**Summary** — footprint spread averaged across all experiments × guided steps × intensity levels, one row per schedule (ranked descending; **bold** = largest).", into=report_diversity),
-        ], align="start")
-    t5_view
-    return (report_diversity,)
+        _labels = list(interf_data["labels"])
+        _by_g = {}
+        for _lb in _labels:
+            _by_g.setdefault(gname(_lb), {})[label_delta.get(_lb)] = _lb
+        _gammas = sorted(_by_g, key=lambda g: gamma_key(next(iter(_by_g[g].values()))))
+        _deltas = [d for d in delta_order if any(label_delta.get(l) == d for l in _labels)]
+
+        def _acc_t1x(_obj):
+            _a = {g: [] for g in _gammas}
+            for _dd in _deltas:
+                for _ei in range(len(EXPS)):
+                    _, _R = t1x_NR(_obj, _ei, _dd)
+                    for _mm in range(M):
+                        for _lb, _rv in _R[_mm].items():
+                            if np.isfinite(_rv):
+                                _a[gname(_lb)].append(_rv)
+            return _a
+
+        def _acc_t13():
+            _a = {g: [] for g in _gammas}
+            for _dd in _deltas:
+                for _ei in range(len(EXPS)):
+                    _, _R = t13_NR(_ei, _dd)
+                    for _lb, _rv in _R.items():
+                        if np.isfinite(_rv):
+                            _a[gname(_lb)].append(_rv)
+            return _a
+
+        _A = _acc_t1x("avgabs"); _B = _acc_t1x("tvd"); _C = _acc_t13()
+        _mean = lambda _xs: float(np.mean(_xs)) if _xs else float("nan")
+        _std = lambda _xs: float(np.std(_xs)) if _xs else float("nan")
+        _rd = {}
+        for _g in _gammas:
+            _m11, _m12, _m13 = _mean(_A[_g]), _mean(_B[_g]), _mean(_C[_g])
+            _ov = _mean([x for x in (_m11, _m12, _m13) if np.isfinite(x)])
+            _rd[_g] = (_m11, _std(_A[_g]), _m12, _std(_B[_g]), _m13, _std(_C[_g]), _ov)
+        _og = sorted(_gammas, key=lambda g: -(_rd[g][6] if np.isfinite(_rd[g][6]) else -1.0))
+        _cmax = {}
+        for _key, _idx in (("t11", 0), ("t12", 2), ("t13", 4), ("ov", 6)):
+            _vals = [_rd[g][_idx] for g in _gammas if np.isfinite(_rd[g][_idx])]
+            _cmax[_key] = max(_vals) if _vals else None
+        def _cell(_mu, _sd, _key):
+            if not np.isfinite(_mu):
+                return "—"
+            _t = f"{_mu:.3f}±{_sd:.3f}" if (_sd is not None and np.isfinite(_sd)) else f"{_mu:.3f}"
+            return f"**{_t}**" if (_cmax[_key] is not None and _mu == _cmax[_key]) else _t
+        _lines = ["| schedule γ | T1.1 propagation | T1.2 spatial dev. | T1.3 diversity | **Overall** |",
+                  "|---|---|---|---|---|"]
+        for _g in _og:
+            _d = _rd[_g]
+            _lines.append(f"| {_g} | {_cell(_d[0], _d[1], 't11')} | {_cell(_d[2], _d[3], 't12')} | {_cell(_d[4], _d[5], 't13')} | {_cell(_d[6], None, 'ov')} |")
+        _cap = (f"**T1.4 leaderboard** — single score $R$ per schedule $\\gamma$ for each eval "
+                f"(T1.1 propagation, T1.2 spatial deviation, T1.3 diversity); T1.1/T1.2 = mean ± std over "
+                f"startdates × ρ × members ({len(EXPS)}×{len(_deltas)}×{M}), T1.3 = mean ± std over startdates × ρ "
+                f"(no member axis); **Overall** = mean of the three. **Bold** = column max; sorted by Overall.")
+        t14_view = copyable_table("\n".join(_lines), _cap, into=report_t14)
+    t14_view
+    return (report_t14,)
 
 
 @app.cell(hide_code=True)
@@ -1388,8 +1909,9 @@ def hdr_support(mo):
     leaderboard, the guidance-kick decomposition (T2b–d), the latent-space closeness (PCA path & ping-pong),
     and the prediction-noise check.
     """
-    mo.md(md_support)
-    return (md_support,)
+    support_checkbox = mo.ui.checkbox(value=False, label="compute support diagnostics (PCA closeness + prediction noise) — off keeps the analysis fast")
+    mo.vstack([mo.md(md_support), support_checkbox])
+    return md_support, support_checkbox
 
 
 @app.cell(hide_code=True)
@@ -1432,137 +1954,6 @@ def _(
         t1_view = copyable_table("\n".join(_rows), r"**Target realization** — final gap $\xi_n$, reached ratio and target-reached per schedule $\gamma$ (selected intensity).", into=report_reliability)
     t1_view
     return (report_reliability,)
-
-
-@app.cell(hide_code=True)
-def hdr_descstats(mo):
-    md_descstats = r"""
-    ### Descriptive statistics
-
-    For each intensity $\rho$ and experiment, the four per-instance spatial statistics
-    $\{\min,\max,\mathrm{mean},\mathrm{std}\}$ of the **target field** (`VAR`) over the target region
-    defined by the mask $\pi$ — **mean**/**std** use the area-weighted masked mean $\mathcal{M}_\pi(x)=\sum_{ij}\pi_{ij}x_{ij}/\sum_{ij}\pi_{ij}$ and the corresponding weighted std, while **min**/**max** are over the mask support ($\pi>0$), reported for the guided state $x^{\mathrm{gui}}$
-    and its same-seed unguided twin $x^{\mathrm{ung}\mid\mathrm{gui}}$. Each cell is the **ensemble avg
-    $\pm$ std** of that statistic over the pool (selected schedules $\times$ members $m$ $\times$ guided
-    steps $n$); the four statistics are the columns, each split into an ung$\mid$gui and a gui subcolumn.
-    """
-    mo.md(md_descstats)
-    return (md_descstats,)
-
-
-@app.cell(hide_code=True)
-def descstats_compute(
-    EXPS,
-    M,
-    MASK0,
-    N,
-    VAR,
-    channel,
-    gamma_key,
-    label_delta,
-    load_rollout,
-    metrics,
-    np,
-    open_store,
-    open_unguided_state,
-    sched_colors,
-    select_point,
-    sweep_points,
-):
-    # ---- Descriptive statistics of the target field over the target region (Support) ----
-    # For each intensity rho (delta) x experiment: the four per-instance spatial statistics
-    # (min, max, mean, std) of the TARGET variable field over the target region defined by the mask:
-    # mean/std are the area-weighted masked mean M_pi = sum(pi*x)/sum(pi) and its weighted std; min/max
-    # are over the mask support (pi>0). For the guided state (gui) and same-seed unguided twin. Pool =
-    # selected schedules x members m x guided steps n; the table reports the ensemble avg +/- std per stat.
-    descstats = None
-    if metrics is not None:
-        _labs = sorted(sched_colors, key=gamma_key)   # all selected schedules across BOTH intensities
-        _mk = np.asarray(MASK0, float)
-        _wsum = float(_mk.sum()) or 1.0
-        _supp = _mk > 0
-        def _four_stats(_f2d):
-            _f = np.asarray(_f2d, float)
-            _mean = float((_f * _mk).sum() / _wsum)                          # area-weighted masked mean (M_pi)
-            _std = float(np.sqrt((_mk * (_f - _mean) ** 2).sum() / _wsum))    # area-weighted masked std
-            _px = _f[_supp]
-            return {"min": float(_px.min()), "max": float(_px.max()), "mean": _mean, "std": _std}
-        descstats = {}
-        for _ei, _rid in enumerate(EXPS):
-            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
-            _sp = sweep_points(_sv, _recs)
-            for _lb in _labs:
-                if _lb not in _sp:
-                    continue
-                _dd = label_delta.get(_lb); _sel = _sp[_lb]
-                _g = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)
-                _t = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)
-                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
-                _gns = [nn for nn in range(N) if _p[nn] != 0.0] or [0]
-                _acc = descstats.setdefault((_ei, _dd),
-                    {"gui": {_s: [] for _s in ("min", "max", "mean", "std")},
-                     "ung": {_s: [] for _s in ("min", "max", "mean", "std")}})
-                for _m in range(M):
-                    for _n in _gns:
-                        _tf = _t.isel(m=_m, n=_n); _tf = _tf.isel(t=-1) if "t" in _tf.dims else _tf
-                        _sg = _four_stats(_g.isel(m=_m, n=_n)); _st = _four_stats(_tf)
-                        for _s in ("min", "max", "mean", "std"):
-                            _acc["gui"][_s].append(_sg[_s]); _acc["ung"][_s].append(_st[_s])
-    return (descstats,)
-
-
-@app.cell(hide_code=True)
-def descstats_table(
-    EXPS,
-    VAR,
-    copyable,
-    delta_labels,
-    delta_order,
-    descstats,
-    mo,
-    np,
-):
-    report_descstats = []
-    # two-level table: 4 stat columns (min/max/mean/std), each split into ung|gui and gui subcolumns;
-    # rows = experiments; one table per intensity rho. Cell = ensemble avg +/- std of that statistic.
-    if descstats is None:
-        descstats_view = mo.md("_press **compute metrics**_")
-    else:
-        _stats = ["min", "max", "mean", "std"]
-        _blocks = []
-        for _dd in delta_order:
-            _present = [(_ei, descstats[(_ei, _dd)]) for _ei in range(len(EXPS)) if (_ei, _dd) in descstats]
-            if not _present:
-                continue
-            _rows_html = []
-            _md = ["| experiment | " + " | ".join(f"{_s} ung/gui | {_s} gui" for _s in _stats) + " |",
-                   "|" + "---|" * (2 * len(_stats) + 1)]
-            for _ei, _acc in _present:
-                _en = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
-                _tds = []; _mds = []
-                for _s in _stats:
-                    for _side in ("ung", "gui"):
-                        _v = _acc[_side][_s]
-                        _txt = f"{np.mean(_v):.4g} ± {np.std(_v):.2g}" if _v else "—"
-                        _tds.append(f"<td style='padding:2px 9px;text-align:right;white-space:nowrap'>{_txt}</td>")
-                        _mds.append(_txt)
-                _rows_html.append(f"<tr><td style='padding:2px 9px'>{_en}</td>" + "".join(_tds) + "</tr>")
-                _md.append(f"| {_en} | " + " | ".join(_mds) + " |")
-            _head = ("<thead><tr><th rowspan='2' style='padding:2px 9px;border-bottom:1px solid #999;text-align:left'>experiment</th>"
-                     + "".join(f"<th colspan='2' style='padding:2px 9px;border-bottom:1px solid #999'>{_s}</th>" for _s in _stats)
-                     + "</tr><tr>"
-                     + "".join("<th style='padding:1px 9px;font-weight:normal;opacity:.75'>ung|gui</th><th style='padding:1px 9px'>gui</th>" for _ in _stats)
-                     + "</tr></thead>")
-            _tbl = f"<table style='border-collapse:collapse;font-size:12.5px'>{_head}<tbody>{''.join(_rows_html)}</tbody></table>"
-            _rho = delta_labels.get(_dd, f"delta#{_dd}")
-            _title = (f"**intensity {_rho}** — descriptive statistics of the target field "
-                      f"`{VAR}` over the target region (mask π: weighted mean/std, min/max over support); each cell = ensemble avg ± std of the "
-                      f"per-instance spatial statistic, pooled over selected schedules × members × steps.")
-            report_descstats.append(_title + "\n\n" + "\n".join(_md))
-            _blocks.append(mo.vstack([mo.md(_title), copyable(_title + "\n\n" + "\n".join(_md)), mo.Html(_tbl)], align="start"))
-        descstats_view = mo.vstack(_blocks, align="start")
-    descstats_view
-    return (report_descstats,)
 
 
 @app.cell(hide_code=True)
@@ -1850,6 +2241,7 @@ def _(
     plt,
     ref_metrics,
     sched_colors,
+    support_checkbox,
     traj_grid,
     ung_traj,
     zoom_pad_slider,
@@ -1857,8 +2249,8 @@ def _(
 ):
     report_closeness = []
     # ---- Closeness: full PCA path grid (ported), rows=exp, cols=m, with zoom-to-trajectories ----
-    if metrics is None or traj_grid is None:
-        t3_view = mo.md("_press **compute metrics**_")
+    if not support_checkbox.value or metrics is None or traj_grid is None or cloud_proj is None:
+        t3_view = mo.md("_support diagnostics off — tick **compute support diagnostics** above_")
     else:
         _n = int(n_slider.value) - 1; _labels = sorted(plot_labels, key=gamma_key)
         _items = []
@@ -1971,6 +2363,7 @@ def _(
     plot_labels,
     plt,
     sched_colors,
+    support_checkbox,
     traj_grid,
     ung_traj,
     zoom_pad_slider2,
@@ -1980,8 +2373,8 @@ def _(
     # Same PCA grid as T3 above: each schedule's FULL guided x_t trajectory (solid, as in T3) with a
     # per-step JUMP whisker (dotted) = the kick guidance injected at that step (pgx_t - pkx_t =
     # c*s_t*gui_vec_t; zero where guidance is off). ung / gui_ung drawn as full trajectories.
-    if metrics is None or traj_grid is None:
-        t3pp_view = mo.md("_press **compute metrics**_")
+    if not support_checkbox.value or metrics is None or traj_grid is None or cloud_proj is None:
+        t3pp_view = mo.md("_support diagnostics off — tick **compute support diagnostics** above_")
     else:
         _n = int(n_slider.value) - 1; _labels = sorted(plot_labels, key=gamma_key)
         _items = [mo.md(r"### Ping-pong — full guided $x_{n,t}$ trajectory (solid, as in T3) with a per-step guidance **jump** (dotted whisker = the kick injected at that step); **ung** / **ung|gui** shown as full trajectories, coloured as in T3.")]
@@ -2161,11 +2554,11 @@ def _(
     pathlength,
     pinned_records,
     plt,
-    point_multiselect,
     project,
     region_latent,
     residual_scaler,
     select_point,
+    selected_point_labels,
     sweep_points,
 ):
     # ---- compute: pooled metrics + per-(exp, m, n) grid trajectories ----
@@ -2175,7 +2568,7 @@ def _(
     sched_colors = None
     ref_metrics = None
     if True:  # auto-compute
-        _labels = list(point_multiselect.value)
+        _labels = list(selected_point_labels)
         sched_colors = {_l: plt.get_cmap("turbo")(_i / max(len(_labels) - 1, 1)) for _i, _l in enumerate(_labels)}
         _keys = ("eps_final", "total_guidance", "pushback_count", "pushback_amount",
                  "overshoot_count", "overshoot_amount", "L", "L_twin", "guidance_steps", "pushback_steps", "end_dist", "realism_tv", "dpc1", "dpc2", "dpc3", "gvec_res_sim")
@@ -2358,6 +2751,7 @@ def _(
     # mean over that variable's channels (levels + its surface pair; mslp added as its own column, NOT
     # folded into tv_all/t5_all so those stay unchanged). Feeds the T1.2/T1.3 per-variable side tables.
     realism_data = None
+    t13_chan = None
     if interf_button.value and sched_colors is not None:
         _labels = list(sched_colors)
         _wsum = float(EVAL_W.sum()) or 1.0
@@ -2366,6 +2760,7 @@ def _(
         _t5_all = {lb: [] for lb in _labels}   # per (exp,n): mean-over-channels footprint spread
         _tv_var = {lb: {v: [] for v in INTERF_VARS} for lb in _labels}   # per (exp,m,n): per-variable mean-over-channels TV
         _t5_var = {lb: {v: [] for v in INTERF_VARS} for lb in _labels}   # per (exp,n): per-variable mean-over-channels footprint spread
+        _t13 = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}   # per (exp): signed ensemble-std object M_pi(std_m(x_gui-x_ung)) per channel
         for _ei, _rid in enumerate(EXPS):
             _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
             _mask = np.asarray(_mask, float)
@@ -2384,6 +2779,7 @@ def _(
                         _t5_tg[_lb].append(float((np.std(np.stack(_tg_foot, 0), axis=0) * EVAL_W).sum() / _wsum))
                     # --- all-fields realism TV + footprint spread (+ per-variable breakdown) ---
                     _foot_ch = {}   # (parent_var, channel) -> list over m of |gui - giu| footprint
+                    _sfoot_ch = {}   # (parent_var, channel) -> list over m of SIGNED (gui - giu)
                     for _m in range(M):
                         _tv_ch_m = []
                         _tv_ch_var = {v: [] for v in INTERF_VARS}
@@ -2396,6 +2792,7 @@ def _(
                                 _tvv = region_realism_tv(_g3[_li], _u3[_li], _mask, EVAL_W)
                                 _tv_ch_m.append(_tvv); _tv_ch_var[_vv].append(_tvv)
                                 _foot_ch.setdefault((_vv, _L), []).append(np.abs(_g3[_li] - _u3[_li]))
+                                _sfoot_ch.setdefault((_vv, _L), []).append(_g3[_li] - _u3[_li])
                             if _vv in INTERF_SURFACE_PAIR:
                                 _svar = INTERF_SURFACE_PAIR[_vv]
                                 _gs = np.asarray(select_point(_gui[_svar], _sel).isel(m=_m, n=_n), float)  # (lat,lon)
@@ -2404,6 +2801,7 @@ def _(
                                 _tvv = region_realism_tv(_gs, _us, _mask, EVAL_W)
                                 _tv_ch_m.append(_tvv); _tv_ch_var[_vv].append(_tvv)   # surface pair folds into its parent variable
                                 _foot_ch.setdefault((_vv, "sfc"), []).append(np.abs(_gs - _us))
+                                _sfoot_ch.setdefault((_vv, "sfc"), []).append(_gs - _us)
                         # mslp: its own variable column (surface-only); kept OUT of tv_all/t5_all
                         try:
                             _mv = "mean_sea_level_pressure"
@@ -2412,6 +2810,7 @@ def _(
                             _um = np.asarray(_umd.isel(t=-1) if "t" in _umd.dims else _umd, float)
                             _tv_ch_var[_mv].append(region_realism_tv(_gm, _um, _mask, EVAL_W))
                             _foot_ch.setdefault((_mv, "sfc"), []).append(np.abs(_gm - _um))
+                            _sfoot_ch.setdefault((_mv, "sfc"), []).append(_gm - _um)
                         except Exception:
                             pass
                         _tv_all[_lb].append(float(np.nanmean(_tv_ch_m)))
@@ -2432,6 +2831,11 @@ def _(
                     for _v in INTERF_VARS:
                         if _by_var_sp[_v]:
                             _t5_var[_lb][_v].append(float(np.mean(_by_var_sp[_v])))
+                    _sm2 = _mask / (_mask.sum() if _mask.sum() > 0 else 1.0)
+                    for (_pv3, _ch3), _sfs in _sfoot_ch.items():
+                        if len(_sfs) >= 2:
+                            _sstd = np.std(np.stack(_sfs, 0), axis=0)
+                            _t13[_lb][_pv3].setdefault(_ch3, {}).setdefault(_ei, []).append(float((_sstd * _sm2).sum()))
         def _ams(_xs):
             return ftt.aggregate_mean_std(_xs) if _xs else (float("nan"), float("nan"))
         realism_data = {lb: {"tv_all": ftt.aggregate_mean_std(_tv_all[lb]),
@@ -2440,7 +2844,9 @@ def _(
                              "tv_var": {v: _ams(_tv_var[lb][v]) for v in INTERF_VARS},
                              "t5_var": {v: _ams(_t5_var[lb][v]) for v in INTERF_VARS},
                              "n_pool": len(_t5_tg[lb])} for lb in _labels}
-    return (realism_data,)
+        t13_chan = {lb: {v: {ch: {ei: float(np.mean(vals)) for ei, vals in byei.items()}
+                             for ch, byei in _t13[lb][v].items()} for v in INTERF_VARS} for lb in _labels}
+    return realism_data, t13_chan
 
 
 @app.cell
@@ -2538,6 +2944,10 @@ def _(
         _absg = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}   # M(x_gui)
         _absum = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # sum_grid |x_gui - x_gui_ung| (global, unmasked)
         _avgabs = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # M_mask(|x_gui - x_gui_ung|)  (mask absolute)
+        _tvd = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # TV whole-grid: sum|normspatial(|Δ|) - pi~|
+        def _tvdist2d(_dfield, _mn):
+            _a = np.abs(_dfield); _s = float(_a.sum())
+            return float(np.abs(_a / (_s if _s > 0 else 1.0) - _mn).sum())
         _pushg  = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # sum_grid(x_gui - x_gui_ung)   (global signed)
         _msig = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # Σ_mask (x_gui - x_gui_ung)
         _mabs = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # Σ_mask |x_gui - x_gui_ung|
@@ -2564,6 +2974,7 @@ def _(
             _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
             _mask = np.asarray(_mask, float); _msum = float(_mask.sum())
             _mbool = (_mask >= 0.5 * _mask.max()).astype(float); _nbool = 1.0 - _mbool  # mask-core (half-max); mask + !mask = grid
+            _mnorm = _mask / (_msum if _msum > 0 else 1.0)
             _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
             _gui = xr.open_zarr(_dir / "gui.zarr"); _gr = xr.open_zarr(_dir / "grads.zarr")
             try:
@@ -2592,6 +3003,7 @@ def _(
                             _pa = _ga - _ua                                                                # (level,) push
                             _pd = np.abs(_g - _u).sum((-2, -1))                                            # (level,) global sum|diff| over ALL grid points
                             _pdm = (np.abs(_g - _u) * _mask).sum((-2, -1)) / _msum                          # (level,) masked-mean |diff| (mask absolute)
+                            _tvd_v = np.abs(np.abs(_g - _u) / np.clip(_pd[:, None, None], 1e-30, None) - _mnorm[None]).sum((-2, -1))
                             _pgs = (_g - _u).sum((-2, -1))                                                  # (level,) global signed sum (global signed)
                             _msig_v = ((_g - _u) * _mbool).sum((-2, -1)); _mabs_v = (np.abs(_g - _u) * _mbool).sum((-2, -1))
                             _nsig_v = ((_g - _u) * _nbool).sum((-2, -1)); _nabs_v = (np.abs(_g - _u) * _nbool).sum((-2, -1))
@@ -2607,6 +3019,7 @@ def _(
                                 _avg[_lb][_var].setdefault(_cl, []).append(float(_pa[_li]))
                                 _absum[_lb][_var].setdefault(_cl, []).append(float(_pd[_li]))
                                 _avgabs[_lb][_var].setdefault(_cl, []).append(float(_pdm[_li]))
+                                _tvd[_lb][_var].setdefault(_cl, []).append(float(_tvd_v[_li]))
                                 _pushg[_lb][_var].setdefault(_cl, []).append(float(_pgs[_li]))
                                 _msig[_lb][_var].setdefault(_cl, []).append(float(_msig_v[_li])); _mabs[_lb][_var].setdefault(_cl, []).append(float(_mabs_v[_li]))
                                 _nsig[_lb][_var].setdefault(_cl, []).append(float(_nsig_v[_li])); _nabs[_lb][_var].setdefault(_cl, []).append(float(_nabs_v[_li]))
@@ -2629,6 +3042,7 @@ def _(
                                 _avg[_lb][_var].setdefault("sfc", []).append(_ga_s - _ua_s)
                                 _absum[_lb][_var].setdefault("sfc", []).append(float(np.abs(_gs - _us).sum()))
                                 _avgabs[_lb][_var].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mask).sum() / _msum))
+                                _tvd[_lb][_var].setdefault("sfc", []).append(_tvdist2d(_gs - _us, _mnorm))
                                 _pushg[_lb][_var].setdefault("sfc", []).append(float((_gs - _us).sum()))
                                 _msig[_lb][_var].setdefault("sfc", []).append(float(((_gs - _us) * _mbool).sum())); _mabs[_lb][_var].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mbool).sum()))
                                 _nsig[_lb][_var].setdefault("sfc", []).append(float(((_gs - _us) * _nbool).sum())); _nabs[_lb][_var].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _nbool).sum()))
@@ -2652,6 +3066,7 @@ def _(
                                 _avg[_lb][_mv].setdefault("sfc", []).append(_ga_s - _ua_s)
                                 _absum[_lb][_mv].setdefault("sfc", []).append(float(np.abs(_gs - _us).sum()))
                                 _avgabs[_lb][_mv].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mask).sum() / _msum))
+                                _tvd[_lb][_mv].setdefault("sfc", []).append(_tvdist2d(_gs - _us, _mnorm))
                                 _pushg[_lb][_mv].setdefault("sfc", []).append(float((_gs - _us).sum()))
                                 _msig[_lb][_mv].setdefault("sfc", []).append(float(((_gs - _us) * _mbool).sum())); _mabs[_lb][_mv].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mbool).sum()))
                                 _nsig[_lb][_mv].setdefault("sfc", []).append(float(((_gs - _us) * _nbool).sum())); _nabs[_lb][_mv].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _nbool).sum()))
@@ -2724,7 +3139,7 @@ def _(
         _val_em_map = {"absum": _val_em(_absum, False), "mabs": _val_em(_mabs, False),
                        "nabs": _val_em(_nabs, False), "pushg": _val_em(_pushg, True),
                        "msig": _val_em(_msig, True), "nsig": _val_em(_nsig, True),
-                       "avgabs": _val_em(_avgabs, False)}
+                       "avgabs": _val_em(_avgabs, False), "tvd": _val_em(_tvd, False)}
         def _chan_em(_acc):
             # per-(ei,m) per-channel value for the T1.1 charts: group the flat per-channel lists by
             # _meta=(ei,m) and mean over the (several) guided steps n -> {lb:{var:{cl:{(ei,m):value}}}}.
@@ -2740,7 +3155,7 @@ def _(
                         _bv[_v][_cl] = {_em: float(np.mean(_vs)) for _em, _vs in _g.items()}
                 _out[_l] = _bv
             return _out
-        _chan_em_map = _chan_em(_avgabs)
+        _chan_em_map = {"avgabs": _chan_em(_avgabs), "tvd": _chan_em(_tvd), "nabs": _chan_em(_nabs), "absum": _chan_em(_absum)}
         interf_data = {"val_em": _val_em_map, "chan_em": _chan_em_map, "avg": _AVG, "kick": _KICK, "appk": _APPK,
                        "abs_gui": _ABSG, "abs_ung": _ABSU, "abs_gt": _ABSGT, "have_gt": _any_gt,
                        "avg_pvt": _apv, "kick_pvt": _kpv, "appk_pvt": _cpv,
@@ -2906,6 +3321,7 @@ def _(
 def _(
     INTERF_SHORT,
     VAR_ORDER,
+    export_button,
     gamma_key,
     gname,
     intensity_dropdown,
@@ -2916,6 +3332,7 @@ def _(
     mo,
     np,
     plt,
+    save_chart,
     sched_colors,
 ):
     # grid-only profile renderers ported from intensity_comparison's "Guidance intensity" section:
@@ -2969,12 +3386,15 @@ def _(
             _ax.set_xlim(-0.5, len(_cos) - 0.5)
             _ax.set_title(INTERF_SHORT.get(_var, _var), fontsize=9, pad=4)
             _ax.set_axisbelow(True); _ax.grid(True, axis="y", color="#E6E6E6", linewidth=0.7); _ax.tick_params(labelsize=7)
+            _ax.ticklabel_format(axis="y", style="plain", useOffset=False)
             for _s in ("top", "right"):
                 _ax.spines[_s].set_visible(False)
         _lax = _axs[0][3]; _lax.axis("off")
         _h, _l = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
         _lax.legend(_h, _l, fontsize=8, loc="upper right", frameon=False)
         _fig.tight_layout()
+        if export_button.value:
+            save_chart(_fig, "T04" if _mode == "abs" else "T05")
         _grid = mo.vstack([mo.md(_ylabel), mo.as_html(_fig)], align="start"); plt.close(_fig)
         return mo.vstack([mo.md(_title_md), mo.md(_desc_md), _grid], align="start")
 
@@ -2983,8 +3403,7 @@ def _(
 
 @app.cell
 def _(EXPS, delta_labels, delta_order, mo):
-    # T1.1 experiment selector: pick one of the E = startdates × ρ experiments (drives the per-experiment
-    # chart + table). Value = (startdate index ei, intensity index δ).
+    # T1.1 experiment selector + eval-region selector (drive the per-experiment chart + table + views).
     _t11_opts = {}
     for _ei in range(len(EXPS)):
         _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
@@ -2992,7 +3411,9 @@ def _(EXPS, delta_labels, delta_order, mo):
             _t11_opts[f"{_date} × {delta_labels.get(_dd, _dd)}"] = (_ei, _dd)
     t11_exp = mo.ui.dropdown(options=_t11_opts, value=(next(iter(_t11_opts)) if _t11_opts else None),
                              label="experiment (startdate × ρ): ")
-    return (t11_exp,)
+    t11_region = mo.ui.dropdown(options={"mask": "avgabs", "!mask": "nabs", "full": "absum"},
+                                value="mask", label="eval region: ")
+    return t11_exp, t11_region
 
 
 @app.cell
@@ -3003,7 +3424,7 @@ def _(MASK0, pca_region_dropdown, region_bool):
 
 
 @app.cell(hide_code=True)
-def _(BBOX, MASK0, PCA_REGION, PCA_REGION_MODE, np):
+def _(BBOX, MASK0, PCA_REGION, PCA_REGION_MODE, np, region_bool):
     # eval region (the renamed selector) applied to T4/T5: image CROP window, a display BOOLEAN
     # (NaN pixels outside the region), a per-pixel metric WEIGHT, and the mask reference cropped to the
     # same window. 'mask' = current tight bbox + mask-weighting; 'globe' = whole grid, uniform; '!mask' =
@@ -3031,13 +3452,47 @@ def _(BBOX, MASK0, PCA_REGION, PCA_REGION_MODE, np):
         EVAL_IMG_BOOL = np.asarray(PCA_REGION, bool)
         EVAL_W = np.asarray(PCA_REGION, float)
     eval_mask_ref = np.asarray(MASK0, float)[EVAL_CROP[0], EVAL_CROP[1]]
-    return EVAL_CROP, EVAL_IMG_BOOL, EVAL_W, eval_mask_ref, region_realism_tv
+
+    def _zoom_win(_img, _mode, _zoom):
+        # crop the display image to a window (size = extent / zoom) centred on the mask
+        if not _zoom or int(_zoom) <= 1:
+            return _img
+        if _mode == "mask":
+            _rc, _cc = _img.shape[0] // 2, _img.shape[1] // 2
+        else:
+            _rows, _cols = np.where(np.asarray(MASK0, float) > 0)
+            _rc = int((_rows.min() + _rows.max()) / 2); _cc = int((_cols.min() + _cols.max()) / 2)
+        _hh = max(1, _img.shape[0] // (2 * int(_zoom))); _hw = max(1, _img.shape[1] // (2 * int(_zoom)))
+        return _img[max(0, _rc - _hh):_rc + _hh, max(0, _cc - _hw):_cc + _hw]
+
+    def region_crop(_full, _mode, _zoom=1):
+        # crop + (for !mask) blank the mask region, then optionally zoom into the mask
+        _crop = BBOX if _mode == "mask" else (slice(None), slice(None))
+        _img = np.asarray(_full, float)[_crop[0], _crop[1]]
+        if _mode == "!mask":
+            _bl = np.asarray(region_bool(MASK0, "!mask"), bool)[_crop[0], _crop[1]]
+            _img = np.where(_bl, _img, np.nan)
+        return _zoom_win(_img, _mode, _zoom)
+
+    def region_maskref(_mode, _zoom=1):
+        _crop = BBOX if _mode == "mask" else (slice(None), slice(None))
+        return _zoom_win(np.asarray(MASK0, float)[_crop[0], _crop[1]], _mode, _zoom)
+
+    return EVAL_W, region_crop, region_maskref, region_realism_tv
 
 
 @app.cell(hide_code=True)
-def _(LEVEL, PCA_REGION, VAR, basis, project, region_cloud_sample):
+def _(
+    LEVEL,
+    PCA_REGION,
+    VAR,
+    basis,
+    project,
+    region_cloud_sample,
+    support_checkbox,
+):
     # PCA-plot background: a projected subsample of the climatology cloud the basis was fit on
-    cloud_proj = project(basis, region_cloud_sample(VAR, LEVEL, PCA_REGION, "era5", time_hour=12, max_points=400))
+    cloud_proj = None if not support_checkbox.value else project(basis, region_cloud_sample(VAR, LEVEL, PCA_REGION, "era5", time_hour=12, max_points=400))
     return (cloud_proj,)
 
 
@@ -3063,53 +3518,31 @@ def _(INTERF_SURFACE_PAIR, field_level_slider, field_var_dropdown):
 
 @app.cell(hide_code=True)
 def _(
-    EVAL_CROP,
-    EVAL_IMG_BOOL,
-    EVAL_W,
     EXPS,
     M,
     N,
     flevel,
     fpartition,
-    ftt,
     fvar,
-    guided_velocity_primitive,
     load_rollout,
     metrics,
     np,
     open_store,
     open_unguided_state,
-    region_realism_tv,
-    residual_scaler,
     sched_colors,
     select_point,
     sweep_points,
 ):
-    # ---- selected-field footprint grid + metrics for the T4/T5 plots and their first table column ----
-    # Reactive to the field selector AND the eval region. gfield=|x_gui-x_gui_ung|, gvec_avg=traj-avg
-    # |guidance vector|, cropped/blanked to the eval region (EVAL_CROP + EVAL_IMG_BOOL). field_metrics =
-    # realism TV + footprint spread aggregated over the eval region (EVAL_W), for the SELECTED field.
-    # n-indexed, so changing n stays instant; changing field or region recomputes.
+    # ---- selected-field footprint grid for the T1.2/T1.3 visual images (reactive to the field selector only) ----
+    # Stores the FULL (uncropped) footprint per (exp, member, n, schedule); the T1.2/T1.3 visuals crop &
+    # normalize to their own eval region independently. gfield = |x_gui - x_gui_ung|; gfield_signed = signed.
     field_grid = None
-    field_metrics = None
     if metrics is not None and sched_colors is not None:
         _labels = list(sched_colors)
-        _cf = residual_scaler(fpartition, fvar, flevel)
         _lvl = flevel if fpartition == "level" else None
-        _wsum = float(EVAL_W.sum()) or 1.0
-        def _crop_img(_full):
-            _img = np.asarray(_full, float)[EVAL_CROP[0], EVAL_CROP[1]]
-            if EVAL_IMG_BOOL is not None:
-                _img = np.where(EVAL_IMG_BOOL[EVAL_CROP[0], EVAL_CROP[1]], _img, np.nan)
-            return _img
         field_grid = {}
-        _tv_acc = {lb: [] for lb in _labels}
-        _t5_acc = {lb: [] for lb in _labels}
-        _tv_meta = {lb: [] for lb in _labels}
-        _t5_meta = {lb: [] for lb in _labels}
         for _ei, _rid in enumerate(EXPS):
             _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
-            _mask = np.asarray(_mask, float)
             _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
             for _lb, _sel in _pts.items():
                 _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
@@ -3118,46 +3551,34 @@ def _(
                 for _n in range(N):
                     if float(_p[_n]) == 0.0:
                         continue
-                    _foot_m = []
                     for _m in range(M):
                         _g = _gd.isel(m=_m, n=_n)
                         _u = _ud0.isel(m=_m, n=_n); _u = _u.isel(t=-1) if "t" in _u.dims else _u
                         if _lvl is not None:
                             _g = _g.sel(level=_lvl); _u = _u.sel(level=_lvl)
                         _guif = np.asarray(_g, float); _ungf = np.asarray(_u, float)
-                        _foot = np.abs(_guif - _ungf)
-                        _foot_m.append(_foot)
-                        _tv_acc[_lb].append(region_realism_tv(_guif, _ungf, _mask, EVAL_W))
-                        _tv_meta[_lb].append((_ei, _m))
-                        _vel = guided_velocity_primitive(_dir, _sel, _m, _n, fvar, _cf, level=_lvl)
                         field_grid.setdefault((_ei, _m, _n), {})[_lb] = {
-                            "gfield": _crop_img(_foot),
-                            "gvec_avg": _crop_img(np.abs(_vel["gui_vec"]).mean(axis=0))}
-                    if len(_foot_m) >= 2:
-                        _std = np.std(np.stack(_foot_m, 0), axis=0)
-                        _t5_acc[_lb].append(float((_std * EVAL_W).sum() / _wsum))
-                        _t5_meta[_lb].append((_ei, _n))
-        def _tv_em(_l):
-            _d = {}
-            for _i, _v in enumerate(_tv_acc[_l]):
-                _d.setdefault(_tv_meta[_l][_i], []).append(_v)
-            return {_k: float(np.nanmean(_vs)) for _k, _vs in _d.items()}
-        def _t5_en(_l):
-            return {_t5_meta[_l][_i]: _t5_acc[_l][_i] for _i in range(len(_t5_acc[_l]))}
-        field_metrics = {lb: {"tv": ftt.aggregate_mean_std(_tv_acc[lb]),
-                              "t5": ftt.aggregate_mean_std(_t5_acc[lb]),
-                              "tv_em": _tv_em(lb), "t5_en": _t5_en(lb),
-                              "n_pool": len(_t5_acc[lb])} for lb in _labels}
-    return field_grid, field_metrics
+                            "gfield": np.abs(_guif - _ungf), "gfield_signed": _guif - _ungf}
+    return (field_grid,)
 
 
 @app.cell(hide_code=True)
-def _(EVAL_W, EXPS, LEVEL, PARTITION, VAR, get_rollout_dir, np, open_store):
+def _(
+    EVAL_W,
+    EXPS,
+    LEVEL,
+    PARTITION,
+    VAR,
+    get_rollout_dir,
+    np,
+    open_store,
+    support_checkbox,
+):
     # section 6 -- unguided clean-estimate prediction noise (guidance-independent).
     # zhat_T(t) = z_t + (s_t/h_t)(z_{t+1}-z_t) from ung_res (finite diff of the unmodified unguided Euler step);
     # RMSE vs z_T = res[-1] over the eval region (EVAL_W), per (m, n, t). One (M, N, T) cube per experiment.
     ung_pred_rmse = None
-    if EXPS:
+    if support_checkbox.value and EXPS:
         _w = np.asarray(EVAL_W, dtype=float)
         _wsum = float(_w.sum()) or 1.0
         ung_pred_rmse = {}
@@ -3341,109 +3762,13 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(
-    EXPS,
-    INTERF_SHORT,
-    INTERF_VARS,
-    M,
-    VAR_ORDER,
-    copyable_table,
-    delta_labels,
-    delta_order,
-    gamma_key,
-    gname,
-    interf_data,
-    label_delta,
-    mo,
-    np,
-):
+def _(interf_data, mo, t11_region, t1x_views):
     report_propagation = []
-    # T1.1 paired summary views from the per-(e,m) masked-mean absolute effect (val_em["avgabs"]).
-    # Per experiment e=(ei,δ) and member m: A_v = Σ_levels g (channel-summed); N_v = A_v/max_γ A_v (per member);
-    # R = Σ_v N_v / max_γ Σ_v N_v. View V1 = single score R (rows = startdates); V2 = per-variable N_v (rows =
-    # vars). One hstack[V1,V2] per intensity ρ, plus one hstack pooled across ρ.
     if interf_data is None or "val_em" not in interf_data:
         interf_score_tables = mo.md("_press **compute interference profiles** above_")
     else:
-        _ve = interf_data["val_em"]["avgabs"]
-        _Vv = list(INTERF_VARS)
-        _labels = list(interf_data["labels"])
-        _nei = len(EXPS)
-        _by_g = {}
-        for _lb in _labels:
-            _by_g.setdefault(gname(_lb), {})[label_delta.get(_lb)] = _lb
-        _gammas = sorted(_by_g, key=lambda _g: gamma_key(next(iter(_by_g[_g].values()))))
-        _deltas = [_d for _d in delta_order if any(label_delta.get(_l) == _d for _l in _labels)]
-        # per-(ei,δ,m): N_all[key][lb][v], R_all[key][lb]
-        _N_all = {}; _R_all = {}
-        for _dd in _deltas:
-            _dlabs = [_l for _l in _labels if label_delta.get(_l) == _dd]
-            for _ei in range(_nei):
-                for _mm in range(M):
-                    _A = {_l: {v: _ve[_l].get((_ei, _mm), {}).get(v, float("nan")) for v in _Vv} for _l in _dlabs}
-                    _vmx = {v: (max((_A[_l][v] for _l in _dlabs if np.isfinite(_A[_l][v])), default=1.0) or 1.0) for v in _Vv}
-                    _N = {_l: {v: _A[_l][v] / _vmx[v] for v in _Vv} for _l in _dlabs}
-                    _sums = {_l: sum(_N[_l][v] for v in _Vv) for _l in _dlabs}
-                    _mx = max((s for s in _sums.values() if np.isfinite(s)), default=1.0) or 1.0
-                    _N_all[(_ei, _dd, _mm)] = _N
-                    _R_all[(_ei, _dd, _mm)] = {_l: _sums[_l] / _mx for _l in _dlabs}
-
-        def _cell(_vals, _best):
-            _v = [x for x in _vals if np.isfinite(x)]
-            if not _v:
-                return "—"
-            _mu = float(np.mean(_v)); _sd = float(np.std(_v))
-            _t = f"{_mu:.3f}±{_sd:.3f}"
-            return f"**{_t}**" if (_best is not None and _mu == _best) else _t
-
-        def _colmean(_vals):
-            _v = [x for x in _vals if np.isfinite(x)]
-            return float(np.mean(_v)) if _v else None
-
-        def _v1(_ddset, _title):
-            # rows = startdates, cols = γ; cell = R over (δ in ddset) × m
-            _rows = ["| startdate | " + " | ".join(_g for _g in _gammas) + " |", "|" + "---|" * (len(_gammas) + 1)]
-            for _ei in range(_nei):
-                _rv = {}
-                for _g in _gammas:
-                    _acc = []
-                    for _dd in _ddset:
-                        _lb = _by_g[_g].get(_dd)
-                        if _lb is None: continue
-                        _acc += [_R_all[(_ei, _dd, _mm)][_lb] for _mm in range(M) if _lb in _R_all[(_ei, _dd, _mm)]]
-                    _rv[_g] = _acc
-                _best = max((m for m in (_colmean(_rv[_g]) for _g in _gammas) if m is not None), default=None)
-                _sd = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
-                _rows.append(f"| {_sd} | " + " | ".join(_cell(_rv[_g], _best) for _g in _gammas) + " |")
-            return copyable_table("\n".join(_rows), _title, into=report_propagation)
-
-        def _v2(_ddset, _title):
-            # rows = vars, cols = γ; cell = N over (ei) × (δ in ddset) × m
-            _rows = ["| variable | " + " | ".join(_g for _g in _gammas) + " |", "|" + "---|" * (len(_gammas) + 1)]
-            for _v in [x for x in VAR_ORDER if x in _Vv]:
-                _rv = {}
-                for _g in _gammas:
-                    _acc = []
-                    for _dd in _ddset:
-                        _lb = _by_g[_g].get(_dd)
-                        if _lb is None: continue
-                        for _ei in range(_nei):
-                            _acc += [_N_all[(_ei, _dd, _mm)][_lb][_v] for _mm in range(M) if _lb in _N_all[(_ei, _dd, _mm)]]
-                    _rv[_g] = _acc
-                _best = max((m for m in (_colmean(_rv[_g]) for _g in _gammas) if m is not None), default=None)
-                _rows.append(f"| {INTERF_SHORT[_v]} | " + " | ".join(_cell(_rv[_g], _best) for _g in _gammas) + " |")
-            return copyable_table("\n".join(_rows), _title, into=report_propagation)
-
-        _blocks = []
-        for _dd in _deltas:
-            _rho = delta_labels.get(_dd, f"δ{_dd}")
-            _t1 = _v1([_dd], f"**{_rho} — V1 single score $R$** per startdate (rows) × γ; mean ± std over the $M={M}$ members.")
-            _t2 = _v2([_dd], f"**{_rho} — V2 per-variable $N_v$** (rows) × γ; mean ± std over startdates × members ({_nei}×{M}).")
-            _blocks.append(mo.hstack([_t1, _t2], justify="start", align="start"))
-        _a1 = _v1(_deltas, f"**across ρ — V1 single score $R$** per startdate (rows) × γ; mean ± std over ρ × members ({len(_deltas)}×{M}).")
-        _a2 = _v2(_deltas, f"**across ρ — V2 per-variable $N_v$** (rows) × γ; mean ± std over startdates × ρ × members ({_nei}×{len(_deltas)}×{M}).")
-        _blocks.append(mo.hstack([_a1, _a2], justify="start", align="start"))
-        interf_score_tables = mo.vstack(_blocks, align="start")
+        _rn = {"avgabs": "mask", "nabs": "!mask", "absum": "full"}.get(t11_region.value, t11_region.value)
+        interf_score_tables = t1x_views(t11_region.value, report_propagation, f"propagation · {_rn}")
     return interf_score_tables, report_propagation
 
 
@@ -3516,6 +3841,455 @@ def copy_helper(mo):
         return mo.vstack(_parts, align="start")
 
     return copyable, copyable_table
+
+
+@app.cell(hide_code=True)
+def t1x_helpers(
+    EXPS,
+    INTERF_SHORT,
+    INTERF_VARS,
+    M,
+    VAR_ORDER,
+    copyable_table,
+    delta_labels,
+    delta_order,
+    export_button,
+    gamma_key,
+    gname,
+    interf_chan_order,
+    interf_data,
+    label_delta,
+    mo,
+    np,
+    plt,
+    save_chart,
+    sched_colors,
+):
+    # Shared T1.1 / T1.2 renderers — identical eval procedure, parameterized by the per-channel object key
+    # ("avgabs" for T1.1 propagation, "tvd" for T1.2 spatial deviation). A = Σ_levels object; N = A/max_γ A
+    # (per member); R = Σ_v N / max_γ Σ_v N. All spreads are population std; tables bold the row-max γ.
+    def t1x_glabels(dd):
+        return sorted((l for l in interf_data["labels"] if label_delta.get(l) == dd), key=gamma_key)
+
+    def t1x_chart(obj_key, ei, dd, ylabel_md, _savename=None):
+        ce = interf_data["chan_em"][obj_key]
+        labs = t1x_glabels(dd)
+        en = f"{EXPS[ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(dd, dd)}"
+        fig, axs = plt.subplots(2, 4, figsize=(20, 7), dpi=120)
+        slots = [(r, c) for r in range(2) for c in range(4) if (r, c) != (0, 3)]
+        for si, var in enumerate(VAR_ORDER):
+            ax = axs[slots[si][0]][slots[si][1]]
+            cos = interf_chan_order(var); xs = list(range(len(cos)))
+            for lb in labs:
+                y0, ylo, yhi = [], [], []
+                for cl in cos:
+                    d = ce.get(lb, {}).get(var, {}).get(cl, {})
+                    vals = [d[(ei, mm)] for mm in range(M) if (ei, mm) in d]
+                    y0.append(d.get((ei, 0), float("nan")))
+                    ylo.append(min(vals) if vals else float("nan")); yhi.append(max(vals) if vals else float("nan"))
+                col = sched_colors[lb]
+                ax.fill_between(xs, ylo, yhi, color=col, alpha=0.15, linewidth=0)
+                ax.plot(xs, y0, "-o", ms=3, lw=1.7, color=col, label=gname(lb))
+            ax.set_xticks(xs); ax.set_xticklabels(cos, fontsize=6, rotation=90)
+            ax.set_xlim(-0.5, len(cos) - 0.5)
+            ax.set_title(INTERF_SHORT.get(var, var), fontsize=9, pad=4)
+            ax.set_axisbelow(True); ax.grid(True, axis="y", color="#E6E6E6", linewidth=0.7); ax.tick_params(labelsize=7)
+            for s in ("top", "right"):
+                ax.spines[s].set_visible(False)
+        lax = axs[0][3]; lax.axis("off")
+        hh, ll = axs[slots[0][0]][slots[0][1]].get_legend_handles_labels()
+        lax.legend(hh, ll, fontsize=8, loc="upper right", frameon=False)
+        fig.tight_layout()
+        out = mo.vstack([mo.md(f"**{en}** — {ylabel_md}"), mo.as_html(fig)], align="start")
+        if export_button.value and _savename:
+            save_chart(fig, _savename)
+        plt.close(fig)
+        return out
+
+    def t1x_NR(obj_key, ei, dd):
+        ve = interf_data["val_em"][obj_key]; labs = t1x_glabels(dd); Vv = list(INTERF_VARS)
+        N = {}; R = {}
+        for mm in range(M):
+            A = {lb: {v: ve[lb].get((ei, mm), {}).get(v, float("nan")) for v in Vv} for lb in labs}
+            vmx = {v: (max((A[lb][v] for lb in labs if np.isfinite(A[lb][v])), default=1.0) or 1.0) for v in Vv}
+            N[mm] = {lb: {v: A[lb][v] / vmx[v] for v in Vv} for lb in labs}
+            sums = {lb: sum(N[mm][lb][v] for v in Vv) for lb in labs}
+            mx = max((s for s in sums.values() if np.isfinite(s)), default=1.0) or 1.0
+            R[mm] = {lb: sums[lb] / mx for lb in labs}
+        return N, R
+
+    def t1x_pertable(obj_key, ei, dd, caption):
+        labs = t1x_glabels(dd); Vv = list(INTERF_VARS)
+        N, R = t1x_NR(obj_key, ei, dd)
+        rows = ["| variable | " + " | ".join(gname(lb) for lb in labs) + " |", "|" + "---|" * (len(labs) + 1)]
+        for v in [x for x in VAR_ORDER if x in Vv]:
+            mus = {lb: float(np.mean([N[mm][lb][v] for mm in range(M)])) for lb in labs}
+            best = max(mus.values(), default=None)
+            cells = []
+            for lb in labs:
+                sd = float(np.std([N[mm][lb][v] for mm in range(M)]))
+                t = f"{mus[lb]:.3f}±{sd:.3f}"
+                cells.append(f"**{t}**" if (best is not None and mus[lb] == best) else t)
+            rows.append(f"| {INTERF_SHORT[v]} | " + " | ".join(cells) + " |")
+        smus = {lb: float(np.mean([R[mm][lb] for mm in range(M)])) for lb in labs}
+        sbest = max(smus.values(), default=None)
+        scells = []
+        for lb in labs:
+            sd = float(np.std([R[mm][lb] for mm in range(M)]))
+            t = f"{smus[lb]:.3f}±{sd:.3f}"
+            scells.append(f"**{t}**" if (sbest is not None and smus[lb] == sbest) else t)
+        rows.append("| **single score** $R$ | " + " | ".join(scells) + " |")
+        return copyable_table("\n".join(rows), caption)
+
+    def t1x_views(obj_key, report_list, label):
+        ve = interf_data["val_em"][obj_key]; Vv = list(INTERF_VARS); labels = list(interf_data["labels"]); nei = len(EXPS)
+        by_g = {}
+        for lb in labels:
+            by_g.setdefault(gname(lb), {})[label_delta.get(lb)] = lb
+        gammas = sorted(by_g, key=lambda g: gamma_key(next(iter(by_g[g].values()))))
+        deltas = [d for d in delta_order if any(label_delta.get(l) == d for l in labels)]
+        N_all = {}; R_all = {}
+        for dd in deltas:
+            dlabs = [l for l in labels if label_delta.get(l) == dd]
+            for ei in range(nei):
+                for mm in range(M):
+                    A = {l: {v: ve[l].get((ei, mm), {}).get(v, float("nan")) for v in Vv} for l in dlabs}
+                    vmx = {v: (max((A[l][v] for l in dlabs if np.isfinite(A[l][v])), default=1.0) or 1.0) for v in Vv}
+                    Nn = {l: {v: A[l][v] / vmx[v] for v in Vv} for l in dlabs}
+                    sums = {l: sum(Nn[l][v] for v in Vv) for l in dlabs}
+                    mx = max((s for s in sums.values() if np.isfinite(s)), default=1.0) or 1.0
+                    N_all[(ei, dd, mm)] = Nn
+                    R_all[(ei, dd, mm)] = {l: sums[l] / mx for l in dlabs}
+        def cellfmt(vals, best):
+            vv = [x for x in vals if np.isfinite(x)]
+            if not vv:
+                return "—"
+            mu = float(np.mean(vv)); sd = float(np.std(vv))
+            t = f"{mu:.3f}±{sd:.3f}"
+            return f"**{t}**" if (best is not None and mu == best) else t
+        def colmean(vals):
+            vv = [x for x in vals if np.isfinite(x)]
+            return float(np.mean(vv)) if vv else None
+        def v1(ddset, title):
+            rows = ["| startdate | " + " | ".join(g for g in gammas) + " |", "|" + "---|" * (len(gammas) + 1)]
+            for ei in range(nei):
+                rv = {}
+                for g in gammas:
+                    acc = []
+                    for dd in ddset:
+                        lb = by_g[g].get(dd)
+                        if lb is None:
+                            continue
+                        acc += [R_all[(ei, dd, mm)][lb] for mm in range(M) if lb in R_all[(ei, dd, mm)]]
+                    rv[g] = acc
+                best = max((m for m in (colmean(rv[g]) for g in gammas) if m is not None), default=None)
+                sd = EXPS[ei].split(chr(47))[-1].split(chr(95))[0]
+                rows.append(f"| {sd} | " + " | ".join(cellfmt(rv[g], best) for g in gammas) + " |")
+            return copyable_table("\n".join(rows), title, into=report_list)
+        def v2(ddset, title):
+            rows = ["| variable | " + " | ".join(g for g in gammas) + " |", "|" + "---|" * (len(gammas) + 1)]
+            for v in [x for x in VAR_ORDER if x in Vv]:
+                rv = {}
+                for g in gammas:
+                    acc = []
+                    for dd in ddset:
+                        lb = by_g[g].get(dd)
+                        if lb is None:
+                            continue
+                        for ei in range(nei):
+                            acc += [N_all[(ei, dd, mm)][lb][v] for mm in range(M) if lb in N_all[(ei, dd, mm)]]
+                    rv[g] = acc
+                best = max((m for m in (colmean(rv[g]) for g in gammas) if m is not None), default=None)
+                rows.append(f"| {INTERF_SHORT[v]} | " + " | ".join(cellfmt(rv[g], best) for g in gammas) + " |")
+            return copyable_table("\n".join(rows), title, into=report_list)
+        blocks = []
+        for dd in deltas:
+            rho = delta_labels.get(dd, f"δ{dd}")
+            blocks.append(mo.hstack([
+                v1([dd], f"**{rho} — V1 single score $R$ ({label})** per startdate (rows) × γ; mean ± std over the $M={M}$ members."),
+                v2([dd], f"**{rho} — V2 per-variable $N_v$ ({label})** (rows) × γ; mean ± std over startdates × members ({nei}×{M})."),
+            ], justify="start", align="start"))
+        blocks.append(mo.hstack([
+            v1(deltas, f"**across ρ — V1 single score $R$ ({label})** per startdate (rows) × γ; mean ± std over ρ × members ({len(deltas)}×{M})."),
+            v2(deltas, f"**across ρ — V2 per-variable $N_v$ ({label})** (rows) × γ; mean ± std over startdates × ρ × members ({nei}×{len(deltas)}×{M})."),
+        ], justify="start", align="start"))
+        return mo.vstack(blocks, align="start")
+
+    return t1x_NR, t1x_chart, t1x_pertable, t1x_views
+
+
+@app.cell(hide_code=True)
+def t12_exp_cell(EXPS, delta_labels, delta_order, mo):
+    # T1.2 experiment selector (independent of T1.1's): one of the E = startdates × ρ experiments.
+    _t12_opts = {}
+    for _ei in range(len(EXPS)):
+        _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+        for _dd in delta_order:
+            _t12_opts[f"{_date} × {delta_labels.get(_dd, _dd)}"] = (_ei, _dd)
+    t12_exp = mo.ui.dropdown(options=_t12_opts, value=(next(iter(_t12_opts)) if _t12_opts else None),
+                             label="experiment (startdate × ρ): ")
+    return (t12_exp,)
+
+
+@app.cell(hide_code=True)
+def t12_views(interf_data, mo, t1x_views):
+    # T1.2 — paired summary views (V1 single score, V2 per-variable) over object D (tvd).
+    report_realism = []
+    if interf_data is None or "val_em" not in interf_data or "tvd" not in interf_data["val_em"]:
+        interf_score_tables_t12 = mo.md("_press **compute interference profiles** above_")
+    else:
+        interf_score_tables_t12 = t1x_views("tvd", report_realism, "spatial deviation")
+    return interf_score_tables_t12, report_realism
+
+
+@app.cell(hide_code=True)
+def t13_helpers(
+    EXPS,
+    INTERF_SHORT,
+    INTERF_VARS,
+    VAR_ORDER,
+    copyable_table,
+    delta_labels,
+    delta_order,
+    export_button,
+    gamma_key,
+    gname,
+    interf_chan_order,
+    interf_data,
+    label_delta,
+    mo,
+    np,
+    plt,
+    save_chart,
+    sched_colors,
+    t13_chan,
+):
+    # T1.3 renderers — same eval procedure as T1.1/T1.2 but the object (signed ensemble std, t13_chan) has
+    # NO member axis: charts have no min-max band and the per-experiment table has a single value per cell.
+    def t13_glabels(dd):
+        return sorted((l for l in interf_data["labels"] if label_delta.get(l) == dd), key=gamma_key)
+
+    def t13_A(lb, v, ei):
+        chs = t13_chan.get(lb, {}).get(v, {})
+        vals = [chs[ch][ei] for ch in chs if ei in chs[ch]]
+        return float(sum(vals)) if vals else float("nan")
+
+    def t13_NR(ei, dd):
+        labs = t13_glabels(dd); Vv = list(INTERF_VARS)
+        A = {lb: {v: t13_A(lb, v, ei) for v in Vv} for lb in labs}
+        vmx = {v: (max((A[lb][v] for lb in labs if np.isfinite(A[lb][v])), default=1.0) or 1.0) for v in Vv}
+        N = {lb: {v: A[lb][v] / vmx[v] for v in Vv} for lb in labs}
+        sums = {lb: sum(N[lb][v] for v in Vv) for lb in labs}
+        mx = max((s for s in sums.values() if np.isfinite(s)), default=1.0) or 1.0
+        R = {lb: sums[lb] / mx for lb in labs}
+        return N, R
+
+    def t13_chart(ei, dd, ylabel_md, _savename=None):
+        labs = t13_glabels(dd)
+        en = f"{EXPS[ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(dd, dd)}"
+        fig, axs = plt.subplots(2, 4, figsize=(20, 7), dpi=120)
+        slots = [(r, c) for r in range(2) for c in range(4) if (r, c) != (0, 3)]
+        for si, var in enumerate(VAR_ORDER):
+            ax = axs[slots[si][0]][slots[si][1]]
+            cos = interf_chan_order(var); xs = list(range(len(cos)))
+            for lb in labs:
+                ys = [t13_chan.get(lb, {}).get(var, {}).get((cl if cl == "sfc" else int(cl[1:])), {}).get(ei, float("nan")) for cl in cos]
+                ax.plot(xs, ys, "-o", ms=3, lw=1.7, color=sched_colors[lb], label=gname(lb))
+            ax.set_xticks(xs); ax.set_xticklabels(cos, fontsize=6, rotation=90)
+            ax.set_xlim(-0.5, len(cos) - 0.5)
+            ax.set_title(INTERF_SHORT.get(var, var), fontsize=9, pad=4)
+            ax.set_axisbelow(True); ax.grid(True, axis="y", color="#E6E6E6", linewidth=0.7); ax.tick_params(labelsize=7)
+            for s in ("top", "right"):
+                ax.spines[s].set_visible(False)
+        lax = axs[0][3]; lax.axis("off")
+        hh, ll = axs[slots[0][0]][slots[0][1]].get_legend_handles_labels()
+        lax.legend(hh, ll, fontsize=8, loc="upper right", frameon=False)
+        fig.tight_layout()
+        out = mo.vstack([mo.md(f"**{en}** — {ylabel_md}"), mo.as_html(fig)], align="start")
+        if export_button.value and _savename:
+            save_chart(fig, _savename)
+        plt.close(fig)
+        return out
+
+    def t13_pertable(ei, dd, caption):
+        labs = t13_glabels(dd); Vv = list(INTERF_VARS)
+        N, R = t13_NR(ei, dd)
+        def fmt(x, best):
+            if not np.isfinite(x):
+                return "—"
+            return f"**{x:.3f}**" if (best is not None and x == best) else f"{x:.3f}"
+        rows = ["| variable | " + " | ".join(gname(lb) for lb in labs) + " |", "|" + "---|" * (len(labs) + 1)]
+        for v in [x for x in VAR_ORDER if x in Vv]:
+            vals = {lb: N[lb][v] for lb in labs}
+            best = max((x for x in vals.values() if np.isfinite(x)), default=None)
+            rows.append(f"| {INTERF_SHORT[v]} | " + " | ".join(fmt(vals[lb], best) for lb in labs) + " |")
+        sv = {lb: R[lb] for lb in labs}
+        sb = max((x for x in sv.values() if np.isfinite(x)), default=None)
+        rows.append("| **single score** $R$ | " + " | ".join(fmt(sv[lb], sb) for lb in labs) + " |")
+        return copyable_table("\n".join(rows), caption)
+
+    def t13_views(report_list, label):
+        Vv = list(INTERF_VARS); labels = list(interf_data["labels"]); nei = len(EXPS)
+        by_g = {}
+        for lb in labels:
+            by_g.setdefault(gname(lb), {})[label_delta.get(lb)] = lb
+        gammas = sorted(by_g, key=lambda g: gamma_key(next(iter(by_g[g].values()))))
+        deltas = [d for d in delta_order if any(label_delta.get(l) == d for l in labels)]
+        N_all = {}; R_all = {}
+        for dd in deltas:
+            for ei in range(nei):
+                N, R = t13_NR(ei, dd)
+                N_all[(ei, dd)] = N; R_all[(ei, dd)] = R
+        def cellfmt(vals, best):
+            vv = [x for x in vals if np.isfinite(x)]
+            if not vv:
+                return "—"
+            mu = float(np.mean(vv))
+            t = f"{mu:.3f}" if len(vv) == 1 else f"{mu:.3f}±{float(np.std(vv)):.3f}"
+            return f"**{t}**" if (best is not None and mu == best) else t
+        def colmean(vals):
+            vv = [x for x in vals if np.isfinite(x)]
+            return float(np.mean(vv)) if vv else None
+        def v1(ddset, title):
+            rows = ["| startdate | " + " | ".join(g for g in gammas) + " |", "|" + "---|" * (len(gammas) + 1)]
+            for ei in range(nei):
+                rv = {}
+                for g in gammas:
+                    acc = []
+                    for dd in ddset:
+                        lb = by_g[g].get(dd)
+                        if lb is not None and lb in R_all.get((ei, dd), {}):
+                            acc.append(R_all[(ei, dd)][lb])
+                    rv[g] = acc
+                best = max((m for m in (colmean(rv[g]) for g in gammas) if m is not None), default=None)
+                sd = EXPS[ei].split(chr(47))[-1].split(chr(95))[0]
+                rows.append(f"| {sd} | " + " | ".join(cellfmt(rv[g], best) for g in gammas) + " |")
+            return copyable_table("\n".join(rows), title, into=report_list)
+        def v2(ddset, title):
+            rows = ["| variable | " + " | ".join(g for g in gammas) + " |", "|" + "---|" * (len(gammas) + 1)]
+            for v in [x for x in VAR_ORDER if x in Vv]:
+                rv = {}
+                for g in gammas:
+                    acc = []
+                    for dd in ddset:
+                        lb = by_g[g].get(dd)
+                        if lb is None:
+                            continue
+                        for ei in range(nei):
+                            val = N_all.get((ei, dd), {}).get(lb, {}).get(v)
+                            if val is not None and np.isfinite(val):
+                                acc.append(val)
+                    rv[g] = acc
+                best = max((m for m in (colmean(rv[g]) for g in gammas) if m is not None), default=None)
+                rows.append(f"| {INTERF_SHORT[v]} | " + " | ".join(cellfmt(rv[g], best) for g in gammas) + " |")
+            return copyable_table("\n".join(rows), title, into=report_list)
+        blocks = []
+        for dd in deltas:
+            rho = delta_labels.get(dd, f"δ{dd}")
+            blocks.append(mo.hstack([
+                v1([dd], f"**{rho} — V1 single score $R$ ({label})** per startdate (rows) × γ (one value; std consumed by the ensemble std)."),
+                v2([dd], f"**{rho} — V2 per-variable $N_v$ ({label})** (rows) × γ; mean ± std over startdates ({nei})."),
+            ], justify="start", align="start"))
+        blocks.append(mo.hstack([
+            v1(deltas, f"**across ρ — V1 single score $R$ ({label})** per startdate (rows) × γ; mean ± std over ρ ({len(deltas)})."),
+            v2(deltas, f"**across ρ — V2 per-variable $N_v$ ({label})** (rows) × γ; mean ± std over startdates × ρ ({nei}×{len(deltas)})."),
+        ], justify="start", align="start"))
+        return mo.vstack(blocks, align="start")
+
+    return t13_NR, t13_chart, t13_pertable, t13_views
+
+
+@app.cell(hide_code=True)
+def t13_exp_cell(EXPS, delta_labels, delta_order, mo):
+    # T1.3 experiment selector (independent): one of the E = startdates × ρ experiments.
+    _t13_opts = {}
+    for _ei in range(len(EXPS)):
+        _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+        for _dd in delta_order:
+            _t13_opts[f"{_date} × {delta_labels.get(_dd, _dd)}"] = (_ei, _dd)
+    t13_exp = mo.ui.dropdown(options=_t13_opts, value=(next(iter(_t13_opts)) if _t13_opts else None),
+                             label="experiment (startdate × ρ): ")
+    return (t13_exp,)
+
+
+@app.cell(hide_code=True)
+def t0_mapctl(
+    MASK0,
+    WARM_CMAP,
+    export_button,
+    get_mask_center,
+    mcolors,
+    mo,
+    np,
+    plt,
+    save_chart,
+    visualize_map,
+):
+    # T0 example-map machinery ported from guidance.py "Inspect states" (diff mode): the exact
+    # visualize_map renderer + the zoom command (zoom_slider + mask-centred zoom) + RdBu colormaps.
+    white_zero_cmap = plt.get_cmap("RdBu_r").copy(); white_zero_cmap.set_bad("white")
+    cool_half_cmap = mcolors.LinearSegmentedColormap.from_list("rdbu_cool", plt.get_cmap("RdBu_r")(np.linspace(0.0, 0.5, 256)))
+    zoom_centers = get_mask_center(np.asarray(MASK0, float))
+    mask_region = np.asarray(MASK0, float) >= 0.5 * float(np.asarray(MASK0, float).max())
+    zoom_slider = mo.ui.slider(1, 8, value=3, step=1, label="zoom: ", show_value=True)
+    contour_checkbox_t02 = mo.ui.checkbox(label="contours", value=True)
+    contour_levels_slider_t02 = mo.ui.slider(4, 30, step=2, value=24, label="levels: ", show_value=True, debounce=True)
+    contour_color_dropdown_t02 = mo.ui.dropdown(["dimgray", "white", "black"], value="black", label="contour color: ")
+    contour_checkbox_t03 = mo.ui.checkbox(label="contours", value=True)
+    contour_levels_slider_t03 = mo.ui.slider(4, 30, step=2, value=24, label="levels: ", show_value=True, debounce=True)
+    contour_color_dropdown_t03 = mo.ui.dropdown(["dimgray", "white", "black"], value="black", label="contour color: ")
+
+    def viz_panel(_arr, _label, _is_diff, _ovmin=None, _ovmax=None, _ocmap=None, _ocenter="auto", _mask=None, _savename=None, _contour_on=True, _contour_levels=24, _contour_color="black"):
+        # exactly guidance.py's diff-mode panel: white_zero (straddling) / warm|cool half (single-signed)
+        # for absolute fields; symmetric white_zero for differences. + min/max/mean/std stamped over the mask.
+        _z = np.asarray(_arr, float)
+        _mk2 = np.asarray(MASK0, float) if _mask is None else np.asarray(_mask, float)
+        _mreg = _mk2 >= 0.5 * float(_mk2.max()); _zc = get_mask_center(_mk2)   # panel mask = selected experiment's target region
+        if _ocmap is not None:
+            _cmap, _c, _vmin, _vmax = _ocmap, (0.0 if _ocenter == "auto" else _ocenter), _ovmin, _ovmax
+        elif _is_diff:
+            _am = (float(np.nanmax(np.abs(_z))) if np.isfinite(_z).any() else 0.0) or 1e-9
+            _cmap, _c, _vmin, _vmax = white_zero_cmap, 0.0, -_am, _am
+        else:
+            _vmin = float(np.nanmin(_z)); _vmax = float(np.nanmax(_z))
+            if _vmin < 0.0 < _vmax:
+                _cmap, _c = white_zero_cmap, 0.0
+            elif _vmin >= 0.0:
+                _cmap, _c = WARM_CMAP, None
+            else:
+                _cmap, _c = cool_half_cmap, None
+        _fig, _ax = visualize_map(_z, cmap=_cmap, mask_2d=_mk2, title=_label,
+                                  vmin=_vmin, vmax=_vmax, center=_c, show_mask=True,
+                                  contour_2d=(_z if _contour_on else None), contour_levels=int(_contour_levels), contour_color=_contour_color, contour_linewidth=0.5,   # iso-lines of the plotted field
+                                  zoom=int(zoom_slider.value), zoom_center_lon=_zc[0], zoom_center_lat=_zc[1],
+                                  dpi=90, figsize=(5.5, 3.6))
+        _ax.tick_params(axis="both", labelsize=6)                       # match T06 tick sizing
+        _ax.xaxis.label.set_size(7); _ax.yaxis.label.set_size(7)        # Longitude/Latitude labels
+        for _cx in _fig.axes:
+            if _cx is not _ax:
+                _cx.tick_params(labelsize=6)                            # colorbar numbers
+        _ax.set_title(_label, fontsize=9)
+        _sa = np.where(_mreg, _z, np.nan)
+        if np.isfinite(_sa).any():
+            _ax.set_title(f"min = {np.nanmin(_sa):.3g} | max = {np.nanmax(_sa):.3g}", loc="left", fontsize=7)
+            _ax.set_title(f"mean = {np.nanmean(_sa):.3g} | std = {np.nanstd(_sa):.3g}", loc="right", fontsize=7)
+        if export_button.value and _savename:
+            save_chart(_fig, _savename)
+        _out = mo.as_html(_fig); plt.close(_fig)
+        return _out
+
+    return (
+        contour_checkbox_t02,
+        contour_checkbox_t03,
+        contour_color_dropdown_t02,
+        contour_color_dropdown_t03,
+        contour_levels_slider_t02,
+        contour_levels_slider_t03,
+        cool_half_cmap,
+        viz_panel,
+        white_zero_cmap,
+        zoom_slider,
+    )
 
 
 if __name__ == "__main__":

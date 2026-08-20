@@ -9,16 +9,10 @@
 \contentsline {figure}{\numberline {4.1}{\ignorespaces Geometric illustration of guidance applied only at flow step $t=1$, with $\lambda _1=1$ and $\lambda _t=0$ for $t\neq 1$. \relax }}{35}{figure.caption.11}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {6.1}{\ignorespaces Spatial target mask used throughout the T1 guidance-profile comparison. \relax }}{48}{figure.caption.12}%
-\contentsline {figure}{\numberline {6.2}{\ignorespaces Matched unguided state $x^{\mathrm {ung}\mid \mathrm {gui}}$ (top left), guidance effect $\Delta x^{\mathrm {GE}}$ (top right), and guided state $x^{\mathrm {gui}}$ (bottom) for the representative experiment $e_{\mathrm {ex}}$ using $\mathrm {spike@1}$. \relax }}{51}{figure.caption.13}%
-\contentsline {figure}{\numberline {6.3}{\ignorespaces ... \relax }}{52}{figure.caption.14}%
-\contentsline {figure}{\numberline {6.4}{\ignorespaces Evolution of the masked guided residual $\bar z^{\mathrm {gui}}_{t,m,v}$ for selected atmospheric variables. Curves show the ensemble mean, while the shaded region spans the minimum and maximum across ensemble members. Upper-air variables are shown at their highest available pressure level for visualization. \relax }}{53}{figure.caption.15}%
-\contentsline {figure}{\numberline {6.5}{\ignorespaces Step-wise decomposition of the guided residual-flow trajectory for $\mathrm {spike@1}$ (top) and $\mathrm {spike@17}$ (bottom), using the same experimental setting and ensemble realization. The panels show the current state, the corresponding unguided-under-guided-context landing, and the contributions of the flow and guidance moves at each flow step. \relax }}{54}{figure.caption.16}%
-\contentsline {figure}{\numberline {6.6}{\ignorespaces Spatial guidance effect $\Delta x^{\mathrm {GE}}$ for 2\,m temperature (top) and geopotential at 1000\,hPa (bottom) in the representative experiment. The response in geopotential illustrates how an intervention targeted at 2\,m temperature propagates to another atmospheric variable. \relax }}{55}{figure.caption.17}%
-\contentsline {figure}{\numberline {6.7}{\ignorespaces Multivariate propagation of the guidance effect for the candidate spike profiles. Earlier interventions, and in particular $\mathrm {spike@1}$, produce a stronger response across atmospheric variables and pressure levels. \relax }}{56}{figure.caption.18}%
-\contentsline {figure}{\numberline {6.8}{\ignorespaces Spatial deviation of the normalized guidance footprint from the prescribed target mask, measured by total-variation distance. Larger values indicate a stronger departure from the imposed mask geometry. \relax }}{56}{figure.caption.19}%
-\contentsline {figure}{\numberline {6.9}{\ignorespaces Ensemble variability of the guidance footprint for the candidate spike profiles. Larger values indicate a stronger dependence of the induced perturbation on the stochastic ensemble realization. \relax }}{57}{figure.caption.20}%
-\contentsline {figure}{\numberline {6.10}{\ignorespaces RMSE between the intermediate residual prediction $\hat z_t$ and the final residual $z_T$ over flow time. Curves summarize the four forecast initializations, with variation across ensemble members. \relax }}{59}{figure.caption.23}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {8.1}{\ignorespaces Spatial target mask used throughout the T1 guidance-profile comparison. \relax }}{48}{figure.caption.12}%
+\addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
