@@ -117,7 +117,6 @@ def _():
         iter_sweeps,
         load_reductions,
         max_day,
-        plot_trajectories,
         plot_trajectory,
         reductions_complete,
         reductions_grid_matches,
@@ -1155,13 +1154,13 @@ def _(
     gt_N_slices = get_slices(gt_rollout, partition, var, level)
     gt_trajectory = get_masked_mean(gt_N_slices, mask)
     return (
-        det_m_trajectory,
         gt_N_slices,
         gt_rollout,
         gt_trajectory,
         gui_M_N_slices,
         gui_M_N_trajectories,
         gui_m_trajectory,
+        gui_ung_M_N_trajectories,
         gui_ung_m_trajectory,
         ung_M_N_slices,
         ung_M_N_trajectories,
@@ -1204,7 +1203,7 @@ def _(
         target_guidance_trajectory = None
         target_guidance_M_N_trajectories = None
         target_guidance_trajectories_all = None
-    return target_guidance_M_N_trajectories, target_guidance_trajectories_all
+    return (target_guidance_M_N_trajectories,)
 
 
 @app.cell
@@ -1507,6 +1506,7 @@ def _(
     gui_ref_select,
     guidance_mode_select,
     mask_mode_select,
+    mask_shift_hint,
     mask_shift_px_slider,
     mask_shift_select,
     mo,
@@ -1539,7 +1539,7 @@ def _(
         mo.hstack([guidance_mode_select, gui_ref_select, mask_mode_select, a_t_mode_select], justify="start"),
         *([spread_widget] if spread_widget is not None else []),
         _sweep_row("sigma_div"),
-        mo.hstack([mask_shift_select, mask_shift_px_slider, mo.md(f"-> `{_ms_vals}`")],
+        mo.hstack([mask_shift_select, mask_shift_px_slider, mask_shift_hint, mo.md(f"-> `{_ms_vals}`")],
                   justify="start", align="center"),
         mo.md("**Specific**:"),
         *([_sweep_row(ax) for ax in _mode_num] if _mode_num else [mo.md("_none_")]),
@@ -1749,6 +1749,101 @@ def wa_schedule(
 
 
 @app.cell
+def _():
+    import earthkit.plots as ekp
+    import cartopy.crs as ccrs
+
+    return ccrs, ekp
+
+
+@app.cell
+def _(ccrs, cool_half_cmap, np, warm_half_cmap, white_zero_cmap):
+    def make_crs(_mode, _lon, _lat):
+        _builders = {
+            "NearsidePerspective": lambda: ccrs.NearsidePerspective(central_latitude=_lat, central_longitude=_lon),
+            "Orthographic": lambda: ccrs.Orthographic(central_longitude=_lon, central_latitude=_lat),
+            "PlateCarree": lambda: ccrs.PlateCarree(central_longitude=_lon),
+            "Robinson": lambda: ccrs.Robinson(central_longitude=_lon),
+            "Mollweide": lambda: ccrs.Mollweide(central_longitude=_lon),
+        }
+        return _builders.get(_mode, _builders["NearsidePerspective"])()
+
+    def globe_abs_style(_arr):
+        # (cmap, vmin, vmax, center): white at 0 if straddling; single-signed -> warm/cool half
+        _vmin, _vmax = float(np.nanmin(_arr)), float(np.nanmax(_arr))
+        if _vmin < 0.0 < _vmax:
+            return white_zero_cmap, _vmin, _vmax, 0.0
+        if _vmin >= 0.0:
+            return warm_half_cmap, _vmin, _vmax, None
+        return cool_half_cmap, _vmin, _vmax, None
+
+    return globe_abs_style, make_crs
+
+
+@app.cell
+def _(mo):
+    globe_crs_dropdown = mo.ui.dropdown(
+        ["NearsidePerspective", "Orthographic", "PlateCarree", "Robinson", "Mollweide"],
+        value="NearsidePerspective", label="globe projection: ")
+    return (globe_crs_dropdown,)
+
+
+@app.cell
+def _(
+    ccrs,
+    ekp,
+    globe_abs_style,
+    globe_crs_dropdown,
+    make_crs,
+    mask,
+    mask_corners,
+    np,
+    xr,
+    zoom_centers,
+    zoom_slider,
+):
+    def _globe_mask():
+        # mask WEIGHTS on the globe (nearside-perspective, centered on the mask) with the bounding
+        # box in red -- ported from experiment_builder.py's global mask chart
+        _clon, _clat = zoom_centers
+        _m = ekp.Map(crs=make_crs(globe_crs_dropdown.value, _clon, _clat))
+        _le = np.linspace(-180, 180, 241); _lc = 0.5 * (_le[:-1] + _le[1:])
+        _la = np.linspace(90, -90, 122); _lac = 0.5 * (_la[:-1] + _la[1:])
+        _mask_da = xr.DataArray(mask, dims=("latitude", "longitude"),
+                                coords={"latitude": _lac, "longitude": _lc})
+        _cmap, _vmin, _vmax, _center = globe_abs_style(mask)
+        _m.pcolormesh(_mask_da, cmap=_cmap, vmin=_vmin, vmax=_vmax)
+        _m.coastlines()
+        _ax = _m.fig.axes[0]
+        _ll, _lr, _lb, _lt = mask_corners
+        _n = 120
+        _lon, _lat = np.linspace(_ll, _lr, _n), np.linspace(_lb, _lt, _n)
+        _bx = np.concatenate([_lon, np.full(_n, _lr), _lon[::-1], np.full(_n, _ll)])
+        _by = np.concatenate([np.full(_n, _lb), _lat, np.full(_n, _lt), _lat[::-1]])
+        _ax.plot(_bx, _by, color="red", linewidth=1.5, transform=ccrs.PlateCarree(), zorder=10)
+        _zoom = max(1, int(zoom_slider.value))
+        if _zoom > 1:
+            if globe_crs_dropdown.value == "PlateCarree":
+                _lon_span, _lat_span = 360.0 / _zoom, 180.0 / _zoom
+                _cx, _cy = zoom_centers
+                _ax.set_extent([max(-180.0, _cx - _lon_span / 2), min(180.0, _cx + _lon_span / 2),
+                                max(-90.0, _cy - _lat_span / 2), min(90.0, _cy + _lat_span / 2)],
+                               crs=ccrs.PlateCarree())
+            else:
+                _x0, _x1 = _ax.get_xlim(); _y0, _y1 = _ax.get_ylim()
+                _xm, _ym = 0.5 * (_x0 + _x1), 0.5 * (_y0 + _y1)
+                _hx, _hy = (_x1 - _x0) / (2 * _zoom), (_y1 - _y0) / (2 * _zoom)
+                _ax.set_xlim(_xm - _hx, _xm + _hx); _ax.set_ylim(_ym - _hy, _ym + _hy)
+        return _m.fig
+
+    try:
+        globe_mask_fig = _globe_mask()
+    except Exception:
+        globe_mask_fig = None   # fall back to the flat mask map if the globe backend fails
+    return (globe_mask_fig,)
+
+
+@app.cell
 def _(
     M_N_widget,
     T_slider,
@@ -1756,6 +1851,8 @@ def _(
     delta_widget,
     dpi_slider,
     experiment_params,
+    globe_crs_dropdown,
+    globe_mask_fig,
     guidance_convergence_t_plot,
     guidance_reference_dropdown,
     inspect_states_widget_make,
@@ -1763,6 +1860,7 @@ def _(
     m_n_widget,
     mask_map,
     mask_mode_dropdown,
+    mask_shift_hint,
     mask_shift_preview_dropdown,
     mask_shift_px_slider,
     mo,
@@ -1773,8 +1871,8 @@ def _(
     state_hist_plot,
     sweep_extra_dropdowns,
     sweep_params_widget,
-    traj_row_select,
     trajectories_plot,
+    trajectory_bands_checkbox,
     var_dropdown,
     wa_schedule_widget,
     weather_map,
@@ -1788,12 +1886,12 @@ def _(
     )
 
     _mask_maps_row = mo.hstack(
-        [_w_ for _w_ in [weather_map, mask_map] if _w_ is not None],
+        [_w_ for _w_ in [weather_map, mask_map, globe_mask_fig] if _w_ is not None],
         justify="start",
         align="start",
     )
     mask_widget_maps = mo.vstack([
-        mo.hstack([zoom_slider, dpi_slider, side_lon_slider, side_lat_slider, sigma_div_slider], justify="start"),
+        mo.hstack([zoom_slider, dpi_slider, side_lon_slider, side_lat_slider, sigma_div_slider, globe_crs_dropdown], justify="start"),
         _mask_maps_row,
     ], align="start")
     # authoring (unguided) exposes the mask coord controls; guided/analyze show only the
@@ -1811,7 +1909,7 @@ def _(
                 mask_widget_controls,
                 M_N_widget,
                 m_n_widget,
-                mo.hstack([traj_row_select, dpi_slider, climatology_rolling_slider], justify="start"),
+                mo.hstack([trajectory_bands_checkbox, dpi_slider, climatology_rolling_slider], justify="start"),
                 trajectories_plot,
                 year_trajectory_plot,
             ])
@@ -1826,7 +1924,7 @@ def _(
                 ),
                 delta_widget,
                 mo.vstack([
-                    mo.hstack([traj_row_select, dpi_slider], justify="start"),
+                    mo.hstack([trajectory_bands_checkbox, dpi_slider], justify="start"),
                     mo.hstack(
                         [trajectories_plot]
                         + ([wa_schedule_widget] if wa_schedule_widget is not None else []),
@@ -1838,7 +1936,7 @@ def _(
             # shift preview render the mask as a job would build it
             mask_widget = mo.vstack([
                 mo.hstack([mask_mode_dropdown, zoom_slider, dpi_slider, sigma_div_slider,
-                           mask_shift_preview_dropdown, mask_shift_px_slider], justify="start"),
+                           mask_shift_preview_dropdown, mask_shift_px_slider, mask_shift_hint, globe_crs_dropdown], justify="start"),
                 _mask_maps_row,
             ], align="start")
             inspect_states_widget=inspect_states_widget_make
@@ -1851,7 +1949,7 @@ def _(
                     justify="start",
                 ),
                 mo.vstack([
-                    mo.hstack([traj_row_select, dpi_slider], justify="start", align="center"),
+                    mo.hstack([trajectory_bands_checkbox, dpi_slider], justify="start", align="center"),
                     mo.hstack(
                         [trajectories_plot]
                         + ([state_hist_plot] if state_hist_plot is not None else []),
@@ -1875,7 +1973,7 @@ def _(
                 _mask_sweep_controls.append(sweep_extra_dropdowns["mask_shift"])
             mask_widget = mo.vstack(
                 ([mo.hstack(_mask_sweep_controls, justify="start")] if _mask_sweep_controls else [])
-                + [mo.hstack([zoom_slider, dpi_slider], justify="start"), _mask_maps_row],
+                + [mo.hstack([zoom_slider, dpi_slider, globe_crs_dropdown], justify="start"), _mask_maps_row],
                 align="start",
             )
             inspect_states_widget=inspect_states_widget_make
@@ -2583,7 +2681,7 @@ def _(
                     ("$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung}}$", gui_det_ung),
                     ("$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung\\_det}}$", gui_det_ung_det),
                     ("$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{gt}}$", gui_det_gt),
-                    ("guidance effect: $r_n^{gui} - r_n^{\\text{ung|gui}}$  $(= x_{n}^{gui} - x_{n}^{\\text{ung|gui}})$", gui_gui_ung),
+                    ("$\Delta x^{\mathrm{GE}}$", gui_gui_ung),
                     ("$r_n^{gui} = x_{n}^{gui} - x_{n}^{\\text{gui\\_det}}$", gui_det_res),
                     ("$r_n^{\\text{ung|gui}} = x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{ung\\_det}}$", gui_ung_det_res),
                     ("$x_{n}^{\\text{gui\\_det}}$", to_display_units(det_n_slice, var)[0]),  # absolute field: K -> degC etc.
@@ -2732,7 +2830,7 @@ def _(
                 gui_ung_gt_map = difference_maps["$x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{gt}}$"]
                 gui_gt_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{gt}}$"]
                 gui_ung_ung_map = difference_maps["$x_{n}^{\\text{ung|gui}} - x_{n}^{\\text{ung}}$"]
-                gui_ung_map = difference_maps["guidance effect: $r_n^{gui} - r_n^{\\text{ung|gui}}$  $(= x_{n}^{gui} - x_{n}^{\\text{ung|gui}})$"]
+                gui_ung_map = difference_maps["$\Delta x^{\mathrm{GE}}$"]
                 gui_minus_ung_map = difference_maps["$x_{n}^{gui} - x_{n}^{\\text{ung}}$"]
                 gui_det_ung_map = difference_maps["$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung}}$"]
                 gui_det_ung_det_map = difference_maps["$x_{n}^{\\text{gui_det}} - x_{n}^{\\text{ung\\_det}}$"]
@@ -3115,12 +3213,9 @@ def _(trajectories_section_checkbox, trajectory_widget):
 
 @app.cell
 def _(mo):
-    # chart/trace selector for the rollout-trajectories plot, mirroring the
-    # cross-checks / flow-analysis / inspect-states multiselects.
-    _traj_rows = ["unguided", "guided", "guided_unguided", "gui_det",
-                  "target_guidance", "target_pct_profile", "dist_bands"]
-    traj_row_select = mo.ui.multiselect(_traj_rows, value=_traj_rows, label="charts: ")
-    return (traj_row_select,)
+    # ensemble min-max bands toggle for the rollout-trajectories chart
+    trajectory_bands_checkbox = mo.ui.checkbox(value=True, label="ensemble bands")
+    return (trajectory_bands_checkbox,)
 
 
 @app.cell
@@ -3131,70 +3226,44 @@ def _():
 
 @app.cell
 def _(
-    N,
-    config,
-    delta_trajectories,
-    delta_trajectory,
-    det_m_trajectory,
     dpi_slider,
-    gt_trajectory,
-    gui_M_N_trajectories,
-    gui_m_trajectory,
-    gui_ung_m_trajectory,
     m,
-    notebook_mode,
-    np,
-    plot_trajectories,
-    target_guidance_M_N_trajectories,
-    target_guidance_trajectories_all,
-    timestamps,
+    plot_rollout_thesis,
+    thesis_H,
+    thesis_ensembles,
+    thesis_gt,
+    thesis_n0,
+    thesis_target,
+    thesis_target_hi,
+    thesis_target_lo,
     to_display_units,
-    traj_row_select,
     trajectories_section_checkbox,
-    ung_M_N_trajectories,
-    ung_m_trajectory,
+    trajectory_bands_checkbox,
     var,
-    view_mask_mode,
 ):
-
-    var_check = (var==config.VAR if notebook_mode in ("guided_rollout", "analyze_rollout") else False)
-
-    # display units: K -> degC for temperature variables. Applies to every absolute
-    # trace (members, ensembles, targets, ground truth); the percentage profiles are
-    # relative and stay unchanged.
-    def _disp(_a):
-        return to_display_units(_a, var)[0] if _a is not None else None
+    # thesis-ready targeted-quantity chart: absolute M_pi values for member m. Each
+    # ensemble's full state x = det + res is a SOLID line, the deterministic core is
+    # shown as hollow markers, and a dotted connector spans the residual. Optional
+    # min-max bands (checkbox); target y*, ground truth, and the n=H marker overlaid.
     _unit = to_display_units(0.0, var)[1]
+    _varname = "surface temperature" if "temperature" in var else var.replace("_", " ")
 
-    trajectories_plot = plot_trajectories(
-        timestamps=timestamps,
-        var=var,
+    trajectories_plot = plot_rollout_thesis(
+        ensembles=thesis_ensembles,
+        target=thesis_target,
+        target_lo=thesis_target_lo,
+        target_hi=thesis_target_hi,
+        ground_truth=thesis_gt,
+        n0=thesis_n0,
+        H=thesis_H,
         m=m,
-        n=None,  # trajectories plot the full n-axis; decoupled from the n-slider
-        guided_member=_disp(gui_m_trajectory) if ("guided" in traj_row_select.value) else None,
-        unguided_member=_disp(ung_m_trajectory) if ("unguided" in traj_row_select.value) else None,
-        guided_unguided_member=_disp(gui_ung_m_trajectory) if ("guided_unguided" in traj_row_select.value) else None,
-        det_member=_disp(det_m_trajectory) if ("gui_det" in traj_row_select.value and det_m_trajectory is not None) else None,
-        guided_ensemble=_disp(gui_M_N_trajectories) if ("dist_bands" in traj_row_select.value) else None,
-        unguided_ensemble=_disp(ung_M_N_trajectories) if ("dist_bands" in traj_row_select.value) else None,
-        target_guidance_ensemble=_disp(target_guidance_M_N_trajectories) if (("dist_bands" in traj_row_select.value) and ("target_guidance" in traj_row_select.value) and var_check) else None,
-        target_guidance_trajectory=[_disp(_t) for _t in target_guidance_trajectories_all] if (("target_guidance" in traj_row_select.value) and var_check) else None,
-        ground_truth=_disp(gt_trajectory),
-        ground_truth_label=f"Ground truth ({view_mask_mode})",
-        delta_trajectories=(
-            ([[0] + list(np.asarray(_t)[:N]) for _t in delta_trajectories] if notebook_mode == "guided_rollout"
-             else [[0] + list(np.asarray(delta_trajectory)[:N])])
-            if (("target_pct_profile" in traj_row_select.value) and notebook_mode in ("guided_rollout", "analyze_rollout")) else None
-        ),
-        annotate_target_guidance=(notebook_mode == "guided_rollout"),
-        show_guided_mean=False,
-        show_unguided_mean=False,
-        title=f"rollout trajectories",
-        subtitle=f"{var} | mask-averaged",
-        ylabel=f"Mask-averaged value [{_unit}]" if _unit else "Mask-averaged value",
-        figsize=(22, 6),
-        dpi=dpi_slider.value
-    ) if trajectories_section_checkbox.value else None
+        show_bands=trajectory_bands_checkbox.value,
+        title="Rollouts",
+        subtitle=f"v = {_varname} | $m = {m}$",
+        ylabel=(r"$\mathcal{M}_\pi(x_n)$ [" + _unit + "]") if _unit else r"$\mathcal{M}_\pi(x_n)$",
+        figsize=(12, 5.2),
+        dpi=dpi_slider.value,
+    ) if (trajectories_section_checkbox.value and thesis_ensembles is not None) else None
     return (trajectories_plot,)
 
 
@@ -4887,8 +4956,23 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mask_shift_px_slider = mo.ui.slider(1, 10, step=1, value=3, label="shift px: ", show_value=True, debounce=True)
+    mask_shift_px_slider = mo.ui.slider(1, 30, step=1, value=3, label="shift px: ", show_value=True, debounce=True)
     return (mask_shift_px_slider,)
+
+
+@app.cell
+def mask_shift_hint_cell(mask_corners, mo, np):
+    # hint: pixels to shift the mask LEFT by half its width. arches grid = 240 lon pts over 360deg
+    # => 1.5 deg/px, so shift = ceil((W/2)/1.5) = ceil(W/3) with W = lon_right - lon_left (deg).
+    _msw = mask_corners[1] - mask_corners[0]
+    _dpx = 360.0 / 240
+    _half = int(np.ceil((_msw / 2) / _dpx))
+    mask_shift_hint = mo.md(
+        rf"_left half-shift $= \left\lceil (W/2)/1.5 \right\rceil = \left\lceil W/3 \right\rceil = {_half}$ px "
+        rf"(W = {_msw:.1f}°, grid 1.5°/px)_"
+    )
+    mask_shift_hint
+    return (mask_shift_hint,)
 
 
 @app.cell(hide_code=True)
@@ -5342,6 +5426,115 @@ def _(
     else:
         year_trajectory_plot = None
     return (year_trajectory_plot,)
+
+
+@app.cell(hide_code=True)
+def _():
+    from src.ui.plot_trajectories import plot_rollout_thesis
+
+    return (plot_rollout_thesis,)
+
+
+@app.cell
+def _(
+    N,
+    config,
+    delta_trajectory,
+    get_masked_mean,
+    get_rollout,
+    get_slices,
+    gt_trajectory,
+    gui_M_N_trajectories,
+    gui_m_trajectory,
+    gui_ung_M_N_trajectories,
+    gui_ung_m_trajectory,
+    level,
+    m,
+    mask,
+    notebook_mode,
+    np,
+    partition,
+    rollout_id,
+    sweep_params,
+    target_guidance_M_N_trajectories,
+    to_display_units,
+    ung_M_N_trajectories,
+    ung_m_trajectory,
+    var,
+):
+    # thesis rollout-trajectories data: ABSOLUTE mask-averaged values (display units,
+    # e.g. deg C), det vs det+res for the selected member m, plus per-ensemble min-max
+    # bands. Plot contents match the original chart; det lines/markers are the addition.
+    def _mm_mn(_store, _need_sweep):
+        _ds = get_rollout(_store, rollout_id)
+        if _need_sweep:
+            _ds = _ds.sel(sweep_params)
+        return get_masked_mean(get_slices(_ds.compute(), partition, var, level), mask)  # (M,N) K
+
+    def _cvt(_a):
+        return to_display_units(_a, var)[0] if _a is not None else None
+
+    thesis_ensembles = None
+    thesis_target = None
+    thesis_target_lo = None
+    thesis_target_hi = None
+    thesis_gt = None
+    thesis_n0 = None
+    thesis_H = None
+    if (notebook_mode in ("guided_rollout", "analyze_rollout")) and (var == config.VAR):
+        try:
+            _ung_det_mn = _mm_mn("ung_det", False)
+        except (FileNotFoundError, KeyError):
+            _ung_det_mn = None
+        _ens = {
+            "ung": {
+                "det": _cvt(_ung_det_mn[m]) if _ung_det_mn is not None else None,
+                "det_res": _cvt(ung_m_trajectory),
+                "band_lo": _cvt(ung_M_N_trajectories.min(axis=0)),
+                "band_hi": _cvt(ung_M_N_trajectories.max(axis=0)),
+                "color": "#8B5A2B", "label": r"$x_{n,m}^{\mathrm{ung}}$",
+            }
+        }
+        if notebook_mode == "analyze_rollout":
+            try:
+                _gui_det_mn = _mm_mn("gui_det", True)
+            except (FileNotFoundError, KeyError):
+                _gui_det_mn = None
+            _gui_det_m = _cvt(_gui_det_mn[m]) if _gui_det_mn is not None else None
+            _ens["ung|gui"] = {
+                "det": _gui_det_m,
+                "det_res": _cvt(gui_ung_m_trajectory),
+                "band_lo": _cvt(gui_ung_M_N_trajectories.min(axis=0)),
+                "band_hi": _cvt(gui_ung_M_N_trajectories.max(axis=0)),
+                "color": "#800080", "label": r"$x_{n,m}^{\mathrm{ung}\mid\mathrm{gui}}$",
+            }
+            _ens["gui"] = {
+                "det": _gui_det_m,
+                "det_res": _cvt(gui_m_trajectory),
+                "band_lo": _cvt(gui_M_N_trajectories.min(axis=0)),
+                "band_hi": _cvt(gui_M_N_trajectories.max(axis=0)),
+                "color": "#0072B2", "label": r"$x_{n,m}^{\mathrm{gui}}$",
+            }
+        thesis_ensembles = _ens
+        # absolute target y*_n for member m (display units); ground truth (carries n=0)
+        thesis_target = _cvt(target_guidance_M_N_trajectories[m]) if target_guidance_M_N_trajectories is not None else None
+        thesis_target_lo = _cvt(target_guidance_M_N_trajectories.min(axis=0)) if target_guidance_M_N_trajectories is not None else None
+        thesis_target_hi = _cvt(target_guidance_M_N_trajectories.max(axis=0)) if target_guidance_M_N_trajectories is not None else None
+        thesis_gt = _cvt(gt_trajectory)
+        thesis_n0 = float(thesis_gt[0]) if thesis_gt is not None else None
+        # last guided step H = last n (1-based) with |rho|>0 (fallback N)
+        _rho = np.asarray(delta_trajectory, dtype=float)[:N]
+        _nz = np.nonzero(np.abs(_rho) > 1e-12)[0]
+        thesis_H = int(_nz[-1] + 1) if len(_nz) else N
+    return (
+        thesis_H,
+        thesis_ensembles,
+        thesis_gt,
+        thesis_n0,
+        thesis_target,
+        thesis_target_hi,
+        thesis_target_lo,
+    )
 
 
 if __name__ == "__main__":

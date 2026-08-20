@@ -202,7 +202,24 @@ For the experiments in this thesis, $\mathcal{M}_\pi$ represents the
 area-weighted regional mean surface temperature introduced in
 \Cref{ch:specify}. The guidance construction itself is more general and can in
 principle be applied to other differentiable functionals of the forecast
-state.
+state. 
+For instance, if the objective were to attain a prescribed maximum temperature
+within the target region, we could define
+\begin{equation}
+    \mathcal{L}_{n,t}^{\mathrm{max}}
+    :=
+    \left[
+        \max_{(i,j):\,k_{ij}=1}
+        \hat{x}_{n,t,v^\star ij}
+        -
+        y_n^\star
+    \right]^2,
+    \label{eq:guidance-loss-alternative}
+\end{equation}
+
+where $y_n^\star$ would denote the requested regional maximum. Other possible
+objectives could target, for example, upper quantiles, upper-tail averages, or
+anomalies relative to a reference climatology.
 
 \subsection{Gradient-based flow guidance}
 \label{sec:gradient-flow-guidance}
@@ -287,9 +304,21 @@ step $n$ and flow step $t$. The corresponding Euler update becomes
 \end{equation}
 
 The guidance gradient $g_{n,t}$ is therefore determined locally by the
-prescribed target and the current generative state. What remains to be
-specified is the guidance strength $\lambda_{n,t}$ with which this direction
-is applied over the flow.
+prescribed target and the current generative state, while
+$\lambda_{n,t}$ controls the magnitude of the resulting intervention.
+\Cref{fig:guided-flow-geometry} illustrates this geometrically for the
+simplified case $\lambda_1=1$ and $\lambda_t=0$ for $t\neq1$.
+
+\begin{figure*}[t]
+    \centering
+    \input{figures/guidance_geometry.tex}
+    \caption{
+        Geometric illustration of guidance applied only at flow step $t=1$,
+        with $\lambda_1=1$ and $\lambda_t=0$ for $t\neq1$.
+    }
+    \label{fig:guided-flow-geometry}
+\end{figure*}
+
 
 \section{Guidance-strength design}
 \label{sec:guidance-strength-design}

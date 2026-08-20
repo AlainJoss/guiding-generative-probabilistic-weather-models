@@ -35,44 +35,25 @@ member-specific targets used by the guidance algorithm. Finally, we summarize
 the complete specification pipeline from the unguided reference ensemble to
 the resulting target trajectories.
 
+\section{Target variable, level, and region}
 
-\section{Target variable and region}
+Using the state representation introduced in
+\Cref{sec:archesweather-dataset}, we specify the atmospheric quantity of
+interest through a mask $\pi$ over variable, vertical level, and space.
 
-We specify the atmospheric quantity of interest through a mask $\pi$ over the
-weather state
-
-\[
-    x_n
-    \in
-    \mathbb{R}^{V\times I\times J},
-\]
-
-where $V$ indexes atmospheric fields and $I$ and $J$ index latitude and
-longitude. The corresponding spatial coordinates are denoted by
-
-\[
-    (\varphi_i,\psi_j),
-    \qquad
-    i=1,\ldots,I,
-    \quad
-    j=1,\ldots,J.
-\]
-
-Let $v^\star$ denote the target variable and let
-
+Let $v^\star$ denote the target variable and
+$\ell^\star\in\mathcal{L}_{v^\star}$ its target level. Furthermore, let
 \[
     k_{ij}\in\{0,1\}
 \]
-
 indicate whether grid cell $(i,j)$ lies inside the selected target region.
 In this thesis, the spatial support is defined by a rectangular bounding box
 on the latitude--longitude grid.
 
-The mask is non-zero only for the selected variable and within the selected
-region. To obtain a regional average that accounts for differences in the
-physical area represented by each grid cell, we weight each included latitude
-row according to
-
+The mask is non-zero only for the selected variable and level and within the
+selected region. To obtain a regional average that accounts for differences in
+the physical area represented by each grid cell, we weight each included
+latitude row according to
 \begin{equation}
     a_i
     =
@@ -80,51 +61,62 @@ row according to
     \cos\varphi\,\mathrm{d}\varphi,
     \label{eq:mask-cell-area}
 \end{equation}
-
 where $[\beta_i^-,\beta_i^+]$ denotes the latitude extent of row $i$.
 Because the longitudinal grid spacing is constant, its contribution cancels
 under normalization.
 
 We therefore define the normalized mask as
-
 \begin{equation}
-    \pi_{vij}
+    \pi_{v\ell ij}
     =
     \frac{
         \mathbf{1}[v=v^\star]\,
+        \mathbf{1}[\ell=\ell^\star]\,
         k_{ij}\,a_i
     }{
         \displaystyle
         \sum_{i',j'}
         k_{i'j'}\,a_{i'}
     },
+    \qquad
+    \ell\in\mathcal{L}_v,
     \label{eq:target-mask}
 \end{equation}
-
 such that
-
 \[
-    \sum_{v,i,j}\pi_{vij}=1.
+    \sum_v
+    \sum_{\ell\in\mathcal{L}_v}
+    \sum_{i,j}
+    \pi_{v\ell ij}
+    =
+    1.
 \]
 
 The corresponding masked-average operator is
-
 \begin{equation}
     \mathcal{M}_\pi(x_n)
     :=
-    \sum_{v,i,j}
-    \pi_{vij}\,
-    x_{n,vij}.
+    \sum_v
+    \sum_{\ell\in\mathcal{L}_v}
+    \sum_{i,j}
+    \pi_{v\ell ij}\,
+    x_{n,v\ell ij}.
     \label{eq:masked-average}
 \end{equation}
 
-Following the convention introduced in the ArchesWeather dataset description,
+Following the convention introduced in \Cref{sec:archesweather-dataset},
 the inverse normalization required to evaluate this diagnostic in physical
 units is implicit in $\mathcal{M}_\pi$.
 
-For the experiments in this thesis, $v^\star$ is surface temperature, such
-that $\mathcal{M}_\pi(x_n)$ represents the area-weighted mean surface
-temperature within the selected target region.
+For the experiments in this thesis, the target variable is temperature and the
+target level is the surface,
+\[
+    v^\star = \mathrm{temperature},
+    \qquad
+    \ell^\star = 0,
+\]
+such that $\mathcal{M}_\pi(x_n)$ represents the
+area-weighted mean $2$~m temperature within the selected target region.
 
 Area weighting prevents the regional mean from being biased toward
 high-latitude grid cells, which represent a smaller physical area on the
@@ -132,7 +124,7 @@ sphere. This follows the latitude-weighting convention used in
 WeatherBench~2 \parencite{rasp2024weatherbench2}.
 
 Figure~\ref{fig:target-mask-example} illustrates the resulting mask for an
-example target region over South America. Its support is rectangular on the
+example target region over Europe. Its support is rectangular on the
 latitude--longitude grid, while the normalized weights vary with latitude
 according to the physical area represented by each grid cell.
 
@@ -142,18 +134,17 @@ according to the physical area represented by each grid cell.
     \centering
     \begin{subfigure}[c]{0.48\textwidth}
         \centering
-        \includegraphics[height=5.2cm]{figures/mask_flat.png}
+        \includegraphics[height=5.1cm]{figures/mask_flat.png}
         \caption{Latitude--longitude representation.}
         \label{fig:target-mask-flat}
     \end{subfigure}
     \hfill
     \begin{subfigure}[c]{0.48\textwidth}
         \centering
-        \includegraphics[height=5.2cm]{figures/mask_globe.png}
+        \includegraphics[height=5.cm]{figures/mask_globe.png}
         \caption{Spherical representation.}
         \label{fig:target-mask-globe}
     \end{subfigure}
-
     \caption{
         Example of the spatial target mask. The rectangular support determines
         which grid cells are included, while the latitude-dependent weights
@@ -189,19 +180,14 @@ the intervention is removed.
 
 \subsection{Reference ensemble and member-specific targets}
 
-Before generating a guided ensemble, we first generate a complete unguided
-reference ensemble
+Before generating a guided ensemble, we first generate an unguided reference
+ensemble of $M$ trajectories over the experimental horizon $n=1,\ldots,N$,
 
 \[
     \left\{
         x_{n,m}^{\mathrm{ung}}
-    \right\}_{
-        \substack{
-            m=1,\ldots,M
-        }
-    }
+    \right\}_{m=1}^{M}.
 \]
-over the experimental horizon, with $n=1,\ldots,N$.
 
 All members start from the same initial atmospheric context but differ through
 their stochastic residual realizations. For each member and weather step, the
@@ -336,7 +322,7 @@ After weather step $H$, no target is imposed. The forecast is nevertheless
 continued until $N$, allowing us to assess how the guided trajectory evolves
 once guidance is switched off.
 
-\section{Pipeline overview}
+\section{Procedure overview}
 
 The complete specification procedure is summarized in
 \Cref{fig:specification-pipeline}. Starting from an initial atmospheric
@@ -420,7 +406,7 @@ examine how the generated scenario evolves after the intervention has ended.
 % guided horizon H and the full experimental horizon N.
 \begin{figure}[t]
     \centering
-    \includegraphics[width=\textwidth]{figures/rollout-trajectories.png}
+    \includegraphics[width=\textwidth]{figures/rollouts.png}
     \caption{
         Schematic illustration of the specification procedure. Each unguided
         reference member defines a baseline trajectory for the targeted
@@ -435,3 +421,4 @@ examine how the generated scenario evolves after the intervention has ended.
 This completes the specification of \emph{what} the model should generate.
 The next chapter addresses \emph{how} the residual flow is modified to realize
 these member-specific targets.
+

@@ -1,5 +1,18 @@
 \chapter{Discussion}\label{ch:discussion}
 
+\section{Quantitative evaluation}
+
+The analyze metrics provide information but only accompagned with the intuition that we gain when looking at the generated guidance effect maps and absolute maps themseleves.
+
+These enable us to anchor our qualitative intuition that spike\@ produces progressively less realistic results with hard measures.
+This also combined with the charts that show how the variables are being pushed (across levels).
+
+In addition, we also measured the accuracy of the clean estimate throughout t and we find that spike\@2 is the worst one.
+So, it seems that having a rough direction to push towards, but the model having enough steps to figure out the final correction produces the best results.
+The nearer we are to T in terms of steps left, the less sensible the gradient is to other variables compared to temperature.
+So having enough steps to correct is good.
+But why does not spike@1 win? It seems that at pure noise, before the model has done any correction, the additional denoising step does not win against a possibly more informative gradient direction.
+
 
 \section{Gradient}
 The gradient has the unique property that it encapsulates what should change with respect to the learned weather function.

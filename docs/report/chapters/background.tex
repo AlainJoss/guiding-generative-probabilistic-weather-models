@@ -48,7 +48,7 @@ states \(z_t\), \(t\in(0,1)\), as \emph{noisy states}, and the endpoint
 \(z_1=x_1\) as the \emph{clean state}.
 
 The evolution of \(z_t\) is governed by a time-dependent velocity field
-\(u_t\), defining the ordinary differential equation
+\(u_t\), defining the ordinary differential equation (ODE)
 \begin{equation}
     \frac{\mathrm{d}}{\mathrm{d}t} z_t
     =
@@ -125,11 +125,12 @@ sample \(x_1\sim p_1\) with independent Gaussian noise
     =
     \alpha_t x_1
     +
-    \beta_t \varepsilon
-    \sim
-    p_t(\cdot\mid x_1).
+    \beta_t \varepsilon,
+    \qquad
+    z_t \sim p_t(\cdot\mid x_1).
     \label{eq:gaussian-interpolation}
 \end{equation}
+
 
 Marginalizing over the data distribution gives the corresponding marginal
 probability path
@@ -355,7 +356,7 @@ Taking the gradient with respect to the noisy state gives the conditional score
     \label{eq:conditional-score}
 \end{align}
 
-The first term corresponds to the unguided generative process, while the
+The first term on the right-hand side corresponds to the unguided generative process, while the
 second introduces the desired condition $y$.
 Guidance can therefore be interpreted as modifying the original generation
 process through the likelihood gradient
@@ -878,6 +879,8 @@ NeuralGCM. Starting from a historical atmospheric state $x_0$, they optimize a
 small perturbation $\delta x_0$ to the initial condition whose subsequent
 evolution produces a more extreme heatwave:
 
+TODO: should switch $\delta x_0$ to defined guidance signal notation
+
 \begin{equation}
     \delta x_0^\star
     =
@@ -944,8 +947,8 @@ we now describe the components of ArchesWeather required for the development
 of our method and refer to the original work for architectural and training
 details.
 
-
 \subsection{Dataset}
+\label{sec:archesweather-dataset}
 
 ArchesWeather is trained on the ERA5 reanalysis dataset
 \parencite{hersbach2020era5}, using one of the versions preprocessed by
@@ -953,14 +956,20 @@ WeatherBench~2 \parencite{rasp2024weatherbench2}.
 The data are represented on a regular $1.5^\circ$ latitude--longitude grid
 with $121\times240$ spatial points.
 
-Each weather state
+We index atmospheric variables by $v$, vertical levels by $\ell$, and spatial
+locations by $(i,j)$. The set of vertical levels is defined as
 \[
-    x_n \in \mathbb{R}^{82\times121\times240}
+    L
+    =
+    \{0,50,100,150,200,250,300,400,500,600,700,850,925,1000\},
 \]
-contains $82$ atmospheric fields.
-Four are surface variables: $2$~m temperature, mean sea-level pressure, and
-the two components ($u$ and $v$) of the $10$~m wind.
-The remaining $78$ fields correspond to six upper-air variables
+where $\ell=0$ denotes the surface for notational convenience, while
+$\ell>0$ corresponds to pressure levels in hPa.
+
+ArchesWeather represents four surface variables: $2$~m temperature, mean
+sea-level pressure, and the two components ($u$ and $v$) of the $10$~m wind.
+For notational convenience, these are assigned to the surface level $\ell=0$.
+The atmospheric state further includes six upper-air variables
 \[
     \{
         \text{geopotential},
@@ -969,13 +978,34 @@ The remaining $78$ fields correspond to six upper-air variables
         u,
         v,
         \text{vertical velocity}
-    \}
+    \},
 \]
-evaluated at the $13$ pressure levels
+each evaluated at the $13$ pressure levels
 \[
     \{50,100,150,200,250,300,400,500,600,700,850,925,1000\}
     \ \mathrm{hPa}.
 \]
+
+Not every variable is therefore defined at every level. For each variable
+$v$, we denote by $L_v\subseteq L$ the set of levels on
+which it is available. Thus, $L_v=\{0\}$ for surface variables,
+whereas $L_v$ contains the $13$ pressure levels for upper-air
+variables.
+
+Using this convention, individual atmospheric fields are denoted by
+\[
+    x_{n,v\ell ij},
+    \qquad
+    \ell\in L_v,
+\]
+where $n$ indexes weather time. ArchesWeather therefore represents
+$4+6\cdot13=82$ valid variable--level combinations. Computationally, these
+combinations are flattened into a channel dimension, such that each weather
+state is stored as
+\[
+    x_n \in \mathbb{R}^{82\times121\times240}.
+\]
+Making the variable--level structure explicit here facilitates the later evaluation, where several quantities are aggregated across vertical levels.
 
 Weather states are available at $00{:}00$, $06{:}00$, $12{:}00$, and
 $18{:}00$ UTC.
@@ -988,6 +1018,7 @@ to their normalized representation. Quantities defined in physical units are
 evaluated after applying the corresponding inverse normalization. For
 notational simplicity, this transformation is treated as part of the
 respective diagnostic operator and is omitted from subsequent notation.
+
 
 
 \subsection{Forecasting setup}

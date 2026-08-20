@@ -18,70 +18,62 @@
 \contentsline {section}{\numberline {2.4}ArchesWeather}{17}{section.2.4}%
 \contentsline {subsection}{\numberline {2.4.1}Dataset}{17}{subsection.2.4.1}%
 \contentsline {subsection}{\numberline {2.4.2}Forecasting setup}{18}{subsection.2.4.2}%
-\contentsline {subsection}{\numberline {2.4.3}Residual flow model}{18}{subsection.2.4.3}%
+\contentsline {subsection}{\numberline {2.4.3}Residual flow model}{19}{subsection.2.4.3}%
 \contentsline {subsection}{\numberline {2.4.4}Sampling}{20}{subsection.2.4.4}%
-\contentsline {chapter}{\numberline {3}Specifying events of interest}{22}{chapter.3}%
-\contentsline {section}{\numberline {3.1}Target variable and region}{23}{section.3.1}%
+\contentsline {chapter}{\numberline {3}Specifying events of interest}{23}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Target variable, level, and region}{24}{section.3.1}%
 \contentsline {section}{\numberline {3.2}Target trajectory}{25}{section.3.2}%
-\contentsline {subsection}{\numberline {3.2.1}Reference ensemble and member-specific targets}{25}{subsection.3.2.1}%
+\contentsline {subsection}{\numberline {3.2.1}Reference ensemble and member-specific targets}{26}{subsection.3.2.1}%
 \contentsline {subsection}{\numberline {3.2.2}Prescribing the relative change}{26}{subsection.3.2.2}%
-\contentsline {section}{\numberline {3.3}Pipeline overview}{27}{section.3.3}%
-\contentsline {chapter}{\numberline {4}Guidance design}{29}{chapter.4}%
-\contentsline {section}{\numberline {4.1}Target-driven guidance}{30}{section.4.1}%
-\contentsline {subsection}{\numberline {4.1.1}Guidance objective}{31}{subsection.4.1.1}%
-\contentsline {subsection}{\numberline {4.1.2}Gradient-based flow guidance}{32}{subsection.4.1.2}%
-\contentsline {section}{\numberline {4.2}Guidance-strength design}{33}{section.4.2}%
-\contentsline {subsection}{\numberline {4.2.1}Final flow step}{34}{subsection.4.2.1}%
-\contentsline {subsection}{\numberline {4.2.2}Flow-time profile}{35}{subsection.4.2.2}%
-\contentsline {subsection}{\numberline {4.2.3}Alternative target-realization strategies}{35}{subsection.4.2.3}%
-\contentsline {section}{\numberline {4.3}Target realization by gain adaptation}{36}{section.4.3}%
-\contentsline {subsection}{\numberline {4.3.1}Secant search}{37}{subsection.4.3.1}%
-\contentsline {chapter}{\numberline {5}Evaluation}{39}{chapter.5}%
-\contentsline {section}{\numberline {5.1}T0: Experiment diagnostics}{40}{section.5.1}%
-\contentsline {section}{\numberline {5.2}T1: Guidance-profile evaluation}{40}{section.5.2}%
-\contentsline {subsection}{\numberline {5.2.1}T1.1: Multivariate propagation of guidance}{40}{subsection.5.2.1}%
-\contentsline {subsection}{\numberline {5.2.2}T1.2: Deviation from the unguided trajectory}{41}{subsection.5.2.2}%
-\contentsline {subsection}{\numberline {5.2.3}T1.3: Spatial deviation from the target mask}{41}{subsection.5.2.3}%
-\contentsline {subsection}{\numberline {5.2.4}T1.4: Guidance-effect diversity across ensemble members}{41}{subsection.5.2.4}%
-\contentsline {section}{\numberline {5.3}T2: Scenario-specification analysis}{41}{section.5.3}%
-\contentsline {chapter}{\numberline {6}Evaluation}{42}{chapter.6}%
-\contentsline {section}{\numberline {6.1}Quantitative evaluation}{43}{section.6.1}%
-\contentsline {subsection}{\numberline {6.1.1}Q2}{43}{subsection.6.1.1}%
-\contentsline {subsection}{\numberline {6.1.2}Q3}{43}{subsection.6.1.2}%
-\contentsline {section}{\numberline {6.2}Quanlitative evaluation}{43}{section.6.2}%
-\contentsline {subsection}{\numberline {6.2.1}Q3}{43}{subsection.6.2.1}%
-\contentsline {subsection}{\numberline {6.2.2}Q4}{43}{subsection.6.2.2}%
-\contentsline {section}{\numberline {6.3}Weather-time assessment}{44}{section.6.3}%
-\contentsline {subsection}{\numberline {6.3.1}Parameter characterisation tests}{44}{subsection.6.3.1}%
-\contentsline {subsubsection}{Region of interest}{44}{section*.11}%
-\contentsline {subsubsection}{Variable of interest}{44}{section*.12}%
-\contentsline {subsubsection}{Intervention profile}{44}{section*.13}%
-\contentsline {subsection}{\numberline {6.3.2}Realism tests}{45}{subsection.6.3.2}%
-\contentsline {subsection}{\numberline {6.3.3}Method Validation}{46}{subsection.6.3.3}%
-\contentsline {chapter}{\numberline {7}Experiments}{47}{chapter.7}%
-\contentsline {section}{\numberline {7.1}Flow-time evaluation}{47}{section.7.1}%
-\contentsline {subsection}{\numberline {7.1.1}Setup}{47}{subsection.7.1.1}%
-\contentsline {subsection}{\numberline {7.1.2}Achievement tests}{48}{subsection.7.1.2}%
-\contentsline {section}{\numberline {7.2}Weather-time evaluation}{49}{section.7.2}%
-\contentsline {subsection}{\numberline {7.2.1}Parameter characterisation tests}{49}{subsection.7.2.1}%
-\contentsline {subsubsection}{Region of interest}{49}{section*.14}%
-\contentsline {subsubsection}{Variable of interest}{49}{section*.15}%
-\contentsline {subsubsection}{Intervention profile}{49}{section*.16}%
-\contentsline {subsection}{\numberline {7.2.2}Realism tests}{49}{subsection.7.2.2}%
-\contentsline {section}{\numberline {7.3}Use cases}{49}{section.7.3}%
-\contentsline {subsection}{\numberline {7.3.1}Europe 2020-06-01}{49}{subsection.7.3.1}%
-\contentsline {subsection}{\numberline {7.3.2}Australia 2020-01-01}{49}{subsection.7.3.2}%
-\contentsline {subsection}{\numberline {7.3.3}North America 2020-07-01}{49}{subsection.7.3.3}%
-\contentsline {chapter}{\numberline {8}Discussion}{50}{chapter.8}%
-\contentsline {section}{\numberline {8.1}Gradient}{50}{section.8.1}%
-\contentsline {section}{\numberline {8.2}Bonus}{50}{section.8.2}%
-\contentsline {section}{\numberline {8.3}Mask}{50}{section.8.3}%
-\contentsline {section}{\numberline {8.4}...}{51}{section.8.4}%
-\contentsline {chapter}{\numberline {9}Conclusion}{52}{chapter.9}%
-\contentsline {section}{\numberline {9.1}Summary}{52}{section.9.1}%
-\contentsline {section}{\numberline {9.2}Future Directions}{52}{section.9.2}%
-\contentsline {section}{\numberline {9.3}Conclusive Remarks}{52}{section.9.3}%
-\contentsline {chapter}{Appendices}{}{section*.17}
-\contentsline {chapter}{\numberline {A}Development of the target-realization algorithm}{54}{appendix.A}%
-\contentsline {section}{\numberline {A.1}\textsc {Close-Gap}}{54}{section.A.1}%
-\contentsline {section}{\numberline {A.2}\textsc {Optimize-Schedule}}{56}{section.A.2}%
+\contentsline {section}{\numberline {3.3}Procedure overview}{28}{section.3.3}%
+\contentsline {chapter}{\numberline {4}Guidance design}{30}{chapter.4}%
+\contentsline {section}{\numberline {4.1}Target-driven guidance}{31}{section.4.1}%
+\contentsline {subsection}{\numberline {4.1.1}Guidance objective}{32}{subsection.4.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}Gradient-based flow guidance}{33}{subsection.4.1.2}%
+\contentsline {section}{\numberline {4.2}Guidance-strength design}{34}{section.4.2}%
+\contentsline {subsection}{\numberline {4.2.1}Final flow step}{35}{subsection.4.2.1}%
+\contentsline {subsection}{\numberline {4.2.2}Flow-time profile}{36}{subsection.4.2.2}%
+\contentsline {subsection}{\numberline {4.2.3}Alternative target-realization strategies}{36}{subsection.4.2.3}%
+\contentsline {section}{\numberline {4.3}Target realization by gain adaptation}{37}{section.4.3}%
+\contentsline {subsection}{\numberline {4.3.1}Secant search}{38}{subsection.4.3.1}%
+\contentsline {chapter}{\numberline {5}Evaluation}{40}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Evaluation setup}{40}{section.5.1}%
+\contentsline {section}{\numberline {5.2}T0: Qualitative evaluation}{41}{section.5.2}%
+\contentsline {section}{\numberline {5.3}T1: Guidance-profile evaluation}{42}{section.5.3}%
+\contentsline {subsection}{\numberline {5.3.1}T1.1: Multivariate propagation of guidance}{42}{subsection.5.3.1}%
+\contentsline {subsection}{\numberline {5.3.2}T1.2: Spatial deviation from the target mask}{43}{subsection.5.3.2}%
+\contentsline {subsection}{\numberline {5.3.3}T1.3: Ensemble variability of the guidance footprint}{44}{subsection.5.3.3}%
+\contentsline {subsection}{\numberline {5.3.4}T1.4: Profile comparison and selection}{45}{subsection.5.3.4}%
+\contentsline {section}{\numberline {5.4}T2: Scenario-specification analysis}{46}{section.5.4}%
+\contentsline {subsection}{\numberline {5.4.1}T2.1: Target intensity}{46}{subsection.5.4.1}%
+\contentsline {subsection}{\numberline {5.4.2}T2.2: Target region}{46}{subsection.5.4.2}%
+\contentsline {chapter}{\numberline {6}Experiments and Results}{47}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Experimental setup}{47}{section.6.1}%
+\contentsline {subsection}{\numberline {6.1.1}Experimental settings}{47}{subsection.6.1.1}%
+\contentsline {subsection}{\numberline {6.1.2}Paired stochastic realizations}{48}{subsection.6.1.2}%
+\contentsline {subsection}{\numberline {6.1.3}Guidance-profile search}{49}{subsection.6.1.3}%
+\contentsline {subsection}{\numberline {6.1.4}Implementation details}{49}{subsection.6.1.4}%
+\contentsline {section}{\numberline {6.2}T0: Qualitative evaluation}{49}{section.6.2}%
+\contentsline {subsection}{\numberline {6.2.1}Descriptive statistics}{50}{subsection.6.2.1}%
+\contentsline {subsection}{\numberline {6.2.2}Guided and matched unguided states}{50}{subsection.6.2.2}%
+\contentsline {subsection}{\numberline {6.2.3}Masked mean}{52}{subsection.6.2.3}%
+\contentsline {subsection}{\numberline {6.2.4}Evolution through the residual flow}{53}{subsection.6.2.4}%
+\contentsline {section}{\numberline {6.3}T1: Guidance-profile evaluation}{54}{section.6.3}%
+\contentsline {subsection}{\numberline {6.3.1}T1.1: Temporal localization of guidance}{55}{subsection.6.3.1}%
+\contentsline {subsection}{\numberline {6.3.2}T1.2: Temporal spreading of guidance}{58}{subsection.6.3.2}%
+\contentsline {subsection}{\numberline {6.3.3}T1.3: Profile selection}{58}{subsection.6.3.3}%
+\contentsline {subsection}{\numberline {6.3.4}T1.4: Prediction accuracy over flow time}{59}{subsection.6.3.4}%
+\contentsline {chapter}{\numberline {7}Discussion}{60}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Quantitative evaluation}{60}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Gradient}{60}{section.7.2}%
+\contentsline {section}{\numberline {7.3}Bonus}{61}{section.7.3}%
+\contentsline {section}{\numberline {7.4}Mask}{61}{section.7.4}%
+\contentsline {section}{\numberline {7.5}...}{61}{section.7.5}%
+\contentsline {chapter}{\numberline {8}Conclusion}{63}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Summary}{63}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Future Directions}{63}{section.8.2}%
+\contentsline {section}{\numberline {8.3}Conclusive Remarks}{63}{section.8.3}%
+\contentsline {chapter}{Appendices}{}{section*.24}
+\contentsline {chapter}{\numberline {A}Development of the target-realization algorithm}{65}{appendix.A}%
+\contentsline {section}{\numberline {A.1}\textsc {Close-Gap}}{65}{section.A.1}%
+\contentsline {section}{\numberline {A.2}\textsc {Optimize-Schedule}}{67}{section.A.2}%
