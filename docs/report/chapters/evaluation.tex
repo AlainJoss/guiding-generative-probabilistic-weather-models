@@ -1,222 +1,222 @@
-\chapter{Evaluation}
-\label{ch:eval}
+% \chapter{Evaluation}
+% \label{ch:eval}
 
-This chapter develops the framework used to evaluate the guidance method.
+% This chapter develops the framework used to evaluate the guidance method.
 
-We first inspect representative guided samples qualitatively to establish an
-intuitive picture of the resulting interventions (T0). We then compare
-candidate flow-time guidance profiles using three complementary criteria (T1):
-the multivariate propagation of the guidance effect, the spatial deviation of
-its footprint from the prescribed target mask, and the variability of this
-footprint across ensemble members. 
+% We first inspect representative guided samples qualitatively to establish an
+% intuitive picture of the resulting interventions (T0). We then compare
+% candidate flow-time guidance profiles using three complementary criteria (T1):
+% the multivariate propagation of the guidance effect, the spatial deviation of
+% its footprint from the prescribed target mask, and the variability of this
+% footprint across ensemble members. 
 
-Finally, with the guidance profile fixed, we examine how the generated state
-changes when varying the two components of the scenario specification: target
-intensity and target region (both in terms of shift and size) (T2).
+% Finally, with the guidance profile fixed, we examine how the generated state
+% changes when varying the two components of the scenario specification: target
+% intensity and target region (both in terms of shift and size) (T2).
 
-\section{Evaluation setup}
-\label{sec:evaluation-setup}
-We conduct all evaluations on single-weather-step experiments, allowing us
-to isolate the behaviour of the guidance procedure without the additional
-effects of autoregressive propagation.
+% \section{Evaluation setup}
+% \label{sec:evaluation-setup}
+% We conduct all evaluations on single-weather-step experiments, allowing us
+% to isolate the behaviour of the guidance procedure without the additional
+% effects of autoregressive propagation.
 
-\subsection{Notation}
-We now introduce the notation shared by the evaluations below.
+% \subsection{Notation}
+% We now introduce the notation shared by the evaluations below.
 
-Let
-\[
-    \Gamma
-    =
-    \left\{
-        \gamma^{(1)},\ldots,\gamma^{(K)}
-    \right\}
-\]
-denote the set of candidate flow-time guidance profiles. Each
-$\gamma\in\Gamma$ specifies how the guidance strength is distributed over the
-residual flow.
+% Let
+% \[
+%     \Gamma
+%     =
+%     \left\{
+%         \gamma^{(1)},\ldots,\gamma^{(K)}
+%     \right\}
+% \]
+% denote the set of candidate flow-time guidance profiles. Each
+% $\gamma\in\Gamma$ specifies how the guidance strength is distributed over the
+% residual flow.
 
-Let $E$ denote the set of experimental settings over which these profiles are
-compared. An experimental setting $e\in E$ specifies the quantities held fixed
-across candidate profiles: the initial forecast context, the target mask
-$\pi_e$, including its target variable $v_e^\star$, level $\ell_e^\star$, and
-spatial support, and the prescribed relative intensity $\rho_H(e)$. Since all
-experiments consist of a single weather step, this intensity
-directly determines the target for the generated state. We thus simplify the intensity level to $\rho_e$.
+% Let $E$ denote the set of experimental settings over which these profiles are
+% compared. An experimental setting $e\in E$ specifies the quantities held fixed
+% across candidate profiles: the initial forecast context, the target mask
+% $\pi_e$, including its target variable $v_e^\star$, level $\ell_e^\star$, and
+% spatial support, and the prescribed relative intensity $\rho_H(e)$. Since all
+% experiments consist of a single weather step, this intensity
+% directly determines the target for the generated state. We thus simplify the intensity level to $\rho_e$.
 
-For each experimental setting, all candidate profiles are evaluated
-on the same scenario specification. The scalar guidance gain is adapted
-independently for each ensemble member to realize the prescribed target, while
-$\gamma$ determines how this guidance is distributed over the residual flow.
+% For each experimental setting, all candidate profiles are evaluated
+% on the same scenario specification. The scalar guidance gain is adapted
+% independently for each ensemble member to realize the prescribed target, while
+% $\gamma$ determines how this guidance is distributed over the residual flow.
 
-TODO: copy pasted, has to be integrated
-We define the evaluation region
-\[
-    \mathcal{R}_{\mathrm{mask}}
-    :=
-    \{(i,j): k_{ij}=1\},
-    \qquad
-    \mathcal{R}_{\neg\mathrm{mask}}
-    :=
-    \{(i,j): k_{ij}=0\},
-\]
-and let $\mathcal{R}_{\mathrm{global}}$ denote the complete spatial grid. In
-the following,
-\[
-    r\in
-    \{\mathrm{mask},\neg\mathrm{mask},\mathrm{global}\}
-\]
-denotes one of these spatial domains.
-
-
-\subsection{Paired stochastic realizations}
-\label{sec:experimental-seeding}
-
-Comparisons between guidance configurations use matched stochastic
-realizations. The random seed is determined from the weather-step and
-ensemble-member indices as
-
-\begin{equation}
-    \mathrm{seed}(n,m)=1000n+m.
-    \label{eq:experimental-seed}
-\end{equation}
-
-The seed is kept fixed across configurations that are compared directly.
-Corresponding guided and unguided states therefore originate from the same
-initial residual-noise realization. This controls sampling noise in paired
-comparisons while retaining stochastic variability across ensemble members.
+% TODO: copy pasted, has to be integrated
+% We define the evaluation region
+% \[
+%     \mathcal{R}_{\mathrm{mask}}
+%     :=
+%     \{(i,j): k_{ij}=1\},
+%     \qquad
+%     \mathcal{R}_{\neg\mathrm{mask}}
+%     :=
+%     \{(i,j): k_{ij}=0\},
+% \]
+% and let $\mathcal{R}_{\mathrm{global}}$ denote the complete spatial grid. In
+% the following,
+% \[
+%     r\in
+%     \{\mathrm{mask},\neg\mathrm{mask},\mathrm{global}\}
+% \]
+% denotes one of these spatial domains.
 
 
+% \subsection{Paired stochastic realizations}
+% \label{sec:experimental-seeding}
 
-\subsection{Guidance effect}
+% Comparisons between guidance configurations use matched stochastic
+% realizations. The random seed is determined from the weather-step and
+% ensemble-member indices as
 
-TODO: connect with previous subsection
-The central object of the evaluation is the state change attributable to
-guidance itself. For a guided state $x_{e,m}^{\mathrm{gui},\gamma}$ and its
-matched unguided-under-guided-context counterpart
-$x_{e,m}^{\mathrm{ung}\mid\mathrm{gui},\gamma}$, we define the
-\emph{guidance effect} as
-(TODO: rename to GE everywhere, I only changed it here)
-\begin{equation}
-    \Delta x_{e,m}^{\mathrm{GE},\gamma}
-    :=
-    x_{e,m}^{\mathrm{gui},\gamma}
-    -
-    x_{e,m}^{\mathrm{ung}\mid\mathrm{gui},\gamma}.
-    \label{eq:guidance-effect}
-\end{equation}
+% \begin{equation}
+%     \mathrm{seed}(n,m)=1000n+m.
+%     \label{eq:experimental-seed}
+% \end{equation}
 
-The two states share the same autoregressive conditioning context,
-deterministic forecast, and initial residual-noise realization, and differ only
-in whether guidance is applied during the residual flow. Their difference
-therefore isolates the state change induced by guidance.
-
-
-\section{T0: Qualitative evaluation}
-\label{sec:qualitative-evaluation}
-
-Before quantitatively comparing the candidate guidance profiles, we first
-inspect representative guided samples qualitatively. The aim is to establish
-an intuitive picture of how guidance modifies the generated weather state.
-
-We examine ... (T01-T06)
-
-\section{T1: Guidance-profile evaluation}
-\label{sec:guidance-profile-evaluation}
-
-\subsection{T1.1: Multivariate propagation of guidance}
-\label{sec:multivariate-propagation}
-
-The first criterion examines how strongly an intervention propagates through the atmospheric
-state. We evaluate this response within the target region ... (not sure)
-
-
-\subsection{T1.2: Spatial deviation from the target mask}
-\label{sec:spatial-mask-deviation}
-
-
-\subsection{T1.3: Ensemble variability of the guidance footprint}
-\label{sec:guidance-footprint-variability}
-
-
-\subsection{T1.4: Profile comparison and selection}
-\label{sec:guidance-profile-selection}
-
-TODO: shorten to the essence
-
-The three criteria are considered jointly when comparing guidance profiles:
-larger multivariate propagation indicates a stronger coupled atmospheric
-response, smaller total-variation distance indicates closer spatial alignment
-with the target mask, and ensemble variability quantifies the dependence of the
-guidance footprint on the stochastic realization. Together with the qualitative
-diagnostics from T0, these measures form the basis for selecting the guidance
-profile $\gamma^\star$ in the following chapter.
+% The seed is kept fixed across configurations that are compared directly.
+% Corresponding guided and unguided states therefore originate from the same
+% initial residual-noise realization. This controls sampling noise in paired
+% comparisons while retaining stochastic variability across ensemble members.
 
 
 
-\section{T2: Scenario-specification analysis}
-\label{sec:scenario-specification-analysis}
+% \subsection{Guidance effect}
 
-TODO: shorten to the essence
+% TODO: connect with previous subsection
+% The central object of the evaluation is the state change attributable to
+% guidance itself. For a guided state $x_{e,m}^{\mathrm{gui},\gamma}$ and its
+% matched unguided-under-guided-context counterpart
+% $x_{e,m}^{\mathrm{ung}\mid\mathrm{gui},\gamma}$, we define the
+% \emph{guidance effect} as
+% (TODO: rename to GE everywhere, I only changed it here)
+% \begin{equation}
+%     \Delta x_{e,m}^{\mathrm{GE},\gamma}
+%     :=
+%     x_{e,m}^{\mathrm{gui},\gamma}
+%     -
+%     x_{e,m}^{\mathrm{ung}\mid\mathrm{gui},\gamma}.
+%     \label{eq:guidance-effect}
+% \end{equation}
 
-With the guidance profile fixed, we next examine how the generated state
-depends on the scenario specification. We vary the two components introduced
-in \Cref{ch:specify}: the prescribed intensity $\rho_H$ and the spatial support
-of the target mask $\pi$.
-
-
-\subsection{T2.1: Target intensity}
-\label{sec:target-intensity-analysis}
-
-We first vary the prescribed intensity $\rho_H$ while keeping the target mask
-$\pi$ and guidance profile $\gamma^\star$ fixed. For each intensity level, we
-inspect the resulting guided state and guidance effect to assess how the
-magnitude and spatial structure of the intervention change as the target is
-moved further from its unguided reference.
-
-
-\subsection{T2.2: Target region}
-\label{sec:target-region-analysis}
-
-We next vary the spatial support of the target mask $\pi$ while keeping the
-target variable, level, prescribed intensity, and guidance profile
-$\gamma^\star$ fixed. The compared masks share a common center but differ in
-their spatial extent. We inspect the resulting guided states and guidance
-effects to assess how the intervention changes when the same target is imposed
-over regions of different size.
+% The two states share the same autoregressive conditioning context,
+% deterministic forecast, and initial residual-noise realization, and differ only
+% in whether guidance is applied during the residual flow. Their difference
+% therefore isolates the state change induced by guidance.
 
 
-Together, T0--T2 define the evaluation framework used in the following chapter
-to compare candidate guidance profiles and characterize the sensitivity of the
-method to the prescribed scenario.
+% \section{T0: Qualitative evaluation}
+% \label{sec:qualitative-evaluation}
+
+% Before quantitatively comparing the candidate guidance profiles, we first
+% inspect representative guided samples qualitatively. The aim is to establish
+% an intuitive picture of how guidance modifies the generated weather state.
+
+% We examine ... (T01-T06)
+
+% \section{T1: Guidance-profile evaluation}
+% \label{sec:guidance-profile-evaluation}
+
+% \subsection{T1.1: Multivariate propagation of guidance}
+% \label{sec:multivariate-propagation}
+
+% The first criterion examines how strongly an intervention propagates through the atmospheric
+% state. We evaluate this response within the target region ... (not sure)
 
 
-\section{Notes}
-These notes specify exactly how the chapter should be built in addition to a few useful notes.
+% \subsection{T1.2: Spatial deviation from the target mask}
+% \label{sec:spatial-mask-deviation}
 
-Experiment tuple notation: $\mathcal{E} = (\Tau, \mathcal{P}, \Pi)$
-for $\tau$ start date, $\rho$ intensity level, $\pi$ mask (target var,level,spatial region).
-Also define the different eval regions $\mathcal{R}$
 
-Seeding, and what this enables (DeltaxGE).
+% \subsection{T1.3: Ensemble variability of the guidance footprint}
+% \label{sec:guidance-footprint-variability}
 
-King of evaluation is DeltaxGE, member, var and level specific.
-We evaluate is across experiments e in E.
 
-T0: 
-- descriptive stats (current Descriptive statistics)
-- example maps (gui, ung|gui, DeltaxGE) take from guidance.py notebook in Inspect states section under diff mode you will find those three charts, select one experiment, m=0, and a use the selected rho as always.
-- example DeltaxGE across selected variables (same as the ones used of the ones used for the current "T01: Convergence over flow time" and plot in the same grid) 
-- T0.4a,b: masked mean charts x2 (T04: Absolute intensity and T05: Relative to ground truth)
-- convergence charts (T01: Convergence over flow time)
-- decomposition chart (T02: Convergence decomposition (landings))
+% \subsection{T1.4: Profile comparison and selection}
+% \label{sec:guidance-profile-selection}
 
-Note in T1 we specify which region is considered for the eval 
-T1:
-- T1.1 multivariate propagation (better name than spread) - object of interest: abs(DeltaxGE)
-- T1.2 mask deviation - object of interest: norm(abs(DeltaxGE)) - mask
-- T1.3 std\_m(DeltaxGE)
-Protocol: since every test consider the object DeltaxGE from different perspectives, we can build the evaluation for each T1.i around the same structure.
-- visual example charts selected vars at selected levels
-- chart for all vars at selected levels (explain once how the charts are created)
-- table funnel (attention, T1.3 looses the variance for each experiment since std is itself the considered object)
-    here we should explain only once how the tables are generated / aggregated
+% TODO: shorten to the essence
+
+% The three criteria are considered jointly when comparing guidance profiles:
+% larger multivariate propagation indicates a stronger coupled atmospheric
+% response, smaller total-variation distance indicates closer spatial alignment
+% with the target mask, and ensemble variability quantifies the dependence of the
+% guidance footprint on the stochastic realization. Together with the qualitative
+% diagnostics from T0, these measures form the basis for selecting the guidance
+% profile $\gamma^\star$ in the following chapter.
+
+
+
+% \section{T2: Scenario-specification analysis}
+% \label{sec:scenario-specification-analysis}
+
+% TODO: shorten to the essence
+
+% With the guidance profile fixed, we next examine how the generated state
+% depends on the scenario specification. We vary the two components introduced
+% in \Cref{ch:specify}: the prescribed intensity $\rho_H$ and the spatial support
+% of the target mask $\pi$.
+
+
+% \subsection{T2.1: Target intensity}
+% \label{sec:target-intensity-analysis}
+
+% We first vary the prescribed intensity $\rho_H$ while keeping the target mask
+% $\pi$ and guidance profile $\gamma^\star$ fixed. For each intensity level, we
+% inspect the resulting guided state and guidance effect to assess how the
+% magnitude and spatial structure of the intervention change as the target is
+% moved further from its unguided reference.
+
+
+% \subsection{T2.2: Target region}
+% \label{sec:target-region-analysis}
+
+% We next vary the spatial support of the target mask $\pi$ while keeping the
+% target variable, level, prescribed intensity, and guidance profile
+% $\gamma^\star$ fixed. The compared masks share a common center but differ in
+% their spatial extent. We inspect the resulting guided states and guidance
+% effects to assess how the intervention changes when the same target is imposed
+% over regions of different size.
+
+
+% Together, T0--T2 define the evaluation framework used in the following chapter
+% to compare candidate guidance profiles and characterize the sensitivity of the
+% method to the prescribed scenario.
+
+
+% \section{Notes}
+% These notes specify exactly how the chapter should be built in addition to a few useful notes.
+
+% Experiment tuple notation: $\mathcal{E} = (\Tau, \mathcal{P}, \Pi)$
+% for $\tau$ start date, $\rho$ intensity level, $\pi$ mask (target var,level,spatial region).
+% Also define the different eval regions $\mathcal{R}$
+
+% Seeding, and what this enables (DeltaxGE).
+
+% King of evaluation is DeltaxGE, member, var and level specific.
+% We evaluate is across experiments e in E.
+
+% T0: 
+% - descriptive stats (current Descriptive statistics)
+% - example maps (gui, ung|gui, DeltaxGE) take from guidance.py notebook in Inspect states section under diff mode you will find those three charts, select one experiment, m=0, and a use the selected rho as always.
+% - example DeltaxGE across selected variables (same as the ones used of the ones used for the current "T01: Convergence over flow time" and plot in the same grid) 
+% - T0.4a,b: masked mean charts x2 (T04: Absolute intensity and T05: Relative to ground truth)
+% - convergence charts (T01: Convergence over flow time)
+% - decomposition chart (T02: Convergence decomposition (landings))
+
+% Note in T1 we specify which region is considered for the eval 
+% T1:
+% - T1.1 multivariate propagation (better name than spread) - object of interest: abs(DeltaxGE)
+% - T1.2 mask deviation - object of interest: norm(abs(DeltaxGE)) - mask
+% - T1.3 std\_m(DeltaxGE)
+% Protocol: since every test consider the object DeltaxGE from different perspectives, we can build the evaluation for each T1.i around the same structure.
+% - visual example charts selected vars at selected levels
+% - chart for all vars at selected levels (explain once how the charts are created)
+% - table funnel (attention, T1.3 looses the variance for each experiment since std is itself the considered object)
+%     here we should explain only once how the tables are generated / aggregated

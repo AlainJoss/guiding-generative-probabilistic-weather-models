@@ -1,93 +1,134 @@
-\chapter{Discussion}\label{ch:discussion}
+% \chapter{Discussion}\label{ch:discussion}
 
 
-\subsection{T1.4: Prediction accuracy over flow time}
-\label{sec:experiments-prediction-noise}
+% \subsection{Supporting diagnostic: intermediate prediction error}
+% \label{sec:evaluation-prediction-noise}
 
-TODO: this should be in the discussion chapter not in here. 
+% To investigate whether guidance effectiveness is associated with the accuracy
+% of the intermediate clean prediction, we additionally inspect the unguided
+% residual flow.
 
-The preference for $\mathrm{spike@1}$ does not coincide with increased
-accuracy of the intermediate residual prediction. To examine this, we compute
+% At flow step $t$, the clean estimate of the final latent is
 
-\begin{equation}
-    \operatorname{RMSE}\!\left(\hat z_t,z_T\right)
-\end{equation}
+% \begin{equation}
+%     \hat{z}_t
+%     :=
+%     z_t
+%     +
+%     \frac{s_t}{h_t}
+%     \left(
+%         z_{t+1}-z_t
+%     \right).
+%     \label{eq:intermediate-latent-prediction}
+% \end{equation}
 
-between the intermediate prediction $\hat z_t$ and the final residual $z_T$.
+% Its error relative to the realized final latent $z_T$ is measured over the
+% evaluation region by
 
-% \begin{figure}[H]
-%     \centering
-%     \includegraphics[width=\textwidth]{figures/T4.png}
-%     \caption{
-%         RMSE between the intermediate residual prediction $\hat z_t$ and the
-%         final residual $z_T$ over flow time. Curves summarize the four forecast
-%         initializations, with variation across ensemble members.
-%     }
-%     \label{fig:t1-prediction-noise}
-% \end{figure}
+% \begin{equation}
+%     \operatorname{RMSE}(t)
+%     :=
+%     \sqrt{
+%         \left\langle
+%             \left(
+%                 \hat{z}_t-z_T
+%             \right)^2
+%         \right\rangle_{\pi}
+%     }.
+%     \label{eq:intermediate-prediction-rmse}
+% \end{equation}
 
-For all four initializations, the prediction error reaches its maximum at
-$t=1$, precisely the flow step selected for guidance. Thereafter, the error
-decreases approximately monotonically toward the final residual. Thus, the
-effectiveness of $\mathrm{spike@1}$ cannot be explained by unusually accurate
-intermediate predictions. Instead, the relationship between prediction
-accuracy and guidance effectiveness is non-monotonic and remains unresolved by
-the present experiments.
+% This diagnostic is not used for profile ranking. It is included only to
+% interpret the temporal location at which guidance is found to be most
+% effective.
+
+% \subsection{T1.4: Prediction accuracy over flow time}
+% \label{sec:experiments-prediction-noise}
+
+% TODO: this should be in the discussion chapter not in here. 
+
+% The preference for $\mathrm{spike@1}$ does not coincide with increased
+% accuracy of the intermediate residual prediction. To examine this, we compute
+
+% \begin{equation}
+%     \operatorname{RMSE}\!\left(\hat z_t,z_T\right)
+% \end{equation}
+
+% between the intermediate prediction $\hat z_t$ and the final residual $z_T$.
+
+% % \begin{figure}[H]
+% %     \centering
+% %     \includegraphics[width=\textwidth]{figures/T4.png}
+% %     \caption{
+% %         RMSE between the intermediate residual prediction $\hat z_t$ and the
+% %         final residual $z_T$ over flow time. Curves summarize the four forecast
+% %         initializations, with variation across ensemble members.
+% %     }
+% %     \label{fig:t1-prediction-noise}
+% % \end{figure}
+
+% For all four initializations, the prediction error reaches its maximum at
+% $t=1$, precisely the flow step selected for guidance. Thereafter, the error
+% decreases approximately monotonically toward the final residual. Thus, the
+% effectiveness of $\mathrm{spike@1}$ cannot be explained by unusually accurate
+% intermediate predictions. Instead, the relationship between prediction
+% accuracy and guidance effectiveness is non-monotonic and remains unresolved by
+% the present experiments.
 
 
-\section{Quantitative evaluation}
+% \section{Quantitative evaluation}
 
-The analyze metrics provide information but only accompagned with the intuition that we gain when looking at the generated guidance effect maps and absolute maps themseleves.
+% The analyze metrics provide information but only accompagned with the intuition that we gain when looking at the generated guidance effect maps and absolute maps themseleves.
 
-These enable us to anchor our qualitative intuition that spike\@ produces progressively less realistic results with hard measures.
-This also combined with the charts that show how the variables are being pushed (across levels).
+% These enable us to anchor our qualitative intuition that spike\@ produces progressively less realistic results with hard measures.
+% This also combined with the charts that show how the variables are being pushed (across levels).
 
-In addition, we also measured the accuracy of the clean estimate throughout t and we find that spike\@2 is the worst one.
-So, it seems that having a rough direction to push towards, but the model having enough steps to figure out the final correction produces the best results.
-The nearer we are to T in terms of steps left, the less sensible the gradient is to other variables compared to temperature.
-So having enough steps to correct is good.
-But why does not spike@1 win? It seems that at pure noise, before the model has done any correction, the additional denoising step does not win against a possibly more informative gradient direction.
-
-
-\section{Gradient}
-The gradient has the unique property that it encapsulates what should change with respect to the learned weather function.
-
-\section{Bonus}
-Distance in PCA space.
-
-\section{Mask}
+% In addition, we also measured the accuracy of the clean estimate throughout t and we find that spike\@2 is the worst one.
+% So, it seems that having a rough direction to push towards, but the model having enough steps to figure out the final correction produces the best results.
+% The nearer we are to T in terms of steps left, the less sensible the gradient is to other variables compared to temperature.
+% So having enough steps to correct is good.
+% But why does not spike@1 win? It seems that at pure noise, before the model has done any correction, the additional denoising step does not win against a possibly more informative gradient direction.
 
 
-We experimented with a gaussian mask, but realized in our experiments that the best thing to do is equal weighting inside the region.
-The correct way to define the region of interest is to choose a greater mask size instead of using some weighting scheme fading out of an epicenter. The mask size should be chosen to cover the entire area of interest, ensuring that all relevant data is included in the analysis. A larger mask size can help to reduce noise and improve the accuracy of the results, while a smaller mask size may exclude important information. It is important to carefully consider the appropriate mask size for each specific application to achieve optimal results.
-Either way we (most probably) loose the global coherence for the guided weather states, so we might as well define directly the region of interest with a mask. 
-Additionally, this enables us to actually make statements about "the region of interest",
-having equal weights everywhere.
-Introducing different weigths might bias the generation in a way that is not desired.
+% \section{Gradient}
+% The gradient has the unique property that it encapsulates what should change with respect to the learned weather function.
 
-We will see that including or not a specific area will change the guided patterns substantially.
-This however is consistent with the notion of "region of interest".
-If we consider a greater area for the changes, the changes will be applied respectively.
+% \section{Bonus}
+% Distance in PCA space.
 
---- note here: it may also be that the pushed area is coherent with the rest, and that the next deterministic prediction influences other regions too
-It is really important to understand how to evaluate what we are doing here.
-Since we are aiming at a specific region of interest, and we are guiding mainly locally over the region of interest, loosing the global coherence of the weather states.
-We shall thus include this in our evaluation by comparing inside region, outside region, and full spatial domain.
+% \section{Mask}
 
-\section{...}
 
-The algorithm doesn't produce diverse results, because the gradients are really stable.
-This has to do with the fact that we have learned one and only one flow model (transition function).
-If we had multiple residual diffusion model, we would expect the possible effects to be more diverse.
-However, the second interpretation might be that the gradient provides with the information about the most likely direction of change (which is true under the learned data distribution).
+% We experimented with a gaussian mask, but realized in our experiments that the best thing to do is equal weighting inside the region.
+% The correct way to define the region of interest is to choose a greater mask size instead of using some weighting scheme fading out of an epicenter. The mask size should be chosen to cover the entire area of interest, ensuring that all relevant data is included in the analysis. A larger mask size can help to reduce noise and improve the accuracy of the results, while a smaller mask size may exclude important information. It is important to carefully consider the appropriate mask size for each specific application to achieve optimal results.
+% Either way we (most probably) loose the global coherence for the guided weather states, so we might as well define directly the region of interest with a mask. 
+% Additionally, this enables us to actually make statements about "the region of interest",
+% having equal weights everywhere.
+% Introducing different weigths might bias the generation in a way that is not desired.
 
-This happens because the guidance vector is a scaled version of the flow model's gradient wrt to the noisy state.
-The gradient is stable across the full trajectory, because the only variable inputs are the noise itself and the timestep of the flow.
-The stochasticity of the noise is not enough to produce diverse results.
-The direction of the gradient is always the same. If we say "let the masked average go up by phi percent", the only thing that changes is the magnitude of the gradient, but not its direction, which is specified by the Jacobian.
+% We will see that including or not a specific area will change the guided patterns substantially.
+% This however is consistent with the notion of "region of interest".
+% If we consider a greater area for the changes, the changes will be applied respectively.
 
-This is in contrast to guidance settings.
+% --- note here: it may also be that the pushed area is coherent with the rest, and that the next deterministic prediction influences other regions too
+% It is really important to understand how to evaluate what we are doing here.
+% Since we are aiming at a specific region of interest, and we are guiding mainly locally over the region of interest, loosing the global coherence of the weather states.
+% We shall thus include this in our evaluation by comparing inside region, outside region, and full spatial domain.
 
-Shift between atmosphere and stratosphere.
+% \section{...}
 
-Put here all observations
+% The algorithm doesn't produce diverse results, because the gradients are really stable.
+% This has to do with the fact that we have learned one and only one flow model (transition function).
+% If we had multiple residual diffusion model, we would expect the possible effects to be more diverse.
+% However, the second interpretation might be that the gradient provides with the information about the most likely direction of change (which is true under the learned data distribution).
+
+% This happens because the guidance vector is a scaled version of the flow model's gradient wrt to the noisy state.
+% The gradient is stable across the full trajectory, because the only variable inputs are the noise itself and the timestep of the flow.
+% The stochasticity of the noise is not enough to produce diverse results.
+% The direction of the gradient is always the same. If we say "let the masked average go up by phi percent", the only thing that changes is the magnitude of the gradient, but not its direction, which is specified by the Jacobian.
+
+% This is in contrast to guidance settings.
+
+% Shift between atmosphere and stratosphere.
+
+% Put here all observations

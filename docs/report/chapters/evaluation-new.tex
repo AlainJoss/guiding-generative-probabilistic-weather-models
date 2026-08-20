@@ -1,2 +1,1126 @@
-\chapter{Evaluation}
+\chapter{Evaluation and Results}
 \label{ch:eval}
+
+This chapter evaluates the proposed guidance method and presents the
+corresponding experimental results. The analysis is organized around the
+state change induced by guidance relative to a matched unguided realization.
+
+We first use descriptive and qualitative diagnostics to establish how guidance
+modifies the generated state and how the intervention develops over flow time
+(T0). We then compare alternative flow-time guidance profiles from three
+complementary perspectives (T1): propagation across atmospheric variables and
+vertical levels, spatial deviation from the prescribed target mask, and
+diversity across stochastic ensemble realizations. Finally, after selecting a
+guidance profile, we examine how the generated response changes with the
+prescribed target intensity, location, and spatial extent (T2).
+
+
+\section{Evaluation setup}
+\label{sec:evaluation-setup}
+
+All experiments considered in T0 and T1 generate a single weather step. This
+isolates the behaviour of the guidance procedure from effects introduced by
+autoregressive propagation over subsequent forecast steps.
+
+
+\subsection{Experimental settings}
+\label{sec:evaluation-settings}
+
+We denote an experimental setting by
+
+\begin{equation}
+    e=(\tau,\rho,\pi),
+    \label{eq:evaluation-setting}
+\end{equation}
+
+where $\tau$ is the forecast initialization, $\rho$ the prescribed relative
+target intensity, and $\pi$ the spatial target mask defined in
+\Cref{sec:target-region}. (TODO: not so clear) The set of evaluated settings is denoted by $E$.
+
+A flow-time guidance profile $\gamma$ specifies how the relative guidance
+strength is distributed over the residual-flow steps. We denote the set of
+profiles compared within an experiment by
+
+\begin{equation}
+    \Gamma
+    =
+    \left\{
+        \gamma^{(1)},\ldots,\gamma^{(K)}
+    \right\}.
+    \label{eq:candidate-guidance-profiles}
+\end{equation}
+
+The scalar guidance gain is adapted independently for each ensemble member to
+realize its prescribed target, while $\gamma$ determines the temporal
+distribution of the intervention.
+
+Throughout the chapter, the variable and level conventions from
+\Cref{sec:archesweather-dataset} are used. In particular,
+$\ell\in L_v$ denotes a level on which variable $v$ is defined.
+
+For quantities restricted to the spatial support of the target mask, we write
+
+\begin{equation}
+    \mathcal{R}
+    :=
+    \left\{
+        (i,j):\pi_{ij}>0
+    \right\}.
+    \label{eq:target-region}
+\end{equation}
+
+
+\subsection{Paired stochastic realizations}
+\label{sec:experimental-seeding}
+
+Comparisons between guidance configurations use matched stochastic
+realizations. The random seed is determined by the weather-step and
+ensemble-member indices as
+
+\begin{equation}
+    \mathrm{seed}(n,m)=1000n+m.
+    \label{eq:experimental-seed}
+\end{equation}
+
+The same seed is retained across configurations that are compared directly.
+This pairs their initial residual-noise realizations and (TODO: specify more directly) removes sampling
+variability in the comparison while preserving stochastic differences between
+ensemble members.
+
+
+\subsection{Guidance effect}
+\label{sec:guidance-effect}
+
+The central object throughout the evaluation is the state change attributable
+to guidance. For experimental setting $e$, ensemble member $m$, and guidance
+profile $\gamma$, we define
+
+(TODO: do not state the numbers but the sets defined by the Dataset section)
+\begin{equation}
+    \Delta x_{e,m}^{\mathrm{GE},\gamma}
+    :=
+    x_{e,m}^{\mathrm{gui},\gamma}
+    -
+    x_{e,m}^{\mathrm{ung}\mid\mathrm{gui},\gamma}
+    \in
+    \mathbb{R}^{82\times121\times240}.
+    \label{eq:guidance-effect}
+\end{equation}
+
+The guided state and its unguided-under-guided-context counterpart share the
+same autoregressive conditioning context, deterministic forecast, and initial
+residual-noise realization. They differ only in whether guidance is applied
+during the residual flow. Their difference therefore isolates the state change
+induced by guidance.
+
+To keep the notation compact, indices for the experimental setting, ensemble
+member, and guidance profile are omitted whenever they are fixed by context.
+For example,
+
+\[
+    \Delta x_{v\ell}^{\mathrm{GE}}
+\]
+
+denotes the guidance-effect field for variable $v$ and level
+$\ell\in L_v$ under the currently considered setting, member, and profile.
+
+(TODO: not so clear)
+The three T1 criteria examine this same object from different perspectives:
+its point-wise magnitude
+$|\Delta x^{\mathrm{GE}}|$, the spatial distribution of that magnitude within
+the target region, and the ensemble variability of the signed effect.
+
+\subsection{Experimental configuration}
+\label{sec:experimental-configuration}
+
+The T0 and T1 experiments target 2\,m temperature using the fixed European
+mask $\pi_{\mathrm{EU}}$ introduced in \Cref{fig:target-mask-example}. All
+forecast initializations are taken at 12:00 UTC. We consider the four dates
+(TODO: should state explicitly that the left one is left from the peak and the other right from the peak)
+\[
+\begin{aligned}
+    &\text{2024-08-09}, \qquad
+    \text{2024-08-12}, \\
+    &\text{2026-07-04}, \qquad
+    \text{2026-07-09},
+\end{aligned}
+\]
+
+and the two relative target intensities
+
+\begin{equation}
+    \rho \in \{0.002,\,0.004\},
+    \label{eq:t1-target-intensities}
+\end{equation}
+
+corresponding to increases of $0.2\%$ and $0.4\%$ relative to each member's
+unguided reference value.
+
+(TODO: is this even necessary to say? e is e irrespectively ...)
+Since the target mask is fixed throughout T1, we abbreviate the experimental
+setting as
+
+\[
+    e=(\tau,\rho).
+\]
+
+The four initializations and two intensities yield eight experimental settings.
+For each setting, we generate $M=5$ stochastic ensemble members. A
+member-specific criterion is therefore evaluated on $8\times5=40$ paired
+realizations.
+
+% not necessary in this form: All experiments use the same numerical sampling and guidance implementation.
+The residual flow is discretized into 25 flow steps.
+
+% TODO: Add secant-search tolerance and maximum number of iterations.
+% TODO: Add numerical precision used during inference.
+% TODO: Add compute hardware.
+
+
+\section{T0: Descriptive and qualitative evaluation}
+\label{sec:qualitative-evaluation}
+(TODO: throughout the descriptions in the captions should be kept to the minimum)
+
+We begin by inspecting the generated intervention directly before reducing it
+to the quantitative criteria used in T1. Unless stated otherwise, the examples
+in this section use
+
+(TODO: do we need to define e\_ex? just set the value := ?)
+\begin{equation}
+    e_{\mathrm{ex}}
+    =
+    (\text{2026-07-09},\,0.002),
+    \qquad
+    m=0,
+    \qquad
+    \gamma=\mathrm{spike@1}.
+    \label{eq:representative-experiment}
+\end{equation}
+
+The profile $\mathrm{spike@1}$ is compared systematically with the alternative
+flow-time profiles in T1.
+
+
+\subsection{T0.1: Descriptive statistics}
+\label{sec:t0-descriptive-statistics}
+
+Add the missing two +0.06 and +0.08
+
+We first place the prescribed changes in physical context. For each
+initialization and intensity, we report the minimum and maximum 2\,m
+temperature over the target support $\mathcal{R}$, together with its
+area-weighted mean $\mathcal{M}_{\pi_{\mathrm{EU}}}$ and corresponding
+weighted spatial standard deviation. The statistics are shown for both the
+guided state and its matched unguided counterpart.
+
+(The table is clear, we should shorten the description to the minimum)
+\begin{table}[H]
+    \centering
+    \caption{
+        Descriptive statistics of 2\,m temperature for $\rho=0.002$.
+        Minimum and maximum are evaluated over the target support, while mean
+        and spatial standard deviation use the area-weighted mask
+        $\pi_{\mathrm{EU}}$. Entries report mean $\pm$ population standard
+        deviation across the evaluated realizations, in $^\circ$C.
+    }
+    \label{tab:t0-descriptive-02}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{lcccccccc}
+        \toprule
+        & \multicolumn{2}{c}{Minimum}
+        & \multicolumn{2}{c}{Maximum}
+        & \multicolumn{2}{c}{Mean}
+        & \multicolumn{2}{c}{Spatial std.} \\
+        \cmidrule(lr){2-3}
+        \cmidrule(lr){4-5}
+        \cmidrule(lr){6-7}
+        \cmidrule(lr){8-9}
+        Initialization
+        & Unguided & Guided
+        & Unguided & Guided
+        & Unguided & Guided
+        & Unguided & Guided \\
+        \midrule
+        2024-08-09
+        & $13.03\pm0.12$ & $13.19\pm0.16$
+        & $37.21\pm0.31$ & $37.67\pm0.34$
+        & $24.83\pm0.046$ & $25.43\pm0.046$
+        & $5.606\pm0.035$ & $5.672\pm0.033$ \\
+
+        2024-08-12
+        & $13.39\pm0.32$ & $13.57\pm0.33$
+        & $38.09\pm0.40$ & $38.54\pm0.41$
+        & $25.14\pm0.068$ & $25.73\pm0.069$
+        & $6.024\pm0.036$ & $6.094\pm0.044$ \\
+
+        2026-07-04
+        & $12.04\pm0.12$ & $12.30\pm0.16$
+        & $37.24\pm0.47$ & $38.00\pm0.49$
+        & $22.66\pm0.039$ & $23.25\pm0.039$
+        & $5.437\pm0.042$ & $5.436\pm0.058$ \\
+
+        2026-07-09
+        & $12.38\pm0.11$ & $12.57\pm0.14$
+        & $35.51\pm0.30$ & $36.75\pm0.57$
+        & $23.86\pm0.053$ & $24.46\pm0.053$
+        & $5.275\pm0.031$ & $5.354\pm0.048$ \\
+        \bottomrule
+    \end{tabular}
+    }
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \caption{
+        Descriptive statistics of 2\,m temperature for $\rho=0.004$, using
+        the same convention as \Cref{tab:t0-descriptive-02}.
+    }
+    \label{tab:t0-descriptive-04}
+    \resizebox{\textwidth}{!}{
+    \begin{tabular}{lcccccccc}
+        \toprule
+        & \multicolumn{2}{c}{Minimum}
+        & \multicolumn{2}{c}{Maximum}
+        & \multicolumn{2}{c}{Mean}
+        & \multicolumn{2}{c}{Spatial std.} \\
+        \cmidrule(lr){2-3}
+        \cmidrule(lr){4-5}
+        \cmidrule(lr){6-7}
+        \cmidrule(lr){8-9}
+        Initialization
+        & Unguided & Guided
+        & Unguided & Guided
+        & Unguided & Guided
+        & Unguided & Guided \\
+        \midrule
+        2024-08-09
+        & $13.03\pm0.12$ & $13.33\pm0.25$
+        & $37.21\pm0.31$ & $38.13\pm0.43$
+        & $24.83\pm0.046$ & $26.02\pm0.047$
+        & $5.606\pm0.035$ & $5.764\pm0.038$ \\
+
+        2024-08-12
+        & $13.39\pm0.32$ & $13.75\pm0.39$
+        & $38.09\pm0.40$ & $39.00\pm0.45$
+        & $25.14\pm0.068$ & $26.33\pm0.069$
+        & $6.024\pm0.036$ & $6.200\pm0.094$ \\
+
+        2026-07-04
+        & $12.04\pm0.12$ & $12.54\pm0.24$
+        & $37.24\pm0.47$ & $38.78\pm0.54$
+        & $22.66\pm0.039$ & $23.84\pm0.039$
+        & $5.437\pm0.042$ & $5.453\pm0.083$ \\
+
+        2026-07-09
+        & $12.38\pm0.11$ & $12.71\pm0.21$
+        & $35.51\pm0.30$ & $38.05\pm0.99$
+        & $23.86\pm0.053$ & $25.05\pm0.053$
+        & $5.275\pm0.031$ & $5.445\pm0.092$ \\
+        \bottomrule
+    \end{tabular}
+    }
+\end{table}
+
+The prescribed relative changes translate into regional-mean temperature
+increases of approximately $0.6^\circ$C and $1.2^\circ$C for
+$\rho=0.002$ and $\rho=0.004$, respectively. Changes in the extrema and
+spatial standard deviation are less uniform, indicating that realizing the
+regional-mean target does not amount to adding a spatially constant
+temperature offset.
+
+
+\subsection{T0.2: Guided and matched unguided states}
+\label{sec:t0-state-comparison}
+
+We next inspect the three objects on which the subsequent evaluation is built.
+For the representative experiment,
+\Cref{fig:t0-state-comparison} shows the 2\,m temperature field of the matched
+unguided state, the guided state, and their difference
+$\Delta x^{\mathrm{GE}}$.
+
+\begin{figure}[H]
+    \centering
+
+    \includegraphics[width=0.32\textwidth]{figures/T02a.png}
+    \hfill
+    \includegraphics[width=0.32\textwidth]{figures/T02b.png}
+    \hfill
+    \includegraphics[width=0.32\textwidth]{figures/T02c.png}
+
+    \caption{
+        Matched unguided state
+        $x^{\mathrm{ung}\mid\mathrm{gui}}$ (left), guided state
+        $x^{\mathrm{gui}}$ (center), and guidance effect
+        $\Delta x^{\mathrm{GE}}$ (right) for 2\,m temperature in the
+        representative experiment. The two state panels share a common scale;
+        the guidance effect is shown on a separate diverging scale centered at
+        zero.
+    }
+    \label{fig:t0-state-comparison}
+\end{figure}
+
+The guidance-effect panel separates the intervention from the weather pattern
+already present in the matched unguided realization and therefore provides the
+most direct view of what guidance has changed.
+
+
+\subsection{T0.3: Guidance effect across atmospheric variables}
+\label{sec:t0-cross-variable-effect}
+
+Although guidance targets 2\,m temperature, its effect need not remain confined
+to the target channel. For the same experimental setting and ensemble member,
+\Cref{fig:t0-cross-variable-effect} shows
+$\Delta x^{\mathrm{GE}}$ for the atmospheric variables used in the subsequent
+flow-time analysis. Surface variables are shown at $\ell=0$ and upper-air
+variables at $1000$\,hPa.
+
+\begin{figure}[H]
+    \centering
+
+    \includegraphics[width=0.48\textwidth]{figures/T03a.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T03b.png}
+
+    \includegraphics[width=0.48\textwidth]{figures/T03c.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T03d.png}
+
+    \includegraphics[width=0.48\textwidth]{figures/T03e.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T03f.png}
+
+    \includegraphics[width=0.48\textwidth]{figures/T03g.png}
+
+    \caption{
+        Guidance effect $\Delta x^{\mathrm{GE}}$ for selected atmospheric
+        variables in the representative experiment. Surface variables are
+        shown at $\ell=0$ and upper-air variables at $1000$\,hPa. The maps
+        provide a qualitative view of how an intervention targeted at 2\,m
+        temperature propagates to other components of the atmospheric state.
+    }
+    \label{fig:t0-cross-variable-effect}
+\end{figure}
+
+The non-zero response outside the targeted temperature channel motivates the
+multivariate propagation criterion introduced in T1.1.
+
+
+\subsection{T0.4: Absolute atmospheric intensity}
+\label{sec:t0-absolute-intensity}
+
+The spatial maps show the structure of the intervention but provide limited
+information about its magnitude relative to the underlying atmospheric state.
+We therefore compare the area-weighted masked values
+
+\begin{equation}
+    \mathcal{M}_{\pi}
+    \left(
+        x_{v\ell}
+    \right),
+    \qquad
+    \ell\in L_v,
+    \label{eq:t0-absolute-intensity}
+\end{equation}
+
+across variables and levels.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T04.png}
+    \caption{
+        Area-weighted masked atmospheric values across variables and vertical
+        levels. Solid curves show the guided states for the compared guidance
+        profiles; the matched unguided state and verifying ground truth are
+        shown as references.
+    }
+    \label{fig:t0-absolute-intensity}
+\end{figure}
+
+This view anchors the guidance-induced changes to the physical magnitude and
+vertical structure of the corresponding atmospheric fields.
+
+
+\subsection{T0.5: Deviation from ground truth}
+\label{sec:t0-relative-ground-truth}
+
+To complement the absolute values, we also measure each variable-level field
+relative to the verifying ERA5 state,
+
+\begin{equation}
+    \mathcal{M}_{\pi}
+    \left(
+        x_{v\ell}
+    \right)
+    -
+    \mathcal{M}_{\pi}
+    \left(
+        x_{v\ell}^{\mathrm{gt}}
+    \right).
+    \label{eq:t0-ground-truth-deviation}
+\end{equation}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T05.png}
+    \caption{
+        Area-weighted masked atmospheric values relative to the verifying
+        ground truth across variables and vertical levels. Zero corresponds to
+        the verifying state; the matched unguided realization is shown as a
+        reference.
+    }
+    \label{fig:t0-relative-ground-truth}
+\end{figure}
+
+Together, T0.4 and T0.5 show both the absolute atmospheric state and how far
+its individual components lie from the corresponding verifying values.
+
+
+\subsection{T0.6: Evolution through flow time}
+\label{sec:t0-flow-convergence}
+
+We next inspect how the intervention develops during the residual flow. The
+intermediate state $x_t$ is defined in \Cref{TODO_BACKGROUND_REFERENCE}; here
+we only introduce the quantities used for visualization.
+
+For the targeted variable and level, we track the difference from the
+prescribed target,
+
+\begin{equation}
+    \xi_t
+    :=
+    \mathcal{M}_{\pi}
+    \left(
+        x_{t,v^\star\ell^\star}^{\mathrm{gui}}
+    \right)
+    -
+    y^\star.
+    \label{eq:intermediate-target-gap}
+\end{equation}
+
+For the remaining variable-level fields, we instead show the masked guidance
+effect,
+
+\begin{equation}
+    \mathcal{M}_{\pi}
+    \left(
+        x_{t,v\ell}^{\mathrm{gui}}
+        -
+        x_{t,v\ell}^{\mathrm{ung}\mid\mathrm{gui}}
+    \right).
+    \label{eq:intermediate-guidance-effect}
+\end{equation}
+
+(TODO: we only need one of the two, not both)
+\begin{figure}[H]
+    \centering
+
+    \includegraphics[width=0.48\textwidth]{figures/T06a.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T06b.png}
+
+    \includegraphics[width=0.48\textwidth]{figures/T06c.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T06d.png}
+
+    \caption{
+        Evolution through flow time for the configurations indicated in each
+        panel. For the targeted 2\,m temperature field, the plotted quantity
+        is the target gap $\xi_t$; the remaining variables show the masked
+        guidance effect relative to the matched unguided trajectory. Solid
+        curves show the selected ensemble member and the shaded region spans
+        the minimum and maximum across the five members.
+    }
+    \label{fig:t0-flow-convergence}
+\end{figure}
+
+The target trajectory shows how the prescribed condition is approached during
+sampling, while the remaining fields reveal when the coupled atmospheric
+response emerges.
+
+(TODO: say the thing about the shading)
+
+\subsection{T0.7: Flow and guidance landings}
+\label{sec:t0-flow-decomposition}
+
+(TODO: we should just remove q and use the mask operator itelf, it's much clearer)
+Finally, we decompose the trajectories from T0.6 into the two operations
+performed at each guided flow step. For the scalar quantity displayed in a
+given panel, we denote the current value by $q_t$, the value obtained after
+the unguided flow move by $q_t^{\mathrm{flow}}$, and the value after the
+guidance correction by $q_t^{\mathrm{gui}}$. Each step can therefore be read
+as
+
+\begin{equation}
+    q_t
+    \longrightarrow
+    q_t^{\mathrm{flow}}
+    \longrightarrow
+    q_t^{\mathrm{gui}},
+    \label{eq:t0-flow-guidance-landings}
+\end{equation}
+
+where the first displacement is generated by the residual flow and the second
+by guidance.
+
+(TODO: We should only stack two images, and use spikeat1 against 17 instead of different dates)
+\begin{figure}[H]
+    \centering
+
+    \includegraphics[width=0.48\textwidth]{figures/T07a.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T07b.png}
+
+    \includegraphics[width=0.48\textwidth]{figures/T07c.png}
+    \hfill
+    \includegraphics[width=0.48\textwidth]{figures/T07d.png}
+
+    \caption{
+        Step-wise decomposition of the flow-time trajectories. Each panel
+        separates the unguided flow move from the subsequent guidance move,
+        making the temporal support of the applied guidance profile explicit.
+    }
+    \label{fig:t0-flow-decomposition}
+\end{figure}
+
+T0 therefore provides complementary views of the same intervention: its
+physical magnitude, spatial structure, cross-variable response, and evolution
+through the residual flow. T1 turns these observations into quantitative
+criteria for comparing alternative guidance profiles.
+
+
+\subsection{Target-realization check}
+\label{sec:target-realization-check}
+
+Before comparing how different profiles realize a target, we verify that the
+target itself is reached. Recall from \Cref{sec:target-trajectory} that the
+absolute target is constructed from the independent unguided reference
+$x^{\mathrm{ung}}$, whereas
+$x^{\mathrm{ung}\mid\mathrm{gui}}$ serves as the matched counterfactual used
+to isolate the guidance effect.
+
+
+(TODO: compress and set 1\% instead of 10e-2)
+For a guided realization, we define its relative target miss as
+
+\begin{equation}
+    r_{e,m}^{\gamma}
+    :=
+    \frac{
+        \left|
+            \mathcal{M}_{\pi_e}
+            \left(
+                x_{e,m,v^\star\ell^\star}^{\mathrm{gui},\gamma}
+            \right)
+            -
+            y_{e,m}^{\star}
+        \right|
+    }{
+        \left|
+            \mathcal{M}_{\pi_e}
+            \left(
+                x_{e,m,v^\star\ell^\star}^{\mathrm{ung}}
+            \right)
+            - y_{e,m}^{\star}
+        \right|
+    }.
+    \label{eq:target-relative-miss}
+\end{equation}
+
+We consider the target successfully realized when
+
+\begin{equation}
+    r_{e,m}^{\gamma}
+    \leq
+    \varepsilon_{\mathrm{tar}},
+    \qquad
+    \varepsilon_{\mathrm{tar}}=10^{-2}.
+    \label{eq:target-realization-tolerance}
+\end{equation}
+
+This check is treated as a prerequisite rather than as a criterion for ranking
+guidance profiles. T1 compares the atmospheric responses of profiles that
+successfully realize the prescribed target.
+(TODO: all our experiments converge succesfully)
+
+\section{T1: Guidance-profile evaluation}
+\label{sec:guidance-profile-evaluation}
+
+We now compare how the atmospheric response depends on the flow-time
+distribution of guidance. The comparison is performed in two stages. We first
+localize the intervention at individual flow steps and then test whether
+spreading guidance over neighbouring steps improves the response.
+
+For the localization experiment, we consider
+
+\begin{equation}
+    \Gamma_{\mathrm{spike}}
+    =
+    \left\{
+        \mathrm{spike@0},
+        \mathrm{spike@1},
+        \mathrm{spike@2},
+        \mathrm{spike@5},
+        \mathrm{spike@11},
+        \mathrm{spike@17},
+        \mathrm{spike@23}
+    \right\},
+    \label{eq:spike-profile-set}
+\end{equation}
+
+where $\mathrm{spike@}k$ assigns unit relative guidance strength to flow step
+$k$ and zero to all remaining steps.
+
+The profiles are evaluated from three complementary perspectives. T1.1
+measures the magnitude of the guidance effect across atmospheric variables and
+levels, T1.2 measures how its spatial structure differs from the prescribed
+mask, and T1.3 measures how strongly the induced response varies across
+ensemble members.
+
+
+\subsection{Common score construction}
+\label{sec:t1-common-score}
+
+(TODO: actually it's probably best to use all indices)
+
+Each criterion produces a non-negative value $c_{v\ell}^{\gamma}$ for every
+variable $v$, level $\ell\in L_v$, and candidate profile $\gamma$. For T1.1
+and T1.2 this value is computed separately for each experimental setting and
+ensemble member; these indices are omitted here for readability.
+
+We first aggregate over the levels of each variable and normalize relative to
+the strongest candidate,
+
+\begin{equation}
+    N_v^\gamma
+    :=
+    \frac{
+        \displaystyle
+        \sum_{\ell\in L_v}
+        c_{v\ell}^{\gamma}
+    }{
+        \displaystyle
+        \max_{\gamma'\in\Gamma}
+        \sum_{\ell\in L_v}
+        c_{v\ell}^{\gamma'}
+    }.
+    \label{eq:t1-variable-score}
+\end{equation}
+
+This gives equal importance to variables whose raw values may differ strongly
+in magnitude or physical units. The normalized variable scores are combined
+into a single multivariate score,
+
+\begin{equation}
+    R^\gamma
+    :=
+    \frac{
+        \displaystyle
+        \sum_{v} N_v^\gamma
+    }{
+        \displaystyle
+        \max_{\gamma'\in\Gamma}
+        \sum_v N_v^{\gamma'}
+    }.
+    \label{eq:t1-single-score}
+\end{equation}
+
+Hence $R^\gamma\in[0,1]$, with the best candidate for a given realization
+attaining one. Since the normalization is relative to the candidate set
+$\Gamma$, all scores are recomputed whenever $\Gamma$ changes.
+
+All reported spreads below are population standard deviations. The dimensions
+over which values are aggregated are stated in the corresponding table or
+figure caption.
+
+
+\subsection{T1.1: Multivariate propagation}
+\label{sec:multivariate-propagation}
+
+The first criterion asks how strongly the intervention propagates through the
+atmospheric state. For each variable and level, we evaluate the area-weighted
+mean magnitude of the guidance effect within the target region,
+
+\begin{equation}
+    c_{v\ell}^{\gamma}
+    :=
+    \mathcal{M}_{\pi}
+    \left(
+        \left|
+            \Delta x_{v\ell}^{\mathrm{GE},\gamma}
+        \right|
+    \right).
+    \label{eq:t1-propagation}
+\end{equation}
+
+The absolute value prevents positive and negative spatial responses from
+cancelling. Larger values therefore indicate a stronger intervention in the
+corresponding atmospheric field.
+
+Before reducing the response spatially,
+\Cref{fig:t1-propagation-example} shows the signed guidance effect directly
+for selected variables throughout the residual flow.
+
+(TODO: add also specific humidity!)
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T1.1a.png}
+    \caption{
+        Evolution of the signed guidance effect
+        $\Delta x^{\mathrm{GE}}$ through flow time for selected atmospheric
+        variables in a representative experiment. The maps show the
+        unaggregated object underlying the multivariate-propagation criterion.
+    }
+    \label{fig:t1-propagation-example}
+\end{figure}
+
+The level-resolved values from \Cref{eq:t1-propagation} are shown in
+\Cref{fig:t1-propagation}. For each variable, the horizontal axis traverses
+its available levels. The solid curve corresponds to one ensemble member and
+the band spans the minimum and maximum across all five members.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T1.1.png}
+    \caption{
+        Level-resolved multivariate propagation for the candidate spike
+        profiles. Each value is the area-weighted masked mean
+        $\mathcal{M}_{\pi}(|\Delta x^{\mathrm{GE}}_{v\ell}|)$.
+        Solid curves show one ensemble member and bands span the minimum and
+        maximum across the five members.
+    }
+    \label{fig:t1-propagation}
+\end{figure}
+
+(TODO: wrong to interprete this here, also spikeat2 is better than 0, so should specify better)
+The response exhibits a pronounced maximum at $\mathrm{spike@1}$.
+$\mathrm{spike@0}$ produces a weaker response, showing that the dependence is
+not simply monotonic with increasingly early guidance. From step~1 onward,
+however, propagation decreases strongly as the intervention is shifted toward
+later flow steps.
+
+
+\subsection{T1.2: Spatial deviation from the target mask}
+\label{sec:spatial-mask-deviation}
+
+The propagation criterion measures the magnitude of the response but does not
+describe its spatial structure. We therefore compare the normalized spatial
+distribution of
+$|\Delta x_{v\ell}^{\mathrm{GE},\gamma}|$ with the prescribed mask.
+
+For each variable and level, we define
+
+\begin{equation}
+    c_{v\ell}^{\gamma}
+    :=
+    D_{v\ell}^{\gamma}
+    =
+    \frac{1}{2}
+    \sum_{(i,j)\in\mathcal{R}}
+    \left|
+        \frac{
+            \left|
+                \Delta x_{v\ell ij}^{\mathrm{GE},\gamma}
+            \right|
+        }{
+            \displaystyle
+            \sum_{(i',j')\in\mathcal{R}}
+            \left|
+                \Delta x_{v\ell i'j'}^{\mathrm{GE},\gamma}
+            \right|
+        }
+        -
+        \pi_{ij}
+    \right|.
+    \label{eq:t1-spatial-deviation}
+\end{equation}
+
+Because both spatial distributions sum to one over $\mathcal{R}$,
+
+\[
+    D_{v\ell}^{\gamma}\in[0,1].
+\]
+
+A value of zero means that the magnitude of the guidance effect follows the
+prescribed mask exactly within the target region. Larger values indicate an
+increasing departure from this imposed spatial pattern.
+
+Figure~\ref{fig:t1-spatial-deviation-example} illustrates the two spatial
+objects being compared before their reduction to $D_{v\ell}^{\gamma}$.
+
+(TODO: should again inspect z1000 or specific humidity and show the artifacts and explain on the figure)
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T1.2a.png}
+    \caption{
+        Example normalized spatial distributions used for T1.2. The
+        normalized magnitude of the guidance effect is compared with the
+        prescribed spatial mask for the candidate profiles.
+    }
+    \label{fig:t1-spatial-deviation-example}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T1.2.png}
+    \caption{
+        Spatial deviation $D_{v\ell}^{\gamma}$ across atmospheric variables
+        and vertical levels for the candidate spike profiles. Solid curves
+        show one ensemble member and bands span the minimum and maximum across
+        the five members.
+    }
+    \label{fig:t1-spatial-deviation}
+\end{figure}
+
+We interpret larger spatial deviation as evidence that the atmospheric
+response is not simply reproducing the prescribed mask geometry. It is not,
+however, treated as a standalone measure of realism and is considered together
+with the qualitative diagnostics and the other two T1 criteria.
+
+(TODO: again)
+Unlike propagation, the spatial-deviation criterion does not select
+$\mathrm{spike@1}$ as its strongest candidate. The highest aggregate score is
+obtained by $\mathrm{spike@0}$, while $\mathrm{spike@1}$ and
+$\mathrm{spike@2}$ remain close. The temporal dependence is also less
+monotonic than for multivariate propagation.
+
+
+\subsection{T1.3: Ensemble diversity}
+\label{sec:guidance-footprint-variability}
+
+The third criterion examines whether the response induced by guidance remains
+dependent on the stochastic ensemble realization. For each variable and level,
+we compute
+
+\begin{equation}
+    c_{v\ell}^{\gamma}
+    :=
+    \mathcal{M}_{\pi}
+    \left(
+        \operatorname{std}_{m}
+        \left[
+            \Delta x_{m,v\ell}^{\mathrm{GE},\gamma}
+        \right]
+    \right),
+    \label{eq:t1-ensemble-diversity}
+\end{equation}
+
+where the standard deviation is evaluated point-wise over the $M$ ensemble
+members. The signed guidance effect is used before taking the ensemble
+standard deviation.
+
+Larger values indicate stronger member-to-member differences in the induced
+response and therefore greater retention of ensemble diversity under guidance.
+
+For visualization,
+\Cref{fig:t1-ensemble-diversity-example} shows the spatial distribution of the
+pixel-wise ensemble standard deviation, normalized only for display.
+
+(TODO: again)
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T1.3a.png}
+    \caption{
+        Example spatial distribution of ensemble diversity for the candidate
+        profiles. Each panel shows the pixel-wise standard deviation of the
+        signed guidance effect across ensemble members, normalized for
+        visualization.
+    }
+    \label{fig:t1-ensemble-diversity-example}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{figures/T1.3.png}
+    \caption{
+        Ensemble diversity across atmospheric variables and vertical levels,
+        measured according to \Cref{eq:t1-ensemble-diversity}. No ensemble
+        band is shown because the member dimension is already consumed by the
+        standard deviation.
+    }
+    \label{fig:t1-ensemble-diversity}
+\end{figure}
+
+The ensemble-diversity score peaks at $\mathrm{spike@1}$.
+$\mathrm{spike@0}$ again produces a weaker response, while diversity decreases
+strongly as guidance is shifted from step~1 toward later flow steps.
+
+
+\subsection{Temporal-localization summary}
+\label{sec:t1-localization-summary}
+
+The three criteria are summarized in
+\Cref{tab:t1-localization-summary}. For propagation and spatial deviation,
+the values are pooled over the four initializations, two target intensities,
+and five ensemble members. Ensemble diversity is instead pooled over the four
+initializations and two intensities because its member dimension is consumed
+by the point-wise ensemble standard deviation.
+
+\begin{table}[H]
+    \centering
+    \caption{
+        Temporal-localization scores across both target intensities.
+        Propagation and spatial deviation report mean $\pm$ population
+        standard deviation over $4\times2\times5=40$ setting-member
+        realizations. Ensemble diversity is summarized over the
+        $4\times2=8$ initialization-intensity settings. Larger values are
+        preferred for all three criteria.
+    }
+    \label{tab:t1-localization-summary}
+    \begin{tabular}{lccc}
+        \toprule
+        Profile
+        & Propagation
+        & Spatial deviation
+        & Ensemble diversity \\
+        \midrule
+        $\mathrm{spike@0}$
+        & $0.689\pm0.050$
+        & $\mathbf{0.998\pm0.005}$
+        & $0.682\pm0.027$ \\
+
+        $\mathrm{spike@1}$
+        & $\mathbf{1.000\pm0.000}$
+        & $0.977\pm0.017$
+        & $\mathbf{1.000\pm0.000}$ \\
+
+        $\mathrm{spike@2}$
+        & $0.770\pm0.057$
+        & $0.984\pm0.012$
+        & $0.772\pm0.039$ \\
+
+        $\mathrm{spike@5}$
+        & $0.463\pm0.040$
+        & $0.915\pm0.018$
+        & $0.402\pm0.017$ \\
+
+        $\mathrm{spike@11}$
+        & $0.134\pm0.013$
+        & $0.840\pm0.030$
+        & $0.115\pm0.011$ \\
+
+        $\mathrm{spike@17}$
+        & $0.046\pm0.004$
+        & $0.857\pm0.042$
+        & $0.041\pm0.005$ \\
+
+        $\mathrm{spike@23}$
+        & $0.028\pm0.002$
+        & $0.858\pm0.042$
+        & $0.011\pm0.001$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+% The criteria therefore provide complementary rather than identical rankings.
+% $\mathrm{spike@1}$ maximizes both multivariate propagation and ensemble
+% diversity, whereas $\mathrm{spike@0}$ yields the largest spatial deviation.
+% The differences in spatial deviation among the early profiles are relatively
+% small, while their propagation and diversity scores differ substantially.
+% We therefore retain $\mathrm{spike@1}$ as the localized reference profile and
+% next test whether distributing its guidance signal over neighbouring flow
+% steps improves the response.
+
+Taken together, the three criteria favour guidance concentrated near the
+beginning of the residual flow. Among the evaluated profiles,
+$\mathrm{spike@1}$ produces the strongest multivariate propagation and
+ensemble diversity while remaining close to the strongest candidates in
+spatial deviation. We therefore select
+
+\begin{equation}
+    \gamma^\star = \mathrm{spike@1}
+    \label{eq:selected-guidance-profile}
+\end{equation}
+
+for the subsequent experiments.
+
+(TODO: we can say here that we also experimented with spreading the signal but the results remained fedel to these findings)
+
+
+\section{T2: Scenario-specification analysis}
+\label{sec:scenario-specification-analysis}
+
+Having fixed the guidance profile to
+$\gamma^\star=\mathrm{spike@1}$, we next examine how the generated response
+changes with the prescribed scenario. We separately vary the target intensity,
+location, and spatial extent while keeping the remaining configuration fixed.
+
+
+\subsection{T2.1: Target intensity}
+\label{sec:target-intensity-analysis}
+
+We first vary the prescribed relative intensity $\rho$ while keeping the
+forecast initialization and spatial target mask fixed.
+
+% TODO: State the evaluated intensity levels.
+% \[
+%     \rho \in \{\ldots\}.
+% \]
+
+For each intensity, we compare the resulting guided state with its matched
+unguided counterpart and inspect the corresponding guidance effect
+$\Delta x^{\mathrm{GE}}$. This shows how the magnitude and spatial structure
+of the required intervention change as the prescribed target is moved further
+from the unguided reference.
+
+\begin{figure}[H]
+    \centering
+    % TODO: Insert target-intensity figure(s).
+    \caption{
+        Guided states and corresponding guidance effects for increasing target
+        intensity using $\gamma^\star=\mathrm{spike@1}$. All other components
+        of the experimental setting are held fixed.
+    }
+    \label{fig:t2-target-intensity}
+\end{figure}
+
+% TODO: Add concise result interpretation.
+
+
+\subsection{T2.2: Target location}
+\label{sec:target-location-analysis}
+
+We next shift the spatial target mask while retaining its size, target
+variable and level, prescribed intensity, and guidance profile.
+
+% TODO: State the evaluated target locations.
+
+\begin{figure}[H]
+    \centering
+    % TODO: Insert target-location figure(s).
+    \caption{
+        Guided states and guidance effects for target regions placed at
+        different locations. The mask extent and prescribed intensity are kept
+        fixed.
+    }
+    \label{fig:t2-target-location}
+\end{figure}
+
+This experiment tests whether the character of the intervention depends on
+the atmospheric state present at the location where the target is imposed.
+
+% TODO: Add concise result interpretation.
+
+
+\subsection{T2.3: Target size}
+\label{sec:target-size-analysis}
+
+Finally, we vary the spatial extent of the target mask while retaining its
+center, target variable and level, prescribed intensity, and guidance profile.
+
+% TODO: State the evaluated mask sizes.
+
+\begin{figure}[H]
+    \centering
+    % TODO: Insert target-size figure(s).
+    \caption{
+        Guided states and guidance effects for target masks of increasing
+        spatial extent. The mask center and prescribed intensity are held
+        fixed.
+    }
+    \label{fig:t2-target-size}
+\end{figure}
+
+This comparison shows how the intervention changes when the same relative
+target is prescribed over increasingly large spatial regions.
+
+% TODO: Add concise result interpretation.

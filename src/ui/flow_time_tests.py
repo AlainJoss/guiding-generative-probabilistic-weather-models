@@ -735,6 +735,7 @@ def t0_maps(
     contour_levels_slider_t02,
     cool_half_cmap,
     delta_labels,
+    export_button,
     gname,
     label_delta,
     load_rollout,
@@ -786,9 +787,9 @@ def t0_maps(
                 _scmap, _scen = cool_half_cmap, None
             _wge = region_crop(_xgui - _xung, "globe", _zz); _gm = (float(np.nanmax(np.abs(_wge))) if np.isfinite(_wge).any() else 0.0) or 1e-9
             _panels = mo.hstack([
-                viz_panel(_xung, r"$x^{\mathrm{ung}\mid\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02a", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value),
-                viz_panel(_xgui, r"$x^{\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02b", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value),
-                viz_panel(_xgui - _xung, r"$\Delta x^{\mathrm{GE}}$", True, _ovmin=-_gm, _ovmax=_gm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename="T02c", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value),
+                viz_panel(_xung, r"$x^{\mathrm{ung}\mid\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02a", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value),
+                viz_panel(_xgui, r"$x^{\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02b", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value),
+                viz_panel(_xgui - _xung, r"$\Delta x^{\mathrm{GE}}$", True, _ovmin=-_gm, _ovmax=_gm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename="T02c", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value),
             ], justify="start", align="start")
             t0_maps_view = mo.vstack([mo.md(f"_{_en}_"), _panels], align="start")
     mo.vstack([mo.hstack([t0_exp, t0_sched, zoom_slider, contour_checkbox_t02, contour_levels_slider_t02, contour_color_dropdown_t02], justify="start"), t0_maps_view], align="start")
@@ -821,6 +822,7 @@ def t0_gegrid(
     contour_color_dropdown_t03,
     contour_levels_slider_t03,
     delta_labels,
+    export_button,
     gname,
     label_delta,
     load_rollout,
@@ -870,7 +872,7 @@ def t0_gegrid(
                 _xg = np.asarray(_gd.isel(m=0, n=_n), float)
                 _ux = _ud.isel(m=0, n=_n); _ux = np.asarray(_ux.isel(t=-1) if "t" in _ux.dims else _ux, float)
                 _lbl = reliability_var_meta.get(_var, (INTERF_SHORT.get(_var, _var), False))[0]
-                _maps.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T03{chr(97 + VAR_ORDER.index(_var))}", _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value, _contour_color=contour_color_dropdown_t03.value))
+                _maps.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T03{chr(97 + VAR_ORDER.index(_var))}", _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value, _contour_color=contour_color_dropdown_t03.value, _do_save=export_button.value))
             _rows = [mo.hstack(_maps[_i:_i + 4], justify="start", align="start") for _i in range(0, len(_maps), 4)]
             _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)} · {t0_sched.value} · m=0 (final state)"
             t0_gegrid_view = mo.vstack([mo.md(rf"_$\Delta x^{{\mathrm{{GE}}}}$ — {_en}_")] + _rows, align="start")
@@ -1401,7 +1403,7 @@ def _(M, N, mo):
         value="temperature", label="field: ")
     field_level_slider = mo.ui.slider(steps=[0, 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
                                       value=0, label="level: ", show_value=True)
-    t12_region = mo.ui.dropdown(["mask", "globe", "!mask"], value="globe", label="T1.2 eval region: ")
+    t12_region = mo.ui.dropdown(["mask", "globe", "!mask"], value="mask", label="T1.2 visual region: ")
     t12_zoom = mo.ui.slider(1, 8, value=1, step=1, label="T1.2 zoom: ", show_value=True)
     mo.vstack([
         mo.hstack([realism_m_slider, realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start"),
@@ -1502,13 +1504,14 @@ def md_t12_def(mo):
     ### Definition and per-variable profiles
 
     **Object.** For each experiment $e=(\text{startdate},\rho)$, member $m$, profile $\gamma$, variable $v$ and
-    level $\ell$ we compare the normalized footprint to the normalized mask over the **whole grid** and take the
-    $L_1$ distance (a total-variation-type deviation):
-    $$D_{e,m,\gamma,v\ell} \;=\; \sum_{ij} \big| \widetilde{G}_{e,m,\gamma,v\ell,ij} - \widetilde{\pi}_{ij} \big|,\qquad
-    \widetilde{G} = \frac{|\Delta x^{\mathrm{GE}}_{v\ell}|}{\sum_{ij}|\Delta x^{\mathrm{GE}}_{v\ell,ij}|},\quad
-    \widetilde{\pi} = \frac{\pi}{\sum_{ij}\pi_{ij}}.$$
-    $D=0$ means the footprint is exactly mask-shaped; larger $D$ = the response departs more from the mask
-    (spreads beyond it or concentrates differently).
+    level $\ell$ we compare the normalized footprint to the normalized mask **over the mask region** ($\pi>0$)
+    and take the **total-variation distance** (half the $L_1$ distance between the two mask-normalized distributions, so $D\in[0,1]$):
+    $$D_{e,m,\gamma,v\ell} \;=\; \tfrac{1}{2}\sum_{ij\in\pi} \big| \widetilde{G}_{e,m,\gamma,v\ell,ij} - \widetilde{\pi}_{ij} \big|,\qquad
+    \widetilde{G} = \frac{|\Delta x^{\mathrm{GE}}_{v\ell}|}{\sum_{ij\in\pi}|\Delta x^{\mathrm{GE}}_{v\ell,ij}|},\quad
+    \widetilde{\pi} = \frac{\pi}{\sum_{ij}\pi_{ij}},$$
+    with both the sum and the footprint normalization restricted to the mask. $D=0$ means the response is shaped
+    exactly like the mask inside the target ($D=1$ = disjoint from it); larger $D$ = it concentrates differently
+    from the mask within the region.
 
     **Chart** (one per experiment, selectable): per variable, $x=$ channels (surface→top), one line per
     $\gamma$ of $D_{v\ell}$; the solid line is member $m{=}0$ and the band spans $[\min_m,\max_m]$ over the $M$
@@ -1576,15 +1579,14 @@ def t12_tables(
 @app.cell(hide_code=True)
 def md_t12_whymask(mo):
     md_t12_whymask = r"""
-    ### Why not restrict the test to the mask
+    ### Why the mask region
 
-    $D$ is measured over the **whole grid**, not the mask region. The multivariate response to the thermal
-    forcing is largely *non-local*: in a representative case only ~24–27% of the $z$, $u$ and $\mathrm{mslp}$
-    footprint mass sits inside the mask (vs ~62% for the target $2\mathrm{m}T$). Restricting the normalization
-    and sum to the mask would (i) discard this leakage — which *is* the spatial-deviation signal — and
-    (ii) invert the ranking: the strongly-propagating variables (whole-grid $D\approx1.5$) collapse to
-    $D\approx0.5$, *below* the target, wrongly reading as "more mask-shaped." A within-mask score would only
-    make sense as a separate controllability check on the target channel.
+    $D$ is measured over the **mask region** (the target support $\pi>0$), not the whole grid. Both the
+    footprint $\widetilde{G}$ and the mask $\widetilde{\pi}$ are normalized to sum to one over the mask, so $D$
+    is a proper total-variation distance between two distributions *inside the target* — it asks whether the
+    guidance concentrates where the mask prescribes, a controllability check on the footprint shape within the
+    region we actually steer. Where the effect leaks **outside** the mask is a separate question, read off the
+    outside-mask mass in T1.1.
     """
     mo.md(md_t12_whymask)
     return (md_t12_whymask,)
@@ -2944,10 +2946,10 @@ def _(
         _absg = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}   # M(x_gui)
         _absum = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # sum_grid |x_gui - x_gui_ung| (global, unmasked)
         _avgabs = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # M_mask(|x_gui - x_gui_ung|)  (mask absolute)
-        _tvd = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # TV whole-grid: sum|normspatial(|Δ|) - pi~|
-        def _tvdist2d(_dfield, _mn):
-            _a = np.abs(_dfield); _s = float(_a.sum())
-            return float(np.abs(_a / (_s if _s > 0 else 1.0) - _mn).sum())
+        _tvd = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # TV over the MASK region: sum|normspatial(|Δ|) - pi~|
+        def _tvdist2d(_dfield, _mn, _sup):
+            _a = np.abs(_dfield) * _sup; _s = float(_a.sum())   # footprint restricted to the mask region
+            return 0.5 * float(np.abs(_a / (_s if _s > 0 else 1.0) - _mn).sum())   # 1/2 -> proper TV distance in [0,1]
         _pushg  = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # sum_grid(x_gui - x_gui_ung)   (global signed)
         _msig = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # Σ_mask (x_gui - x_gui_ung)
         _mabs = {lb: {v: {} for v in INTERF_VARS} for lb in _labels}  # Σ_mask |x_gui - x_gui_ung|
@@ -2974,7 +2976,7 @@ def _(
             _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
             _mask = np.asarray(_mask, float); _msum = float(_mask.sum())
             _mbool = (_mask >= 0.5 * _mask.max()).astype(float); _nbool = 1.0 - _mbool  # mask-core (half-max); mask + !mask = grid
-            _mnorm = _mask / (_msum if _msum > 0 else 1.0)
+            _mnorm = _mask / (_msum if _msum > 0 else 1.0); _msupp = (_mask > 0).astype(float)   # mask region (support) — T1.2 D restricted here
             _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
             _gui = xr.open_zarr(_dir / "gui.zarr"); _gr = xr.open_zarr(_dir / "grads.zarr")
             try:
@@ -3003,7 +3005,7 @@ def _(
                             _pa = _ga - _ua                                                                # (level,) push
                             _pd = np.abs(_g - _u).sum((-2, -1))                                            # (level,) global sum|diff| over ALL grid points
                             _pdm = (np.abs(_g - _u) * _mask).sum((-2, -1)) / _msum                          # (level,) masked-mean |diff| (mask absolute)
-                            _tvd_v = np.abs(np.abs(_g - _u) / np.clip(_pd[:, None, None], 1e-30, None) - _mnorm[None]).sum((-2, -1))
+                            _absmask = (np.abs(_g - _u) * _msupp[None]).sum((-2, -1)); _tvd_v = 0.5 * np.abs(np.abs(_g - _u) * _msupp[None] / np.clip(_absmask[:, None, None], 1e-30, None) - _mnorm[None]).sum((-2, -1))
                             _pgs = (_g - _u).sum((-2, -1))                                                  # (level,) global signed sum (global signed)
                             _msig_v = ((_g - _u) * _mbool).sum((-2, -1)); _mabs_v = (np.abs(_g - _u) * _mbool).sum((-2, -1))
                             _nsig_v = ((_g - _u) * _nbool).sum((-2, -1)); _nabs_v = (np.abs(_g - _u) * _nbool).sum((-2, -1))
@@ -3042,7 +3044,7 @@ def _(
                                 _avg[_lb][_var].setdefault("sfc", []).append(_ga_s - _ua_s)
                                 _absum[_lb][_var].setdefault("sfc", []).append(float(np.abs(_gs - _us).sum()))
                                 _avgabs[_lb][_var].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mask).sum() / _msum))
-                                _tvd[_lb][_var].setdefault("sfc", []).append(_tvdist2d(_gs - _us, _mnorm))
+                                _tvd[_lb][_var].setdefault("sfc", []).append(_tvdist2d(_gs - _us, _mnorm, _msupp))
                                 _pushg[_lb][_var].setdefault("sfc", []).append(float((_gs - _us).sum()))
                                 _msig[_lb][_var].setdefault("sfc", []).append(float(((_gs - _us) * _mbool).sum())); _mabs[_lb][_var].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mbool).sum()))
                                 _nsig[_lb][_var].setdefault("sfc", []).append(float(((_gs - _us) * _nbool).sum())); _nabs[_lb][_var].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _nbool).sum()))
@@ -3066,7 +3068,7 @@ def _(
                                 _avg[_lb][_mv].setdefault("sfc", []).append(_ga_s - _ua_s)
                                 _absum[_lb][_mv].setdefault("sfc", []).append(float(np.abs(_gs - _us).sum()))
                                 _avgabs[_lb][_mv].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mask).sum() / _msum))
-                                _tvd[_lb][_mv].setdefault("sfc", []).append(_tvdist2d(_gs - _us, _mnorm))
+                                _tvd[_lb][_mv].setdefault("sfc", []).append(_tvdist2d(_gs - _us, _mnorm, _msupp))
                                 _pushg[_lb][_mv].setdefault("sfc", []).append(float((_gs - _us).sum()))
                                 _msig[_lb][_mv].setdefault("sfc", []).append(float(((_gs - _us) * _mbool).sum())); _mabs[_lb][_mv].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _mbool).sum()))
                                 _nsig[_lb][_mv].setdefault("sfc", []).append(float(((_gs - _us) * _nbool).sum())); _nabs[_lb][_mv].setdefault("sfc", []).append(float((np.abs(_gs - _us) * _nbool).sum()))
@@ -4216,7 +4218,6 @@ def t13_exp_cell(EXPS, delta_labels, delta_order, mo):
 def t0_mapctl(
     MASK0,
     WARM_CMAP,
-    export_button,
     get_mask_center,
     mcolors,
     mo,
@@ -4239,7 +4240,7 @@ def t0_mapctl(
     contour_levels_slider_t03 = mo.ui.slider(4, 30, step=2, value=24, label="levels: ", show_value=True, debounce=True)
     contour_color_dropdown_t03 = mo.ui.dropdown(["dimgray", "white", "black"], value="black", label="contour color: ")
 
-    def viz_panel(_arr, _label, _is_diff, _ovmin=None, _ovmax=None, _ocmap=None, _ocenter="auto", _mask=None, _savename=None, _contour_on=True, _contour_levels=24, _contour_color="black"):
+    def viz_panel(_arr, _label, _is_diff, _ovmin=None, _ovmax=None, _ocmap=None, _ocenter="auto", _mask=None, _savename=None, _contour_on=True, _contour_levels=24, _contour_color="black", _do_save=False):
         # exactly guidance.py's diff-mode panel: white_zero (straddling) / warm|cool half (single-signed)
         # for absolute fields; symmetric white_zero for differences. + min/max/mean/std stamped over the mask.
         _z = np.asarray(_arr, float)
@@ -4273,7 +4274,7 @@ def t0_mapctl(
         if np.isfinite(_sa).any():
             _ax.set_title(f"min = {np.nanmin(_sa):.3g} | max = {np.nanmax(_sa):.3g}", loc="left", fontsize=7)
             _ax.set_title(f"mean = {np.nanmean(_sa):.3g} | std = {np.nanstd(_sa):.3g}", loc="right", fontsize=7)
-        if export_button.value and _savename:
+        if _do_save and _savename:
             save_chart(_fig, _savename)
         _out = mo.as_html(_fig); plt.close(_fig)
         return _out

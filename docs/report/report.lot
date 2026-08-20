@@ -4,11 +4,9 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\addvspace {10\p@ }
-\addvspace {10\p@ }
-\addvspace {10\p@ }
-\contentsline {table}{\numberline {8.1}{\ignorespaces Summary of the temporal-localization experiment across the four initializations and two target intensities. Larger values correspond to the preferred behaviour for all three evaluation criteria. \relax }}{51}{table.caption.13}%
-\addvspace {10\p@ }
+\contentsline {table}{\numberline {5.1}{\ignorespaces Descriptive statistics of 2\,m temperature for $\rho =0.002$. Minimum and maximum are evaluated over the target support, while mean and spatial standard deviation use the area-weighted mask $\pi _{\mathrm {EU}}$. Entries report mean $\pm $ population standard deviation across the evaluated realizations, in $^\circ $C. \relax }}{43}{table.caption.12}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces Descriptive statistics of 2\,m temperature for $\rho =0.004$, using the same convention as \Cref {tab:t0-descriptive-02}. \relax }}{44}{table.caption.13}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces Temporal-localization scores across both target intensities. Propagation and spatial deviation report mean $\pm $ population standard deviation over $4\times 2\times 5=40$ setting-member realizations. Ensemble diversity is summarized over the $4\times 2=8$ initialization-intensity settings. Larger values are preferred for all three criteria. \relax }}{55}{table.caption.26}%
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }

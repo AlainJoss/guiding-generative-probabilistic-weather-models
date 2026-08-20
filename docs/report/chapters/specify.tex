@@ -36,24 +36,26 @@ the complete specification pipeline from the unguided reference ensemble to
 the resulting target trajectories.
 
 \section{Target variable, level, and region}
+\label{sec:target-region}
 
 Using the state representation introduced in
 \Cref{sec:archesweather-dataset}, we specify the atmospheric quantity of
-interest through a mask $\pi$ over variable, vertical level, and space.
+interest through a target variable $v^\star$, target level
+$\ell^\star\in L_{v^\star}$, and a spatial mask $\pi$.
 
-Let $v^\star$ denote the target variable and
-$\ell^\star\in\mathcal{L}_{v^\star}$ its target level. Furthermore, let
+Let
+
 \[
     k_{ij}\in\{0,1\}
 \]
+
 indicate whether grid cell $(i,j)$ lies inside the selected target region.
 In this thesis, the spatial support is defined by a rectangular bounding box
 on the latitude--longitude grid.
 
-The mask is non-zero only for the selected variable and level and within the
-selected region. To obtain a regional average that accounts for differences in
-the physical area represented by each grid cell, we weight each included
-latitude row according to
+To account for differences in the physical area represented by each grid
+cell, we weight each included latitude row according to
+
 \begin{equation}
     a_i
     =
@@ -61,62 +63,64 @@ latitude row according to
     \cos\varphi\,\mathrm{d}\varphi,
     \label{eq:mask-cell-area}
 \end{equation}
+
 where $[\beta_i^-,\beta_i^+]$ denotes the latitude extent of row $i$.
 Because the longitudinal grid spacing is constant, its contribution cancels
 under normalization.
 
-We therefore define the normalized mask as
+We define the normalized spatial mask as
+
 \begin{equation}
-    \pi_{v\ell ij}
-    =
+    \pi_{ij}
+    :=
     \frac{
-        \mathbf{1}[v=v^\star]\,
-        \mathbf{1}[\ell=\ell^\star]\,
-        k_{ij}\,a_i
+        k_{ij}a_i
     }{
         \displaystyle
         \sum_{i',j'}
-        k_{i'j'}\,a_{i'}
+        k_{i'j'}a_{i'}
     },
-    \qquad
-    \ell\in\mathcal{L}_v,
     \label{eq:target-mask}
 \end{equation}
+
 such that
+
 \[
-    \sum_v
-    \sum_{\ell\in\mathcal{L}_v}
-    \sum_{i,j}
-    \pi_{v\ell ij}
-    =
-    1.
+    \sum_{i,j}\pi_{ij}=1.
 \]
 
-The corresponding masked-average operator is
+For any atmospheric field $x_{v\ell}$, the corresponding spatial
+masked-average operator is
+
 \begin{equation}
-    \mathcal{M}_\pi(x_n)
+    \mathcal{M}_{\pi}(x_{v\ell})
     :=
-    \sum_v
-    \sum_{\ell\in\mathcal{L}_v}
     \sum_{i,j}
-    \pi_{v\ell ij}\,
-    x_{n,v\ell ij}.
+    \pi_{ij}x_{v\ell ij}.
     \label{eq:masked-average}
 \end{equation}
 
-Following the convention introduced in \Cref{sec:archesweather-dataset},
-the inverse normalization required to evaluate this diagnostic in physical
-units is implicit in $\mathcal{M}_\pi$.
+Following the convention introduced in
+\Cref{sec:archesweather-dataset}, the inverse normalization required to
+evaluate this diagnostic in physical units is implicit in
+$\mathcal{M}_{\pi}$.
 
-For the experiments in this thesis, the target variable is temperature and the
-target level is the surface,
+For the experiments in this thesis, the target variable and level are
+
 \[
-    v^\star = \mathrm{temperature},
+    v^\star=\mathrm{temperature},
     \qquad
-    \ell^\star = 0,
+    \ell^\star=0,
 \]
-such that $\mathcal{M}_\pi(x_n)$ represents the
-area-weighted mean $2$~m temperature within the selected target region.
+
+such that
+
+\[
+    \mathcal{M}_{\pi}(x_{v^\star\ell^\star})
+\]
+
+represents the area-weighted mean 2\,m temperature within the selected target
+region.
 
 Area weighting prevents the regional mean from being biased toward
 high-latitude grid cells, which represent a smaller physical area on the
@@ -128,8 +132,6 @@ example target region over Europe. Its support is rectangular on the
 latitude--longitude grid, while the normalized weights vary with latitude
 according to the physical area represented by each grid cell.
 
-% TODO: Improve the figure by using a single colorbar and matching the globe
-% diameter to the side length of the rectangular representation.
 \begin{figure}[t]
     \centering
     \begin{subfigure}[c]{0.48\textwidth}
@@ -141,31 +143,38 @@ according to the physical area represented by each grid cell.
     \hfill
     \begin{subfigure}[c]{0.48\textwidth}
         \centering
-        \includegraphics[height=5.cm]{figures/mask_globe.png}
+        \includegraphics[height=5.0cm]{figures/mask_globe.png}
         \caption{Spherical representation.}
         \label{fig:target-mask-globe}
     \end{subfigure}
     \caption{
-        Example of the spatial target mask. The rectangular support determines
+        Example spatial target mask. The rectangular support determines
         which grid cells are included, while the latitude-dependent weights
         account for differences in physical grid-cell area.
     }
     \label{fig:target-mask-example}
 \end{figure}
 
-The binary spatial support treats all locations within the selected region
-equally apart from the correction for physical grid-cell area. Normalizing
-$\pi$ to sum to one ensures that $\mathcal{M}_\pi$ remains an average and is
-therefore directly comparable across regions of different sizes.
-
-Although we use $\mathcal{M}_\pi$ to compute a regional mean, the subsequent
-guidance formulation does not fundamentally depend on this particular choice.
-It can in principle be replaced by another differentiable functional of the
-forecast state.
+Normalizing $\pi$ to sum to one ensures that
+$\mathcal{M}_{\pi}$ remains an average and is therefore directly comparable
+across regions of different sizes.
 
 
 \section{Target trajectory}
 \label{sec:target-trajectory}
+
+TODO: need to rewrite from now until chapter 4 included all notation regarding the averaging operator.
+For instance
+$$
+q_{n,m}^{\mathrm{ung}}
+:=
+\mathcal{M}_{\pi}
+\left(
+    x_{n,m,v^\star\ell^\star}^{\mathrm{ung}}
+\right)
+$$
+
+GGGGGGGGGG
 
 Once the target variable and region have been specified through $\pi$, the
 remaining task is to define how strongly the targeted quantity should deviate

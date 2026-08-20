@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  20 AUG 2026 16:46
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023) (preloaded format=pdflatex 2023.11.23)  20 AUG 2026 22:14
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -1034,21 +1034,7 @@ Package csquotes Info: Checking for multilingual support...
 Package csquotes Info: ... found 'babel' package.
 Package csquotes Info: Adjusting default style.
 Package csquotes Info: Redefining alias 'default' -> 'english'.
- (./report.aux (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation-new.aux) (./chapters/evaluation.aux
-
-LaTeX Warning: Label `ch:eval' multiply defined.
-
-
-LaTeX Warning: Label `ch:eval@cref' multiply defined.
-
-) (./chapters/experiments-new.aux) (./chapters/experiments.aux
-
-LaTeX Warning: Label `ch:experiments' multiply defined.
-
-
-LaTeX Warning: Label `ch:experiments@cref' multiply defined.
-
-) (./chapters/discussion.aux) (./chapters/storyline.aux) (./chapters/conclusion.aux) (./appendices/appendix1.aux))
+ (./report.aux (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation-new.aux) (./chapters/evaluation.aux) (./chapters/experiments-new.aux) (./chapters/experiments.aux) (./chapters/discussion.aux) (./chapters/storyline.aux) (./chapters/conclusion.aux) (./appendices/appendix1.aux))
 \openout1 = `report.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 5.
@@ -1168,29 +1154,30 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ) [2
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 55.
- [3]
-Package cleveref Info: loaded `english' language definitions on input line 83.
- [4])
+Package cleveref Info: loaded `english' language definitions on input line 57.
+ [3])
 \tf@toc=\write6
 \openout6 = `report.toc'.
 
 Package cleveref Info: loaded `english' language definitions on input line 60.
- [5] (./report.lof
+ [4] (./report.lof
 Package cleveref Info: loaded `english' language definitions on input line 1.
-)
+ [5
+
+]
+Package cleveref Info: loaded `english' language definitions on input line 25.
+ [6])
 \tf@lof=\write7
 \openout7 = `report.lof'.
 
- [6
-
-] (./report.lot
+Package cleveref Info: loaded `english' language definitions on input line 61.
+ [7] (./report.lot
 Package cleveref Info: loaded `english' language definitions on input line 1.
 )
 \tf@lot=\write8
 \openout8 = `report.lot'.
 
- [7
+ [8
 
 ]
 \openout2 = `chapters/introduction.aux'.
@@ -1208,6 +1195,12 @@ l.50
 ] [2]
 
 LaTeX Warning: Reference `ch:evaluation' on page 1 undefined on input line 124.
+
+
+LaTeX Warning: Reference `ch:experiments' on page 1 undefined on input line 125.
+
+
+LaTeX Warning: Reference `ch:discussion' on page 1 undefined on input line 126.
 
 ) [3]
 \openout2 = `chapters/background.aux'.
@@ -1270,35 +1263,35 @@ Chapter 3.
 
 
 ]
-Package cleveref Info: loaded `english' language definitions on input line 120.
+Package cleveref Info: loaded `english' language definitions on input line 114.
  [24]
-<figures/mask_flat.png, id=772, 514.20105pt x 264.14685pt>
+<figures/mask_flat.png, id=782, 514.20105pt x 264.14685pt>
 File: figures/mask_flat.png Graphic file (type png)
 <use figures/mask_flat.png>
-Package pdftex.def Info: figures/mask_flat.png  used on input line 137.
+Package pdftex.def Info: figures/mask_flat.png  used on input line 139.
 (pdftex.def)             Requested size: 282.4819pt x 145.10922pt.
 
-Overfull \hbox (53.53238pt too wide) in paragraph at lines 137--138
+Overfull \hbox (53.53238pt too wide) in paragraph at lines 139--140
  [][] 
  []
 
-<figures/mask_globe.png, id=774, 514.20105pt x 514.20105pt>
+<figures/mask_globe.png, id=784, 514.20105pt x 514.20105pt>
 File: figures/mask_globe.png Graphic file (type png)
 <use figures/mask_globe.png>
-Package pdftex.def Info: figures/mask_globe.png  used on input line 144.
+Package pdftex.def Info: figures/mask_globe.png  used on input line 146.
 (pdftex.def)             Requested size: 142.26486pt x 142.26378pt.
 Package cleveref Info: loaded `english' language definitions on input line 179.
 [25 <./figures/mask_flat.png> <./figures/mask_globe.png>]
-Package cleveref Info: loaded `english' language definitions on input line 241.
+Package cleveref Info: loaded `english' language definitions on input line 249.
  [26]
-Package cleveref Info: loaded `english' language definitions on input line 325.
+Package cleveref Info: loaded `english' language definitions on input line 329.
  [27]
-Package cleveref Info: loaded `english' language definitions on input line 392.
+Package cleveref Info: loaded `english' language definitions on input line 400.
  [28]
-<figures/rollouts.png, id=805, 698.77863pt x 295.5843pt>
+<figures/rollouts.png, id=816, 698.77863pt x 295.5843pt>
 File: figures/rollouts.png Graphic file (type png)
 <use figures/rollouts.png>
-Package pdftex.def Info: figures/rollouts.png  used on input line 409.
+Package pdftex.def Info: figures/rollouts.png  used on input line 418.
 (pdftex.def)             Requested size: 476.98244pt x 201.77042pt.
 )
 Package cleveref Info: loaded `english' language definitions on input line 70.
@@ -1340,101 +1333,208 @@ Package cleveref Info: loaded `english' language definitions on input line 71.
 
  (./chapters/evaluation-new.tex
 Chapter 5.
-) [40
+[40
 
 
 
 
 ]
+Package cleveref Info: loaded `english' language definitions on input line 115.
+ [41]
+Package cleveref Info: loaded `english' language definitions on input line 171.
+ [42]
+Package cleveref Info: loaded `english' language definitions on input line 323.
+ [43]
+<figures/T02a.png, id=936, 371.9496pt x 198.5016pt>
+File: figures/T02a.png Graphic file (type png)
+<use figures/T02a.png>
+Package pdftex.def Info: figures/T02a.png  used on input line 344.
+(pdftex.def)             Requested size: 152.63786pt x 81.4619pt.
+<figures/T02b.png, id=937, 371.9496pt x 198.5016pt>
+File: figures/T02b.png Graphic file (type png)
+<use figures/T02b.png>
+Package pdftex.def Info: figures/T02b.png  used on input line 346.
+(pdftex.def)             Requested size: 152.63786pt x 81.4619pt.
+<figures/T02c.png, id=938, 377.2494pt x 198.5016pt>
+File: figures/T02c.png Graphic file (type png)
+<use figures/T02c.png>
+Package pdftex.def Info: figures/T02c.png  used on input line 348.
+(pdftex.def)             Requested size: 152.63786pt x 80.31699pt.
+<figures/T03a.png, id=940, 377.2494pt x 196.5744pt>
+File: figures/T03a.png Graphic file (type png)
+<use figures/T03a.png>
+Package pdftex.def Info: figures/T03a.png  used on input line 380.
+(pdftex.def)             Requested size: 228.94952pt x 119.3013pt.
+<figures/T03b.png, id=941, 373.395pt x 196.5744pt>
+File: figures/T03b.png Graphic file (type png)
+<use figures/T03b.png>
+Package pdftex.def Info: figures/T03b.png  used on input line 382.
+(pdftex.def)             Requested size: 228.94952pt x 120.5311pt.
+<figures/T03c.png, id=942, 377.2494pt x 196.5744pt>
+File: figures/T03c.png Graphic file (type png)
+<use figures/T03c.png>
+Package pdftex.def Info: figures/T03c.png  used on input line 384.
+(pdftex.def)             Requested size: 228.94952pt x 119.3013pt.
+<figures/T03d.png, id=943, 367.6134pt x 196.5744pt>
+File: figures/T03d.png Graphic file (type png)
+<use figures/T03d.png>
+Package pdftex.def Info: figures/T03d.png  used on input line 386.
+(pdftex.def)             Requested size: 228.94952pt x 122.42676pt.
+<figures/T03e.png, id=944, 388.8126pt x 196.5744pt>
+File: figures/T03e.png Graphic file (type png)
+<use figures/T03e.png>
+Package pdftex.def Info: figures/T03e.png  used on input line 388.
+(pdftex.def)             Requested size: 228.94952pt x 115.75291pt.
+<figures/T03f.png, id=945, 377.2494pt x 196.5744pt>
+File: figures/T03f.png Graphic file (type png)
+<use figures/T03f.png>
+Package pdftex.def Info: figures/T03f.png  used on input line 390.
+(pdftex.def)             Requested size: 228.94952pt x 119.3013pt.
+<figures/T03g.png, id=946, 373.395pt x 197.0562pt>
+File: figures/T03g.png Graphic file (type png)
+<use figures/T03g.png>
+Package pdftex.def Info: figures/T03g.png  used on input line 392.
+(pdftex.def)             Requested size: 228.94952pt x 120.8265pt.
+Package cleveref Info: loaded `english' language definitions on input line 402.
+ [44 <./figures/T02a.png> <./figures/T02b.png> <./figures/T02c.png>]
+Package cleveref Info: loaded `english' language definitions on input line 408.
+ [45 <./figures/T03a.png> <./figures/T03b.png> <./figures/T03c.png> <./figures/T03d.png> <./figures/T03e.png> <./figures/T03f.png> <./figures/T03g.png>]
+<figures/T04.png, id=965, 1438.173pt x 498.1812pt>
+File: figures/T04.png Graphic file (type png)
+<use figures/T04.png>
+Package pdftex.def Info: figures/T04.png  used on input line 429.
+(pdftex.def)             Requested size: 476.98244pt x 165.22127pt.
+<figures/T05.png, id=966, 1438.173pt x 498.1812pt>
+File: figures/T05.png Graphic file (type png)
+<use figures/T05.png>
+Package pdftex.def Info: figures/T05.png  used on input line 464.
+(pdftex.def)             Requested size: 476.98244pt x 165.22127pt.
+Package cleveref Info: loaded `english' language definitions on input line 473.
+ [46 <./figures/T04.png>]
+
+LaTeX Warning: Reference `TODO_BACKGROUND_REFERENCE' on page 1 undefined on input line 482.
+
+<figures/T06a.png, id=976, 901.4478pt x 336.2964pt>
+File: figures/T06a.png Graphic file (type png)
+<use figures/T06a.png>
+Package pdftex.def Info: figures/T06a.png  used on input line 517.
+(pdftex.def)             Requested size: 228.94952pt x 85.4132pt.
+<figures/T06b.png, id=977, 901.4478pt x 336.2964pt>
+File: figures/T06b.png Graphic file (type png)
+<use figures/T06b.png>
+Package pdftex.def Info: figures/T06b.png  used on input line 519.
+(pdftex.def)             Requested size: 228.94952pt x 85.4132pt.
+<figures/T06c.png, id=978, 901.4478pt x 336.2964pt>
+File: figures/T06c.png Graphic file (type png)
+<use figures/T06c.png>
+Package pdftex.def Info: figures/T06c.png  used on input line 521.
+(pdftex.def)             Requested size: 228.94952pt x 85.4132pt.
+<figures/T06d.png, id=979, 901.4478pt x 336.2964pt>
+File: figures/T06d.png Graphic file (type png)
+<use figures/T06d.png>
+Package pdftex.def Info: figures/T06d.png  used on input line 523.
+(pdftex.def)             Requested size: 228.94952pt x 85.4132pt.
+Package cleveref Info: loaded `english' language definitions on input line 535.
+[47 <./figures/T05.png>]
+<figures/T07a.png, id=987, 1074.8958pt x 365.2044pt>
+File: figures/T07a.png Graphic file (type png)
+<use figures/T07a.png>
+Package pdftex.def Info: figures/T07a.png  used on input line 569.
+(pdftex.def)             Requested size: 228.94952pt x 77.7874pt.
+<figures/T07b.png, id=988, 1074.8958pt x 365.2044pt>
+File: figures/T07b.png Graphic file (type png)
+<use figures/T07b.png>
+Package pdftex.def Info: figures/T07b.png  used on input line 571.
+(pdftex.def)             Requested size: 228.94952pt x 77.7874pt.
+<figures/T07c.png, id=989, 1074.8958pt x 365.2044pt>
+File: figures/T07c.png Graphic file (type png)
+<use figures/T07c.png>
+Package pdftex.def Info: figures/T07c.png  used on input line 573.
+(pdftex.def)             Requested size: 228.94952pt x 77.7874pt.
+<figures/T07d.png, id=990, 1074.8958pt x 365.2044pt>
+File: figures/T07d.png Graphic file (type png)
+<use figures/T07d.png>
+Package pdftex.def Info: figures/T07d.png  used on input line 575.
+(pdftex.def)             Requested size: 228.94952pt x 77.7874pt.
+Package cleveref Info: loaded `english' language definitions on input line 584.
+ [48 <./figures/T06a.png> <./figures/T06b.png> <./figures/T06c.png> <./figures/T06d.png>]
+Package cleveref Info: loaded `english' language definitions on input line 652.
+ [49 <./figures/T07a.png> <./figures/T07b.png> <./figures/T07c.png> <./figures/T07d.png>]
+Package cleveref Info: loaded `english' language definitions on input line 725.
+ [50]
+<figures/T1.1a.png, id=1018, 926.5014pt x 245.2362pt>
+File: figures/T1.1a.png Graphic file (type png)
+<use figures/T1.1a.png>
+Package pdftex.def Info: figures/T1.1a.png  used on input line 766.
+(pdftex.def)             Requested size: 476.98244pt x 126.255pt.
+Package cleveref Info: loaded `english' language definitions on input line 780.
+ [51 <./figures/T1.1a.png>]
+<figures/T1.1.png, id=1028, 1438.173pt x 498.1812pt>
+File: figures/T1.1.png Graphic file (type png)
+<use figures/T1.1.png>
+Package pdftex.def Info: figures/T1.1.png  used on input line 783.
+(pdftex.def)             Requested size: 476.98244pt x 165.22127pt.
+Package cleveref Info: loaded `english' language definitions on input line 846.
+ [52 <./figures/T1.1.png>]
+<figures/T1.2a.png, id=1037, 827.7324pt x 223.5552pt>
+File: figures/T1.2a.png Graphic file (type png)
+<use figures/T1.2a.png>
+Package pdftex.def Info: figures/T1.2a.png  used on input line 853.
+(pdftex.def)             Requested size: 476.98244pt x 128.82295pt.
+<figures/T1.2.png, id=1038, 1438.173pt x 498.1812pt>
+File: figures/T1.2.png Graphic file (type png)
+<use figures/T1.2.png>
+Package pdftex.def Info: figures/T1.2.png  used on input line 864.
+(pdftex.def)             Requested size: 476.98244pt x 165.22127pt.
+Package cleveref Info: loaded `english' language definitions on input line 885.
+ [53 <./figures/T1.2a.png> <./figures/T1.2.png>]
+<figures/T1.3a.png, id=1046, 827.7324pt x 223.5552pt>
+File: figures/T1.3a.png Graphic file (type png)
+<use figures/T1.3a.png>
+Package pdftex.def Info: figures/T1.3a.png  used on input line 921.
+(pdftex.def)             Requested size: 476.98244pt x 128.82295pt.
+<figures/T1.3.png, id=1047, 1438.173pt x 498.1812pt>
+File: figures/T1.3.png Graphic file (type png)
+<use figures/T1.3.png>
+Package pdftex.def Info: figures/T1.3.png  used on input line 933.
+(pdftex.def)             Requested size: 476.98244pt x 165.22127pt.
+Package cleveref Info: loaded `english' language definitions on input line 942.
+ [54 <./figures/T1.3a.png>]
+Package cleveref Info: loaded `english' language definitions on input line 1028.
+ [55 <./figures/T1.3.png>]
+Package cleveref Info: loaded `english' language definitions on input line 1097.
+ [56])
+Package cleveref Info: loaded `english' language definitions on input line 73.
+ [57]
 \openout2 = `chapters/evaluation.aux'.
 
- (./chapters/evaluation.tex
-Chapter 6.
-[41
-
-
-
-
-]
-Package cleveref Info: loaded `english' language definitions on input line 99.
- [42]
-Package cleveref Info: loaded `english' language definitions on input line 156.
- [43]
-Package cleveref Info: loaded `english' language definitions on input line 204.
- [44])
-Package cleveref Info: loaded `english' language definitions on input line 74.
- [45]
+ (./chapters/evaluation.tex)
 \openout2 = `chapters/experiments-new.aux'.
 
- (./chapters/experiments-new.tex
-Chapter 7.
-) [46
-
-
-
-
-]
+ (./chapters/experiments-new.tex)
 \openout2 = `chapters/experiments.aux'.
 
- (./chapters/experiments.tex
-Chapter 8.
-[47
-
-
-
-
-]
-File: figures/mask_flat.png Graphic file (type png)
-<use figures/mask_flat.png>
-Package pdftex.def Info: figures/mask_flat.png  used on input line 67.
-(pdftex.def)             Requested size: 310.03566pt x 159.26723pt.
-Package cleveref Info: loaded `english' language definitions on input line 95.
- [48]
-
-LaTeX Warning: Reference `...' on page 49 undefined on input line 154.
-
-Package cleveref Info: loaded `english' language definitions on input line 159.
-[49]
-
-LaTeX Warning: Reference `..' on page 50 undefined on input line 215.
-
-
-LaTeX Warning: Reference `fig:t0-early-late' on page 50 undefined on input line 222.
-
-Package cleveref Info: loaded `english' language definitions on input line 257.
-[50]
-Package cleveref Info: loaded `english' language definitions on input line 344.
- [51]
-Overfull \hbox (6.81302pt too wide) in paragraph at lines 362--368
-\T1/cmr/m/n/12 Taken to-gether, the temporal-localization and spread-ing ex-per-i-ments sup-port re-tain-ing $[]$.
- []
-
-)
-Package cleveref Info: loaded `english' language definitions on input line 76.
- [52]
+ (./chapters/experiments.tex)
 \openout2 = `chapters/discussion.aux'.
 
- (./chapters/discussion.tex
-Chapter 9.
-
-Package hyperref Warning: Difference (2) between bookmark levels is greater 
-(hyperref)                than one, level fixed on input line 4.
-
-[53
-
-
-
-
-]
-Package cleveref Info: loaded `english' language definitions on input line 76.
- [54])
-Package cleveref Info: loaded `english' language definitions on input line 77.
- [55]
+ (./chapters/discussion.tex)
 \openout2 = `chapters/storyline.aux'.
 
  (./chapters/storyline.tex
-Chapter 10.
-) [56
+Chapter 6.
+) [58
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1443,13 +1543,13 @@ Chapter 10.
 \openout2 = `chapters/conclusion.aux'.
 
  (./chapters/conclusion.tex
-Chapter 11.
-) [57
+Chapter 7.
+) [59
 
 
 
 
-] [58
+] [60
 
 
 
@@ -1458,16 +1558,16 @@ Chapter 11.
 
  (./appendices/appendix1.tex
 Appendix A.
-[59
+[61
 
 
 ]
 Package cleveref Info: loaded `english' language definitions on input line 146.
- [60]
-Package cleveref Info: loaded `english' language definitions on input line 214.
- [61])
-Package cleveref Info: loaded `english' language definitions on input line 89.
  [62]
+Package cleveref Info: loaded `english' language definitions on input line 214.
+ [63])
+Package cleveref Info: loaded `english' language definitions on input line 89.
+ [64]
 Overfull \hbox (23.74425pt too wide) in paragraph at lines 92--92
 \T1/cmr/m/n/12 Gen-er-a-tive Model for Ef-fi-cient ML Weather Fore-cast-ing^^Q. In: \T1/cmr/m/it/12 arXiv preprint arXiv:2412.12971
  []
@@ -1477,46 +1577,43 @@ Overfull \hbox (8.17903pt too wide) in paragraph at lines 92--92
 []\T1/cmr/m/n/12 Kanxuan He and Hong-shan Guo. ^^P  Prob-a-bilis-tic Se-quence Gen-er-a-tion Guided by Intensity--
  []
 
-[63
+[65
 
 
 
 ]
 Package cleveref Info: loaded `english' language definitions on input line 91.
- [64]
+ [66]
 Overfull \hbox (11.12402pt too wide) in paragraph at lines 92--92
 []\T1/cmr/m/n/12 World Me-te-o-ro-log-i-cal Or-ga-ni-za-tion. \T1/cmr/m/it/12 At-las of Mor-tal-ity and Eco-nomic Losses from Weather,
  []
 
 Package cleveref Info: loaded `english' language definitions on input line 93.
-[65] [66] (./report.aux
+[67] [68] (./report.aux
 Package cleveref Info: loaded `english' language definitions on input line 20.
  (./chapters/introduction.aux) (./chapters/background.aux) (./chapters/specify.aux) (./chapters/guidance.aux) (./chapters/evaluation-new.aux) (./chapters/evaluation.aux) (./chapters/experiments-new.aux) (./chapters/experiments.aux) (./chapters/discussion.aux) (./chapters/storyline.aux) (./chapters/conclusion.aux) (./appendices/appendix1.aux))
 
 LaTeX Warning: There were undefined references.
 
-
-LaTeX Warning: There were multiply-defined labels.
-
 Package rerunfilecheck Info: File `report.out' has not changed.
-(rerunfilecheck)             Checksum: F0986CD8C06746CDB41D0E9326B625E6;13944.
+(rerunfilecheck)             Checksum: 017F405FF134CD5AE8A77CF7377F2D7A;12455.
 Package logreq Info: Writing requests to 'report.run.xml'.
 \openout1 = `report.run.xml'.
 
  ) 
 Here is how much of TeX's memory you used:
- 43692 strings out of 476025
- 885530 string characters out of 5790016
- 1870388 words of memory out of 5000000
- 63093 multiletter control sequences out of 15000+600000
+ 43940 strings out of 476025
+ 890988 string characters out of 5790016
+ 1875388 words of memory out of 5000000
+ 63298 multiletter control sequences out of 15000+600000
  540339 words of font info for 98 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 89i,12n,120p,1246b,3030s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 89i,12n,120p,1246b,3009s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1440.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfbx2488.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc1728.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfcc2074.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm0800.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfrm1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftc1095.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfti1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sftt1200.pfb></usr/local/texlive/2023/texmf-dist/fonts/type1/public/cm-super/sfxc1728.pfb>
-Output written on report.pdf (74 pages, 1516855 bytes).
+Output written on report.pdf (77 pages, 5723074 bytes).
 PDF statistics:
- 1293 PDF objects out of 1440 (max. 8388607)
- 1132 compressed objects within 12 object streams
- 322 named destinations out of 1000 (max. 500000)
- 668 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 1389 PDF objects out of 1440 (max. 8388607)
+ 1171 compressed objects within 12 object streams
+ 339 named destinations out of 1000 (max. 500000)
+ 694 words of extra memory for PDF output out of 10000 (max. 10000000)
 
