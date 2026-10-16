@@ -116,10 +116,10 @@ def _(mo):
     context and pick the plotted intensity; metrics recompute automatically.
 
     - **T0 — Qualitative analysis**: descriptive **statistics** (T01), the **example maps** and
-      $\Delta x^{\mathrm{GE}}$ across variables (T02–T03), the **absolute-intensity** (T04) / vs-ground-truth
+      guidance effect and applied guidance across variables (T02–T03), the **absolute-intensity** (T04) / vs-ground-truth
       (T05) profiles, and the flow-time **convergence** grid (T06) with its **decomposition** (T07).
     - **T1 — Temporal localization of guidance**: multivariate propagation (T1.1, opening with the
-      guidance-effect maps over flow time), spatial deviation from the mask (T1.2), and ensemble diversity
+      guidance-effect and raw-gradient maps over flow time), spatial deviation from the mask (T1.2), and ensemble diversity
       of the footprint (T1.3).
     - **Support**: realized-target table, leaderboard, guidance-kick decomposition, latent-space closeness,
       and the prediction-noise check.
@@ -167,9 +167,9 @@ def hdr_tables_readme(mo):
     views. **T1.3 has no member axis** ($\operatorname{std}_m$ already consumes the members), so its cells carry
     a single value and any $\pm$ runs over startdates/$\rho$ only.
 
-    **Descriptive statistics** (Support) pool differently: each cell is the ensemble avg $\pm$ std of a
-    per-instance spatial statistic (min/max over the mask support; area-weighted masked mean $\mathcal{M}_\pi$ and weighted std) over the pool selected schedules
-    $\times$ members $\times$ steps.
+    **Descriptive statistics** (T0.1) pool differently: for a **single selected schedule** at $n=1$, each
+    cell is the **mean $\pm$ std over the $M$ ensemble members** of a per-instance spatial statistic (min/max
+    over the mask support; area-weighted masked mean $\mathcal{M}_\pi$ and weighted std).
     """
     mo.md(md_reading)
     return (md_reading,)
@@ -182,18 +182,31 @@ def hdr_export(mo):
 
     The **⬇ save all charts → figures/** button saves every currently-rendered chart to
     `docs/report/figures/` as a separate PNG (150 dpi), one file per panel, named by test id — e.g.
-    `\includegraphics{figures/T02a.png}`:
+    `\includegraphics{figures/T02aa.png}`:
 
-    | test | ids |
+    | test | exported ids |
     | --- | --- |
-    | T02 | `T02a`, `T02b`, `T02c` |
-    | T03 | `T03a`–`T03g` |
-    | T04 | `T04` |
-    | T05 | `T05` |
-    | T06 | `T06a`–`T06d` |
-    | T07 | `T07a`–`T07d` |
-    | T1.1 / T1.2 / T1.3 charts | `T1.1`, `T1.2`, `T1.3` |
-    | visual examples | `T1.1a`, `T1.2a`, `T1.3a` |
+    | T02 states — row 1 | `additions/<k>_det`, `T02<m>a`, `T02<m>b` — x^det core, twin, guided |
+    | T02 residuals — row 2 | `additions/<k>_res_ung`, `additions/<k>_res_gui`, `T02<m>c` — twin residual, guided residual, Δx^GE |
+    | T03 per-mode two-row | `T03_<m><v>_res` (residual) and `T03_<m><v>_grad` (applied kick) — `<m>` = selected-mode letter, `<v>` = variable a–g |
+    | T04, T05 profiles | `T04`, `T05` |
+    | T06 convergence | `T06` (selected startdate) |
+    | T07 landings | `T07a`, `T07b`, … (one per selected γ mode) |
+    | T1.1 / T1.2 / T1.3 profile charts | `T1.1`, `T1.2`, `T1.3` |
+    | T1.1 flow filmstrips | `T1.1a`, `T1.1b`, … (effect) and `T1.1a_grad`, `T1.1b_grad`, … (raw gradient) — one per selected variable |
+    | T1.2 / T1.3 visual maps | `T1.2a`/`T1.2b` and `T1.3a`/`T1.3b` (target / selected field) |
+    | T1.3 per-member effects | `T1.3_members_<m>` — one grid per selected γ mode (ρ=0.004; rows=dates, cols=members); `<m>`=mode letter |
+    | T2.1 effect (ρ charts, all dates in rows) | `T2.1_<δ>_<date>_<v>` — `<δ>`=intensity index 0/1, `<date>`=startdate (all), `<v>`=variable a–g |
+    | T2.2 effect (date charts, ρ in rows) | `T2.2_<year>_<δ>_<v>` |
+
+    **Index legend** — to decode/construct any name:
+
+    - `<v>` variable letter (fixed order): `a`=temperature (t), `b`=u-wind (u), `c`=v-wind (v), `d`=geopotential (z), `e`=specific humidity (q), `f`=vertical velocity (w), `g`=mean-sea-level pressure (mslp).
+    - `<m>` selected-mode letter — `a`, `b`, … in γ-order of the modes you selected (T02, T03).
+    - `<k>` the spike's 0-based flow step (mode `spike@K` → `k = K−1`).
+    - `<δ>` intensity index in `GUIDANCE_DELTA` order: `0`=peak@+0.2%, `1`=peak@+0.4%.
+    - `<date>` full startdate (e.g. `2024-08-09`); `<year>` its year (`2024`/`2026`).
+    - `additions/*` panels save under `docs/report/figures/additions/`.
 
     Only currently-rendered charts are saved — first compute what you want (press **compute field profiles**
     for T04/T05 and the T1.1–T1.3 charts), then press export. Each press overwrites, so the files always match
@@ -203,9 +216,140 @@ def hdr_export(mo):
     return (md_export,)
 
 
+@app.cell(hide_code=True)
+def figures_manifest_cell(
+    EXPS,
+    INTERF_PLAIN,
+    M,
+    N,
+    VAR_ORDER,
+    delta_labels,
+    delta_order,
+    flevel,
+    flevel_t13,
+    fvar,
+    fvar_t13,
+    gamma_key,
+    gname,
+    intensity_dropdown,
+    mo,
+    mode_math,
+    mode_of,
+    n_slider,
+    plot_labels,
+    realism_m_slider,
+    reliability_effect_modes,
+    reliability_m_slider,
+    sched_colors,
+    t02_modes,
+    t03_modes,
+    t07_modes,
+    t0_exp,
+    t12_region,
+    t12_zoom,
+    t13_region,
+    t2_mode,
+    var_select,
+    varlevel_select,
+    zoom_slider,
+):
+    # Current selections & figure manifest — a DYNAMIC summary of what each exported figure in
+    # docs/report/figures/ shows given the notebook's live selector state. Included in the markdown report
+    # so it can be handed to another agent alongside the PNGs.
+    def _clean(_g):
+        return _g.replace("\\text{-}", "-").replace("$\\mathrm{", "").replace("}$", "").replace("$", "")
+    def _pl(_v):
+        return INTERF_PLAIN.get(_v, _v)
+
+    _dates = ", ".join(e.split(chr(47))[-1].split(chr(95))[0] for e in EXPS)
+    _rhos = ", ".join(f"{delta_labels.get(_d, _d)} (δ#{_d})" for _d in delta_order)
+    _ei0 = t0_exp.value[0] if t0_exp.value else 0
+    _dd0 = intensity_dropdown.value
+    _date0 = EXPS[_ei0].split(chr(47))[-1].split(chr(95))[0]
+    _rho_t02 = delta_labels.get(_dd0, _dd0)
+    _rho_plot = delta_labels.get(intensity_dropdown.value, intensity_dropdown.value)
+    _t2m = _clean(t2_mode.value) if t2_mode.value else "—"
+    _t2vn = len([v for v in VAR_ORDER if varlevel_select.value and v in varlevel_select.value])
+    _t2vmap = ", ".join(f"{chr(97 + VAR_ORDER.index(v))}={_pl(v)}" for v in VAR_ORDER if varlevel_select.value and v in varlevel_select.value)
+    _t2dvals = ", ".join(f"{_d}={delta_labels.get(_d, _d)}" for _d in delta_order)
+
+    # T02: gamma-ordered selected modes, one map-triplet each
+    _t02_modes = [mt for mt in dict.fromkeys(mode_of(_l) for _l in sorted(sched_colors, key=gamma_key)) if t02_modes.value and mt in t02_modes.value]
+    _t02_rows = []
+    for _mi, mt in enumerate(_t02_modes):
+        _mb, _ms, _mr = mt.partition("@")
+        _k = (int(_mr.split("-")[0]) - 1) if (_ms and _mr.split("-")[0].isdigit()) else _mi
+        _t02_rows.append(f"| `T02{chr(97 + _mi)}a/b/c`, `additions/{_k}_det`, `_res_gui`, `_res_ung` | γ **{_clean(mode_math(mt))}** 3×2: row1 x^det/twin/guided, row2 twin-res/gui-res/Δx^GE — startdate **{_date0}**, **{_rho_t02}**, m = 0 |")
+
+    # T03: gamma-ordered selected modes x selected vars
+    _t03_modes = [mt for mt in dict.fromkeys(mode_of(_l) for _l in sorted(sched_colors, key=gamma_key)) if t03_modes.value and mt in t03_modes.value]
+    _t03_vars = [v for v in VAR_ORDER if varlevel_select.value and v in varlevel_select.value]
+    _t03_rows = []
+    for _mi, _mt in enumerate(_t03_modes):
+        _ids = ", ".join(f"`T03_{chr(97 + _mi)}{chr(97 + VAR_ORDER.index(v))}`" for v in _t03_vars)
+        _t03_rows.append(f"| {_ids} (each `_res` + `_grad`) | γ **{_clean(mode_math(_mt))}**: row-1 Δx^GE, row-2 applied kick Σ c·h·g^gui (T07 guidance move); vars {', '.join(_pl(v) for v in _t03_vars)} |")
+
+    # T07: gamma-ordered selected modes (at plotted intensity)
+    _t07_modes = [mt for mt in dict.fromkeys(mode_of(_l) for _l in sorted(plot_labels, key=gamma_key)) if t07_modes.value and mt in t07_modes.value]
+    _t07_rows = [f"| `T07{chr(97 + _mi)}` | landings decomposition, γ **{_clean(mode_math(_mt))}** |" for _mi, _mt in enumerate(_t07_modes)]
+
+    # T1.1 flow filmstrips: selected vars
+    _eff_vars = [v for v in VAR_ORDER if var_select.value and v in var_select.value]
+    _t11_eff = ", ".join(f"`T1.1{chr(97 + _eff_vars.index(v))}`" for v in _eff_vars)
+    _t11_grad = ", ".join(f"`T1.1{chr(97 + _eff_vars.index(v))}_grad`" for v in _eff_vars)
+    _eff_modes = ", ".join(_clean(gname(_l)) for _l in sorted([l for l in plot_labels if l in (reliability_effect_modes.value or [])], key=gamma_key))
+
+    figures_manifest = f"""## Current selections & figure manifest
+
+    _Live snapshot of the notebook's selectors: what each exported figure in `docs/report/figures/` shows.
+    Re-export (⬇ button) after changing any selector to keep the PNGs in sync with this manifest._
+
+    **Context.** Startdates: {_dates}. Intensities ρ: {_rhos}. Ensemble M = {M}, weather steps N = {N},
+    flow steps T = 25. Target field = 2 m temperature over the European mask; guidance effect
+    Δx^GE = x^gui − x^(ung|gui).
+
+    **Global selectors**
+    - Plotted intensity (T02–T07, T1.x): **{_rho_plot}** (δ#{intensity_dropdown.value})
+    - Example startdate (T02, T03, T06, T07): **{_date0}**
+    - Weather step n = {int(n_slider.value)}; reliability member m = {int(reliability_m_slider.value)}; T02/T03 map zoom = {int(zoom_slider.value)}×
+
+    **T0 figures**
+
+    | id(s) | shows (current selection) |
+    | --- | --- |
+    {chr(10).join(_t02_rows) if _t02_rows else "| _(T02: no γ mode selected)_ | |"}
+    {chr(10).join(_t03_rows) if _t03_rows else "| _(T03: no mode/var selected)_ | |"}
+    | `T04`, `T05` | absolute-intensity / vs-ground-truth profiles — selected γ modes at **{_rho_plot}** |
+    | `T06` | convergence-over-flow grid — startdate **{_date0}**, **{_rho_plot}**, m = {int(reliability_m_slider.value)}, all plotted schedules as lines |
+    {chr(10).join(_t07_rows) if _t07_rows else "| _(T07: no γ mode selected)_ | |"}
+
+    **T1 figures** (need **compute field profiles** for the charts)
+
+    | id(s) | shows (current selection) |
+    | --- | --- |
+    | `T1.1`, `T1.2`, `T1.3` | profile charts: multivariate propagation / spatial deviation D / ensemble diversity |
+    | {_t11_eff or "—"} | T1.1 signed guidance-effect filmstrips over flow — vars {', '.join(_pl(v) for v in _eff_vars) or '—'}, startdate **{EXPS[0].split(chr(47))[-1].split(chr(95))[0]}** |
+    | {_t11_grad or "—"} | T1.1 raw-gradient ∇L filmstrips over flow (each 2-D map normalized to ±1) — same vars |
+    | `T1.2a` / `T1.2b` | T1.2 footprint: target **2 m temperature** / selected **{_pl(fvar) if fvar in INTERF_PLAIN else fvar}@{flevel}** — region {t12_region.value}, zoom {int(t12_zoom.value)}×, m = {int(realism_m_slider.value)} |
+    | `T1.3a` / `T1.3b` | T1.3 signed-std: target **2 m temperature** / selected **{_pl(fvar_t13) if fvar_t13 in INTERF_PLAIN else fvar_t13}@{flevel_t13}** — region {t13_region.value} |
+
+    _T1.1 filmstrip γ modes: {_eff_modes or '—'} (rows)._
+
+    **T2 figures** — guidance effect Δx^GE, γ mode **{_t2m}**, {_t2vn} vars in columns
+
+    | id(s) | shows (current selection) |
+    | --- | --- |
+    | `T2.1_<δ>_<date>_<v>` | per-ρ charts, all startdates in rows. δ: {_t2dvals}; date: {_dates}; v: {_t2vmap} |
+    | `T2.2_<year>_<δ>_<v>` | per-date charts (first 2024, first 2026), ρ in rows. δ: {_t2dvals}; v: {_t2vmap} |
+    """
+    mo.md(figures_manifest)
+    return (figures_manifest,)
+
+
 @app.cell
 def table_report_cell(
     copyable,
+    figures_manifest,
     md_closeness,
     md_descstats,
     md_export,
@@ -236,6 +380,9 @@ def table_report_cell(
     md_t13_scores,
     md_t13_visual,
     md_t14,
+    md_t2,
+    md_t21,
+    md_t22,
     md_target_real,
     md_title,
     mo,
@@ -256,6 +403,7 @@ def table_report_cell(
         ("md", md_title),
         ("md", md_reading),
         ("md", md_export),
+        ("md", figures_manifest),
         ("md", md_t0),
         ("md", md_descstats), ("tbl", report_descstats),
         ("md", md_t0_maps),
@@ -269,6 +417,7 @@ def table_report_cell(
         ("md", md_t12), ("md", md_t12_visual), ("md", md_t12_def), ("md", md_t12_scores), ("tbl", report_realism), ("md", md_t12_whymask),
         ("md", md_t13), ("md", md_t13_visual), ("md", md_t13_def), ("md", md_t13_scores), ("tbl", report_diversity),
         ("md", md_t14), ("tbl", report_t14),
+        ("md", md_t2), ("md", md_t21), ("md", md_t22),
         ("md", md_support),
         ("md", md_target_real), ("tbl", report_reliability),
         ("md", md_leaderboard), ("tbl", report_leaderboard),
@@ -298,8 +447,9 @@ def export_charts(mo):
     FIG_DIR = Path("/Users/alain/Desktop/master-thesis/guiding-generative-probabilistic-weather-models/docs/report/figures")
     export_button = mo.ui.run_button(label="⬇ save all charts → figures/")
     def save_chart(_fig, _name):
-        FIG_DIR.mkdir(parents=True, exist_ok=True)
-        _fig.savefig(FIG_DIR / f"{_name}.png", dpi=150, bbox_inches="tight")
+        _p = FIG_DIR / f"{_name}.png"
+        _p.parent.mkdir(parents=True, exist_ok=True)   # supports subdir names like "additions/1_det"
+        _fig.savefig(_p, dpi=150, bbox_inches="tight")
         return _name
     mo.vstack([export_button, mo.md(f"_Press to save every plotted chart (T02–T07, T1.1–T1.3 + visual examples) to_ `docs/report/figures/` _as separate PNGs. Compute the relevant data first._")])
     return export_button, save_chart
@@ -494,7 +644,6 @@ def _(
     EXPS,
     ROLLOUTS_SKIPPED,
     experiment_dropdown,
-    intensity_dropdown,
     mo,
     n_slider,
     pin_dropdowns,
@@ -509,7 +658,7 @@ def _(
               f"{', '.join(e.split('/')[-1].split(chr(95))[0] for e in EXPS)}_"
               + (f"  ·  _skipped (not ready): {', '.join(ROLLOUTS_SKIPPED)}_" if ROLLOUTS_SKIPPED else "")),
         mo.hstack([point_multiselect, n_slider], justify="start", align="center"),
-        mo.hstack([mo.md("_sweep:_"), *[pin_dropdowns[_k] for _k in pin_dropdowns.value], intensity_dropdown],
+        mo.hstack([mo.md("_sweep:_"), *[pin_dropdowns[_k] for _k in pin_dropdowns.value]],
                   justify="start", align="center"),
     ], align="start")
     return
@@ -543,8 +692,7 @@ def _(mo):
     unguided-under-guided-context).
 
     Seven views: descriptive **statistics** of the target field (T01); the **example maps**
-    $x^{\mathrm{ung}\mid\mathrm{gui}}$, $x^{\mathrm{gui}}$, $\Delta x^{\mathrm{GE}}$ (T02) and $\Delta x^{\mathrm{GE}}$
-    **across variables** (T03); the profiles of **absolute intensity** (T04) and **deviation from ground truth**
+    $x^{\mathrm{ung}\mid\mathrm{gui}}$, $x^{\mathrm{gui}}$, $\Delta x^{\mathrm{GE}}$ (T02) and the **guidance effect and applied guidance** across variables (T03); the profiles of **absolute intensity** (T04) and **deviation from ground truth**
     (T05); and the flow-time **convergence** grid (T06) with its per-step **decomposition** (T07).
     """
     mo.md(md_t0)
@@ -559,12 +707,22 @@ def hdr_descstats(mo):
     For each intensity $\rho$ and experiment, the four per-instance spatial statistics
     $\{\min,\max,\mathrm{mean},\mathrm{std}\}$ of the **target field** (`VAR`) over the target region
     defined by the mask $\pi$ — **mean**/**std** use the area-weighted masked mean $\mathcal{M}_\pi(x)=\sum_{ij}\pi_{ij}x_{ij}/\sum_{ij}\pi_{ij}$ and the corresponding weighted std, while **min**/**max** are over the mask support ($\pi>0$), reported for the guided state $x^{\mathrm{gui}}$
-    and its same-seed unguided twin $x^{\mathrm{ung}\mid\mathrm{gui}}$. Each cell is the **ensemble avg
-    $\pm$ std** of that statistic over the pool (selected schedules $\times$ members $m$ $\times$ guided
-    steps $n$); the four statistics are the columns, each split into an ung$\mid$gui and a gui subcolumn.
+    and its same-seed unguided twin $x^{\mathrm{ung}\mid\mathrm{gui}}$. For a **single selected schedule**
+    $\gamma$ (dropdown) at $n=1$, each cell is the **mean $\pm$ std over the $M$ ensemble members** of that
+    statistic; the four statistics are the columns, each split into an ung$\mid$gui and a gui subcolumn.
     """
     mo.md(md_descstats)
     return (md_descstats,)
+
+
+@app.cell
+def descstats_sched_cell(gamma_key, gname, mo, mode_of, sched_colors):
+    # single-choice schedule for the T0.1 descriptive statistics (one γ; n=1; ± over the M members)
+    _ds_gs = {}
+    for _l in sorted(sched_colors, key=gamma_key):
+        _ds_gs.setdefault(mode_of(_l), gname(_l))
+    descstats_sched = mo.ui.dropdown(options=_ds_gs, value=(next(iter(_ds_gs)) if _ds_gs else None), label="descstats schedule γ: ")
+    return (descstats_sched,)
 
 
 @app.cell(hide_code=True)
@@ -574,7 +732,9 @@ def descstats_compute(
     N,
     VAR,
     channel,
+    descstats_sched,
     gamma_key,
+    gname,
     label_delta,
     load_rollout,
     metrics,
@@ -590,10 +750,10 @@ def descstats_compute(
     # (min, max, mean, std) of the TARGET variable field over the target region defined by the mask:
     # mean/std are the area-weighted masked mean M_pi = sum(pi*x)/sum(pi) and its weighted std; min/max
     # are over the mask support (pi>0). For the guided state (gui) and same-seed unguided twin. Pool =
-    # selected schedules x members m x guided steps n; the table reports the ensemble avg +/- std per stat.
+    # a SINGLE selected schedule (descstats_sched), members m, fixed n=1; the table reports the member avg +/- std per stat.
     descstats = None
     if metrics is not None:
-        _labs = sorted(sched_colors, key=gamma_key)   # all selected schedules across BOTH intensities
+        _labs = [_l for _l in sorted(sched_colors, key=gamma_key) if gname(_l) == descstats_sched.value]   # single selected schedule
         _toff = 273.15 if VAR in ("2m_temperature", "temperature") else 0.0   # K -> C for temperature (std shift-invariant)
         def _four_stats(_f2d, _mk, _wsum, _supp):
             _f = np.asarray(_f2d, float) - _toff
@@ -613,16 +773,15 @@ def descstats_compute(
                 _g = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)
                 _t = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)
                 _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
-                _gns = [nn for nn in range(N) if _p[nn] != 0.0] or [0]
+                _n0 = next((nn for nn in range(N) if _p[nn] != 0.0), 0)   # fix n=1 (first guided step)
                 _acc = descstats.setdefault((_ei, _dd),
                     {"gui": {_s: [] for _s in ("min", "max", "mean", "std")},
                      "ung": {_s: [] for _s in ("min", "max", "mean", "std")}})
                 for _m in range(M):
-                    for _n in _gns:
-                        _tf = _t.isel(m=_m, n=_n); _tf = _tf.isel(t=-1) if "t" in _tf.dims else _tf
-                        _sg = _four_stats(_g.isel(m=_m, n=_n), _mk, _wsum, _supp); _st = _four_stats(_tf, _mk, _wsum, _supp)
-                        for _s in ("min", "max", "mean", "std"):
-                            _acc["gui"][_s].append(_sg[_s]); _acc["ung"][_s].append(_st[_s])
+                    _tf = _t.isel(m=_m, n=_n0); _tf = _tf.isel(t=-1) if "t" in _tf.dims else _tf
+                    _sg = _four_stats(_g.isel(m=_m, n=_n0), _mk, _wsum, _supp); _st = _four_stats(_tf, _mk, _wsum, _supp)
+                    for _s in ("min", "max", "mean", "std"):
+                        _acc["gui"][_s].append(_sg[_s]); _acc["ung"][_s].append(_st[_s])
     return (descstats,)
 
 
@@ -634,6 +793,7 @@ def descstats_table(
     delta_labels,
     delta_order,
     descstats,
+    descstats_sched,
     mo,
     np,
 ):
@@ -641,7 +801,7 @@ def descstats_table(
     # two-level table: 4 stat columns (min/max/mean/std), each split into ung|gui and gui subcolumns;
     # rows = experiments; one table per intensity rho. Cell = ensemble avg +/- std of that statistic.
     if descstats is None:
-        descstats_view = mo.md("_press **compute metrics**_")
+        descstats_view = mo.vstack([descstats_sched, mo.md("_press **compute metrics**_")], align="start")
     else:
         _stats = ["min", "max", "mean", "std"]
         _blocks = []
@@ -672,12 +832,80 @@ def descstats_table(
             _rho = delta_labels.get(_dd, f"delta#{_dd}")
             _title = (f"**intensity {_rho}** — descriptive statistics of the target field "
                       f"`{VAR}` over the target region (mask π: weighted mean/std, min/max over support); each cell = ensemble avg ± std of the "
-                      f"per-instance spatial statistic, pooled over selected schedules × members × steps.")
+                      f"per-instance spatial statistic, over the $M$ ensemble members for the selected schedule at $n=1$.")
             report_descstats.append(_title + "\n\n" + "\n".join(_md))
             _blocks.append(mo.vstack([mo.md(_title), copyable(_title + "\n\n" + "\n".join(_md)), mo.Html(_tbl)], align="start"))
-        descstats_view = mo.vstack(_blocks, align="start")
+        descstats_view = mo.vstack([descstats_sched] + _blocks, align="start")
     descstats_view
     return (report_descstats,)
+
+
+@app.cell(hide_code=True)
+def descstats_summary(
+    EXPS,
+    N,
+    copyable,
+    delta_order,
+    descstats,
+    descstats_sched,
+    label_delta,
+    load_rollout,
+    mo,
+    np,
+    sweep_points,
+):
+    # T0.1 — additional SUMMARY table: one row per (initialization × {matched unguided, guided per ρ}),
+    # columns = min/max/mean/spatial-std, ± over the M members; emitted as LaTeX for the report.
+    if descstats is None:
+        descstats_summary_view = mo.md("_press **compute metrics**_")
+    else:
+        _rho_of = {}
+        _d0, _c0, _sv0, _r0, _m0 = load_rollout(EXPS[0])
+        _sp0 = sweep_points(_sv0, _r0)
+        for _lb0 in _sp0:
+            _dd0 = label_delta.get(_lb0)
+            if _dd0 is None or _dd0 in _rho_of:
+                continue
+            _pp = np.asarray(_sv0["GUIDANCE_DELTA"][_sp0[_lb0]["GUIDANCE_DELTA"]], float)[:N]
+            _nz = _pp[_pp != 0.0]
+            _rho_of[_dd0] = float(_nz[0]) if len(_nz) else float(_pp[0])
+        _stats = ["min", "max", "mean", "std"]
+        def _cell(_acc, _side):
+            return " & ".join(
+                (f"${np.mean(_acc[_side][_s]):.4g} \\pm {np.std(_acc[_side][_s]):.2g}$" if _acc[_side][_s] else "--")
+                for _s in _stats)
+        _rows = []
+        for _ei in range(len(EXPS)):
+            _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+            _ddU = next((_d for _d in delta_order if (_ei, _d) in descstats), None)
+            if _ddU is None:
+                continue
+            _rows.append(f"        {_date}\n        & Matched unguided\n        & {_cell(descstats[(_ei, _ddU)], 'ung')} \\\\")
+            for _dd in delta_order:
+                if (_ei, _dd) not in descstats:
+                    continue
+                _rows.append(f"        & Guided, $\\rho={_rho_of.get(_dd, _dd):.4g}$\n        & {_cell(descstats[(_ei, _dd)], 'gui')} \\\\")
+            _rows.append("        \\addlinespace")
+        while _rows and _rows[-1].strip() == "\\addlinespace":
+            _rows.pop()
+        _latex = (
+            "\\begin{table}[H]\n    \\centering\n    \\caption{\n"
+            f"        Descriptive statistics of 2\\,m temperature (schedule {descstats_sched.value}, $n=1$).\n"
+            "        Entries report mean $\\pm$ population standard deviation across the five ensemble\n"
+            "        members, in $^\\circ$C.\n    }\n    \\label{tab:t0-descriptive-statistics}\n"
+            "    \\resizebox{\\textwidth}{!}{\n    \\begin{tabular}{llcccc}\n        \\toprule\n"
+            "        Initialization\n        & State / intensity\n        & Minimum\n        & Maximum\n"
+            "        & Mean\n        & Spatial std. \\\\\n        \\midrule\n\n"
+            + "\n".join(_rows) +
+            "\n        \\bottomrule\n    \\end{tabular}\n    }\n\\end{table}"
+        )
+        descstats_summary_view = mo.vstack([
+            mo.md("**Summary table (LaTeX)** — matched unguided + guided per ρ, ± over the M members:"),
+            copyable(_latex, "📋 copy LaTeX"),
+            mo.md("```\n" + _latex + "\n```"),
+        ], align="start")
+    descstats_summary_view
+    return
 
 
 @app.cell(hide_code=True)
@@ -715,11 +943,31 @@ def t0_selectors(
         _key = _date if _date not in _t0_opts else f"{_date} #{_ei}"
         _t0_opts[_key] = (_ei, _dd0)
     t0_exp = mo.ui.dropdown(options=_t0_opts, value=(next(iter(_t0_opts)) if _t0_opts else None), label="example startdate: ")
-    _t0_gs = {}
+    _t02_mopts = {}
     for _l in sorted(sched_colors, key=gamma_key):
-        _t0_gs.setdefault(mode_of(_l), gname(_l))
-    t0_sched = mo.ui.dropdown(options=_t0_gs, value=(next(iter(_t0_gs)) if _t0_gs else None), label="example schedule γ: ")
-    return t0_exp, t0_sched
+        _t02_mopts.setdefault(gname(_l), mode_of(_l))
+    t02_modes = mo.ui.multiselect(options=_t02_mopts, value=list(_t02_mopts.keys())[:1], label="T02 modes γ: ")
+    _t03_mopts = {}
+    for _l in sorted(sched_colors, key=gamma_key):
+        _t03_mopts.setdefault(gname(_l), mode_of(_l))
+    t03_modes = mo.ui.multiselect(options=_t03_mopts, value=list(_t03_mopts.keys())[:1], label="T03 modes γ: ")
+    return t02_modes, t03_modes, t0_exp
+
+
+@app.cell(hide_code=True)
+def shared_field_selectors(INTERF_PLAIN, VAR_ORDER, mo):
+    # Shared field selectors, reused across tests. `varlevel_select` = the 7 example var-level combos (each
+    # variable at its representative level) for the map grids — T03, T07, T2.1, T2.2. `var_select` = the base
+    # variables (shown across all their levels) for the profile / filmstrip plots — T1.1, T04, T05. Both
+    # multiselects return variable names (from VAR_ORDER).
+    _vl_lab = {"temperature": "t@2m", "u_component_of_wind": "u@10m", "v_component_of_wind": "v@10m",
+               "geopotential": "z@1000", "specific_humidity": "q@1000", "vertical_velocity": "w@1000",
+               "mean_sea_level_pressure": "mslp"}
+    _vl_opts = {_vl_lab.get(_v, _v): _v for _v in VAR_ORDER}
+    varlevel_select = mo.ui.multiselect(options=_vl_opts, value=list(_vl_opts.keys()), label="var-levels: ")
+    _v_opts = {INTERF_PLAIN[_v]: _v for _v in VAR_ORDER}
+    var_select = mo.ui.multiselect(options=_v_opts, value=list(_v_opts.keys()), label="variables: ")
+    return var_select, varlevel_select
 
 
 @app.cell(hide_code=True)
@@ -736,11 +984,14 @@ def t0_maps(
     cool_half_cmap,
     delta_labels,
     export_button,
+    gamma_key,
     gname,
+    intensity_dropdown,
     label_delta,
     load_rollout,
     metrics,
     mo,
+    mode_of,
     np,
     open_store,
     open_unguided_state,
@@ -749,62 +1000,105 @@ def t0_maps(
     sched_colors,
     select_point,
     sweep_points,
+    t02_modes,
     t0_exp,
-    t0_sched,
     viz_panel,
     white_zero_cmap,
     zoom_slider,
 ):
-    # T0/T02 example maps — the exact guidance.py Inspect-states diff-mode panels: twin x^{ung|gui},
-    # guided x^{gui}, and Δx^GE, via visualize_map with the zoom command (target field, m=0).
-    if metrics is None or t0_exp.value is None or t0_sched.value is None:
-        t0_maps_view = mo.md("_press **compute metrics** / pick an experiment_")
+    # T0/T02 example maps — per γ mode a 3×2 decomposition (guidance.py "Inspect states"):
+    #   row 1 = absolute states [x^det core, x^{ung|gui} twin, x^{gui} guided];
+    #   row 2 = residuals/effect [r^{ung|gui}=twin−ung_det, r^{gui}=guided−gui_det, Δx^GE=guided−twin].
+    # m=0, target field (2 m temp, K→°C); zoom command; Δx^GE colorbar shared across modes. The x^det /
+    # r^{gui} / r^{ung|gui} panels export to figures/additions/<k>_{det,res_gui,res_ung} (k = flow step).
+    if metrics is None or t0_exp.value is None or not t02_modes.value:
+        t0_maps_view = mo.md("_press **compute metrics** / pick an experiment and γ mode(s)_")
     else:
-        _ei, _dd = t0_exp.value
+        _ei = t0_exp.value[0]; _dd = intensity_dropdown.value
         _dir, _cfg, _sv, _recs, _mask = load_rollout(EXPS[_ei])
         _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
-        _lb = next((l for l in sched_colors if gname(l) == t0_sched.value and label_delta.get(l) == _dd and l in _sp), None)
-        if _lb is None:
-            t0_maps_view = mo.md("_selected schedule not available for this experiment_")
-        else:
+        _toff = 273.15 if VAR in ("2m_temperature", "temperature") else 0.0   # K -> C for absolute fields
+        _zz = int(zoom_slider.value)
+        _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+        _modes_ord = [_mt for _mt in dict.fromkeys(mode_of(_l) for _l in sorted(sched_colors, key=gamma_key)) if _mt in t02_modes.value]
+        # pass 1: load per-mode states + residuals; accumulate the Δx^GE max-abs across ALL modes
+        _items = []; _gm = 1e-9
+        for _mi, _mt in enumerate(_modes_ord):
+            _ml = chr(97 + _mi)
+            _mb, _ms, _mr = _mt.partition("@")
+            _step = (int(_mr.split("-")[0]) - 1) if (_ms and _mr.split("-")[0].isdigit()) else _mi   # display flow step
+            _lb = next((l for l in sorted(sched_colors, key=gamma_key) if mode_of(l) == _mt and label_delta.get(l) == _dd and l in _sp), None)
+            if _lb is None:
+                _items.append(("miss", _mt)); continue
             _sel = _sp[_lb]
             _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
             _n = next((nn for nn in range(N) if _p[nn] != 0.0), 0)
-            _gt = channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg)
-            _tt = channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg)
-            _toff = 273.15 if VAR in ("2m_temperature", "temperature") else 0.0   # K -> C for temperature
-            _xgui = np.asarray(_gt.isel(m=0, n=_n), float) - _toff
-            _xung = np.asarray(_tt.isel(m=0, n=_n).isel(t=-1), float) - _toff
-            _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)} · {t0_sched.value} · m=0"
-            _zz = int(zoom_slider.value)
-            _ws = region_crop(_xung, "globe", _zz); _wg = region_crop(_xgui, "globe", _zz)  # zoom-region windows
-            _svmin = float(min(np.nanmin(_ws), np.nanmin(_wg))); _svmax = float(max(np.nanmax(_ws), np.nanmax(_wg)))
+            _xgui = np.asarray(channel(select_point(open_store(_dir, "gui", VAR), _sel), _cfg).isel(m=0, n=_n), float) - _toff
+            _xung = np.asarray(channel(select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel), _cfg).isel(m=0, n=_n).isel(t=-1), float) - _toff
+            _det = np.asarray(channel(select_point(open_store(_dir, "gui_det", VAR), _sel), _cfg).isel(m=0, n=_n), float) - _toff
+            try:
+                _und = np.asarray(channel(select_point(open_store(_dir, "ung_det", VAR), _sel), _cfg).isel(m=0, n=_n), float) - _toff
+            except Exception:
+                _und = _det   # guidance.py fallback: no ung_det -> use gui_det core (exact at n=0)
+            _rg = _xgui - _det; _ru = _xung - _und   # realized generative residuals r_n = x_n − x_n^det
+            _wge = region_crop(_xgui - _xung, "globe", _zz)
+            if np.isfinite(_wge).any():
+                _gm = max(_gm, float(np.nanmax(np.abs(_wge))))
+            _en = f"{_date} × {delta_labels.get(_dd, _dd)} · {gname(_lb)} · m=0"
+            _items.append(("hit", _ml, _step, _xgui, _xung, _det, _rg, _ru, _en))
+        # pass 2: render 3×2 per mode; row-1 absolutes share a per-mode scale, row-2 residuals share theirs,
+        # Δx^GE uses the shared [−_gm, _gm] across modes (0-centred)
+        _blocks = []
+        for _it in _items:
+            if _it[0] == "miss":
+                _blocks.append(mo.md(f"_γ mode {_it[1]} not available for this experiment / intensity_")); continue
+            _, _ml, _step, _xgui, _xung, _det, _rg, _ru, _en = _it
+            _wd = region_crop(_det, "globe", _zz); _ws = region_crop(_xung, "globe", _zz); _wg = region_crop(_xgui, "globe", _zz)
+            _svmin = float(min(np.nanmin(_wd), np.nanmin(_ws), np.nanmin(_wg)))
+            _svmax = float(max(np.nanmax(_wd), np.nanmax(_ws), np.nanmax(_wg)))
             if _svmin < 0.0 < _svmax:
                 _scmap, _scen = white_zero_cmap, 0.0
             elif _svmin >= 0.0:
                 _scmap, _scen = WARM_CMAP, None
             else:
                 _scmap, _scen = cool_half_cmap, None
-            _wge = region_crop(_xgui - _xung, "globe", _zz); _gm = (float(np.nanmax(np.abs(_wge))) if np.isfinite(_wge).any() else 0.0) or 1e-9
-            _panels = mo.hstack([
-                viz_panel(_xung, r"$x^{\mathrm{ung}\mid\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02a", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value),
-                viz_panel(_xgui, r"$x^{\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename="T02b", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value),
-                viz_panel(_xgui - _xung, r"$\Delta x^{\mathrm{GE}}$", True, _ovmin=-_gm, _ovmax=_gm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename="T02c", _contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value),
+            _wru = region_crop(_ru, "globe", _zz); _wrg = region_crop(_rg, "globe", _zz)
+            _rm = (max(float(np.nanmax(np.abs(_wru))), float(np.nanmax(np.abs(_wrg)))) if (np.isfinite(_wru).any() or np.isfinite(_wrg).any()) else 0.0) or 1e-9
+            _ck = dict(_contour_on=contour_checkbox_t02.value, _contour_levels=contour_levels_slider_t02.value, _contour_color=contour_color_dropdown_t02.value, _do_save=export_button.value)
+            _row1 = mo.hstack([
+                viz_panel(_det, r"$x^{\mathrm{det}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename=f"additions/{_step}_det", **_ck),
+                viz_panel(_xung, r"$x^{\mathrm{ung}\mid\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename=f"T02{_ml}a", **_ck),
+                viz_panel(_xgui, r"$x^{\mathrm{gui}}$", False, _ovmin=_svmin, _ovmax=_svmax, _ocmap=_scmap, _ocenter=_scen, _mask=_mask, _savename=f"T02{_ml}b", **_ck),
             ], justify="start", align="start")
-            t0_maps_view = mo.vstack([mo.md(f"_{_en}_"), _panels], align="start")
-    mo.vstack([mo.hstack([t0_exp, t0_sched, zoom_slider, contour_checkbox_t02, contour_levels_slider_t02, contour_color_dropdown_t02], justify="start"), t0_maps_view], align="start")
+            _row2 = mo.hstack([
+                viz_panel(_ru, r"$r^{\mathrm{ung}\mid\mathrm{gui}}$", True, _ovmin=-_rm, _ovmax=_rm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename=f"additions/{_step}_res_ung", **_ck),
+                viz_panel(_rg, r"$r^{\mathrm{gui}}$", True, _ovmin=-_rm, _ovmax=_rm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename=f"additions/{_step}_res_gui", **_ck),
+                viz_panel(_xgui - _xung, r"$\Delta x^{\mathrm{GE}}$", True, _ovmin=-_gm, _ovmax=_gm, _ocmap=white_zero_cmap, _ocenter=0.0, _mask=_mask, _savename=f"T02{_ml}c", **_ck),
+            ], justify="start", align="start")
+            _blocks.append(mo.vstack([mo.md(f"_{_en}_"), _row1, _row2], align="start"))
+        t0_maps_view = mo.vstack(_blocks, align="start") if _blocks else mo.md("_no γ mode available for this experiment / intensity_")
+    mo.vstack([mo.hstack([t0_exp, intensity_dropdown, t02_modes, zoom_slider, contour_checkbox_t02, contour_levels_slider_t02, contour_color_dropdown_t02], justify="start"), t0_maps_view], align="start")
     return
 
 
 @app.cell(hide_code=True)
 def md_t0_gegrid(mo):
     md_t0_gegrid = r"""
-    ### T03: Δx^GE across selected variables
+    ### T03: Guidance effect and applied guidance across variables
 
-    The guidance effect $\Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}$ at the
-    final guided state, for the seven convergence variables (T06) (each at its surface value, else level $1000$) in the same
-    $2\times4$ grid, for the selected experiment and schedule at $m{=}0$ (diverging, white $=0$; mask bbox).
-    Shows how an intervention on $2\mathrm{m}$ temperature propagates across atmospheric variables and levels.
+    For each selected **γ-mode** (a_t_mode), a **two-row** panel over the selected variables (each at its surface
+    value, else level $1000$), for the selected experiment at $m{=}0$ (diverging, white $=0$; mask bbox):
+
+    - **Row 1** — the guidance effect at the final guided state,
+      $\Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}$.
+    - **Row 2** — the **applied guidance kick** to the state, summed over the mode's guided flow step(s),
+      $-\sum_t c\,h_t\,g^{\mathrm{gui}}_t$ (the T07 "guidance move", sign-flipped to the guidance/effect
+      direction) — the actual kick injected at the spike (or spread) step, in each variable.
+
+    Each panel is scaled to its own max-abs, so the map shows the **pattern** and the colourbar the **magnitude**.
+    Contrasts *what is injected* (row 2, at the spike step) with *how it propagates* to the final state across
+    atmospheric variables and levels (row 1). Use the variable / γ-mode multiselects to choose the columns and
+    which modes get their own two-row block.
     """
     mo.md(md_t0_gegrid)
     return (md_t0_gegrid,)
@@ -823,60 +1117,91 @@ def t0_gegrid(
     contour_levels_slider_t03,
     delta_labels,
     export_button,
+    gamma_key,
     gname,
+    guided_velocity_primitive,
+    intensity_dropdown,
     label_delta,
     load_rollout,
     metrics,
     mo,
+    mode_of,
     np,
     open_store,
     open_unguided_state,
     pinned_records,
     reliability_var_meta,
+    residual_scaler,
     sched_colors,
     select_point,
     sweep_points,
+    t03_modes,
     t0_exp,
-    t0_sched,
+    varlevel_select,
     viz_panel,
     zoom_slider,
 ):
-    # T0/T03 — Δx^GE across the 7 convergence variables (final guided state minus twin) via the exact
-    # guidance.py visualize_map renderer + zoom, m=0.
-    if metrics is None or t0_exp.value is None or t0_sched.value is None:
-        t0_gegrid_view = mo.md("_press **compute metrics** / pick an experiment_")
+    # T03 — per γ-mode two-row panel: row 1 = final guidance effect Δx^GE, row 2 = applied guidance vector
+    # Σ_t λ_t·∇L at the mode's guided flow step(s). m=0, exact viz_panel renderer + zoom.
+    if metrics is None or t0_exp.value is None or not t03_modes.value or not varlevel_select.value:
+        t0_gegrid_view = mo.md("_press **compute metrics** / pick an experiment, mode(s) and variable(s)_")
     else:
-        _ei, _dd = t0_exp.value
+        _ei = t0_exp.value[0]; _dd = intensity_dropdown.value
         _dir, _cfg, _sv, _recs, _mask = load_rollout(EXPS[_ei])
         _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
-        _lb = next((l for l in sched_colors if gname(l) == t0_sched.value and label_delta.get(l) == _dd and l in _sp), None)
-        if _lb is None:
-            t0_gegrid_view = mo.md("_selected schedule not available for this experiment_")
-        else:
+        _vars = [_v for _v in VAR_ORDER if _v in varlevel_select.value]
+        _modes_ord = [_mt for _mt in dict.fromkeys(mode_of(_l) for _l in sorted(sched_colors, key=gamma_key)) if _mt in t03_modes.value]
+        _en0 = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)} · m=0"
+        def _resolve(_b):
+            if _b in INTERF_SURFACE_PAIR:
+                return INTERF_SURFACE_PAIR[_b], "surface", 0
+            if _b == "mean_sea_level_pressure":
+                return _b, "surface", 0
+            return _b, "level", 1000
+        _blocks = []
+        for _mi, _mt in enumerate(_modes_ord):
+            _lb = next((l for l in sched_colors if mode_of(l) == _mt and label_delta.get(l) == _dd and l in _sp), None)
+            if _lb is None:
+                _blocks.append(mo.md(f"_mode {_mt} not available for this experiment_")); continue
             _sel = _sp[_lb]
             _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
             _n = next((nn for nn in range(N) if _p[nn] != 0.0), 0)
-            def _resolve(_b):
-                if _b in INTERF_SURFACE_PAIR:
-                    return INTERF_SURFACE_PAIR[_b], "surface", 0
-                if _b == "mean_sea_level_pressure":
-                    return _b, "surface", 0
-                return _b, "level", 1000
-            _maps = []
-            for _var in VAR_ORDER:
+            _ml = chr(97 + _mi)
+            _res, _grd = [], []
+            for _var in _vars:
                 _rv, _rp, _rl = _resolve(_var); _lev = _rl if _rp == "level" else None
+                _vl = chr(97 + VAR_ORDER.index(_var))
+                _lbl = reliability_var_meta.get(_var, (INTERF_SHORT.get(_var, _var), False))[0]
+                # Row 1: final residual Δx^GE = x^gui − x^{ung|gui}
                 _gd = select_point(open_store(_dir, "gui", _rv), _sel)
                 _ud = select_point(open_unguided_state(_dir, "gui_ung", _rv), _sel)
                 _gd = _gd.sel(level=_lev) if (_lev is not None and "level" in _gd.dims) else _gd
                 _ud = _ud.sel(level=_lev) if (_lev is not None and "level" in _ud.dims) else _ud
                 _xg = np.asarray(_gd.isel(m=0, n=_n), float)
                 _ux = _ud.isel(m=0, n=_n); _ux = np.asarray(_ux.isel(t=-1) if "t" in _ux.dims else _ux, float)
-                _lbl = reliability_var_meta.get(_var, (INTERF_SHORT.get(_var, _var), False))[0]
-                _maps.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T03{chr(97 + VAR_ORDER.index(_var))}", _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value, _contour_color=contour_color_dropdown_t03.value, _do_save=export_button.value))
-            _rows = [mo.hstack(_maps[_i:_i + 4], justify="start", align="start") for _i in range(0, len(_maps), 4)]
-            _en = f"{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]} × {delta_labels.get(_dd, _dd)} · {t0_sched.value} · m=0 (final state)"
-            t0_gegrid_view = mo.vstack([mo.md(rf"_$\Delta x^{{\mathrm{{GE}}}}$ — {_en}_")] + _rows, align="start")
-    mo.vstack([mo.hstack([t0_exp, t0_sched, zoom_slider, contour_checkbox_t03, contour_levels_slider_t03, contour_color_dropdown_t03], justify="start"), t0_gegrid_view], align="start")
+                _res.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T03_{_ml}{_vl}_res",
+                            _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value,
+                            _contour_color=contour_color_dropdown_t03.value, _do_save=export_button.value))
+                # Row 2: applied guidance kick to the STATE, −Σ_t c·h_t·g^gui_t — the spatial analog of the
+                # T07 "guidance move" (the injected latent nudge, same units/scale as row 1; NOT the
+                # denoiser-amplified clean-pred readout c·s·g). Convention-robust primitive path.
+                _c = residual_scaler(_rp, _rv, level=_lev)
+                _vel = guided_velocity_primitive(_dir, _sel, 0, _n, _rv, _c, level=_lev)
+                _gk = -(_c * _vel["h"][:, None, None] * _vel["gui_vec"]).sum(axis=0)
+                _grd.append(viz_panel(_gk, _lbl, True, _mask=_mask, _savename=f"T03_{_ml}{_vl}_grad",
+                            _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value,
+                            _contour_color=contour_color_dropdown_t03.value, _do_save=export_button.value))
+            _blocks.append(mo.vstack([
+                mo.md(rf"**{gname(_lb)}** — {_en0}"),
+                mo.md(r"_row 1 — $\Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}$ (final state)_"),
+                mo.hstack(_res, justify="start", align="start"),
+                mo.md(r"_row 2 — applied guidance kick $-\sum_t c\,h_t\,g^{\mathrm{gui}}_t$ (injected state nudge, oriented to the effect direction; same units/scale as row 1, = T07 guidance move) at the guided step(s)_"),
+                mo.hstack(_grd, justify="start", align="start"),
+            ], align="start"))
+        t0_gegrid_view = mo.vstack(_blocks, align="start")
+    mo.vstack([mo.hstack([t0_exp, intensity_dropdown, t03_modes, varlevel_select, zoom_slider, contour_checkbox_t03,
+                          contour_levels_slider_t03, contour_color_dropdown_t03], justify="start"),
+               t0_gegrid_view], align="start")
     return
 
 
@@ -886,7 +1211,7 @@ def hdr_t04(mo):
     ### T04: Absolute intensity
 
     The masked-mean of the guided state $\mathcal{M}_\pi(x^{\mathrm{gui}})$ per variable and vertical level, one
-    line per top-$k$ schedule $\gamma$; dashed grey = unguided twin (ung$\mid$gui), dashed green = ground
+    line per selected $\gamma$ mode; dashed grey = unguided twin (ung$\mid$gui), dashed green = ground
     truth. One chart per level variable, $x$ = channels (surface→top); pooled across experiments
     (exp$\times m\times n$).
     """
@@ -895,12 +1220,23 @@ def hdr_t04(mo):
 
 
 @app.cell(hide_code=True)
+def t45_selectors(gamma_key, gname, mo, mode_of, sched_colors, var_select):
+    # T04/T05 γ-mode selector — pick which schedules to draw as lines (replaces the auto top-k for these two).
+    _t45_mopts = {}
+    for _l in sorted(sched_colors, key=gamma_key):
+        _t45_mopts.setdefault(gname(_l), mode_of(_l))
+    t45_modes = mo.ui.multiselect(options=_t45_mopts, value=list(_t45_mopts.keys()), label="T04/T05 γ modes: ")
+    mo.hstack([t45_modes, var_select], justify="start")
+    return (t45_modes,)
+
+
+@app.cell(hide_code=True)
 def _(interf_profile_render):
     interf_abs_view = interf_profile_render(
         "abs",
         r"",
         r"Masked-mean of the **guided state** $\mathcal{M}_m(x^{\mathrm{gui}})$ per variable/level, one line "
-        r"per top-$k$ schedule; dashed grey = unguided twin (ung|gui), dashed green = ground truth (gt). "
+        r"per selected $\gamma$ mode; dashed grey = unguided twin (ung|gui), dashed green = ground truth (gt). "
         r"One chart per level variable — $x$ = channels (surface→top). Pooled across experiments (exp×m×n).",
         r"$\mathcal{M}_m(x^{\mathrm{gui}})$",
     )
@@ -973,54 +1309,55 @@ def _(
     reliability_var_meta,
     save_chart,
     sched_colors,
+    t0_exp,
 ):
-    # ---- Reliability: guided-state convergence over flow time, 7-field grid per experiment ----
+    # ---- T06: guided-state convergence over flow time, 7-field grid for the SELECTED startdate (t0_exp) ----
     # All 7 fields at surface (else level 1000). Target field (*) shows the gap xi_{n,t}->0; others show
-    # the guidance effect M(x_t)-M(twin). Solid = selected member; dashed = ung|gui twin; band = min-max
-    # over members. Legend in the upper-right slot.
-    if metrics is None or reliability_states is None:
-        reliability_conv_view = mo.md("_press **compute metrics**_")
+    # the guidance effect M(x_t)-M(twin). Solid = selected member; dashed = ung|gui twin; band = min-max.
+    if metrics is None or reliability_states is None or t0_exp.value is None:
+        reliability_conv_view = mo.md("_press **compute metrics** / pick a startdate_")
     else:
+        _ei0 = t0_exp.value[0]
         _rn = int(n_slider.value) - 1
         _m0 = int(reliability_m_slider.value)
         _shade = reliability_shade_checkbox.value
         _labels = sorted(plot_labels, key=gamma_key)
         _ncol, _nrow = 4, 2
         _slots = [(_r, _c) for _r in range(_nrow) for _c in range(_ncol) if (_r, _c) != (0, _ncol - 1)]
-        _items = []
-        for _ei in range(len(EXPS)):
-            _items.append(mo.md(f"_{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]}_  (n={_rn + 1}, member m={_m0})"))
-            _f, _axs = plt.subplots(_nrow, _ncol, figsize=(3.1 * _ncol, 2.3 * _nrow), squeeze=False, dpi=120)
-            for _vi, _var in enumerate(VAR_ORDER):
-                _r, _c = _slots[_vi]; _ax = _axs[_r][_c]
-                _lbl, _is_t = reliability_var_meta[_var]
-                for _lb in _labels:
-                    _cs = [reliability_states[(_ei, _m, _lb, _var)] for _m in range(M) if (_ei, _m, _lb, _var) in reliability_states]
-                    if not _cs:
-                        continue
-                    _arr = np.stack(_cs); _x = np.arange(_arr.shape[1]); _col = sched_colors[_lb]
-                    if _shade and _arr.shape[0] > 1:
-                        _ax.fill_between(_x, np.nanmin(_arr, 0), np.nanmax(_arr, 0), color=_col, alpha=0.15, linewidth=0)
-                    if (_ei, _m0, _lb, _var) in reliability_states:
-                        _ax.plot(_x, reliability_states[(_ei, _m0, _lb, _var)], "-", color=_col, linewidth=1.4, label=gname(_lb))
-                if (_ei, _m0, _var) in reliability_twin:
-                    _tw = reliability_twin[(_ei, _m0, _var)]
-                    _ax.plot(np.arange(len(_tw)), _tw, "--", color="#333333", linewidth=1.2, label=r"ung$\mid$gui")
-                _ax.axhline(0.0, color="#888888", linewidth=0.8)
-                _ax.set_title((_lbl[:-1] + r"^\star$") if _is_t else _lbl, fontsize=9)
-                _ax.set_xlabel("$t$", fontsize=7); _ax.tick_params(labelsize=6)
-            _lax = _axs[0][_ncol - 1]; _lax.axis("off")
-            _h, _l = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
-            if _h:
-                _lax.legend(_h, _l, fontsize=7, loc="upper right", frameon=False)
-            _f.tight_layout(pad=0.5)
-            if export_button.value:
-                save_chart(_f, f"T06{chr(97 + _ei)}")
-            _items.append(mo.as_html(_f))
+        _f, _axs = plt.subplots(_nrow, _ncol, figsize=(3.1 * _ncol, 2.3 * _nrow), squeeze=False, dpi=120)
+        for _vi, _var in enumerate(VAR_ORDER):
+            _r, _c = _slots[_vi]; _ax = _axs[_r][_c]
+            _lbl, _is_t = reliability_var_meta[_var]
+            for _lb in _labels:
+                _cs = [reliability_states[(_ei0, _m, _lb, _var)] for _m in range(M) if (_ei0, _m, _lb, _var) in reliability_states]
+                if not _cs:
+                    continue
+                _arr = np.stack(_cs); _x = np.arange(_arr.shape[1]); _col = sched_colors[_lb]
+                if _shade and _arr.shape[0] > 1:
+                    _ax.fill_between(_x, np.nanmin(_arr, 0), np.nanmax(_arr, 0), color=_col, alpha=0.15, linewidth=0)
+                if (_ei0, _m0, _lb, _var) in reliability_states:
+                    _ax.plot(_x, reliability_states[(_ei0, _m0, _lb, _var)], "-", color=_col, linewidth=1.4, label=gname(_lb))
+            if (_ei0, _m0, _var) in reliability_twin:
+                _tw = reliability_twin[(_ei0, _m0, _var)]
+                _ax.plot(np.arange(len(_tw)), _tw, "--", color="#333333", linewidth=1.2, label=r"ung$\mid$gui")
+            _ax.axhline(0.0, color="#888888", linewidth=0.8)
+            _ax.set_title((_lbl[:-1] + r"^\star$") if _is_t else _lbl, fontsize=9)
+            _ax.set_xlabel("$t$", fontsize=7); _ax.tick_params(labelsize=6)
+        _lax = _axs[0][_ncol - 1]; _lax.axis("off")
+        _h, _l = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
+        if _h:
+            _lax.legend(_h, _l, fontsize=7, loc="upper right", frameon=False)
+        _f.tight_layout(pad=0.5)
+        if export_button.value:
+            save_chart(_f, "T06")
+        _date = EXPS[_ei0].split(chr(47))[-1].split(chr(95))[0]
         reliability_conv_view = mo.vstack([
-            mo.hstack([reliability_m_slider, reliability_shade_checkbox], justify="start"),
-            mo.md(r"7 fields at **surface** (else **level 1000**). Target field ($^\star$): gap $\xi_{n,t}=\mathcal{M}_\pi(\hat{x}_t)-y^\star\!\to 0$; others: guidance effect $\mathcal{M}_\pi(\hat{x}_t)-\mathcal{M}_\pi(x^{\mathrm{ung}\mid\mathrm{gui}})$. Solid = selected member $m$; dashed = ung$\mid$gui twin; band = min-max over members."),
-            *_items], align="start")
+            mo.hstack([t0_exp, reliability_m_slider, reliability_shade_checkbox], justify="start"),
+            mo.md(rf"7 fields at **surface** (else **level 1000**), startdate **{_date}** ($n={_rn + 1}$, member $m={_m0}$). "
+                  rf"Target field ($^\star$): gap $\xi_{{n,t}}=\mathcal{{M}}_\pi(\hat{{x}}_t)-y^\star\!\to 0$; others: guidance "
+                  rf"effect $\mathcal{{M}}_\pi(\hat{{x}}_t)-\mathcal{{M}}_\pi(x^{{\mathrm{{ung}}\mid\mathrm{{gui}}}})$. Solid = "
+                  rf"selected member $m$; dashed = ung$\mid$gui twin; band = min-max over members."),
+            mo.as_html(_f)], align="start")
     reliability_conv_view
     return
 
@@ -1033,7 +1370,7 @@ def hdr_r3(mo):
     The same 7-field grid decomposed per flow step: the state $\mathcal{M}_\pi(\hat{x}_t)$ (gold) splits each
     step's move into the **flow move** ($\mathcal{M}_\pi(\hat{x}_t)\to$ ung$\mid$gui landing) and the
     **guidance move** (ung$\mid$gui landing $\to$ guided landing) — the guidance contribution injected at step
-    $t$. One selected schedule $\gamma$ and member $m$; target field ($^\star$) descends to $0$.
+    $t$. One grid per selected $\gamma$ mode and member $m$; the **purple line** traces the full ung$\mid$gui (unguided-twin) trajectory, from which the guided state departs via the guidance moves. Target field ($^\star$) descends to $0$.
     """
     mo.md(md_t02)
     return (md_t02,)
@@ -1044,42 +1381,55 @@ def wf_plot(
     EXPS,
     VAR_ORDER,
     export_button,
+    gamma_key,
+    gname,
     metrics,
     mo,
+    mode_of,
     n_slider,
     np,
+    plot_labels,
     plt,
     reliability_land,
     reliability_m_slider,
     reliability_states,
+    reliability_twin,
     reliability_var_meta,
-    reliability_wf_sched,
     save_chart,
+    t07_modes,
+    t0_exp,
+    varlevel_select,
 ):
-    # ---- Reliability 1.3: convergence decomposition (landings waterfall), 7-field grid ----
-    # guidance.py "landings" grammar, thesis-ready: per flow step the state M_pi(x_t) (gold) splits into the
-    # flow move (red: state_t -> ung|gui landing) and the guidance move (blue: ung|gui landing -> guided
-    # landing). One selected schedule + member; target field (*) descends to 0.
-    if metrics is None or reliability_states is None:
-        reliability_wf_view = mo.md("_press **compute metrics**_")
-    elif reliability_wf_sched.value is None:
-        reliability_wf_view = mo.md("_no schedule selected_")
+    # ---- T07: convergence decomposition (landings) — one grid PER selected γ mode (t07_modes), over the
+    # selected var-levels (varlevel_select), at the SELECTED startdate (t0_exp). Per flow step the state splits into
+    # the flow move and the guidance move.
+    _t07_controls = mo.hstack([t0_exp, t07_modes, varlevel_select, reliability_m_slider], justify="start")
+    if metrics is None or reliability_states is None or t0_exp.value is None or not t07_modes.value or not varlevel_select.value:
+        reliability_wf_view = mo.vstack([_t07_controls, mo.md("_pick a startdate, γ mode(s) and var-level(s) — press **compute metrics** first if nothing renders_")], align="start")
     else:
+        _ei0 = t0_exp.value[0]
         _rn = int(n_slider.value) - 1
         _m0 = int(reliability_m_slider.value)
-        _sched = reliability_wf_sched.value
-        _ncol, _nrow = 4, 2
-        _slots = [(_r, _c) for _r in range(_nrow) for _c in range(_ncol) if (_r, _c) != (0, _ncol - 1)]
+        _sel_vars = [_v for _v in VAR_ORDER if _v in varlevel_select.value]
+        _ncol = min(4, len(_sel_vars) + 1)
+        _nrow = max(1, -(-(len(_sel_vars) + 1) // _ncol))
+        _slots = [(_r, _c) for _r in range(_nrow) for _c in range(_ncol) if (_r, _c) != (0, _ncol - 1)][:len(_sel_vars)]
+        _legend_pos = (0, _ncol - 1)
         _off = 0.18
+        _date = EXPS[_ei0].split(chr(47))[-1].split(chr(95))[0]
+        _modes_ord = [_mt for _mt in dict.fromkeys(mode_of(_l) for _l in sorted(plot_labels, key=gamma_key)) if _mt in t07_modes.value]
         _items = []
-        for _ei in range(len(EXPS)):
-            _items.append(mo.md(f"_{EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]}_  (n={_rn + 1}, member m={_m0})"))
+        for _mi, _mt in enumerate(_modes_ord):
+            _lb = next((_l for _l in plot_labels if mode_of(_l) == _mt), None)
+            if _lb is None:
+                _items.append(mo.md(f"_γ mode {_mt} not available at this intensity_")); continue
+            _items.append(mo.md(rf"_**{gname(_lb)}** — {_date}  ($n={_rn + 1}$, member $m={_m0}$)_"))
             _f, _axs = plt.subplots(_nrow, _ncol, figsize=(3.7 * _ncol, 2.5 * _nrow), squeeze=False, dpi=120)
-            for _vi, _var in enumerate(VAR_ORDER):
+            for _vi, _var in enumerate(_sel_vars):
                 _r, _c = _slots[_vi]; _ax = _axs[_r][_c]
                 _lbl, _is_t = reliability_var_meta[_var]
                 _lab = (lambda _s: _s) if _vi == 0 else (lambda _s: "_nolegend_")
-                _k = (_ei, _m0, _sched, _var)
+                _k = (_ei0, _m0, _lb, _var)
                 if _k in reliability_states and _k in reliability_land and len(reliability_land[_k]):
                     _st = reliability_states[_k]; _ld = reliability_land[_k]
                     _T = len(_ld); _xt = np.arange(len(_st)).astype(float)
@@ -1091,21 +1441,35 @@ def wf_plot(
                     _ax.plot(_xt, _st, "-", color="#B7950B", alpha=0.6, linewidth=1.0, zorder=5)
                     _ax.plot(_xt, _st, "o", color="#B7950B", mec="white", mew=0.5, ms=3.5, ls="none", zorder=7, label=_lab("state"))
                     _ax.plot(_xt[1:], _ld, "s", color="#800080", mec="white", mew=0.5, ms=3.0, ls="none", zorder=6, label=_lab(r"ung$\mid$gui landing"))
+                    _tk = (_ei0, _m0, _var)
+                    if _tk in reliability_twin and len(reliability_twin[_tk]):
+                        _tw = np.asarray(reliability_twin[_tk], float)
+                        _tw = _tw - _tw[0] + _st[0]          # re-align t=0 to the panel's guided state[0]
+                        _ax.plot(np.arange(len(_tw)), _tw, "-", color="#800080", lw=1.1, alpha=0.55, zorder=2, label=_lab(r"ung$\mid$gui trajectory"))
                 if _is_t:
                     _ax.axhline(0.0, color="#888888", linewidth=0.8, zorder=1)
                 _ax.set_title((_lbl[:-1] + r"^\star$") if _is_t else _lbl, fontsize=9)
                 _ax.set_xlabel("$t$", fontsize=7); _ax.tick_params(labelsize=6); _ax.margins(x=0.02)
-            _lax = _axs[0][_ncol - 1]; _lax.axis("off")
+            _used = set(_slots) | {_legend_pos}
+            for _rr in range(_nrow):
+                for _cc in range(_ncol):
+                    if (_rr, _cc) not in _used:
+                        _axs[_rr][_cc].axis("off")
+            _lax = _axs[_legend_pos[0]][_legend_pos[1]]; _lax.axis("off")
             _h, _l = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
             if _h:
                 _lax.legend(_h, _l, fontsize=8, loc="upper right", frameon=False)
             _f.tight_layout(pad=0.5)
             if export_button.value:
-                save_chart(_f, f"T07{chr(97 + _ei)}")
+                save_chart(_f, f"T07{chr(97 + _mi)}")
             _items.append(mo.as_html(_f))
         reliability_wf_view = mo.vstack([
-            mo.hstack([reliability_wf_sched, reliability_m_slider], justify="start"),
-            mo.md(r"Per flow step the state $\mathcal{M}_\pi(\hat{x}_t)$ (gold) splits its move into the **flow move** (red: state$_t\to$ ung$\mid$gui landing) and the **guidance move** (blue: ung$\mid$gui landing $\to$ guided landing) — the guidance contribution injected at that step. Target field ($^\star$) descends to $0$."),
+            _t07_controls,
+            mo.md(r"Per flow step the state $\mathcal{M}_\pi(\hat{x}_t)$ (gold) splits its move into the **flow move** "
+                  r"(red: state$_t\to$ ung$\mid$gui landing) and the **guidance move** (blue: ung$\mid$gui landing $\to$ "
+                  r"guided landing) — the guidance contribution injected at that step. **One grid per selected γ mode** "
+                  r"(same startdate), over the selected var-levels; target field ($^\star$) descends to $0$. The purple line "
+                  r"traces the full ung$\mid$gui (unguided-twin) trajectory over flow time — the state departs from it via the guidance moves."),
             *_items], align="start")
     reliability_wf_view
     return
@@ -1151,6 +1515,11 @@ def hdr_r4(mo):
     $x_t=\hat{x}^{\mathrm{gui\_det}}+\sigma_r z_t$) as a spatial map over the mask bbox at each flow step $t$,
     per selected variable (one filmstrip each) and mode (rows), single experiment. Back-shifted by one flow
     step so spike@$t{=}k$ shows its effect from column $t{=}k$.
+
+    Directly below each variable's effect filmstrip, an **equivalent filmstrip of the raw loss gradient**
+    $-\nabla_{z_t}\mathcal{L}_t$ (sign-flipped to the guidance/descent direction) over the same flow steps (from the `grads` store), with **each 2-D map
+    normalized to $\pm 1$** so the pattern's evolution across steps is comparable regardless of that step's
+    absolute magnitude.
     """
     mo.md(md_t03)
     return (md_t03,)
@@ -1178,13 +1547,13 @@ def effect_plot(
     plot_labels,
     plt,
     reliability_effect_modes,
-    reliability_effect_vars,
     reliability_m_slider,
     reliability_var_meta,
     residual_scaler,
     save_chart,
     select_point,
     sweep_points,
+    var_select,
 ):
     # ---- Reliability 1.4: guidance effect over flow time (maps), per selected variable + mode ----
     # Signed effect x_t^gui - x_t^{ung|gui} (x_t = gui_det + sigma_r z_t) as a map per flow step t
@@ -1192,13 +1561,13 @@ def effect_plot(
     # variable. Back-shifted by one flow step so spike@t=k shows its effect from column t=k. No colorbar/title.
     if metrics is None:
         reliability_effect_view = mo.md("_press **compute metrics**_")
-    elif not reliability_effect_modes.value or not reliability_effect_vars.value:
+    elif not reliability_effect_modes.value or not var_select.value:
         reliability_effect_view = mo.md("_select at least one mode and one variable_")
     else:
         _rn = int(n_slider.value) - 1
         _m0 = int(reliability_m_slider.value)
         _modes = [_lb for _lb in sorted(plot_labels, key=gamma_key) if _lb in reliability_effect_modes.value]
-        _vars = [_v for _v in VAR_ORDER if _v in reliability_effect_vars.value]
+        _vars = [_v for _v in VAR_ORDER if _v in var_select.value]
         _STEPS = [0, 1, 2, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 24]
         _ei = 0
         _dir, _cfg, _sv, _recs, _rmask = load_rollout(EXPS[_ei])
@@ -1254,8 +1623,37 @@ def effect_plot(
             if export_button.value:
                 save_chart(_fig, f"T1.1{chr(97 + _vars.index(_vb))}")
             _items.append(mo.as_html(_fig)); plt.close(_fig)
+            # --- raw-gradient filmstrip over the flow (each 2-D map normalized to ±1) ---
+            _grads = {}
+            for _lb in _modes:
+                if _lb not in _sp:
+                    continue
+                _sel = _sp[_lb]
+                _ga = select_point(open_store(_dir, "grads", _rv), _sel)
+                _ga = _ga.sel(level=_lev) if (_lev is not None and "level" in _ga.dims) else _ga
+                _grads[_lb] = -np.asarray(_ga.isel(m=_m0, n=_rn), float)[:, BBOX[0], BBOX[1]]  # −∇L: guidance descends, flip to the effect direction
+            if _grads:
+                _Tg = next(iter(_grads.values())).shape[0]
+                _items.append(mo.md(rf"_$-\nabla_{{z_t}}\mathcal{{L}}_t$ (raw gradient, sign-flipped to the guidance/effect direction — each map normalized to $\pm 1$)_"))
+                _figg, _axsg = plt.subplots(_nrow, _ncol, figsize=(_ncol * 0.85, _nrow * 0.85 * 0.55 + 0.45), squeeze=False, dpi=130)
+                for _ri, _lb in enumerate(_modes):
+                    _g = _grads.get(_lb)
+                    for _ci, _k in enumerate(_STEPS):
+                        _ax = _axsg[_ri][_ci]
+                        if _g is not None:
+                            _sl = _g[min(_k, _Tg - 1)]; _mx = float(np.nanmax(np.abs(_sl))) or 1.0
+                            _ax.imshow(_sl / _mx, cmap="RdBu_r", vmin=-1, vmax=1)
+                        _ax.set_xticks([]); _ax.set_yticks([])
+                        if _ri == 0:
+                            _ax.set_title(rf"$t={_k}$", fontsize=7)
+                        if _ci == 0:
+                            _ax.set_ylabel(gname(_lb), fontsize=10, rotation=0, ha="right", va="center", labelpad=20)
+                _figg.subplots_adjust(left=0.08, right=0.995, top=0.85, bottom=0.03, wspace=0.06, hspace=0.12)
+                if export_button.value:
+                    save_chart(_figg, f"T1.1{chr(97 + _vars.index(_vb))}_grad")
+                _items.append(mo.as_html(_figg)); plt.close(_figg)
         reliability_effect_view = mo.vstack([
-            mo.hstack([reliability_effect_vars, reliability_effect_modes, reliability_m_slider], justify="start"),
+            mo.hstack([var_select, reliability_effect_modes, reliability_m_slider], justify="start"),
             mo.md(r"Signed guidance effect $x_t^{\mathrm{gui}}-x_t^{\mathrm{ung}\mid\mathrm{gui}}$ at each flow step $t$ (mask bbox; diverging, white $=0$), rows = selected modes, one filmstrip per selected variable (single experiment). Back-shifted by one so spike@$t{=}k$ shows its effect from column $t=k$."),
             *_items], align="start")
     reliability_effect_view
@@ -1379,8 +1777,7 @@ def md_t12_visual(mo):
     The object T1.2 scores, shown directly: the spatially-normalized absolute guidance effect
     $\widetilde{G}_{v\ell} = |\Delta x^{\mathrm{GE}}_{v\ell}| / \sum_{ij}|\Delta x^{\mathrm{GE}}_{v\ell}|$ as a
     spatial footprint per schedule $\gamma$ (columns), one row per experiment; the first column is the
-    normalized target mask $\widetilde{\pi}$. Use the field / region / member controls to browse variables and
-    levels.
+    normalized target mask $\widetilde{\pi}$. **Two maps** are shown: the first is fixed to the **target field** (2\,m temperature); the variable and level selectors beneath it drive a **second map of choice**. The other controls (member, step, colour scale, region, zoom) sit above and apply to both.
     """
     mo.md(md_t12_visual)
     return (md_t12_visual,)
@@ -1400,14 +1797,14 @@ def _(M, N, mo):
     field_var_dropdown = mo.ui.dropdown(
         ["geopotential", "u_component_of_wind", "v_component_of_wind", "temperature",
          "specific_humidity", "vertical_velocity", "mean_sea_level_pressure"],
-        value="temperature", label="field: ")
+        value="temperature", label="T1.2 field: ")
     field_level_slider = mo.ui.slider(steps=[0, 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
-                                      value=0, label="level: ", show_value=True)
+                                      value=0, label="T1.2 level: ", show_value=True)
     t12_region = mo.ui.dropdown(["mask", "globe", "!mask"], value="mask", label="T1.2 visual region: ")
     t12_zoom = mo.ui.slider(1, 8, value=1, step=1, label="T1.2 zoom: ", show_value=True)
     mo.vstack([
         mo.hstack([realism_m_slider, realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start"),
-        mo.hstack([field_var_dropdown, field_level_slider, t12_region, t12_zoom], justify="start"),
+        mo.hstack([t12_region, t12_zoom], justify="start"),
     ], align="start")
     return (
         field_level_slider,
@@ -1427,6 +1824,9 @@ def _(
     WARM_CMAP,
     export_button,
     field_grid,
+    field_grid_target,
+    field_level_slider,
+    field_var_dropdown,
     flevel,
     fvar,
     gamma_key,
@@ -1446,9 +1846,9 @@ def _(
     t12_region,
     t12_zoom,
 ):
-    # T1.2 visual example — normalized guidance footprint maps for the selected field, over the T1.2 eval
-    # region (default globe: whole-grid footprint, matching the whole-grid D score). G~ = |Δ| / Σ|Δ|.
-    if metrics is None or field_grid is None:
+    # T1.2 visual example — TWO normalized-footprint maps: (1) the fixed target field 2m temperature,
+    # (2) the field of choice below the field/level selectors. G~ = |Δ| / Σ|Δ|, over the T1.2 eval region.
+    if metrics is None or field_grid is None or field_grid_target is None:
         t4_view = mo.md("_press **compute metrics**_")
     else:
         _m = int(realism_m_slider.value); _n = int(realism_n_slider.value) - 1
@@ -1457,43 +1857,54 @@ def _(
         _common = realism_norm_dropdown.value == "common max"
         _cols = ["mask"] + sorted(plot_labels, key=gamma_key)
         _mk = region_maskref(_reg, int(t12_zoom.value)); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
-        _grids = []; _exmax = []
-        for _ei in range(len(EXPS)):
-            _cell = field_grid.get((_ei, _m, _n), {})
-            _r0 = []
-            for _col in _cols:
-                if _col == "mask":
-                    _r0.append(_mkp)
-                elif _col in _cell:
-                    _gf = region_crop(_cell[_col]["gfield"], _reg, int(t12_zoom.value)); _gfs = np.nansum(_gf); _r0.append(_gf/_gfs if _gfs > 0 else _gf)
-                else:
-                    _r0.append(None)
-            _grids.append(_r0)
-            _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 if _p is not None), default=1.0))
-        _gmax = max(_exmax) if _exmax else 1.0
-        _H, _W = _mkp.shape; _ncol = len(_cols); _nrow = len(_grids)
-        _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
-        _fw = 1.3 * _ncol + 1.9
-        _cellw = (_right - _left) * _fw / _ncol
-        _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
-        _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
-        for _ei, _r0 in enumerate(_grids):
-            _vmax = _gmax if _common else _exmax[_ei]
-            for _ci in range(_ncol):
-                _ax = _axs[_ei][_ci]
-                if _r0[_ci] is not None:
-                    _ax.imshow(_r0[_ci], cmap=_cmap, vmin=0.0, vmax=_vmax)
-                _ax.set_xticks([]); _ax.set_yticks([])
-                if _ei == 0:
-                    _ax.set_title("mask" if _cols[_ci] == "mask" else gname(_cols[_ci]), fontsize=8)
-                if _ci == 0:
-                    _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
-        _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
-        if export_button.value:
-            save_chart(_f, "T1.2a")
+        def _render(_fg, _savename):
+            _grids = []; _exmax = []
+            for _ei in range(len(EXPS)):
+                _cell = _fg.get((_ei, _m, _n), {})
+                _r0 = []
+                for _col in _cols:
+                    if _col == "mask":
+                        _r0.append(_mkp)
+                    elif _col in _cell:
+                        _gf = region_crop(_cell[_col]["gfield"], _reg, int(t12_zoom.value)); _gfs = np.nansum(_gf)
+                        _r0.append(_gf/_gfs if _gfs > 0 else _gf)
+                    else:
+                        _r0.append(None)
+                _grids.append(_r0)
+                _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 if _p is not None), default=1.0))
+            _gmax = max(_exmax) if _exmax else 1.0
+            _H, _W = _mkp.shape; _ncol = len(_cols); _nrow = len(_grids)
+            _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
+            _fw = 1.3 * _ncol + 1.9
+            _cellw = (_right - _left) * _fw / _ncol
+            _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
+            _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
+            for _ei, _r0 in enumerate(_grids):
+                _vmax = _gmax if _common else _exmax[_ei]
+                for _ci in range(_ncol):
+                    _ax = _axs[_ei][_ci]
+                    if _r0[_ci] is not None:
+                        _ax.imshow(_r0[_ci], cmap=_cmap, vmin=0.0, vmax=_vmax)
+                    _ax.set_xticks([]); _ax.set_yticks([])
+                    if _ei == 0:
+                        _ax.set_title("mask" if _cols[_ci] == "mask" else gname(_cols[_ci]), fontsize=8)
+                    if _ci == 0:
+                        _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
+            _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
+            if export_button.value:
+                save_chart(_f, _savename)
+            _out = mo.as_html(_f); plt.close(_f); return _out
+        _cap = (rf"T1.2 eval region **{_reg}**, zoom **{int(t12_zoom.value)}×**, member $m={_m}$, step $n={_n + 1}$; "
+                rf"colour scale **{realism_norm_dropdown.value}**. Normalized footprint "
+                rf"$\widetilde{{G}}=|\Delta x^{{\mathrm{{GE}}}}|/\sum|\Delta x^{{\mathrm{{GE}}}}|$ per schedule $\gamma$ "
+                rf"(columns), one row per experiment; first column: the normalized mask $\widetilde{{\pi}}$.")
         t4_view = mo.vstack([
-            mo.md(rf"_Selected field **{fvar}**@{flevel}, T1.2 eval region **{_reg}**, zoom **{int(t12_zoom.value)}×**, member $m={_m}$, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. Normalized footprint $\widetilde{{G}}=|\Delta x^{{\mathrm{{GE}}}}|/\sum|\Delta x^{{\mathrm{{GE}}}}|$ per schedule $\gamma$ (columns), one row per experiment; first column: the normalized mask $\widetilde{{\pi}}$._"),
-            mo.as_html(_f)], align="start")
+            mo.md(rf"_**Target field — 2m temperature** (default). {_cap}_"),
+            _render(field_grid_target, "T1.2a"),
+            mo.hstack([field_var_dropdown, field_level_slider], justify="start"),
+            mo.md(rf"_**Selected field — {fvar}@{flevel}.** {_cap}_"),
+            _render(field_grid, "T1.2b"),
+        ], align="start")
     t4_view
     return
 
@@ -1606,6 +2017,99 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
+def t13m_selectors(gamma_key, gname, mo, mode_of, sched_colors):
+    # T1.3 per-member panel — γ-mode multiselect (ρ fixed at 0.004 / δ#1; one grid per selected mode).
+    _t13m_mopts = {}
+    for _l in sorted(sched_colors, key=gamma_key):
+        _t13m_mopts.setdefault(gname(_l), mode_of(_l))
+    t13m_modes = mo.ui.multiselect(options=_t13m_mopts, value=list(_t13m_mopts.keys())[:1], label="T1.3 members γ mode: ")
+    t13m_modes
+    return (t13m_modes,)
+
+
+@app.cell(hide_code=True)
+def t13_members(
+    EXPS,
+    M,
+    export_button,
+    field_grid_target,
+    gamma_key,
+    label_delta,
+    metrics,
+    mo,
+    mode_math,
+    mode_of,
+    np,
+    plt,
+    realism_n_slider,
+    realism_norm_dropdown,
+    region_crop,
+    region_maskref,
+    save_chart,
+    sched_colors,
+    t13_region,
+    t13m_modes,
+    white_zero_cmap,
+):
+    # T1.3 opener — per-member guidance effects (target 2 m temperature) at ρ=0.004 (δ#1): one grid per
+    # selected γ mode (t13m_modes); rows = startdates, columns = ensemble members m; each cell = signed
+    # Δx^GE (diverging, white=0). The per-member spread here is what T1.3 collapses into std_m below.
+    if metrics is None or field_grid_target is None or not t13m_modes.value:
+        t13_members_view = mo.md("_press **compute metrics** / pick a γ mode_")
+    else:
+        _n = int(realism_n_slider.value) - 1
+        _reg = t13_region.value
+        _common = realism_norm_dropdown.value == "common max"
+        _dd = 1   # ρ = 0.004 = peak@+0.4% = δ#1
+        _modes_ord = [_mt for _mt in dict.fromkeys(mode_of(_l) for _l in sorted(sched_colors, key=gamma_key)) if _mt in t13m_modes.value]
+        _blocks = []
+        for _mi, _mt in enumerate(_modes_ord):
+            _lb = next((_l for _l in sorted(sched_colors, key=gamma_key) if mode_of(_l) == _mt and label_delta.get(_l) == _dd), None)
+            if _lb is None:
+                _blocks.append(mo.md(f"_no schedule for **{mode_math(_mt)}** at ρ=0.004 (δ#1) in the current sweep_")); continue
+            _grids = []; _exmax = []
+            for _ei in range(len(EXPS)):
+                _row = []
+                for _m in range(M):
+                    _cell = field_grid_target.get((_ei, _m, _n), {}).get(_lb)
+                    _row.append(region_crop(np.asarray(_cell["gfield_signed"], float), _reg) if _cell is not None else None)
+                _grids.append(_row)
+                _exmax.append(max((float(np.nanmax(np.abs(_p))) for _p in _row if _p is not None), default=1.0))
+            _gmax = max(_exmax) if _exmax else 1.0
+            _H, _W = np.asarray(region_maskref(_reg)).shape
+            _ncol = M; _nrow = len(_grids)
+            _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
+            _fw = 1.3 * _ncol + 1.9
+            _cellw = (_right - _left) * _fw / _ncol
+            _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
+            _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
+            for _ei, _row in enumerate(_grids):
+                _vmax = (_gmax if _common else _exmax[_ei]) or 1e-9
+                for _m in range(_ncol):
+                    _ax = _axs[_ei][_m]
+                    if _row[_m] is not None:
+                        _ax.imshow(_row[_m], cmap=white_zero_cmap, vmin=-_vmax, vmax=_vmax)
+                    _ax.set_xticks([]); _ax.set_yticks([])
+                    if _ei == 0:
+                        _ax.set_title(rf"$m={_m}$", fontsize=8)
+                    if _m == 0:
+                        _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
+            _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
+            if export_button.value:
+                save_chart(_f, f"T1.3_members_{chr(97 + _mi)}")
+            _html = mo.as_html(_f); plt.close(_f)
+            _cap = (rf"_**Per-member guidance effect — 2 m temperature**, $\gamma=$**{mode_math(_mt)}**, "
+                    rf"$\rho=0.004$ (δ#1), step $n={_n + 1}$; scale **{realism_norm_dropdown.value}**. Each cell = the "
+                    rf"signed effect $\Delta x^{{\mathrm{{GE}}}}=x^{{\mathrm{{gui}}}}-x^{{\mathrm{{ung}}\mid\mathrm{{gui}}}}$ "
+                    rf"for member $m$ (columns), one row per startdate (diverging, white $=0$; region **{_reg}**). The "
+                    rf"$M={M}$ members' spread is what T1.3 collapses into $\operatorname{{std}}_m$ below._")
+            _blocks.append(mo.vstack([mo.md(_cap), _html], align="start"))
+        t13_members_view = mo.vstack(_blocks, align="start")
+    t13_members_view
+    return
+
+
+@app.cell(hide_code=True)
 def md_t13_visual(mo):
     md_t13_visual = r"""
     ### Visual example
@@ -1616,26 +2120,24 @@ def md_t13_visual(mo):
     as a spatial map per schedule $\gamma$ (columns), one row per experiment; the first column is the normalized
     target mask $\widetilde{\pi}$. This shows **where** the member-to-member response disagrees, not its
     magnitude — the magnitude is what the score $s=\mathcal{M}_\pi(\operatorname{std}_m(\Delta x^{\mathrm{GE}}))$
-    below reports. Use the field / region controls to browse variables and levels.
+    below reports. **Two maps** are shown: the first is fixed to the **target field** (2\,m temperature); the variable and level selectors beneath it drive a **second map of choice**. The other controls sit above and apply to both.
     """
     mo.md(md_t13_visual)
     return (md_t13_visual,)
 
 
 @app.cell(hide_code=True)
-def _(
-    field_level_slider,
-    field_var_dropdown,
-    mo,
-    realism_cmap_dropdown,
-    realism_n_slider,
-    realism_norm_dropdown,
-):
+def _(mo, realism_cmap_dropdown, realism_n_slider, realism_norm_dropdown):
     # T1.3 controls: field selector + T1.3 eval region (default mask) + view opts
     t13_region = mo.ui.dropdown(["mask", "globe", "!mask"], value="mask", label="T1.3 eval region: ")
-    mo.hstack([field_var_dropdown, field_level_slider, t13_region,
-               realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start")
-    return (t13_region,)
+    field_var_dropdown_t13 = mo.ui.dropdown(
+        ["geopotential", "u_component_of_wind", "v_component_of_wind", "temperature",
+         "specific_humidity", "vertical_velocity", "mean_sea_level_pressure"],
+        value="temperature", label="T1.3 field: ")
+    field_level_slider_t13 = mo.ui.slider(steps=[0, 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 50],
+                                          value=0, label="T1.3 level: ", show_value=True)
+    mo.hstack([t13_region, realism_n_slider, realism_cmap_dropdown, realism_norm_dropdown], justify="start")
+    return field_level_slider_t13, field_var_dropdown_t13, t13_region
 
 
 @app.cell(hide_code=True)
@@ -1644,9 +2146,12 @@ def _(
     M,
     WARM_CMAP,
     export_button,
-    field_grid,
-    flevel,
-    fvar,
+    field_grid_t13,
+    field_grid_target,
+    field_level_slider_t13,
+    field_var_dropdown_t13,
+    flevel_t13,
+    fvar_t13,
     gamma_key,
     gname,
     metrics,
@@ -1662,9 +2167,9 @@ def _(
     save_chart,
     t13_region,
 ):
-    # T1.3 visual example — per-pixel ensemble std of the SIGNED guidance effect std_m(x_gui - x_ung) for the
-    # selected field, over the T1.3 eval region (default mask, matching the M_pi mask-domain score).
-    if metrics is None or field_grid is None:
+    # T1.3 visual example — TWO signed-std footprint maps: (1) fixed target field 2m temperature,
+    # (2) the field of choice below the field/level selectors. std_m(signed Δ), sum-normalized per panel.
+    if metrics is None or field_grid_t13 is None or field_grid_target is None:
         t5_spread_view = mo.md("_press **compute metrics**_")
     else:
         _n = int(realism_n_slider.value) - 1
@@ -1673,47 +2178,58 @@ def _(
         _common = realism_norm_dropdown.value == "common max"
         _cols = ["mask"] + sorted(plot_labels, key=gamma_key)
         _mk = region_maskref(_reg); _mks = np.nansum(_mk); _mkp = _mk/_mks if _mks > 0 else _mk
-        def _std_over_m(_ei, _lb):
-            _stack = [np.asarray(field_grid[(_ei, _mm, _n)][_lb]["gfield_signed"], float)
-                      for _mm in range(M) if (_ei, _mm, _n) in field_grid and _lb in field_grid[(_ei, _mm, _n)]]
-            if len(_stack) < 2:
-                return None
-            return region_crop(np.std(np.stack(_stack, 0), axis=0), _reg)
-        _grids = []; _exmax = []
-        for _ei in range(len(EXPS)):
-            _r0 = []
-            for _col in _cols:
-                if _col == "mask":
-                    _r0.append(_mkp)
-                else:
-                    _sf = _std_over_m(_ei, _col)
-                    _r0.append(_sf/np.nansum(_sf) if (_sf is not None and np.nansum(_sf) > 0) else _sf)
-            _grids.append(_r0)
-            _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 if _p is not None), default=1.0))
-        _gmax = max(_exmax) if _exmax else 1.0
-        _H, _W = _mkp.shape; _ncol = len(_cols); _nrow = len(_grids)
-        _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
-        _fw = 1.3 * _ncol + 1.9
-        _cellw = (_right - _left) * _fw / _ncol
-        _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
-        _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
-        for _ei, _r0 in enumerate(_grids):
-            _vmax = _gmax if _common else _exmax[_ei]
-            for _ci in range(_ncol):
-                _ax = _axs[_ei][_ci]
-                if _r0[_ci] is not None:
-                    _ax.imshow(_r0[_ci], cmap=_cmap, vmin=0.0, vmax=_vmax)
-                _ax.set_xticks([]); _ax.set_yticks([])
-                if _ei == 0:
-                    _ax.set_title("mask" if _cols[_ci] == "mask" else gname(_cols[_ci]), fontsize=8)
-                if _ci == 0:
-                    _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
-        _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
-        if export_button.value:
-            save_chart(_f, "T1.3a")
+        def _render(_fg, _savename):
+            def _std_over_m(_ei, _lb):
+                _stack = [np.asarray(_fg[(_ei, _mm, _n)][_lb]["gfield_signed"], float)
+                          for _mm in range(M) if (_ei, _mm, _n) in _fg and _lb in _fg[(_ei, _mm, _n)]]
+                if len(_stack) < 2:
+                    return None
+                return region_crop(np.std(np.stack(_stack, 0), axis=0), _reg)
+            _grids = []; _exmax = []
+            for _ei in range(len(EXPS)):
+                _r0 = []
+                for _col in _cols:
+                    if _col == "mask":
+                        _r0.append(_mkp)
+                    else:
+                        _sf = _std_over_m(_ei, _col)
+                        _r0.append(_sf/np.nansum(_sf) if (_sf is not None and np.nansum(_sf) > 0) else _sf)
+                _grids.append(_r0)
+                _exmax.append(max((float(np.nanmax(_p)) for _p in _r0 if _p is not None), default=1.0))
+            _gmax = max(_exmax) if _exmax else 1.0
+            _H, _W = _mkp.shape; _ncol = len(_cols); _nrow = len(_grids)
+            _left, _right, _top, _bot = 0.14, 0.995, 0.90, 0.03
+            _fw = 1.3 * _ncol + 1.9
+            _cellw = (_right - _left) * _fw / _ncol
+            _fh = _nrow * (_cellw * (_H / _W)) / (_top - _bot)
+            _f, _axs = plt.subplots(_nrow, _ncol, figsize=(_fw, _fh), squeeze=False, dpi=120)
+            for _ei, _r0 in enumerate(_grids):
+                _vmax = _gmax if _common else _exmax[_ei]
+                for _ci in range(_ncol):
+                    _ax = _axs[_ei][_ci]
+                    if _r0[_ci] is not None:
+                        _ax.imshow(_r0[_ci], cmap=_cmap, vmin=0.0, vmax=_vmax)
+                    _ax.set_xticks([]); _ax.set_yticks([])
+                    if _ei == 0:
+                        _ax.set_title("mask" if _cols[_ci] == "mask" else gname(_cols[_ci]), fontsize=8)
+                    if _ci == 0:
+                        _ax.set_ylabel(EXPS[_ei].split(chr(47))[-1].split(chr(95))[0], fontsize=8, rotation=0, ha="right", va="center", labelpad=6)
+            _f.subplots_adjust(left=_left, right=_right, top=_top, bottom=_bot, wspace=0.06, hspace=0.08)
+            if export_button.value:
+                save_chart(_f, _savename)
+            _out = mo.as_html(_f); plt.close(_f); return _out
+        _cap = (rf"T1.3 eval region **{_reg}**, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. "
+                rf"Per-pixel std across members $m$ of the **signed** guidance effect "
+                rf"$\operatorname{{std}}_m(\Delta x^{{\mathrm{{GE}}}})$ per schedule $\gamma$ (columns), one row per "
+                rf"experiment; first column: the normalized mask $\widetilde{{\pi}}$; each panel sum-normalized to a "
+                rf"unit footprint (shape, not magnitude).")
         t5_spread_view = mo.vstack([
-            mo.md(rf"_Selected field **{fvar}**@{flevel}, T1.3 eval region **{_reg}**, step $n={_n + 1}$; colour scale **{realism_norm_dropdown.value}**. Per-pixel std across members $m$ of the **signed** guidance effect $\operatorname{{std}}_m(\Delta x^{{\mathrm{{GE}}}})$ per schedule $\gamma$ (columns), one row per experiment; first column: the normalized mask $\widetilde{{\pi}}$; each panel sum-normalized to a unit footprint (shape, not magnitude)._"),
-            mo.as_html(_f)])
+            mo.md(rf"_**Target field — 2m temperature** (default). {_cap}_"),
+            _render(field_grid_target, "T1.3a"),
+            mo.hstack([field_var_dropdown_t13, field_level_slider_t13], justify="start"),
+            mo.md(rf"_**Selected field — {fvar_t13}@{flevel_t13}.** {_cap}_"),
+            _render(field_grid_t13, "T1.3b"),
+        ], align="start")
     t5_spread_view
     return
 
@@ -1900,6 +2416,226 @@ def t14_leaderboard(
         t14_view = copyable_table("\n".join(_lines), _cap, into=report_t14)
     t14_view
     return (report_t14,)
+
+
+@app.cell(hide_code=True)
+def hdr_t2(mo):
+    md_t2 = r"""
+    ## T2: Intensity dependence
+
+    *How does the guidance effect scale with the prescribed intensity $\rho$ (the `GUIDANCE_DELTA` sweep)?*
+    """
+    mo.md(md_t2)
+    return (md_t2,)
+
+
+@app.cell(hide_code=True)
+def t2_selectors(gamma_key, gname, mo, sched_colors):
+    # T2.1 selectors: a single gamma-mode (rows are the intensity rho sweep, so the mode is fixed) + column variables.
+    _t2_gn = list(dict.fromkeys(gname(_l) for _l in sorted(sched_colors, key=gamma_key)))
+    t2_mode = mo.ui.dropdown(options=_t2_gn, value=(_t2_gn[0] if _t2_gn else None), label="T2 mode γ: ")
+    return (t2_mode,)
+
+
+@app.cell(hide_code=True)
+def hdr_t21(mo):
+    md_t21 = r"""
+    ### T2.1: Effect across dates, grouped by intensity
+
+    The guidance effect $\Delta x^{\mathrm{GE}} = x^{\mathrm{gui}} - x^{\mathrm{ung}\mid\mathrm{gui}}$ for a
+    single $\gamma$-mode at $m{=}0$, grouped into **one chart per intensity level $\rho$** (`GUIDANCE_DELTA`
+    peak), with the **all startdates in rows** and the **selected variables in columns**
+    (surface value, else level $1000$; diverging, white $=0$, mask bbox). At fixed $\rho$ this contrasts the guidance effect across all startdates and variables. Each panel self-scales and stamps its mask stats.
+    """
+    mo.md(md_t21)
+    return (md_t21,)
+
+
+@app.cell(hide_code=True)
+def t2_date(
+    EXPS,
+    INTERF_SHORT,
+    INTERF_SURFACE_PAIR,
+    N,
+    VAR_ORDER,
+    base_pin,
+    contour_checkbox_t03,
+    contour_color_dropdown_t03,
+    contour_levels_slider_t03,
+    delta_labels,
+    delta_order,
+    export_button,
+    gname,
+    label_delta,
+    load_rollout,
+    metrics,
+    mo,
+    mode_math,
+    mode_of,
+    np,
+    open_store,
+    open_unguided_state,
+    pinned_records,
+    reliability_var_meta,
+    sched_colors,
+    select_point,
+    sweep_points,
+    t2_mode,
+    varlevel_select,
+    viz_panel,
+    zoom_slider,
+):
+    # T2.1 — guidance effect Δx^GE grouped by intensity level ρ: one chart per ρ (GUIDANCE_DELTA), with the
+    # startdates in rows and variables in columns; fixed γ-mode (t2_mode), m=0. All startdates (EXPS order) in rows.
+    if metrics is None or not t2_mode.value or not varlevel_select.value:
+        t2_date_view = mo.md("_press **compute metrics** / pick a γ mode and variable(s)_")
+    else:
+        _mt = next((mode_of(_l) for _l in sched_colors if gname(_l) == t2_mode.value), None)
+        _vars = [_v for _v in VAR_ORDER if _v in varlevel_select.value]
+        def _resolve(_b):
+            if _b in INTERF_SURFACE_PAIR:
+                return INTERF_SURFACE_PAIR[_b], "surface", 0
+            if _b == "mean_sea_level_pressure":
+                return _b, "surface", 0
+            return _b, "level", 1000
+        _loaded = []
+        for _ei in range(len(EXPS)):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(EXPS[_ei])
+            _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
+            _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+            _loaded.append((_date, _dir, _cfg, _sv, _sp, _mask))
+        _charts = []
+        for _di, _dd in enumerate(delta_order):
+            _rows = []
+            for _date, _dir, _cfg, _sv, _sp, _mask in _loaded:
+                _lb = next((l for l in sched_colors if mode_of(l) == _mt and label_delta.get(l) == _dd and l in _sp), None)
+                if _lb is None:
+                    _rows.append(mo.md(f"_{_date}: mode {mode_math(_mt)} @ ρ {delta_labels.get(_dd, _dd)} not available_")); continue
+                _sel = _sp[_lb]
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _n = next((nn for nn in range(N) if _p[nn] != 0.0), 0)
+                _cells = []
+                for _var in _vars:
+                    _rv, _rp, _rl = _resolve(_var); _lev = _rl if _rp == "level" else None
+                    _vl = chr(97 + VAR_ORDER.index(_var))
+                    _lbl = reliability_var_meta.get(_var, (INTERF_SHORT.get(_var, _var), False))[0]
+                    _gd = select_point(open_store(_dir, "gui", _rv), _sel)
+                    _ud = select_point(open_unguided_state(_dir, "gui_ung", _rv), _sel)
+                    _gd = _gd.sel(level=_lev) if (_lev is not None and "level" in _gd.dims) else _gd
+                    _ud = _ud.sel(level=_lev) if (_lev is not None and "level" in _ud.dims) else _ud
+                    _xg = np.asarray(_gd.isel(m=0, n=_n), float)
+                    _ux = _ud.isel(m=0, n=_n); _ux = np.asarray(_ux.isel(t=-1) if "t" in _ux.dims else _ux, float)
+                    _cells.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T2.1_{_dd}_{_date}_{_vl}",
+                                _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value,
+                                _contour_color=contour_color_dropdown_t03.value, _do_save=export_button.value))
+                _rows.append(mo.vstack([mo.md(rf"_{_date}_"), mo.hstack(_cells, justify="start", align="start")], align="start"))
+            _charts.append(mo.vstack([mo.md(rf"**ρ = {delta_labels.get(_dd, _dd)}** — γ {mode_math(_mt)} · m=0"), *_rows], align="start"))
+        t2_date_view = mo.vstack(_charts, align="start")
+    mo.vstack([mo.hstack([t2_mode, varlevel_select, zoom_slider, contour_checkbox_t03, contour_levels_slider_t03, contour_color_dropdown_t03], justify="start"), t2_date_view], align="start")
+    return
+
+
+@app.cell(hide_code=True)
+def hdr_t22(mo):
+    md_t22 = r"""
+    ### T2.2: Effect across intensity levels, grouped by date
+
+    The same guidance effect $\Delta x^{\mathrm{GE}}$ (single $\gamma$-mode, $m{=}0$), grouped into **one
+    chart per startdate** (first 2024, first 2026), with the **intensity levels $\rho$ in rows** (each
+    `GUIDANCE_DELTA` peak) and the **selected variables in columns** (surface value, else level $1000$;
+    diverging, white $=0$, mask bbox). At a fixed startdate this shows how the effect grows with $\rho$ across
+    variables. Each panel self-scales and stamps its mask stats.
+    """
+    mo.md(md_t22)
+    return (md_t22,)
+
+
+@app.cell(hide_code=True)
+def t2_rho(
+    EXPS,
+    INTERF_SHORT,
+    INTERF_SURFACE_PAIR,
+    N,
+    VAR_ORDER,
+    base_pin,
+    contour_checkbox_t03,
+    contour_color_dropdown_t03,
+    contour_levels_slider_t03,
+    delta_labels,
+    delta_order,
+    export_button,
+    gname,
+    label_delta,
+    load_rollout,
+    metrics,
+    mo,
+    mode_math,
+    mode_of,
+    np,
+    open_store,
+    open_unguided_state,
+    pinned_records,
+    reliability_var_meta,
+    sched_colors,
+    select_point,
+    sweep_points,
+    t2_mode,
+    varlevel_select,
+    viz_panel,
+    zoom_slider,
+):
+    # T2.2 — guidance effect Δx^GE grouped by startdate: one chart per date, intensity levels ρ in rows,
+    # fixed γ-mode (t2_mode), m=0. Two charts: first 2024 startdate (top), first 2026 startdate (bottom).
+    if metrics is None or not t2_mode.value or not varlevel_select.value:
+        t2_rho_view = mo.md("_press **compute metrics** / pick a γ mode and variable(s)_")
+    else:
+        _mt = next((mode_of(_l) for _l in sched_colors if gname(_l) == t2_mode.value), None)
+        _vars = [_v for _v in VAR_ORDER if _v in varlevel_select.value]
+        def _resolve(_b):
+            if _b in INTERF_SURFACE_PAIR:
+                return INTERF_SURFACE_PAIR[_b], "surface", 0
+            if _b == "mean_sea_level_pressure":
+                return _b, "surface", 0
+            return _b, "level", 1000
+        _pick = []
+        for _yr in ("2024", "2026"):
+            _idx = next((i for i in range(len(EXPS)) if EXPS[i].split(chr(47))[-1].split(chr(95))[0].startswith(_yr)), None)
+            if _idx is not None:
+                _pick.append((_yr, _idx))
+        _charts = []
+        for _yr, _ei in _pick:
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(EXPS[_ei])
+            _sp = sweep_points(_sv, pinned_records(_recs, base_pin))
+            _date = EXPS[_ei].split(chr(47))[-1].split(chr(95))[0]
+            _rows = []
+            for _di, _dd in enumerate(delta_order):
+                _rr = chr(97 + _di)
+                _lb = next((l for l in sched_colors if mode_of(l) == _mt and label_delta.get(l) == _dd and l in _sp), None)
+                if _lb is None:
+                    _rows.append(mo.md(f"_ρ {delta_labels.get(_dd, _dd)}: mode {mode_math(_mt)} not available_")); continue
+                _sel = _sp[_lb]
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _n = next((nn for nn in range(N) if _p[nn] != 0.0), 0)
+                _cells = []
+                for _var in _vars:
+                    _rv, _rp, _rl = _resolve(_var); _lev = _rl if _rp == "level" else None
+                    _vl = chr(97 + VAR_ORDER.index(_var))
+                    _lbl = reliability_var_meta.get(_var, (INTERF_SHORT.get(_var, _var), False))[0]
+                    _gd = select_point(open_store(_dir, "gui", _rv), _sel)
+                    _ud = select_point(open_unguided_state(_dir, "gui_ung", _rv), _sel)
+                    _gd = _gd.sel(level=_lev) if (_lev is not None and "level" in _gd.dims) else _gd
+                    _ud = _ud.sel(level=_lev) if (_lev is not None and "level" in _ud.dims) else _ud
+                    _xg = np.asarray(_gd.isel(m=0, n=_n), float)
+                    _ux = _ud.isel(m=0, n=_n); _ux = np.asarray(_ux.isel(t=-1) if "t" in _ux.dims else _ux, float)
+                    _cells.append(viz_panel(_xg - _ux, _lbl, True, _mask=_mask, _savename=f"T2.2_{_yr}_{_dd}_{_vl}",
+                                _contour_on=contour_checkbox_t03.value, _contour_levels=contour_levels_slider_t03.value,
+                                _contour_color=contour_color_dropdown_t03.value, _do_save=export_button.value))
+                _rows.append(mo.vstack([mo.md(rf"_ρ = **{delta_labels.get(_dd, _dd)}**_"),
+                                        mo.hstack(_cells, justify="start", align="start")], align="start"))
+            _charts.append(mo.vstack([mo.md(rf"**{_date}** — γ {mode_math(_mt)} · m=0"), *_rows], align="start"))
+        t2_rho_view = mo.vstack(_charts, align="start")
+    mo.vstack([mo.hstack([t2_mode, varlevel_select, zoom_slider, contour_checkbox_t03, contour_levels_slider_t03, contour_color_dropdown_t03], justify="start"), t2_rho_view], align="start")
+    return
 
 
 @app.cell(hide_code=True)
@@ -2123,8 +2859,19 @@ def _(interf_render):
     return
 
 
+@app.cell(hide_code=True)
+def t2d_selectors(gamma_key, gname, mo, mode_of, sched_colors, var_select):
+    # T2c/T2d profile (γ-mode) selector — which schedules to draw in the applied-kick grids/tables (T2c raw, T2d 2mT-normalized).
+    _t2d_mopts = {}
+    for _l in sorted(sched_colors, key=gamma_key):
+        _t2d_mopts.setdefault(gname(_l), mode_of(_l))
+    t2d_modes = mo.ui.multiselect(options=_t2d_mopts, value=list(_t2d_mopts.keys()), label="T2c/T2d γ profiles: ")
+    mo.hstack([t2d_modes, var_select], justify="start")
+    return (t2d_modes,)
+
+
 @app.cell
-def _(interf_render):
+def _(interf_render, t2d_modes, var_select):
     interf_C_view = interf_render(
         "appk",
         r"### T2c — Applied guidance kick $\lVert\lambda_t\nabla\mathcal{L}\rVert$",
@@ -2132,16 +2879,18 @@ def _(interf_render):
         r"multiplier $\lambda^{\mathrm{raw}}_t=w_t a_t c_t/\lVert g_t\rVert$ (from the guidance schedule sidecar), then "
         r"$\sqrt{\sum_t (\lambda^{\mathrm{raw}}_t)^2\sum_{\mathrm{mask}}(\nabla_z\mathcal{L})^2}$. Since $\lambda^{\mathrm{raw}}_t=0$ on "
         r"unguided steps, this is schedule-aware and isolates **where** the guidance acts (e.g. a single step for "
-        r"`spike@k`) — the faithful guidance kick. One chart per level variable — $x$ = channels (surface→top), top-$k$ lines.",
+        r"`spike@k`) — the faithful guidance kick. One chart per level variable — $x$ = channels (surface→top), selected γ profiles (shared T2c/T2d selector).",
         r"applied kick  $\|\lambda_t\nabla\mathcal{L}\|$",
         _lower_better=True,
+        _modes=t2d_modes.value,
+        _vars=var_select.value,
     )
     interf_C_view
     return
 
 
 @app.cell
-def _(interf_render):
+def _(interf_render, t2d_modes, var_select):
     interf_D_view = interf_render(
         "appk",
         r"### T2d — Applied kick, normalized to surface temperature (2mT)",
@@ -2149,11 +2898,13 @@ def _(interf_render):
         r"kick (2mT), so all schedules pass through **1 at temperature/sfc** (dashed line) and every channel "
         r"reads as the applied kick **per unit of the target's surface kick**. The table ranks by "
         r"**collateral** = total non-target kick per unit 2mT (**higher = better** — the fullest physically-coupled "
-        r"response per unit of target kick). One chart per level variable — $x$ = channels (surface→top), best-$k$ lines.",
+        r"response per unit of target kick). One chart per level variable — $x$ = channels (surface→top), selected γ profiles.",
         r"applied kick / 2mT",
         _lower_better=True,
         _normalize_by_2mT=True,
         _show_table=True,
+        _modes=t2d_modes.value,
+        _vars=var_select.value,
     )
     interf_D_view
     return
@@ -3187,6 +3938,7 @@ def _(
     interf_k_slider,
     label_delta,
     mo,
+    mode_of,
     np,
     plt,
     sched_colors,
@@ -3197,7 +3949,7 @@ def _(
     # (surface-temperature) kick (all schedules = 1 at temp/sfc) and rank/score by COLLATERAL =
     # total non-target kick per unit 2mT (min = most targeted). _show_table=False -> grid only.
     def interf_render(_key, _title_md, _desc_md, _ylabel, _split_T_sfc=False, _lower_better=False,
-                      _normalize_by_2mT=False, _show_table=True):
+                      _normalize_by_2mT=False, _show_table=True, _modes=None, _vars=None):
         _head = [mo.md(_title_md)] if _title_md else []
         if interf_data is None:
             return mo.vstack([*_head, mo.md("_press **compute interference profiles** above_")])
@@ -3220,11 +3972,21 @@ def _(
             _rankval = _score
             _ranked = sorted(_labels, key=lambda _l: _score[_l], reverse=not _lower_better)
         _winner = _ranked[0]
-        _top = _ranked[:_k]
+        if _modes is not None:
+            _msel = set(_modes or [])
+            _top = [_l for _l in _ranked if mode_of(_l) in _msel]
+            _k = len(_top)
+        else:
+            _top = _ranked[:_k]
+        _drawn_lbl = "selected" if _modes is not None else f"best-{_k}"
         # ---- 6-chart grid ----
-        _fig, _axs = plt.subplots(2, 4, figsize=(20, 7), dpi=120)
-        _slots = [(_r, _c) for _r in range(2) for _c in range(4) if (_r, _c) != (0, 3)]
-        for _si, _var in enumerate(VAR_ORDER):
+        _gvars = [_v for _v in VAR_ORDER if (_vars is None or _v in _vars)]
+        if not _gvars:
+            return mo.vstack([*_head, mo.md(_desc_md), mo.md("_pick at least one variable_")], align="start")
+        _ncol = min(4, len(_gvars) + 1); _nrow = max(1, -(-(len(_gvars) + 1) // _ncol))
+        _fig, _axs = plt.subplots(_nrow, _ncol, figsize=(5 * _ncol, 3.5 * _nrow), dpi=120, squeeze=False)
+        _slots = [(_r, _c) for _r in range(_nrow) for _c in range(_ncol) if (_r, _c) != (0, _ncol - 1)][:len(_gvars)]
+        for _si, _var in enumerate(_gvars):
             _ax = _axs[_slots[_si][0]][_slots[_si][1]]
             _cos = interf_chan_order(_var); _xs = list(range(len(_cos)))
             for _lb in sorted(_top, key=gamma_key):
@@ -3241,7 +4003,12 @@ def _(
             _ax.set_axisbelow(True); _ax.grid(True, axis="y", color="#E6E6E6", linewidth=0.7); _ax.tick_params(labelsize=7)
             for _s in ("top", "right"):
                 _ax.spines[_s].set_visible(False)
-        _lax = _axs[0][3]; _lax.axis("off")
+        _legend_pos = (0, _ncol - 1); _used = set(_slots) | {_legend_pos}
+        for _rr in range(_nrow):
+            for _cc in range(_ncol):
+                if (_rr, _cc) not in _used:
+                    _axs[_rr][_cc].axis("off")
+        _lax = _axs[_legend_pos[0]][_legend_pos[1]]; _lax.axis("off")
         _h, _l = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
         _lax.legend(_h, _l, fontsize=8, loc="upper right", frameon=False)
         _fig.tight_layout()
@@ -3271,7 +4038,7 @@ def _(
                 _rows.append(f"| {_star}{gname(_lb)} | " + " | ".join(_cells) + " |")
             return mo.vstack([
                 *_head, mo.md(_desc_md), _grid,
-                mo.md(f"_best-{_k} schedules (★) drawn. Each cell = applied kick **per unit of the 2mT surface "
+                mo.md(f"_{_drawn_lbl} schedules (★) drawn. Each cell = applied kick **per unit of the 2mT surface "
                       f"kick** (temperature column = its **levels only**; 2mT itself is 1 by construction, omitted). "
                       f"**collateral** = total non-target kick per unit 2mT; **max = winner** (fullest physically-coupled "
                       f"response per unit of target kick). **bold** = per-column max. Pooled over "
@@ -3306,7 +4073,7 @@ def _(
             *_head,
             mo.md(_desc_md),
             _grid,
-            mo.md(f"_best-{_k} schedules (★) drawn, ranked by the variable-normalized push score"
+            mo.md(f"_{_drawn_lbl} schedules (★) drawn, ranked by the variable-normalized push score"
                   + (" (**lower = better**)" if _lower_better else "")
                   + f"; **bold** = per-column {'min' if _lower_better else 'max'}"
                   + (" ($t_{2m}$ = surface temperature, first column, unbolded; $t$ = temperature levels only)" if _split_T_sfc else "")
@@ -3329,13 +4096,15 @@ def _(
     intensity_dropdown,
     interf_chan_order,
     interf_data,
-    interf_k_slider,
     label_delta,
     mo,
+    mode_of,
     np,
     plt,
     save_chart,
     sched_colors,
+    t45_modes,
+    var_select,
 ):
     # grid-only profile renderers ported from intensity_comparison's "Guidance intensity" section:
     # per level variable a 6-chart grid (x = channels surface->top), one line per top-k schedule of the
@@ -3346,11 +4115,12 @@ def _(
         if interf_data is None:
             return mo.vstack([mo.md(_title_md), mo.md("_press **compute interference profiles** above_")])
         _absg = interf_data["abs_gui"]; _absu = interf_data["abs_ung"]; _absgt = interf_data["abs_gt"]
-        _labels = [_l for _l in interf_data["labels"] if label_delta.get(_l) == intensity_dropdown.value]; _score = interf_data["avg_score"]
+        _labels = [_l for _l in interf_data["labels"] if label_delta.get(_l) == intensity_dropdown.value]
         _have_gt = bool(interf_data.get("have_gt"))
-        _k = min(int(interf_k_slider.value), len(_labels))
-        _ranked = sorted(_labels, key=lambda _l: _score[_l], reverse=True)
-        _top = _ranked[:_k]
+        _top = [_l for _l in _labels if mode_of(_l) in set(t45_modes.value or [])]
+        _sel_vars = [_v for _v in VAR_ORDER if _v in (var_select.value or [])]
+        if not _sel_vars:
+            return mo.vstack([mo.md(_title_md), mo.md("_pick at least one variable_")])
 
         def _refline(_D, _var, _cos):
             # schedule-independent reference (gui_ung / gt): mean across drawn labels (collapses to value)
@@ -3360,9 +4130,10 @@ def _(
                 _out.append(float(np.mean(_vv)) if _vv else np.nan)
             return _out
 
-        _fig, _axs = plt.subplots(2, 4, figsize=(20, 7), dpi=120)
-        _slots = [(_r, _c) for _r in range(2) for _c in range(4) if (_r, _c) != (0, 3)]
-        for _si, _var in enumerate(VAR_ORDER):
+        _ncol = min(4, len(_sel_vars) + 1); _nrow = max(1, -(-(len(_sel_vars) + 1) // _ncol))
+        _fig, _axs = plt.subplots(_nrow, _ncol, figsize=(5 * _ncol, 3.5 * _nrow), dpi=120, squeeze=False)
+        _slots = [(_r, _c) for _r in range(_nrow) for _c in range(_ncol) if (_r, _c) != (0, _ncol - 1)][:len(_sel_vars)]
+        for _si, _var in enumerate(_sel_vars):
             _ax = _axs[_slots[_si][0]][_slots[_si][1]]
             _cos = interf_chan_order(_var); _xs = list(range(len(_cos)))
             _gtref = _refline(_absgt, _var, _cos) if _have_gt else [np.nan] * len(_cos)
@@ -3391,7 +4162,12 @@ def _(
             _ax.ticklabel_format(axis="y", style="plain", useOffset=False)
             for _s in ("top", "right"):
                 _ax.spines[_s].set_visible(False)
-        _lax = _axs[0][3]; _lax.axis("off")
+        _legend_pos = (0, _ncol - 1); _used = set(_slots) | {_legend_pos}
+        for _rr in range(_nrow):
+            for _cc in range(_ncol):
+                if (_rr, _cc) not in _used:
+                    _axs[_rr][_cc].axis("off")
+        _lax = _axs[_legend_pos[0]][_legend_pos[1]]; _lax.axis("off")
         _h, _l = _axs[_slots[0][0]][_slots[0][1]].get_legend_handles_labels()
         _lax.legend(_h, _l, fontsize=8, loc="upper right", frameon=False)
         _fig.tight_layout()
@@ -3499,7 +4275,13 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(INTERF_SURFACE_PAIR, field_level_slider, field_var_dropdown):
+def _(
+    INTERF_SURFACE_PAIR,
+    field_level_slider,
+    field_level_slider_t13,
+    field_var_dropdown,
+    field_var_dropdown_t13,
+):
     # resolve the T4/T5 field selector (dropdown + level slider) -> (var, partition, level),
     # same mapping as experiment_builder.py (level 0 = surface tick; surface-paired vars map to
     # their 2m/10m twin; a level-only var at the surface tick falls back to its lowest level).
@@ -3515,7 +4297,8 @@ def _(INTERF_SURFACE_PAIR, field_level_slider, field_var_dropdown):
         return _base, "level", _lvl
 
     fvar, fpartition, flevel = _resolve_field(field_var_dropdown.value, int(field_level_slider.value))
-    return flevel, fpartition, fvar
+    fvar_t13, fpartition_t13, flevel_t13 = _resolve_field(field_var_dropdown_t13.value, int(field_level_slider_t13.value))
+    return flevel, flevel_t13, fpartition, fpartition_t13, fvar, fvar_t13
 
 
 @app.cell(hide_code=True)
@@ -3562,6 +4345,95 @@ def _(
                         field_grid.setdefault((_ei, _m, _n), {})[_lb] = {
                             "gfield": np.abs(_guif - _ungf), "gfield_signed": _guif - _ungf}
     return (field_grid,)
+
+
+@app.cell(hide_code=True)
+def field_grid_t13(
+    EXPS,
+    M,
+    N,
+    flevel_t13,
+    fpartition_t13,
+    fvar_t13,
+    load_rollout,
+    metrics,
+    np,
+    open_store,
+    open_unguided_state,
+    sched_colors,
+    select_point,
+    sweep_points,
+):
+    # ---- T1.3 selected-field footprint grid (independent field selector from T1.2) ----
+    field_grid_t13 = None
+    if metrics is not None and sched_colors is not None:
+        _labels = list(sched_colors)
+        _lvl = flevel_t13 if fpartition_t13 == "level" else None
+        field_grid_t13 = {}
+        for _ei, _rid in enumerate(EXPS):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
+            _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
+            for _lb, _sel in _pts.items():
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _gd = select_point(open_store(_dir, "gui", fvar_t13), _sel)
+                _ud0 = select_point(open_unguided_state(_dir, "gui_ung", fvar_t13), _sel)
+                for _n in range(N):
+                    if float(_p[_n]) == 0.0:
+                        continue
+                    for _m in range(M):
+                        _g = _gd.isel(m=_m, n=_n)
+                        _u = _ud0.isel(m=_m, n=_n); _u = _u.isel(t=-1) if "t" in _u.dims else _u
+                        if _lvl is not None:
+                            _g = _g.sel(level=_lvl); _u = _u.sel(level=_lvl)
+                        _guif = np.asarray(_g, float); _ungf = np.asarray(_u, float)
+                        field_grid_t13.setdefault((_ei, _m, _n), {})[_lb] = {
+                            "gfield": np.abs(_guif - _ungf), "gfield_signed": _guif - _ungf}
+    return (field_grid_t13,)
+
+
+@app.cell(hide_code=True)
+def field_grid_target(
+    EXPS,
+    LEVEL,
+    M,
+    N,
+    PARTITION,
+    VAR,
+    load_rollout,
+    metrics,
+    np,
+    open_store,
+    open_unguided_state,
+    sched_colors,
+    select_point,
+    sweep_points,
+):
+    # ---- TARGET-variable footprint grid (fixed to VAR = target field @ its partition/level) for the
+    # T1.2/T1.3 FIRST (target) map; same structure as field_grid but never reacts to the field selector. ----
+    field_grid_target = None
+    if metrics is not None and sched_colors is not None:
+        _labels = list(sched_colors)
+        _lvlT = LEVEL if PARTITION == "level" else None
+        field_grid_target = {}
+        for _ei, _rid in enumerate(EXPS):
+            _dir, _cfg, _sv, _recs, _mask = load_rollout(_rid)
+            _sp = sweep_points(_sv, _recs); _pts = {lb: _sp[lb] for lb in _labels if lb in _sp}
+            for _lb, _sel in _pts.items():
+                _p = np.asarray(_sv["GUIDANCE_DELTA"][_sel["GUIDANCE_DELTA"]], float)[:N]
+                _gd = select_point(open_store(_dir, "gui", VAR), _sel)
+                _ud0 = select_point(open_unguided_state(_dir, "gui_ung", VAR), _sel)
+                for _n in range(N):
+                    if float(_p[_n]) == 0.0:
+                        continue
+                    for _m in range(M):
+                        _g = _gd.isel(m=_m, n=_n)
+                        _u = _ud0.isel(m=_m, n=_n); _u = _u.isel(t=-1) if "t" in _u.dims else _u
+                        if _lvlT is not None:
+                            _g = _g.sel(level=_lvlT); _u = _u.sel(level=_lvlT)
+                        _guif = np.asarray(_g, float); _ungf = np.asarray(_u, float)
+                        field_grid_target.setdefault((_ei, _m, _n), {})[_lb] = {
+                            "gfield": np.abs(_guif - _ungf), "gfield_signed": _guif - _ungf}
+    return (field_grid_target,)
 
 
 @app.cell(hide_code=True)
@@ -3622,30 +4494,22 @@ def _(M, mo):
 
 
 @app.cell(hide_code=True)
-def wf_sel(gamma_key, mo, mode_of, plot_labels):
-    # subsection-3 (landings) schedule selector: pick which schedule's convergence decomposition is drawn.
-    def _wf_plain(_lb):
-        _b, _s, _r = mode_of(_lb).partition("@")
-        if not _s:
-            return mode_of(_lb)
-        if "-" in _r:
-            _a, _bb = _r.split("-", 1)
-            return f"{_b}@{int(_a) - 1}-{int(_bb) - 1}" if _a.isdigit() and _bb.isdigit() else mode_of(_lb)
-        return f"{_b}@{int(_r) - 1}" if _r.isdigit() else mode_of(_lb)
-
-    _wf_map = {_wf_plain(_lb): _lb for _lb in sorted(plot_labels, key=gamma_key)}
-    reliability_wf_sched = mo.ui.dropdown(options=_wf_map, value=(next(iter(_wf_map)) if _wf_map else None), label="schedule γ: ")
-    return (reliability_wf_sched,)
+def wf_sel(gamma_key, gname, mo, mode_of, plot_labels):
+    # T07 landings: γ-mode + var-level multiselects — one convergence-decomposition grid per selected γ
+    # mode (fixed startdate), over the chosen var-levels (default: all 7 reliability fields).
+    _t07_mopts = {}
+    for _l in sorted(plot_labels, key=gamma_key):
+        _t07_mopts.setdefault(gname(_l), mode_of(_l))
+    t07_modes = mo.ui.multiselect(options=_t07_mopts, value=list(_t07_mopts.keys())[:1], label="T07 γ modes: ")
+    return (t07_modes,)
 
 
 @app.cell(hide_code=True)
-def effect_sel(INTERF_PLAIN, VAR_ORDER, gamma_key, mo, plot_labels, pmode):
+def effect_sel(gamma_key, mo, plot_labels, pmode):
     # §1.4 mode picker: which schedules' guidance-effect-over-t filmstrips to draw (default first two).
     _eopts = {pmode(_lb): _lb for _lb in sorted(plot_labels, key=gamma_key)}
     reliability_effect_modes = mo.ui.multiselect(options=_eopts, value=list(_eopts)[:2], label="modes: ")
-    _vopts = {INTERF_PLAIN[_v]: _v for _v in VAR_ORDER}
-    reliability_effect_vars = mo.ui.multiselect(options=_vopts, value=["t"], label="variables: ")
-    return reliability_effect_modes, reliability_effect_vars
+    return (reliability_effect_modes,)
 
 
 @app.cell(hide_code=True)
@@ -3810,7 +4674,7 @@ def _():
         _first = _rest.split("-", 1)[0] if _sep else ""
         return (_cat, int(_first) if _first.isdigit() else 0, str(_lb))
 
-    return gamma_key, gname, mode_of
+    return gamma_key, gname, mode_math, mode_of
 
 
 @app.cell

@@ -4,15 +4,7 @@ __pycache__/
 notebooks/
 data/
 local_data/
+docs/
 
-journal/latex-notes/*
-!journal/latex-notes/main.pdf
-!journal/latex-notes/main.tex
-!journal/latex-notes/refs.bib
-
-data_party_tricks.md
 skills-lock.json
-
-figures/
-# generated PCA bases (fit-once cache)
-local_data/pca_basis/
+WDMs-characterization.xlsx
