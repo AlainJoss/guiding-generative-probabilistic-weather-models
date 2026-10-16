@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import xarray as xr
 import torch
 
 from src.utils import get_x_cond, find_era5_input
@@ -12,10 +11,9 @@ from src.rollout_config import RolloutConfig, GUIDANCE_METHOD_HYPERS
 from src.mask import get_mask_tdict, get_mask_2d, get_masked_mean
 
 from src.utils import create_slice_zarr_container, tdict_to_xr, append_to_zarr, advance_x_cond
-from src.utils import get_gt_rollout, gt_state_to_tdict, append_w_star, append_guidance_schedule
+from src.utils import get_gt_rollout, gt_state_to_tdict
 
 from geoarches.lightning_modules.guided_diffusion import GuidedFlow
-from tensordict.tensordict import TensorDict
 
 def build_guidance_kwargs(guidance_type, sweep_params):
     # Straight pass-through: hyper names already equal the guidance-fn kwarg names.
@@ -143,17 +141,6 @@ def rollout(
                 x_hat_curr = x_hat_gui
 
             if guidance_flag:
-                # FGWNOLR attaches the optimized scalar w* to the trace; pop it before
-                # the stacking loop (it is not a per-t tensor) and persist it as a sidecar.
-                w_star = sampling_trace.pop("w_star", None)
-                if w_star is not None:
-                    append_w_star(rollout_dir, sweep_params, m, n, w_star)
-
-                # applied weight schedule {w_t, a_t} (lambda_t = w_t * a_t) -> sidecar
-                sched = sampling_trace.pop("guidance_schedule", None)
-                if sched is not None:
-                    append_guidance_schedule(rollout_dir, guidance_type, sweep_params, m, n, **sched)
-
                 save_state = flow_model.denormalize(x_hat_gui).cpu()
                 save_state = tdict_to_xr(
                     create_slice_zarr_container(m, n, t_dim=False, sweep_params=sweep_params),

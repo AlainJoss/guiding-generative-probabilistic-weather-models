@@ -1,4 +1,3 @@
-import xarray as xr
 import torch
 import numpy as np
 
@@ -135,25 +134,6 @@ def get_elliptical_mask(lon_left, lon_right, lat_bottom, lat_top, sigma_div=2.0)
     z = np.exp(-0.5 * ((d_ns / sig_lat) ** 2 + (d_ew / sig_lon) ** 2))
     z = z * _lat_area_weights(len(lat_c))[:, None]  # arches/WeatherBench per-lat cell area
     return (z / z.sum()).astype(np.float32)
-
-
-def get_great_circle_field(lon_left, lon_right, lat_bottom, lat_top):
-    """
-    Great-circle distance (in degrees) from the box center at every grid
-    point. Contouring this field draws iso-distance rings radiating from
-    the mask center (wraps in lon and over the poles like the masks).
-    """
-    lon_e = np.linspace(-180.0, 180.0, 240 + 1, endpoint=True)
-    lon_c = 0.5 * (lon_e[:-1] + lon_e[1:])
-    lat_c = np.linspace(90.0, -90.0, 121)   # arches data latitudes (poles included)
-
-    lon_grid, lat_grid = np.meshgrid(np.radians(lon_c), np.radians(lat_c))
-
-    mu_lat = np.radians((lat_bottom + lat_top) / 2)
-    mu_lon = np.radians(_wrap_lon((lon_left + lon_right) / 2))
-
-    d = _haversine(lat_grid, lon_grid, mu_lat, mu_lon)
-    return np.degrees(d).astype(np.float32)
 
 
 def get_mask_center(lon_left, lon_right, lat_bottom, lat_top):

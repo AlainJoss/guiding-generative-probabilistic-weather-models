@@ -3,10 +3,8 @@
 ##########################
 
 import json
-import functools
-from typing import Any
 from pathlib import Path 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 import xarray as xr
 import torch
@@ -146,23 +144,6 @@ def get_sweep_dict(rollout_id):
     return get_dict_from_json(path)
 
 
-def append_w_star(rollout_dir, sweep_params: dict, m: int, n: int, w_star: float):
-    """Persist an optimized guidance strength (FGW/FGWNOLR) for one (sweep point, m, n).
-
-    Stored in <rollout_dir>/w_star.json as a list of records; an existing record for
-    the same (sweep, m, n) is replaced (resume-safe). sweep values are the ACTUAL job
-    params (GUIDANCE_DELTA as the vector)."""
-    path = Path(rollout_dir) / "w_star.json"
-    records = json.loads(path.read_text()) if path.exists() else []
-    sweep = dict(sweep_params or {})
-    records = [
-        r for r in records
-        if not (r["m"] == m and r["n"] == n and r["sweep"] == sweep)
-    ]
-    records.append({"sweep": sweep, "m": m, "n": n, "w_star": float(w_star)})
-    path.write_text(json.dumps(records, indent=2))
-
-
 def _sweep_match(sel_v, rec_v):
     # loose sweep-value compare: floats via isclose, lists elementwise, else equality
     if isinstance(sel_v, (list, tuple)) or isinstance(rec_v, (list, tuple)):
@@ -196,33 +177,6 @@ def get_w_star(rollout_id, sweep_sel: dict | None = None, m: int | None = None, 
     elementwise). sweep_sel uses ACTUAL values (GUIDANCE_DELTA as the vector, not its
     zarr index). Returns [] if no sidecar exists (pre-FGW rollouts)."""
     return _load_records(get_rollout_dir(rollout_id) / "w_star.json", sweep_sel, m, n)
-
-
-def append_guidance_schedule(rollout_dir, method: str, sweep_params: dict, m: int, n: int,
-                             w_t: list, a_t: list, c_t: list | None = None,
-                             g_norm_t: list | None = None):
-    """Persist the APPLIED guidance weight schedule for one (method, sweep point, m, n).
-
-    Stored in <rollout_dir>/guidance_schedule.json as records
-    {"method", "sweep", "m", "n", "w_t", "a_t", "c_t", "g_norm_t"}; an existing record
-    for the same (method, sweep, m, n) is replaced (resume-safe).
-    lambda_hat = w*a*c multiplies the UNIT gradient (= the kick norm); the raw-gradient
-    multiplier is lambda_hat / g_norm. Legacy records lack c_t/g_norm_t: readers
-    default both to 1, under which w*a IS the raw multiplier (old convention)."""
-    path = Path(rollout_dir) / "guidance_schedule.json"
-    records = json.loads(path.read_text()) if path.exists() else []
-    sweep = dict(sweep_params or {})
-    records = [
-        r for r in records
-        if not (r["method"] == method and r["m"] == m and r["n"] == n and r["sweep"] == sweep)
-    ]
-    records.append({
-        "method": method, "sweep": sweep, "m": m, "n": n,
-        "w_t": [float(v) for v in w_t], "a_t": [float(v) for v in a_t],
-        "c_t": [float(v) for v in (c_t if c_t is not None else [1.0] * len(w_t))],
-        "g_norm_t": [float(v) for v in (g_norm_t if g_norm_t is not None else [1.0] * len(w_t))],
-    })
-    path.write_text(json.dumps(records, indent=2))
 
 
 def get_guidance_schedule(rollout_id, sweep_sel: dict | None = None, m: int | None = None,
@@ -506,14 +460,6 @@ def batchify_and_move(sample, device):
     }
 
 
-def tensor_timestamp_to_string(
-    timestamp: torch.Tensor,
-    fmt: str = "%Y-%m-%d %H:%M:%S",
-) -> str:
-    ts = timestamp.item()
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime(fmt)
-
-
 ##########################
 # dataset utils
 ##########################
@@ -572,18 +518,6 @@ def get_x_cond(timestamp: datetime, N, input_path: Path | None = None):
     return x_cond
 
 
-def get_timestamps(ds: xr.Dataset):
-    timestamps = []
-    for i in range(len(ds.time)):
-        ns_ts = ds.time[i].item()
-        dt_utc = datetime.fromtimestamp(ns_ts / 10**9, tz=timezone.utc)
-        dt_display = dt_utc.replace(tzinfo=None)
-        dt = str(dt_display)
-        timestamps.append(dt)
-
-    return timestamps
-
-
 # TODO: should merge these in a lazyable func
 
 
@@ -605,9 +539,3 @@ def get_slices(states: xr.Dataset, partition: str, var: str, level: str):
         slices = slices.sel(level=level)
     slices = slices.to_numpy()
     return slices
-
-
-def get_N_slices(ds: xr.Dataset, N: int, timestamp: datetime, partition: str, var: str, level: str):
-    N_states = get_N_states(ds, N, timestamp)
-    N_slices = get_slices(N_states, partition, var, level)
-    return N_slices

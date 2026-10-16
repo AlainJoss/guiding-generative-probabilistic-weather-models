@@ -1,14 +1,10 @@
-import functools
 
-import torch
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import marimo as mo
-from matplotlib.ticker import FormatStrFormatter
 
 import geopandas as gpd
 import geodatasets
@@ -77,27 +73,6 @@ def mask_bbox_from_active_cells(mask_plot: np.ndarray, lon_e_plot: np.ndarray, l
     lat_bottom = lat_e_plot[i_max + 1]
 
     return lon_left, lon_right, lat_bottom, lat_top
-
-
-def compute_fit_zoom(mask_2d, *, max_zoom=12, padding=1.15):
-    """Integer zoom factor that frames the mask bbox.
-
-    Matches apply_zoom's integer zoom convention so the slider can
-    be snapped directly to the return value.
-    """
-    geom = prepare_era5_plot_grid(np.asarray(mask_2d).astype(float))
-    bbox = mask_bbox_from_active_cells(
-        geom["array_plot"] > 0,
-        geom["lon_e_plot"],
-        geom["lat_e_plot"],
-    )
-    if bbox is None:
-        return 1
-    lon_l, lon_r, lat_b, lat_t = bbox
-    lon_span = max(lon_r - lon_l, 1.0) * padding
-    lat_span = max(lat_t - lat_b, 1.0) * padding
-    z = max(360.0 / lon_span, 180.0 / lat_span)
-    return max(1, min(int(z), max_zoom))
 
 
 def draw_mask_outline(
@@ -563,60 +538,6 @@ def make_interactive_map(
     )
 
 
-def visualize_mask_3d(
-    mask_2d,
-    *,
-    cmap="coolwarm",
-    figsize=(9, 6),
-    dpi=100,
-    elev=35,
-    azim=-60,
-    title=None,
-    zoom=1,
-    zoom_center_lon=0.0,
-    zoom_center_lat=0.0,
-):
-    """3D surface of the mask weights with the world map drawn on the base plane."""
-    grid = prepare_era5_plot_grid(np.asarray(mask_2d).astype(float))
-    lon, lat = np.meshgrid(grid["lon_c_plot"], grid["lat_c"])
-    z = grid["array_plot"]
-
-    fig = plt.figure(figsize=figsize, dpi=dpi)
-    ax = fig.add_subplot(projection="3d")
-
-    ax.plot_surface(
-        lon, lat, z,
-        cmap=cmap, linewidth=0, antialiased=True, alpha=0.85,
-        rstride=1, cstride=1,
-    )
-
-    # coastlines on the base plane (z = 0)
-    for geom in _get_world().boundary.geometry:
-        for line in getattr(geom, "geoms", [geom]):
-            xs, ys = line.xy
-            ax.plot(xs, ys, zs=0.0, zdir="z", color="black", linewidth=0.4)
-
-    # same integer-zoom convention as the 2D maps
-    zoom_ = max(1, int(zoom))
-    lon_span, lat_span = 360.0 / zoom_, 180.0 / zoom_
-    ax.set_xlim(max(-180.0, zoom_center_lon - lon_span / 2),
-                min(180.0, zoom_center_lon + lon_span / 2))
-    ax.set_ylim(max(-90.0, zoom_center_lat - lat_span / 2),
-                min(90.0, zoom_center_lat + lat_span / 2))
-    zmax = float(np.nanmax(z))
-    ax.set_zlim(0.0, zmax * 1.05 if zmax > 0 else 1e-6)
-
-    ax.set_xlabel("Longitude", fontsize=9)
-    ax.set_ylabel("Latitude", fontsize=9)
-    ax.tick_params(axis="both", labelsize=8)
-    ax.view_init(elev=elev, azim=azim)
-    ax.set_box_aspect((2, 1, 0.6))
-    if title is not None:
-        ax.set_title(title, fontsize=12)
-
-    return fig
-
-
 # ------------------------------------------------------------
 # wrapper
 # ------------------------------------------------------------
@@ -723,111 +644,3 @@ def to_display_units(array, var, *, is_difference=False):
             return array, "°C"
         return np.asarray(array) - 273.15, "°C"
     return array, native
-
-
-def visualize_grid(
-    panels,
-    *,
-    nrows,
-    ncols,
-    vmin,
-    vmax,
-    center=None,
-    cmap="coolwarm",
-    unit_label=None,
-    mask_2d=None,
-    show_mask=False,
-    zoom=1,
-    zoom_center_lon=0.0,
-    zoom_center_lat=0.0,
-    figsize_per_panel=(4.8, 3.4),
-    dpi=100,
-    tick_formatter=None,
-    show_values=False,
-    value_fmt=".2f",
-    value_fontsize=5,
-    value_color="black",
-    value_threshold=None,
-):
-    """Grid of map panels sharing one figure-level colorbar.
-
-    panels: sequence of (title, array_2d). Length must equal nrows*ncols.
-    vmin/vmax/center: shared norm across all panels.
-    unit_label: appended to the colorbar label; if given, shown as
-        "value [unit_label]".
-    tick_formatter: optional matplotlib Formatter applied to the
-        colorbar ticks (e.g. to render Kelvin arrays as °C).
-    """
-    if len(panels) != nrows * ncols:
-        raise ValueError(
-            f"panels has {len(panels)} entries but grid is "
-            f"{nrows}x{ncols}={nrows * ncols}"
-        )
-
-    world = _get_world()
-
-    first_arr = np.asarray(panels[0][1])
-    grid_geom = prepare_era5_plot_grid(first_arr)
-    shared_norm = make_norm(
-        grid_geom["array_plot"], vmin=vmin, vmax=vmax, center=center
-    )
-
-    figsize = (figsize_per_panel[0] * ncols, figsize_per_panel[1] * nrows)
-    fig, axes = plt.subplots(
-        nrows, ncols, figsize=figsize, dpi=dpi, squeeze=False
-    )
-
-    im = None
-    for idx, (title, array_2d) in enumerate(panels):
-        r, c = divmod(idx, ncols)
-        ax = axes[r][c]
-        geom = prepare_era5_plot_grid(array_2d)
-
-        draw_base_map(
-            ax,
-            array_2d_plot=geom["array_plot"],
-            lon_e_plot=geom["lon_e_plot"],
-            lat_e_plot=geom["lat_e_plot"],
-            lon_c_plot=geom["lon_c_plot"],
-            lat_c=geom["lat_c"],
-            cmap=cmap,
-            norm=shared_norm,
-            title=title,
-            add_colorbar=False,
-            world=world,
-            show_values=show_values,
-            value_fmt=value_fmt,
-            value_fontsize=value_fontsize,
-            value_color=value_color,
-            value_threshold=value_threshold,
-        )
-
-        if mask_2d is not None and show_mask:
-            draw_mask_outline(
-                ax,
-                mask_plot=np.asarray(mask_2d),
-                lon_e_plot=geom["lon_e_plot"],
-                lat_e_plot=geom["lat_e_plot"],
-                edgecolor="red",
-                linewidth=1.0,
-                with_points=False,
-            )
-
-        apply_zoom(
-            ax,
-            zoom=zoom,
-            center_lon=zoom_center_lon,
-            center_lat=zoom_center_lat,
-        )
-
-        im = ax.collections[0]
-
-    # fig.tight_layout()
-    cbar_ax = fig.add_axes([0.93, 0.12, 0.015, 0.76])
-    cbar = fig.colorbar(im, cax=cbar_ax)
-    if unit_label:
-        cbar.set_label(unit_label)
-    if tick_formatter is not None:
-        cbar.ax.yaxis.set_major_formatter(tick_formatter)
-
-    return fig

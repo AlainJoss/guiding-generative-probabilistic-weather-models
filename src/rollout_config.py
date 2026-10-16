@@ -7,23 +7,15 @@ from typing import Any
 # hyper names equal the guidance-fn kwarg names so build_guidance_kwargs is a straight
 # pass-through (no map).
 GUIDANCE_METHOD_HYPERS = {
-    # FGWNOLR: secant on the exact scalar dL/dw -- no learning rate, no iteration
-    # count (optimizes until the hardcoded loss threshold is reached)
+    # FGWNOLR: secant root search on the signed terminal gap; no learning rate
     "FGWNOLR": ["fgwnolr_w_init", "eta", "a_t_mode"],
-    # FGWNOGAP: per-step gap tracking of the prescribed path r_target = a_t * r_0
-    "FGWNOGAP": ["eta", "a_t_mode"],
-    # FGWFREE: Adam on the full lambda trajectory; phi = kick-energy regularizer strength
-    "FGWFREE": ["phi"],
-    # UG: backward Universal Guidance (arXiv 2302.07121) -- closed-form
-    # loss-minimizing clean-space shift, a_t-gated (eta only shapes non-@ modes)
-    "UG": ["eta", "a_t_mode"],
 }
 
 # mask hypers, shared by every mask mode (extent rescaling / pixel translation)
 MASK_HYPERS = ["sigma_div", "mask_shift"]
 
 # common hypers
-GUIDANCE_METHODS = ["FGWNOLR", "FGWNOGAP", "FGWFREE", "UG"]
+GUIDANCE_METHODS = list(GUIDANCE_METHOD_HYPERS)
 GUI_REFS = ["UNG", "GT"]
 MASK_MODES = ["BBOX", "ELLIPTICAL"]
 
@@ -75,14 +67,13 @@ class RolloutConfig:
     GUI_REF: str | None = None  # UNG -> TODO: remove if guiding towards gt is not of interest
     GUIDANCE_MODE: str | None = None
 
-    ### mode-specific swept hypers (None -> method default; pinned for irrelevant modes)
+    ### guidance swept hypers (None -> method default)
     # names match the guidance-fn kwargs (see GUIDANCE_METHOD_HYPERS)
 
-    # FGWNOLR (secant on the exact scalar dL/dw; no learning rate; runs until the
-    # hardcoded loss threshold is met)
+    # FGWNOLR (secant root search on the signed terminal gap)
     fgwnolr_w_init: float | None = None  # starting w
 
-    # eta: shared profile parameter for FGWNOLR/FGWNOGAP/UG; its meaning
+    # eta: guidance profile parameter; its meaning
     # depends on a_t_mode (closure rate for gap-closing, bell depth for gaussian,
     # end level for linear/logistic -- see a_t_profile in guided_diffusion.py)
     eta: float | None = None
@@ -90,9 +81,6 @@ class RolloutConfig:
     # a_t_mode: guidance profile shape (A_T_MODES in guided_diffusion.py:
     # gaussian/linear/logistic/gap-closing, each with a "-spec" twin)
     a_t_mode: str | None = None
-
-    # phi: FGWFREE regularizer strength (penalty on the applied guidance kicks)
-    phi: float | None = None
 
     # sigma_div: mask extent divisor, shared by ALL mask modes (half-side or
     # sigma = box extent / sigma_div; 2.0 = base box, 4.0 = half, 1.0 = double).

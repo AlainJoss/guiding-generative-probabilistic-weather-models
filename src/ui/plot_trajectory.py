@@ -1,15 +1,8 @@
-import torch
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-import marimo as mo
 from matplotlib.ticker import FormatStrFormatter
-import matplotlib.dates as mdates
 import matplotlib.patheffects as pe
-from matplotlib.ticker import AutoMinorLocator, FormatStrFormatter
+from matplotlib.ticker import AutoMinorLocator
 
 def plot_trajectory(
     trajectory: list[np.float64] | dict[str, list[np.float64]],

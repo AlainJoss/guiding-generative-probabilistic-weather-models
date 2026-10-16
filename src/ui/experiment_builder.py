@@ -14,7 +14,6 @@ def _(mo):
 
 @app.cell
 def _():
-    import os
     from datetime import timedelta
 
     import marimo as mo
@@ -29,7 +28,6 @@ def _():
     from src.utils import ensure_rollout_dir, get_now_timestamp, dump_json, get_xr_dataset
     from src.mask import get_mask_2d, get_mask_center, effective_bbox
     from src.ui.map import visualize_map, to_display_units
-    from src.ui.helpers import get_timestamp_from_sliders, max_day
     from src.rollout_config import RolloutConfig
 
     SURFACE_PAIR = {"temperature": "2m_temperature",
@@ -451,7 +449,6 @@ def _(xr):
     from src.paths import GT
     from src.mask import get_masked_mean
     from src.utils import get_slices
-    import pandas as pd
     import matplotlib.dates as mdates
 
     clim_path = GT / "clim_2m_temperature.nc"

@@ -119,23 +119,13 @@ class GuidedFlow(BaseLightningModule):
     """
     Deterministic + generative-residual forecasting with guided flow sampling.
 
-    Guidance methods (dispatched by `sample`):
-      FGWNOLR - secant root-find of the signed terminal gap xi(w)=0 for a constant
-                strength w; lambda_t = w * a_t (forward flow evals only, no adjoint)
-      FGWNOGAP - exact per-step closure of the masked gap along a schedule
-      FGWFREE - Adam optimization of the full lambda trajectory with a
-                kick-energy regularizer (no w / a_t split)
-      UG - backward Universal Guidance: closed-form clean-space shift, a_t-gated
+    FGWNOLR uses the clean-prediction loss gradient with a constant strength w
+    and a flow-time profile a_t: u_guided = u - w * a_t * grad(L).
+    A secant search chooses w to close the signed terminal target gap.
 
-    Unified schedule convention: every method applies the UNIT gradient,
-    u~ = u - (w * a_t * c_t) * g/||g||, so lambda_hat = w*a_t*c_t is the kick
-    norm. w = scalar scale, a_t = dimensionless O(1) profile, c_t = measured
-    magnitude carrier (||g|| for NOLR, Newton magnitude for NOGAP, ||g||/h for
-    FREE). The sidecar records
-    {w_t, a_t, c_t, g_norm_t}; the raw-gradient multiplier is w*a*c/||g||.
-    The LAST flow step is never guided in any method: it snaps z onto the
-    predicted residual (h = s), so a kick there would be raw state surgery
-    with no model step left to re-process it.
+    The trace stores the gradient, velocity, and latent trajectory for analysis.
+    The last flow step is unguided: it snaps the latent onto the predicted
+    residual, leaving no subsequent model step to process a guidance kick.
     """
 
     # ---------------------------------------------------------------- init ---
@@ -340,27 +330,6 @@ class GuidedFlow(BaseLightningModule):
             device=z_t.device,
         )
 
-    # for FWWFREE
-    def _vjp(self, outputs_td, inputs_td, v_td, create_graph: bool = False):
-        # J^T v with J = d(outputs)/d(inputs), per TensorDict key
-        keys = list(inputs_td.keys())
-        grads = torch.autograd.grad(
-            [outputs_td[k] for k in keys],
-            [inputs_td[k] for k in keys],
-            grad_outputs=[v_td[k] for k in keys],
-            retain_graph=create_graph,
-            create_graph=create_graph,
-            allow_unused=True,
-        )
-        return inputs_td.__class__(
-            {
-                k: torch.zeros_like(inputs_td[k]) if g is None else g
-                for k, g in zip(keys, grads)
-            },
-            batch_size=inputs_td.batch_size,
-            device=inputs_td.device,
-        )
-
     # ------------------------------------------------------ sampling entry ---
 
     def sample(
@@ -382,16 +351,10 @@ class GuidedFlow(BaseLightningModule):
         if not guidance_flag:
             z, sampling_trace = self.unguided_flow(x_cond, det_pred, seed)
         else:
-            flows = {
-                "FGWNOLR": self._fgwnolr_flow,
-                "FGWNOGAP": self._fgwnogap_flow,
-                "FGWFREE": self._fgwfree_flow,
-                "UG": self._ug_flow,
-            }
-            if guidance_type not in flows:
-                raise ValueError(f"Unknown guidance_type: {guidance_type}")
-            
-            z, sampling_trace = flows[guidance_type](
+            if guidance_type != "FGWNOLR":
+                raise ValueError(f"Unknown guidance_type: {guidance_type}; expected FGWNOLR")
+
+            z, sampling_trace = self._fgwnolr_flow(
                 x_cond=x_cond,
                 det_pred=det_pred,
                 delta_t=delta_n,
@@ -452,20 +415,12 @@ class GuidedFlow(BaseLightningModule):
         w_schedule: list,
         a_schedule: list[float],
         seed: int | None = None,
-        c_fn=None,
         record: bool = True,
     ):
-        # guided sampling on the UNIT gradient: u~ = u - (w*a_t*c_t) * g/||g||,
-        # so lambda_hat = w*a_t*c_t IS the applied kick norm. c_fn(i, u_t, g_t,
-        # g_norm, h) supplies the magnitude carrier c_t; the default c_t = ||g_t||
-        # reproduces the raw-gradient kick w*a*g exactly (FGWNOLR). Records the
-        # raw trace primitives (grads = dL/dz, vfs = s_t*u_t, res = z_t) and the
-        # {w_t, a_t, c_t, g_norm_t} sidecar; the raw-gradient multiplier used by
-        # reconstructions is w*a*c / g_norm.
+        # Apply the raw loss-gradient kick w*a_t*g.
         z_t = self.init_noise(x_cond, seed)
         timesteps = self.flow_timesteps()
         sampling_trace = defaultdict(list)
-        w_t_trace, a_t_trace, c_t_trace, g_norm_trace = [], [], [], []
 
         for i in tqdm(range(len(timesteps)), desc=f"{guidance_name} sampling", disable=not record):
             t, s_t, h = self.step_factors(i, timesteps)
@@ -487,20 +442,16 @@ class GuidedFlow(BaseLightningModule):
             if i == len(timesteps) - 1:
                 # i == T-1 is the 0-based index of thesis flow step T (the final Euler step):
                 # it snaps z onto the predicted residual (h = s), so a kick there is state
-                # surgery no model step can re-process -> NEVER guided (uniform across methods)
+                # surgery no model step can re-process -> NEVER guided
                 a_t, c_t = 0.0, 0.0
             else:
                 a_t = float(a_schedule[i])
-                c_t = float(c_fn(i, u_t, grad_vec, g_norm, float(h))) if c_fn is not None else g_norm
+                c_t = g_norm
             lam_raw = float(w_schedule[i]) * a_t * c_t / g_norm
             gui_step = grad_vec.apply(lambda g: g * lam_raw)
             if record:
-                # per-step traces (grads/vfs/res + the {w,a,c,g_norm} sidecar) are only
-                # needed for the final rollout; skip them during the w-search (record=False)
-                w_t_trace.append(float(w_schedule[i]))
-                a_t_trace.append(a_t)
-                c_t_trace.append(c_t)
-                g_norm_trace.append(g_norm)
+                # Per-step traces are only needed for the final rollout;
+                # skip them during the strength search (record=False).
                 sampling_trace["grads"].append(grad_vec.detach().cpu())
                 sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
                 sampling_trace["res"].append(z_t.detach().cpu())
@@ -509,17 +460,11 @@ class GuidedFlow(BaseLightningModule):
             with torch.no_grad():
                 z_t = self.euler_step(z_t, u_t, h)
 
-        if record:
-            sampling_trace["guidance_schedule"] = {
-                "w_t": w_t_trace, "a_t": a_t_trace,
-                "c_t": c_t_trace, "g_norm_t": g_norm_trace,
-            }
         return z_t, sampling_trace
 
     def _final_guided_pass(
         self, guidance_name, w_schedule, a_schedule,
-        x_cond, det_pred, delta_t, mask, x_ref, seed, w_star=None,
-        c_fn=None,
+        x_cond, det_pred, delta_t, mask, x_ref, seed,
     ):
         # final pass with the optimized schedule, yielding the standard traces
         z_t, sampling_trace = self._guided_flow(
@@ -532,180 +477,8 @@ class GuidedFlow(BaseLightningModule):
             w_schedule=w_schedule,
             a_schedule=a_schedule,
             seed=seed,
-            c_fn=c_fn,
         )
-        if w_star is not None:
-            sampling_trace["w_star"] = float(w_star)  # -> w_star.json sidecar
         return z_t, sampling_trace
-
-    # ------------------------ UG: Universal-Guidance backward shift --------
-
-    def _ug_flow(
-        self,
-        x_cond,
-        det_pred: TensorDict,
-        delta_t: torch.Tensor,
-        mask: TensorDict,
-        x_ref: TensorDict,
-        seed: int,
-        eta: float = 0.5,
-        a_t_mode: str = "spike@1",
-    ):
-        # Backward universal guidance (Bansal et al., arXiv 2302.07121, Eq. 7/9)
-        # adapted to the residual flow: at a_t-gated steps, apply the CLOSED-FORM
-        # loss-minimizing clean-space shift instead of a gradient kick. For the
-        # quadratic masked loss L = (S(x_hat) - A)^2 with linear S, the paper's
-        # m-step GD from Delta=0 converges to the minimum-norm exact solution
-        #   Delta_x = -e * M / ||M||^2   (e = signed residual, M = mask weights,
-        # denormalized units), which zeroes the residual of the implied clean
-        # prediction. The paper's epsilon substitution (Eq. 9) becomes a velocity
-        # correction: x_hat = denorm(det + (z + s*u) * rtps)  =>
-        #   Delta_u = Delta_x / (data_std * rtps * s_t),   u <- u + a_t * Delta_u.
-        # No outer optimization, no w; the remaining (contractive) flow acts on
-        # the shift untouched -- the contrast to FGWNOLR's optimized kick.
-        # Schedule semantics: the kick is along the MASK PATTERN, not the unit
-        # gradient; c_t = ||Delta_u|| so lambda_hat = w*a_t*c_t is the applied
-        # kick norm (w_t = 1 throughout). No w_star sidecar (nothing optimized).
-        z_t = self.init_noise(x_cond, seed)
-        timesteps = self.flow_timesteps()
-        a_sched = alpha_t_profile(a_t_mode, eta, len(timesteps)).tolist()
-        m2 = float(sum((mask[k] ** 2).sum() for k in mask.keys()))
-        sampling_trace = defaultdict(list)
-        w_t_trace, a_t_trace, c_t_trace, g_norm_trace = [], [], [], []
-
-        for i in tqdm(range(len(timesteps)), desc="UG sampling"):
-            t, s_t, h = self.step_factors(i, timesteps)
-            z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
-
-            with torch.enable_grad():
-                time_embedding = self.embed_time(x_cond, t)
-                input_state = self.velocity_input(z_t, x_cond)
-                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                x_hat_t_norm = det_pred + self.euler_step(
-                    z_t, u_t, s_t
-                ) * self.residual_to_pangu_scale
-                x_hat_t = self.denormalize(x_hat_t_norm)
-                # recorded for the traces only; the UG kick needs no gradients
-                grad_vec = self.guidance_gradient(x_hat_t, x_ref, delta_t, mask, z_t)
-
-            g_norm = float(torch.sqrt(
-                sum((grad_vec[k].detach() ** 2).sum() for k in grad_vec.keys())
-            ).clamp_min(1e-30))
-            # the last Euler step snaps z onto the predicted residual (h = s);
-            # NEVER guided (uniform convention across methods)
-            a_t = 0.0 if i == len(timesteps) - 1 else float(a_sched[i])
-
-            e = float(self.masked_residual(x_hat_t.detach(), x_ref, delta_t, mask))
-            delta_x = mask.apply(lambda m: (-e / m2) * m)  # exact minimum-norm shift
-            delta_u = (delta_x / self.data_std / self.residual_to_pangu_scale).apply(
-                lambda x: x / float(s_t)
-            )
-            c_t = float(torch.sqrt(
-                sum((delta_u[k].detach() ** 2).sum() for k in delta_u.keys())
-            ))
-
-            w_t_trace.append(1.0)
-            a_t_trace.append(a_t)
-            c_t_trace.append(c_t)
-            g_norm_trace.append(g_norm)
-            sampling_trace["grads"].append(grad_vec.detach().cpu())
-            sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
-            sampling_trace["res"].append(z_t.detach().cpu())
-
-            if a_t != 0.0:
-                # guided_velocity subtracts gui_vec, so pass -a_t * Delta_u
-                gui_step = delta_u.apply(lambda x: (-a_t) * x)
-                u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
-            with torch.no_grad():
-                z_t = self.euler_step(z_t, u_t, h)
-
-        sampling_trace["guidance_schedule"] = {
-            "w_t": w_t_trace, "a_t": a_t_trace,
-            "c_t": c_t_trace, "g_norm_t": g_norm_trace,
-        }
-        return z_t, sampling_trace
-
-    # --------------------------------------- shared lambda-gradient eval ---
-
-    def _flow_loss_and_lambda_grads(
-        self, x_cond, det_pred, delta_t, mask, x_ref, seed, lam_sched,
-    ):
-        """
-        Run one guided pass with per-step multipliers lam_sched (a list of T
-        floats; step i kicks u~_i = u_i - lam_i * g_i) and return
-        (gap_loss, dL_dlam, g_norm2, resid):
-          gap_loss    final masked loss L(z_T) = resid^2
-          resid       the SIGNED final masked residual e (for Gauss-Newton fits)
-          dL_dlam[i]  exact dL/dlam_i under the frozen-g first-order scheme
-          g_norm2[i]  ||g_i||^2  (for regularizers)
-
-        Scheme: freeze g_i, so the step map has dz_{i+1}/dz_i = I + h_i du/dz.
-        The forward pass caches the leaf z_i, detached g_i and h_i; a backward
-        adjoint loop then gives dL/dlam_i = -h_i <adj_{i+1}, g_i> with the adjoint
-        adj = dL/dz propagated by adj <- adj + h_i (du/dz)^T adj (one VJP/step).
-        """
-        timesteps = self.flow_timesteps()
-        T = len(timesteps)
-        z_t = self.init_noise(x_cond, seed)
-        z_cache, g_cache, h_cache = [], [], []          # per-step leaves for the adjoint
-        g_norm2 = torch.zeros(T, device=self.device)
-
-        # ---- forward: integrate the guided flow, caching what the adjoint needs
-        for i in range(T):
-            t, s_t, h = self.step_factors(i, timesteps)
-            z_t = z_t.detach().apply(lambda x: x.requires_grad_(True))
-
-            with torch.enable_grad():
-                time_embedding = self.embed_time(x_cond, t)
-                input_state = self.velocity_input(z_t, x_cond)
-                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                # clean-state estimate x_hat = denorm(det + (z + s*u) * rtps)
-                x_hat_t = self.denormalize(
-                    det_pred + self.euler_step(z_t, u_t, s_t) * self.residual_to_pangu_scale
-                )
-                g_t = self.guidance_gradient(x_hat_t, x_ref, delta_t, mask, z_t)
-
-            z_cache.append(z_t.detach())
-            g_cache.append(g_t.detach())
-            h_cache.append(float(h))
-            g_norm2[i] = sum((g_t[k].detach() ** 2).sum() for k in g_t.keys())
-
-            # i == T-1 (0-based) is thesis flow step T, never guided (see _guided_flow);
-            # otherwise kick by lam_i
-            lam_i = 0.0 if i == T - 1 else float(lam_sched[i])
-            gui_step = g_t.apply(lambda g: g * lam_i)
-            u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
-            z_t = self.euler_step(z_t, u_t, h).detach()
-
-        # ---- final loss and adjoint seed  adj = dL/dz_T
-        z_T = z_t.detach().apply(lambda x: x.requires_grad_(True))
-        with torch.enable_grad():
-            x_hat_gui = self.final_prediction(det_pred, z_T)
-            residual = self.masked_residual(x_hat_gui, x_ref, delta_t, mask)
-            gap_loss = residual ** 2
-        adj = self.grad_wrt_z(gap_loss, z_T)
-
-        # ---- backward: dL/dlam_i, then push the adjoint back through step i
-        dL_dlam = torch.zeros(T, device=self.device)
-        for i in range(T - 1, -1, -1):
-            t, s_t, h = self.step_factors(i, timesteps)
-            dL_dlam[i] = -h_cache[i] * sum(
-                (adj[k] * g_cache[i][k]).sum() for k in adj.keys()
-            )
-            z_i = z_cache[i].detach().apply(lambda x: x.requires_grad_(True))
-            with torch.enable_grad():
-                time_embedding = self.embed_time(x_cond, t)
-                input_state = self.velocity_input(z_i, x_cond)
-                u_i = self.velocity(x_cond, time_embedding, input_state, z_i, s_t)
-            vjp = self._vjp(u_i, z_i, adj)
-            adj = tensordict_apply(lambda a, v: a + h * v, adj, vjp)
-
-        dL_dlam[-1] = 0.0  # lambda_{T-1} is never applied -> derivative is exactly 0
-
-        return (
-            float(gap_loss.detach().cpu()), dL_dlam.detach(),
-            g_norm2.detach(), float(residual.detach().cpu()),
-        )
 
     # -------------------------- FGWNOLR: secant on a constant strength w ---
 
@@ -724,8 +497,8 @@ class GuidedFlow(BaseLightningModule):
         # Target realization by secant ROOT FINDING on the signed terminal gap xi(w).
         # For the fixed flow-time profile a_t, lam_t = w * a_t; each evaluation runs the
         # ACTUAL guided flow (record=False) with the SAME initial noise and returns the
-        # signed endpoint gap xi(w) = M(x_gui(w)) - y*. Secant searches xi(w) = 0 -- no
-        # adjoint/VJP, no dL/dw, no frozen-gradient approximation. Safeguards: w >= 0,
+        # signed endpoint gap xi(w) = M(x_gui(w)) - y*. Secant searches xi(w) = 0.
+        # Safeguards: w >= 0,
         # step capped at 3x the last interval, eval cap, and the evaluated w with the
         # smallest |xi| wins if no root is reached.
         GAP_THRESHOLD = 1e-3   # |xi| <= 1e-3 (was L = xi^2 <= 1e-6); in the target's units
@@ -740,7 +513,7 @@ class GuidedFlow(BaseLightningModule):
             z_T, _ = self._guided_flow(
                 "FGWNOLR", x_cond, det_pred, delta_t, mask, x_ref,
                 w_schedule=[w] * T, a_schedule=alpha_sched, seed=seed,
-                c_fn=None, record=False,
+                record=False,
             )
             gap = self.masked_residual(
                 self.final_prediction(det_pred, z_T), x_ref, delta_t, mask
@@ -790,214 +563,5 @@ class GuidedFlow(BaseLightningModule):
 
         return self._final_guided_pass(
             "FGWNOLR", [w_star] * T, alpha_sched,
-            x_cond, det_pred, delta_t, mask, x_ref, seed, w_star=w_star,
-        )
-
-    # ------------------------- FGWNOGAP: exact per-step gap closure ---
-
-    def _fgwnogap_flow(
-        self,
-        x_cond,
-        det_pred: TensorDict,
-        delta_t: torch.Tensor,
-        mask: TensorDict,
-        x_ref: TensorDict,
-        seed: int,
-        eta: float = 1.0,
-        a_t_mode: str = "gap-closing",
-    ):
-        # Anchored gap closure: aim the signed residual at the deterministic
-        # remaining-gap PATH r_target(t) = a_t * r_0 (a_t = a_t_profile(a_t_mode,
-        # eta); the classic behavior is a_t_mode="gap-closing" -> (1-eta)^(t+1))
-        # with a Newton step along g = 2 r dS/dz:
-        #   gui_step = 2 r (r - r_target) g / (h ||g||^2).
-        # Drift and overshoot are corrected against the prescribed path. Non-
-        # monotone or non-closing profiles are allowed: the gap then FOLLOWS that
-        # path (it may reopen or stay open at the end, by design).
-        z_t = self.init_noise(x_cond, seed)
-        timesteps = self.flow_timesteps()
-        a_sched = alpha_t_profile(a_t_mode, eta, len(timesteps))
-        sampling_trace = defaultdict(list)
-        scale_trace, g_norm_trace = [], []
-
-        for i in tqdm(range(len(timesteps)), desc="FGWNOGAP sampling"):
-            t, s_t, h = self.step_factors(i, timesteps)
-            z_t = z_t.apply(lambda x: x.detach().requires_grad_(True))
-
-            with torch.enable_grad():
-                time_embedding = self.embed_time(x_cond, t)
-                input_state = self.velocity_input(z_t, x_cond)
-                u_t = self.velocity(x_cond, time_embedding, input_state, z_t, s_t)
-                x_hat_t_norm = det_pred + self.euler_step(
-                    z_t, u_t, s_t
-                ) * self.residual_to_pangu_scale
-                x_hat_t = self.denormalize(x_hat_t_norm)
-                resid = self.masked_residual(x_hat_t, x_ref, delta_t, mask)
-                loss_sq = resid ** 2
-                gui_vec = self.grad_wrt_z(loss_sq, z_t)
-
-            resid_val = float(resid.detach())
-            if i == 0:
-                r_0 = resid_val                        # initial gap r_0
-            r_target = float(a_sched[i]) * r_0         # target gap on the prescribed path
-
-            g_norm2 = sum((gui_vec[k] ** 2).sum() for k in gui_vec.keys())
-            if i == len(timesteps) - 1:
-                scale = torch.zeros(())  # the last flow step is never guided
-            else:
-                # Newton multiplier: lambda_t = 2 r (r - r_target) / (h ||g||^2)
-                scale = (2.0 * resid_val * (resid_val - r_target)) / (h * g_norm2.clamp_min(1e-30))
-            gui_step = gui_vec.apply(lambda g: g * scale)
-            scale_trace.append(float(scale))
-            g_norm_trace.append(float(torch.sqrt(g_norm2).clamp_min(1e-30)))
-
-            print(
-                f"FGWNOGAP step: t={i} r={resid_val:.6f} r_target={r_target:.6f} "
-                f"scale(=lambda_t)={float(scale):.4f}",
-                flush=True,
-            )
-
-            sampling_trace["grads"].append(gui_vec.detach().cpu())
-            sampling_trace["vfs"].append(u_t.apply(lambda x: x * s_t).detach().cpu())
-            sampling_trace["res"].append(z_t.detach().cpu())
-
-            u_t = self.guided_velocity(u_t=u_t, gui_vec=gui_step, lambda_=1.0)
-            with torch.no_grad():
-                z_t = self.euler_step(z_t, u_t, h)
-
-        # unit-gradient convention: lambda_hat = w*a*c = ||kick||; `scale` was the
-        # raw-gradient multiplier, so c = scale * ||g|| / a (w = 1: no scale knob)
-        a_theory = [float(a_sched[i]) for i in range(len(scale_trace))]
-        c_impl = [
-            _sc * _gn / _a if _a > 0 else float("nan")
-            for _sc, _gn, _a in zip(scale_trace, g_norm_trace, a_theory)
-        ]
-        sampling_trace["guidance_schedule"] = {
-            "w_t": [1.0] * len(scale_trace), "a_t": a_theory,
-            "c_t": c_impl, "g_norm_t": g_norm_trace,
-        }
-
-        return z_t, sampling_trace
-
-    # ------------- FGWFREE: full lambda trajectory, kick-regularized ---
-
-    def _fgwfree_flow(
-        self,
-        x_cond,
-        det_pred: TensorDict,
-        delta_t: torch.Tensor,
-        mask: TensorDict,
-        x_ref: TensorDict,
-        seed: int,
-        phi: float = 0.1,
-    ):
-        # Optimize the per-step guidance kick k_t = h_t * lambda_t jointly (no
-        # w / a_t split) with Adam on
-        #   J(k) = L_gap(z_T) + phi * sum_t ||k_t g_t||^2.
-        # Kick space keeps the coordinates comparable and the phi-curvature
-        # uniform: the last flow step has h ~ 0, so lambda_t = k_t / h_t is NOT
-        # comparable across steps and would ill-condition a shared lr.
-        # Each Adam step costs one forward + one frozen-g adjoint (no autograd
-        # through the unrolled flow). NOTE: FGWNOLR no longer runs this adjoint --
-        # its gap-root secant is a forward-only evaluation -- so an FGWFREE eval is
-        # now strictly heavier. Stops on closed gap, objective plateau, or the eval cap; the
-        # best-J kick runs the final traced pass with a_t profile = kick shape.
-        LOSS_THRESHOLD = 1e-6   # gap part considered closed
-        REL_TOL = 1e-3          # relative objective plateau
-        MAX_EVALS = 30
-        INIT_DAMP = 0.5         # first-order init overshoots -> take half the jump
-        LR_FRAC = 0.05          # Adam lr as a fraction of the init scale
-        LR_MIN = 1.0
-
-        timesteps = self.flow_timesteps()
-        T = len(timesteps)
-        # step sizes h_t, used to convert kick <-> lambda (lambda_t = kick_t / h_t)
-        h_vec = torch.tensor(
-            [float(self.step_factors(i, timesteps)[2]) for i in range(T)],
-            device=self.device,
-        )
-
-        # probe at kick = 0 (unguided path): the linearization is linear (gap) +
-        # quadratic (reg), minimized in closed form at -dJ/dkick / (2 phi ||g||^2)
-        # -- the phi-aware regularized Newton step. Start there (damped) instead
-        # of crawling from zero, and match Adam's lr to the discovered scale.
-        gap0, dL_dlam0, g_norm2_0, resid0 = self._flow_loss_and_lambda_grads(
-            x_cond, det_pred, delta_t, mask, x_ref, seed, lam_sched=[0.0] * T,
-        )
-        if phi > 0 and abs(resid0) > 1e-12:
-            dJ_dkick0 = dL_dlam0 / h_vec                          # chain rule: /h
-            reg_curv = (2.0 * phi * g_norm2_0).clamp_min(1e-30)   # regularizer curvature
-            # Gauss-Newton: the SIGNED gap e is modeled linear and L = e^2 stays
-            # quadratic, so the shrinkage bounds the jump by "close the gap
-            # exactly" as phi -> 0 (the plain linear-loss model promises gap
-            # reductions far beyond zero and detonates the flow at small phi);
-            # for large phi it reduces to the regularized-Newton formula.
-            shrink = 1.0 / (1.0 + float((dJ_dkick0 ** 2 / (4.0 * resid0 ** 2 * reg_curv)).sum()))
-            kick = (INIT_DAMP * shrink * (-dJ_dkick0 / reg_curv)).clamp_(min=0.0)
-            lr = max(LR_MIN, LR_FRAC * float(kick.max()))
-        else:
-            kick = torch.zeros(T, device=self.device)  # gap closed or unregularized
-            lr = 50.0
-        print(
-            f"FGWFREE init: gap(0)={gap0:.6f} |kick0|max={float(kick.max()):.3f} lr={lr:.3f}",
-            flush=True,
-        )
-        optimizer = torch.optim.Adam([kick], lr=lr)
-
-        # kick = 0 is a legitimate candidate (J = gap0, reg = 0): a bad init jump
-        # can never worsen the final schedule
-        best_J, best_kick = gap0, torch.zeros(T, device=self.device)
-        J_prev = None
-        for k in range(MAX_EVALS - 1):  # the probe consumed one evaluation
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-            # guided pass at lambda_t = kick_t / h_t; objective J = gap + phi*reg
-            gap_loss, dL_dlam, g_norm2, _ = self._flow_loss_and_lambda_grads(
-                x_cond, det_pred, delta_t, mask, x_ref, seed,
-                lam_sched=(kick.detach() / h_vec).tolist(),
-            )
-            reg = float((kick.detach() ** 2 * g_norm2).sum())
-            J = gap_loss + phi * reg
-            print(
-                f"FGWFREE eval {k}: gap={gap_loss:.6f} reg={reg:.6f} J={J:.6f} "
-                f"|kick|max={float(kick.detach().abs().max()):.3f}",
-                flush=True,
-            )
-
-            if J < best_J:
-                best_J, best_kick = J, kick.detach().clone()
-            if gap_loss > max(100.0 * gap0, 1e-6):
-                # out of the trust region: gradients on a blown-up path are garbage;
-                # pull kick halfway back toward the best-known schedule instead
-                with torch.no_grad():
-                    kick.data = 0.5 * (kick.data + best_kick)
-                print(f"FGWFREE backtrack at eval {k}: gap={gap_loss:.3g}", flush=True)
-                continue
-            if gap_loss <= LOSS_THRESHOLD:
-                break
-            if J_prev is not None and abs(J_prev - J) <= REL_TOL * max(abs(J_prev), 1e-12):
-                break  # objective plateau
-            J_prev = J
-
-            # exact frozen-g gradient in kick space:
-            #   dJ/dkick = dL/dlam / h + 2 phi ||g||^2 kick   (adjoint + reg terms)
-            kick.grad = dL_dlam / h_vec + 2.0 * phi * kick.detach() * g_norm2
-            optimizer.step()
-            with torch.no_grad():
-                kick.clamp_(min=0.0)  # same >= 0 projection as w in FGWNOLR
-
-        print(
-            f"FGWFREE best J={best_J:.6f} "
-            f"kick={[round(float(v), 3) for v in best_kick]}",
-            flush=True,
-        )
-
-        # final traced pass: w = kick scale, a_t = learned O(1) kick profile, and
-        # c = ||g||/h so the raw-gradient multiplier stays exactly kick_t / h_t
-        kick_max = float(best_kick.max().clamp_min(1e-30))
-        return self._final_guided_pass(
-            "FGWFREE", [kick_max] * T, (best_kick / kick_max).tolist(),
             x_cond, det_pred, delta_t, mask, x_ref, seed,
-            c_fn=lambda i, u, g, gn, h: gn / h,
         )

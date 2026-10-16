@@ -20,127 +20,18 @@ def target_A(base, p_n):
     return (1.0 + np.asarray(p_n, dtype=float)) * np.asarray(base, dtype=float)
 
 
-def eps_trajectory(s_xhat_t, A):
-    """Gap over flow steps and its normalized form.
-
-    ``s_xhat_t`` (T,): masked-mean of the clean prediction per flow step; ``A``: scalar target.
-    Returns ``(eps_t, eps_rel_t)`` with ``eps_rel = eps/eps_0`` (NaN if the initial gap ~ 0)."""
-    eps = np.asarray(s_xhat_t, dtype=float) - float(A)
-    eps0 = eps[0]
-    eps_rel = eps / eps0 if abs(eps0) > 1e-12 else np.full_like(eps, np.nan)
-    return eps, eps_rel
-
-
-def final_gap(s_xhat_final, A):
-    """Final gap ``S(x_final) - A`` (physical units)."""
-    return float(s_xhat_final) - float(A)
-
-
-# --- T2 -------------------------------------------------------------------------------
-def overshoot_oscillation(eps):
-    """T2 scalars from the gap curve. ``eps`` (T,): gap over flow steps (``eps[0]`` = initial gap).
-
-    overshoot = how far the RELATIVE gap crosses past target = ``max(0, -min_t eps/eps_0)``;
-    oscillation_count = number of sign changes of the per-step gap change ``diff(eps)``
-    (0 = monotone convergence)."""
-    eps = np.asarray(eps, dtype=float)
-    eps = eps[np.isfinite(eps)]
-    if eps.size < 2:
-        return 0.0, 0
-    eps0 = eps[0]
-    eps_rel = eps / eps0 if abs(eps0) > 1e-12 else eps
-    overshoot = float(max(0.0, -np.min(eps_rel)))
-    sgn = np.sign(np.diff(eps))
-    sgn = sgn[sgn != 0]
-    osc = int(np.sum(sgn[1:] != sgn[:-1])) if sgn.size > 1 else 0
-    return overshoot, osc
-
-
-def pushback_trajectory(vfs, gui_vfs, mask):
-    """T2 pushback masked-mean over flow steps: ``dvf_t = vfs_t - gui_vfs_{t-1}`` (``dvf_0=0``),
-    reduced by ``S(dvf_t) = sum(mask*dvf_t)``. ``vfs``/``gui_vfs`` (T,lat,lon). Returns (T,)."""
-    vfs = np.asarray(vfs, dtype=float)
-    gv = np.asarray(gui_vfs, dtype=float)
-    prev = np.concatenate([np.zeros_like(gv[:1]), gv[:-1]], axis=0)   # gui_vfs.shift(t=1), fill 0
-    dvf = vfs - prev
-    return (dvf * np.asarray(mask)).sum(axis=(-2, -1))
-
-
-def step_reversal_frac(gui_vfs, mask):
-    """T2 oscillation proxy: fraction of flow steps whose guided velocity REVERSES vs the
-    previous step (mask-weighted cosine < 0, i.e. deflection > 90 deg)."""
-    a = np.asarray(gui_vfs, dtype=float)
-    b = np.concatenate([a[:1], a[:-1]], axis=0)                       # previous step
-    m = np.asarray(mask, dtype=float)
-    dot = (m * a * b).sum(axis=(-2, -1))
-    na = np.sqrt((m * a * a).sum(axis=(-2, -1)))
-    nb = np.sqrt((m * b * b).sum(axis=(-2, -1)))
-    denom = na * nb
-    cos = dot / np.where(denom > 1e-12, denom, np.nan)
-    cos = cos[1:]                                                     # step 0 has no predecessor
-    cos = cos[np.isfinite(cos)]
-    return float(np.mean(cos < 0.0)) if cos.size else np.nan
-
-
-def kick_per_step(gui_vec, h):
-    """T3(a) per-step SQUARED kick norm (full-field L2): ``sum_space (gui_vec_t * h_t)^2``.
-    ``gui_vec`` (T,lat,lon), ``h`` (T,). Returns (T,) -- feed to ``total_guidance``."""
-    gv = np.asarray(gui_vec, dtype=float)
-    hh = np.asarray(h, dtype=float)[:, None, None]
-    return ((gv * hh) ** 2).sum(axis=(-2, -1))
-
-
 # --- T3 -------------------------------------------------------------------------------
-def total_guidance_normal(gui_vec, h, c):
-    """T3(a) total applied guidance in NORMAL (physical field) space, summed over flow steps:
-
-        G = sum_t || c * h_t * gui_vec_t ||_2   (full-field L2)
-
-    i.e. the per-step physical clean-pred displacement produced by the applied guidance
-    velocity ``gui_vec_t`` (mapped from latent to physical by the residual scaler ``c``),
-    integrated over the flow. Method-agnostic (identical for spike and continuous schedules)
-    and convention-robust (``gui_vec`` reconstructed from stored primitives). PCA space is
-    used only for path lengths, never for this magnitude. ``gui_vec`` (T,lat,lon), ``h`` (T,)."""
-    gv = np.asarray(gui_vec, dtype=float)
-    hh = np.asarray(h, dtype=float)[:, None, None]
-    per_t = np.sqrt(((float(c) * hh * gv) ** 2).sum(axis=(-2, -1)))
-    return float(per_t.sum())
-
-
-def total_guidance(kick_lat_l2_t):
-    """(legacy, latent units) total applied guidance ``= sum_t ||kick_t||`` where
-    ``kick_lat_l2_t`` is the per-step SQUARED kick norm. Prefer ``total_guidance_normal``."""
-    k = np.asarray(kick_lat_l2_t, dtype=float)
-    return float(np.nansum(np.sqrt(np.clip(k, 0.0, None))))
-
-
-def total_deviance(gui_vec, s, c, bbox):
-    """T3 total deviance from the UNGUIDED STEPS inside the guided flow: the sum over flow
-    steps of the per-pixel RMS norm (over the mask-region ``bbox``) of the clean-pred guidance
-    contribution ``c * s_t * gui_vec_t`` -- i.e. how far each guided step lands from what the
-    *unguided* step would give FROM THE SAME STATE (``base - kick`` in comparison.py).
-
-    Unlike comparing to a separate same-seed unguided twin (which diverges cumulatively and
-    conflates WHEN guidance acts with HOW MUCH), this sums the ACTUAL per-step interventions,
-    so it is applicable to any schedule -- spike or continuous. ``gui_vec`` (T, lat, lon)
-    is the applied guidance velocity ((vfs - gui_vfs)/s); ``s`` (T,) the noise levels; ``c``
-    the residual scaler."""
-    gv = np.asarray(gui_vec, dtype=float)[..., bbox[0], bbox[1]]   # (T, bh, bw)
-    ss = np.asarray(s, dtype=float)[:, None, None]
-    contrib = float(c) * ss * gv                                   # per-step clean-pred guidance kick
-    F = gv.shape[-1] * gv.shape[-2]
-    return float(np.sqrt((contrib ** 2).sum(axis=(-2, -1)) / F).sum())
 
 
 def step_sums(base, kick):
     """T3 total guidance-step and pushback-step lengths (per-pixel RMS over F), summed over
-    flow steps -- exactly the two moves visualized in intensity_comparison's pingpong anatomy:
+    flow steps:
 
         guidance step_t = ||kick_t - base_t||        (base_t -> kick_t: the applied kick)
         pushback step_t = ||base_{t+1} - kick_t||    (kick_t -> base_{t+1}: the flow pull-back)
 
     ``base`` (gui_ung_over_t) and ``kick`` (guided) are the (T, F) bbox-latent branch pair from
-    ``clean_pred_branches_primitive``. Returns ``(guidance_sum, pushback_sum)``. Applicable to
+    the flow-time notebook. Returns ``(guidance_sum, pushback_sum)``. Applicable to
     any schedule (the sum of the actual per-step moves inside the guided flow)."""
     base = np.asarray(base, dtype=float)
     kick = np.asarray(kick, dtype=float)
@@ -148,18 +39,6 @@ def step_sums(base, kick):
     guidance = np.linalg.norm(kick - base, axis=1) / f
     pushback = np.linalg.norm(base[1:] - kick[:-1], axis=1) / f
     return float(guidance.sum()), float(pushback.sum())
-
-
-def step_cosine(g, u):
-    """T3(c) per-step cosine between the guided step and the ``gui_ung`` twin step, in full
-    masked-region field space. ``g``, ``u`` (T, F): bbox-latent trajectories.
-    Returns ``(cos_t (T-1,), mean_cos)``."""
-    dg = np.diff(np.asarray(g, dtype=float), axis=0)
-    du = np.diff(np.asarray(u, dtype=float), axis=0)
-    denom = np.linalg.norm(dg, axis=1) * np.linalg.norm(du, axis=1)
-    cos = np.einsum("tf,tf->t", dg, du) / np.where(denom > 1e-12, denom, np.nan)
-    mean_cos = float(np.nanmean(cos)) if np.isfinite(cos).any() else np.nan
-    return cos, mean_cos
 
 
 # --- Interference (measured on the guidance-convergence plot, average mask space) -----

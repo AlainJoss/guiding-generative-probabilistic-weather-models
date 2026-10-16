@@ -16,10 +16,9 @@ def _():
         clean_pred_trajectory_primitive, guided_velocity_primitive, convergence_state_line,
         residual_scaler, channel, open_store, select_point,
     )
-    from src.pca_basis import mask_bbox, bbox_latent, ensure_basis, project, pathlength, cloud_sample, region_bool, region_latent, ensure_region_basis, region_cloud_sample
+    from src.pca_basis import mask_bbox, project, pathlength, region_bool, region_latent, ensure_region_basis, region_cloud_sample
     from src import flow_time_tests as ftt
     from src.mask import get_masked_mean
-    from src.ui.plot_trajectory import plot_trajectory
     from src.ui.map import visualize_map, get_mask_center
     from src.utils import get_rollout_ids, get_gt_rollout, get_rollout_dir, find_era5_input
     from datetime import datetime
@@ -31,12 +30,6 @@ def _():
     # same warm half of RdBu_r as the mask map in guidance.py (white at 0 -> red at max)
     WARM_CMAP = mcolors.LinearSegmentedColormap.from_list(
         "rdbu_warm", plt.get_cmap("RdBu_r")(np.linspace(0.5, 1.0, 256)))
-
-
-    def glabel(lb):
-        """Display label: the sweep key `a_t_mode` IS the flow-time profile gamma, so
-        render it as 'γ' in every table/legend/title (report notation)."""
-        return str(lb).split(" δ#")[0].replace("a_t_mode", "γ")
 
 
     return (
@@ -527,7 +520,7 @@ def _(get_rollout_dir, load_rollout, mask_bbox, mo, np, rollout_multiselect):
 @app.cell(hide_code=True)
 def _(mo, sweep_values0):
     # --- pin the non-schedule / non-intensity sweep axes (e.g. GUI_REF, MASK_MODE, mask_shift, sigma_div).
-    # --- Schedule axes (GUIDANCE_MODE + its GUIDANCE_METHOD_HYPERS: a_t_mode / fgwnolr_w_init / eta / phi)
+    # --- Schedule axes (GUIDANCE_MODE + its GUIDANCE_METHOD_HYPERS: a_t_mode / fgwnolr_w_init / eta)
     # --- stay as the compared rows; GUIDANCE_DELTA is the intensity axis (handled separately). Single-valued
     # --- axes are pinned silently. Mirrors intensity_comparison.py's pin_dropdowns.
     from src.rollout_config import GUIDANCE_METHOD_HYPERS as _GMH
@@ -2733,11 +2726,6 @@ def _(
             _n = _r["n_pool"]; _p = (_r["reached_count"] / _n) if _n else float("nan")
             _sd = float(np.sqrt(max(_p * (1.0 - _p), 0.0) / _n)) if _n else float("nan")
             return (_p, _sd)
-        def _dist_ms(_r):
-            _mu = (_r["dpc1"][0], _r["dpc2"][0], _r["dpc3"][0]); _sd = (_r["dpc1"][1], _r["dpc2"][1], _r["dpc3"][1])
-            _d = float(np.sqrt(sum(_x * _x for _x in _mu)))
-            _ds = float(np.sqrt(sum((_x * _y) ** 2 for _x, _y in zip(_mu, _sd))) / _d) if _d > 0 else 0.0
-            return (_d, _ds)
         def _f(_ms, _is_best, signed=False):
             if _ms is None or not np.isfinite(_ms[0]):
                 return "—"

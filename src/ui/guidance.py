@@ -35,7 +35,6 @@ def _(
 @app.cell
 def _():
     import marimo as mo
-    from pathlib import Path
     import torch
     import numpy as np
     import xarray as xr
@@ -43,8 +42,6 @@ def _():
     import matplotlib.pyplot as plt
     plt.style.use("petroff10")
     import matplotlib.colors as mcolors
-    from datetime import datetime, timedelta, date, time
-    import calendar
     import cv2
     from geoarches.paths import STATS_PATH
 
@@ -54,30 +51,26 @@ def _():
 
 @app.cell
 def _():
-    from src.paths import ROLLOUTS
     from src.rollout_config import MASK_MODES, RolloutConfig, GUIDANCE_METHODS, GUI_REFS, GUIDANCE_METHOD_HYPERS
     from geoarches.lightning_modules.guided_diffusion import A_T_MODES, alpha_t_profile as a_t_profile
-    from src.dimensions import PARTITIONS, LEVELS_DICT, VARIABLES_DICT
+    from src.dimensions import LEVELS_DICT, VARIABLES_DICT
 
     from src.ui.helpers import max_day, get_timestamp_from_sliders
-    from src.ui.map import visualize_map, visualize_mask_3d, to_display_units
+    from src.ui.map import visualize_map, to_display_units
     from src.ui.plot_trajectory import plot_trajectory
-    from src.ui.plot_trajectories import plot_trajectories
 
     from src.utils import get_var_idx, get_level_idx
     from src.utils import get_now_timestamp, ensure_rollout_dir, get_rollout_dir, find_era5_input
-    from src.utils import get_timestamps, get_N_timestamps, get_N_slices as base_get_N_slices, get_slices as base_get_slices, get_gt_rollout
+    from src.utils import get_N_timestamps, get_slices as base_get_slices, get_gt_rollout
     from src.utils import (
         dump_json, get_rollout_ids, get_rollout, get_sweep_dict, get_config, sweep_coord_label
     )
     from src.utils import get_w_star, get_guidance_schedule
     from src.run import iter_sweeps
-    from src.reductions import (reductions_grid_matches, reductions_complete, load_reductions, build_reductions_store, compute_reductions_for_sweep, reductions_exist)
-    from src.schedules import N_schedule, delta_schedule
+    from src.reductions import reductions_grid_matches, reductions_complete, load_reductions, build_reductions_store, compute_reductions_for_sweep
     from src.normalization import XarrayNormalizer
-    from src.spectrum import power_spectrum, log_spectral_distance, spectral_bias
 
-    from src.mask import get_masked_mean, get_mask_2d, get_mask_center, get_great_circle_field, get_bbox_mask
+    from src.mask import get_masked_mean, get_mask_2d, get_mask_center
 
 
     return (
@@ -91,7 +84,6 @@ def _():
         VARIABLES_DICT,
         XarrayNormalizer,
         a_t_profile,
-        base_get_N_slices,
         base_get_slices,
         build_reductions_store,
         compute_reductions_for_sweep,
@@ -437,7 +429,7 @@ def _(
                 label="guidance_reference: ",
             )
             # "w" was the flow-level strength axis of legacy runs; current sweeps
-            # (FGWNOLR/FGWNOGAP) don't have it
+            # (FGWNOLR) don't have it
             if "w" in experiment_params:
                 w_slider = mo.ui.slider(
                     steps=experiment_params["w"],
@@ -1605,7 +1597,7 @@ def wa_schedule(
         fgwnolr_w_choices = []
         eta_choices = []
         _am_choices = []
-    eta_modes = [mode for mode in selected_modes if mode in ("FGWNOLR", "FGWNOGAP")]
+    eta_modes = [mode for mode in selected_modes if mode == "FGWNOLR"]
     _has_recorded = notebook_mode == "analyze_rollout" and bool(lambda_t_by_method)
     _AT_COLOR = "#7B2CBF"  # a_t purple
     if _has_recorded:
@@ -1707,9 +1699,7 @@ def wa_schedule(
             _ax_wa.set_xlim(-1.0, T + 0.4)
             _ax_wa.set_xticks(np.arange(0, T + 1))
     elif eta_modes:
-        # preview: a_t on the RIGHT (shared by both methods). NOLR also previews
-        # lambda_t = w_t * a_t on the LEFT; NOGAP's w_t / lambda_t are solved per
-        # step at runtime, so only a_t is shown.
+        # Preview a_t on the right and lambda_t = w_t * a_t on the left.
         _left_label = r"$\lambda_t,\ w_t$"
         _sched, _right = {}, {}
         _am_choices = _am_choices or ["gap-closing"]
@@ -1717,20 +1707,14 @@ def wa_schedule(
             for _am in _am_choices:
                 _a = a_t_profile(_am, _eta, T)
                 _right[rf"$a_t$ ({_am}, $\eta$={_eta:g})"] = _a[:-1].tolist()
-                if "FGWNOLR" in eta_modes:
-                    for _w in (fgwnolr_w_choices or [250.0]):
-                        _sched[rf"$\lambda_t$ ($w$={_w:g}, {_am}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
-        if not _sched:
-            # NOGAP-only: no w/lambda -> put a_t on the left
-            _sched, _right, _left_label = _right, None, r"$a_t$"
-        _color_map = {_k: _AT_COLOR for _k in _sched} if _right is None else None
+                for _w in (fgwnolr_w_choices or [250.0]):
+                    _sched[rf"$\lambda_t$ ($w$={_w:g}, {_am}, $\eta$={_eta:g})"] = (_w * _a)[:-1].tolist()
         wa_schedule_widget = plot_trajectory(
             _sched,
             dpi=dpi_slider.value,
             right_trajectory=_right,
             right_label=r"$a_t$",
             right_color=_AT_COLOR,
-            color_map=_color_map,
             var=_left_label,
             title=r"Guidance schedule  ($\hat\lambda_t = w\,a_t\,c_t$ — kick norm on the unit gradient)",
             subtitle="preview — before guiding",
@@ -4057,18 +4041,6 @@ def _(mask, mcolors, mo, np, plt, xr):
             out[label] = tuple(c + (1 - c) * (1 - intensity) for c in hue)
         return out
 
-    def maybe_mask(ds, mode):
-        if mode not in ("mask", "!mask"):
-            return ds
-        # boolean region at half-maximum: BBOX (0/1) is unchanged; ELLIPTICAL is
-        # nonzero everywhere (astype(bool) would be all-True -> "!mask" all-NaN),
-        # and its peak is ~1/sum, so the threshold must be relative to max.
-        _m = xr.DataArray(
-            mask >= 0.5 * mask.max(),
-            dims=("latitude", "longitude"),
-            coords={"latitude": ds.latitude, "longitude": ds.longitude},
-        )
-        return ds.where(_m if mode == "mask" else ~_m)
 
     def cross_traces(red_ds, axis, agg, m_idx, *, k, var, by_level, diff, absv, bands, rank_by="agg change"):
         """Member trace + optional min/max band from spatially pre-reduced cubes (see `red`).
@@ -4837,8 +4809,7 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
     # numeric axes -> (start, stop, log_scale, integer)
     # keys equal the guidance-fn kwarg names (see GUIDANCE_METHOD_HYPERS)
     NUMERIC_AXES = {
-        # FGWNOLR (secant on the exact scalar dL/dw; no lr, no iteration count --
-        # optimizes until the hardcoded loss threshold in _fgwnolr_flow is reached)
+        # FGWNOLR: secant root search on the signed terminal gap.
         "fgwnolr_w_init": (5000.0, 10000.0, False, False),
         # eta: shared profile parameter (meaning depends on a_t_mode -- closure rate
         # for gap-closing, bell depth for gaussian, end level for linear/logistic)
@@ -4846,8 +4817,6 @@ def _(A_T_MODES, GUIDANCE_METHODS, GUI_REFS, MASK_MODES, mo, np):
         # sigma_div: mask hyper shared by ALL mask modes -- extent / sigma_div
         # (2.0 = base box, 4.0 = half, 1.0 = double)
         "sigma_div":      (2,   4.0,   False, False),
-        # phi: FGWFREE kick-energy regularizer strength (log-scaled authoring range)
-        "phi":            (0.01,  1.0,   True,  False),
     }
 
     _rc = {}
@@ -5316,7 +5285,7 @@ def _(
 
 
 @app.cell
-def _(base_get_N_slices, base_get_slices, np, var, var_valid):
+def _(base_get_slices, np, var, var_valid):
     def _gate_selected(_sl, _var):
         if not var_valid and _var == var:
             return np.full(np.asarray(_sl).shape, np.nan)
@@ -5325,8 +5294,6 @@ def _(base_get_N_slices, base_get_slices, np, var, var_valid):
     def get_slices(states, partition_, var_, level_):
         return _gate_selected(base_get_slices(states, partition_, var_, level_), var_)
 
-    def get_N_slices(states, partition_, var_, level_):
-        return _gate_selected(base_get_N_slices(states, partition_, var_, level_), var_)
 
     return (get_slices,)
 
